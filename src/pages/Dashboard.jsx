@@ -219,21 +219,21 @@ export default function DashboardExecutive() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="glass-card rounded-2xl p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg">
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+      {/* Header - Responsive */}
+      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center shadow-lg flex-shrink-0">
+              <svg className="w-5 h-5 sm:w-7 sm:h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </div>
             <div>
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
                 Dashboard Ejecutivo
               </h1>
-              <p className="text-slate-600 mt-1 text-sm">
+              <p className="text-slate-600 mt-0.5 sm:mt-1 text-xs sm:text-sm">
                 Análisis y KPIs del mes actual
               </p>
             </div>
@@ -242,47 +242,47 @@ export default function DashboardExecutive() {
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="input-modern"
+            className="input-modern w-full sm:w-auto text-sm sm:text-base"
           >
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
       </div>
 
-      {/* KPIs Principales - 4 Cards */}
-      <div className="grid lg:grid-cols-4 gap-6">
+      {/* KPIs Principales - Responsive Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6">
         <KPICard
           label="Total Costos"
           value={formatCurrency(kpis.totalCostos)}
           icon="💰"
           color="from-red-500 to-rose-600"
-          subtitle={`${kpis.diasTrabajados} días trabajados`}
+          subtitle={`${kpis.diasTrabajados} días`}
         />
         <KPICard
           label="Horas Productivas"
           value={formatNumber(kpis.horasProductivas)}
           icon="⏱️"
           color="from-blue-500 to-cyan-600"
-          subtitle={`${kpis.promedioHorasDia} hrs/día promedio`}
+          subtitle={`${kpis.promedioHorasDia} hrs/día`}
         />
         <KPICard
           label="Costo por Hora"
           value={formatCurrency(kpis.costoPorHora)}
           icon="📊"
           color="from-violet-500 to-purple-600"
-          subtitle="Eficiencia operacional"
+          subtitle="Eficiencia"
         />
         <KPICard
-          label="Personal Activo"
+          label="Personal"
           value={kpis.totalEmpleados}
           icon="👷"
           color="from-emerald-500 to-teal-600"
-          subtitle={formatCurrency(kpis.promedioSueldo) + " promedio"}
+          subtitle={formatCurrency(kpis.promedioSueldo)}
         />
       </div>
 
-      {/* Análisis Operacional */}
-      <div className="grid lg:grid-cols-2 gap-6">
+      {/* Análisis Operacional - Stack en mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Eficiencia de Flota */}
         <AnalysisCard
           title="Eficiencia de Flota"
@@ -308,8 +308,8 @@ export default function DashboardExecutive() {
         />
       </div>
 
-      {/* Desglose de Costos */}
-      <div className="grid lg:grid-cols-3 gap-6">
+      {/* Desglose de Costos - Stack en mobile */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Personal */}
         <CostCard
           title="Personal"
@@ -350,8 +350,8 @@ export default function DashboardExecutive() {
         />
       </div>
 
-      {/* Órdenes y Rendiciones */}
-      <div className="grid lg:grid-cols-2 gap-6">
+      {/* Órdenes y Rendiciones - Stack en mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* OC */}
         <AnalysisCard
           title="Órdenes de Compra"
@@ -381,36 +381,38 @@ export default function DashboardExecutive() {
 }
 
 // ============================================
-// COMPONENTES
+// COMPONENTES RESPONSIVE
 // ============================================
 
 function KPICard({ label, value, icon, color, subtitle }) {
   return (
-    <div className="glass-card rounded-xl p-6 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between mb-4">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shadow-lg text-2xl`}>
+    <div className="glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 lg:p-6 hover:shadow-lg transition-shadow">
+      <div className="flex items-start justify-between mb-2 sm:mb-4">
+        <div className={`w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br ${color} flex items-center justify-center shadow-lg text-lg sm:text-xl lg:text-2xl`}>
           {icon}
         </div>
       </div>
-      <div className="text-3xl font-black text-slate-900 mb-1">{value}</div>
-      <div className="text-sm font-semibold text-slate-600">{label}</div>
-      {subtitle && <div className="text-xs text-slate-500 mt-2">{subtitle}</div>}
+      <div className="text-lg sm:text-2xl lg:text-3xl font-black text-slate-900 mb-0.5 sm:mb-1 break-words">
+        {value}
+      </div>
+      <div className="text-xs sm:text-sm font-semibold text-slate-600 leading-tight">{label}</div>
+      {subtitle && <div className="text-[10px] sm:text-xs text-slate-500 mt-1 sm:mt-2 leading-tight">{subtitle}</div>}
     </div>
   );
 }
 
 function AnalysisCard({ title, icon, items }) {
   return (
-    <div className="glass-card rounded-xl p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <span className="text-2xl">{icon}</span>
-        <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+    <div className="glass-card rounded-lg sm:rounded-xl p-4 sm:p-6">
+      <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+        <span className="text-xl sm:text-2xl">{icon}</span>
+        <h3 className="text-base sm:text-lg font-bold text-slate-900">{title}</h3>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">{item.label}</span>
-            <span className={`text-sm font-bold ${item.highlight ? 'text-blue-700' : 'text-slate-900'}`}>
+          <div key={idx} className="flex items-center justify-between gap-2">
+            <span className="text-xs sm:text-sm text-slate-600 leading-tight">{item.label}</span>
+            <span className={`text-xs sm:text-sm font-bold ${item.highlight ? 'text-blue-700' : 'text-slate-900'} text-right`}>
               {item.value}
             </span>
           </div>
@@ -422,26 +424,26 @@ function AnalysisCard({ title, icon, items }) {
 
 function CostCard({ title, icon, total, percentage, color, items }) {
   return (
-    <div className="glass-card rounded-xl p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-2xl">{icon}</span>
-        <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+    <div className="glass-card rounded-lg sm:rounded-xl p-4 sm:p-6">
+      <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+        <span className="text-xl sm:text-2xl">{icon}</span>
+        <h3 className="text-base sm:text-lg font-bold text-slate-900">{title}</h3>
       </div>
       
-      <div className="mb-4">
-        <div className="text-2xl font-black text-slate-900 mb-1">
+      <div className="mb-3 sm:mb-4">
+        <div className="text-xl sm:text-2xl font-black text-slate-900 mb-1 break-words">
           {new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', minimumFractionDigits: 0 }).format(total)}
         </div>
-        <div className={`text-sm font-bold text-${color}-600`}>
+        <div className={`text-xs sm:text-sm font-bold text-${color}-600`}>
           {percentage}% del total
         </div>
       </div>
 
       <div className="space-y-2">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between text-sm">
+          <div key={idx} className="flex items-center justify-between text-xs sm:text-sm gap-2">
             <span className="text-slate-600">{item.label}</span>
-            <span className="font-semibold text-slate-900">{item.value}</span>
+            <span className="font-semibold text-slate-900 text-right">{item.value}</span>
           </div>
         ))}
       </div>
