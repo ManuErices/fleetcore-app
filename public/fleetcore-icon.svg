@@ -1,0 +1,30 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo circular con gradiente -->
+  <circle cx="32" cy="32" r="32" fill="url(#gradient)"/>
+  
+  <!-- Engranaje -->
+  <path d="M32 18C24.268 18 18 24.268 18 32C18 39.732 24.268 46 32 46C39.732 46 46 39.732 46 32C46 24.268 39.732 18 32 18ZM32 40C27.582 40 24 36.418 24 32C24 27.582 27.582 24 32 24C36.418 24 40 27.582 40 32C40 36.418 36.418 40 32 40Z" fill="white" opacity="0.9"/>
+  
+  <!-- Centro del engranaje -->
+  <circle cx="32" cy="32" r="6" fill="white"/>
+  
+  <!-- Dientes del engranaje -->
+  <rect x="30" y="12" width="4" height="6" rx="1" fill="white"/>
+  <rect x="30" y="46" width="4" height="6" rx="1" fill="white"/>
+  <rect x="12" y="30" width="6" height="4" ry="1" fill="white"/>
+  <rect x="46" y="30" width="6" height="4" ry="1" fill="white"/>
+  
+  <!-- Dientes diagonales -->
+  <rect x="20" y="18" width="4" height="6" rx="1" fill="white" transform="rotate(-45 22 21)"/>
+  <rect x="40" y="18" width="4" height="6" rx="1" fill="white" transform="rotate(45 42 21)"/>
+  <rect x="20" y="40" width="4" height="6" rx="1" fill="white" transform="rotate(45 22 43)"/>
+  <rect x="40" y="40" width="4" height="6" rx="1" fill="white" transform="rotate(-45 42 43)"/>
+  
+  <!-- Gradiente -->
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,758 @@
+import React, { useState, useEffect } from "react";
+import { listActiveProjects, listMachines } from "../lib/db";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../lib/firebase";
+
+function isoToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
+export default function ReportDetallado() {
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
+  const [machines, setMachines] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Estado para QR Scanner
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [qrError, setQrError] = useState('');
+  
+  const [formData, setFormData] = useState({
+    fecha: isoToday(),
+    numeroReporte: '',
+    machineId: '',
+    operador: '',
+    rut: '',
+    actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+    tiemposNoEfectivos: [],
+    cargaCombustible: '',
+    horometro: '',
+    kilometraje: '',
+    estadoMaquina: 'operativa',
+    observaciones: ''
+  });
+
+  useEffect(() => {
+    (async () => {
+      const p = await listActiveProjects();
+      setProjects(p);
+      if (p.length > 0) setSelectedProject(p[0].id);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProject) return;
+    (async () => {
+      const m = await listMachines(selectedProject);
+      setMachines(m);
+    })();
+  }, [selectedProject]);
+
+  const addActividad = () => {
+    setFormData({
+      ...formData,
+      actividadesEfectivas: [...formData.actividadesEfectivas, { actividad: '', horaInicio: '', horaFin: '' }]
+    });
+  };
+
+  const removeActividad = (index) => {
+    const newActividades = formData.actividadesEfectivas.filter((_, i) => i !== index);
+    setFormData({ ...formData, actividadesEfectivas: newActividades });
+  };
+
+  const updateActividad = (index, field, value) => {
+    const newActividades = [...formData.actividadesEfectivas];
+    newActividades[index][field] = value;
+    setFormData({ ...formData, actividadesEfectivas: newActividades });
+  };
+
+  const addTiempoNoEfectivo = () => {
+    setFormData({
+      ...formData,
+      tiemposNoEfectivos: [...formData.tiemposNoEfectivos, { motivo: '', horaInicio: '', horaFin: '' }]
+    });
+  };
+
+  const removeTiempoNoEfectivo = (index) => {
+    const newTiempos = formData.tiemposNoEfectivos.filter((_, i) => i !== index);
+    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+  };
+
+  const updateTiempoNoEfectivo = (index, field, value) => {
+    const newTiempos = [...formData.tiemposNoEfectivos];
+    newTiempos[index][field] = value;
+    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedProject || !formData.machineId) {
+      alert("Selecciona proyecto y máquina");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await addDoc(collection(db, 'reportes_detallados'), {
+        projectId: selectedProject,
+        ...formData,
+        createdAt: serverTimestamp()
+      });
+      
+      alert("✅ Reporte guardado exitosamente");
+      
+      // Reset
+      setFormData({
+        fecha: isoToday(),
+        numeroReporte: '',
+        machineId: '',
+        operador: '',
+        rut: '',
+        actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+        tiemposNoEfectivos: [],
+        cargaCombustible: '',
+        horometro: '',
+        kilometraje: '',
+        estadoMaquina: 'operativa',
+        observaciones: ''
+      });
+    } catch (error) {
+      console.error("Error:", error);
+      alert("❌ Error al guardar");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const selectedMachine = machines.find(m => m.id === formData.machineId);
+
+  // Función para manejar escaneo QR
+  const handleQRScan = (qrCode) => {
+    if (!qrCode) return;
+    
+    setQrError('');
+    
+    // Buscar máquina por código QR
+    const machine = machines.find(m => m.qrCode === qrCode || m.code === qrCode || m.id === qrCode);
+    
+    if (machine) {
+      setFormData({ ...formData, machineId: machine.id });
+      setShowQRScanner(false);
+      console.log(`✅ Máquina encontrada: ${machine.code} - ${machine.name}`);
+    } else {
+      setQrError(`❌ No se encontró máquina con QR: ${qrCode}`);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Contenedor con max-width para desktop */}
+      <div className="max-w-md mx-auto bg-white min-h-screen shadow-xl">
+        
+        {/* Header */}
+        <div className="bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 text-white p-6 shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg">
+              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight">Reporte Detallado</h1>
+              <p className="text-sm text-purple-100 font-medium">Maquinaria</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-4 space-y-4 pb-24">
+          
+          {/* Proyecto */}
+          <Section 
+            title="Proyecto" 
+            icon={
+              <svg className="w-5 h-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+            }
+          >
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className="input-modern w-full"
+              required
+            >
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Section>
+
+          {/* Datos Básicos */}
+          <Section 
+            title="Información General" 
+            icon={
+              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            }
+          >
+            <div className="space-y-4">
+              <InputField
+                label="Fecha"
+                type="date"
+                value={formData.fecha}
+                onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+                required
+              />
+              
+              <InputField
+                label="N° de Reporte"
+                type="text"
+                value={formData.numeroReporte}
+                onChange={(e) => setFormData({ ...formData, numeroReporte: e.target.value })}
+                placeholder="001"
+                required
+              />
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Máquina</label>
+                
+                <div className="flex gap-2">
+                  <select
+                    value={formData.machineId}
+                    onChange={(e) => setFormData({ ...formData, machineId: e.target.value })}
+                    className="input-modern w-full"
+                    required
+                  >
+                    <option value="">Seleccionar...</option>
+                    {machines.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.code} - {m.name}
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setShowQRScanner(true)}
+                    className="flex-shrink-0 w-12 h-12 bg-purple-600 hover:bg-purple-700 text-white rounded-xl flex items-center justify-center shadow-lg transition-all active:scale-95"
+                    title="Escanear QR"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                    </svg>
+                  </button>
+                </div>
+                
+                {selectedMachine && (
+                  <div className="mt-2 p-3 bg-purple-50 rounded-lg border-2 border-purple-200">
+                    <div className="text-xs font-bold text-purple-700 mb-1">Máquina Seleccionada</div>
+                    <div className="text-sm font-black text-purple-900">{selectedMachine.code}</div>
+                    <div className="text-xs text-purple-600">{selectedMachine.name}</div>
+                  </div>
+                )}
+              </div>
+
+              {selectedMachine && (
+                <div className="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-200">
+                  <div className="text-xs font-bold text-purple-600 mb-1">PATENTE</div>
+                  <div className="text-lg font-black text-purple-900">{selectedMachine.patente || 'N/A'}</div>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* Operador */}
+          <Section 
+            title="Operador" 
+            icon={
+              <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            }
+          >
+            <div className="space-y-4">
+              <InputField
+                label="Nombre Completo"
+                value={formData.operador}
+                onChange={(e) => setFormData({ ...formData, operador: e.target.value })}
+                placeholder="Juan Pérez"
+                required
+              />
+              <InputField
+                label="RUT"
+                value={formData.rut}
+                onChange={(e) => setFormData({ ...formData, rut: e.target.value })}
+                placeholder="12.345.678-9"
+                required
+              />
+            </div>
+          </Section>
+
+          {/* Actividades */}
+          <Section 
+            title="Actividades Efectivas" 
+            icon={
+              <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          >
+            <div className="space-y-3">
+              {formData.actividadesEfectivas.map((act, idx) => (
+                <ActivityCard
+                  key={idx}
+                  index={idx}
+                  data={act}
+                  onUpdate={updateActividad}
+                  onRemove={removeActividad}
+                  canRemove={formData.actividadesEfectivas.length > 1}
+                  color="emerald"
+                />
+              ))}
+              
+              <button
+                type="button"
+                onClick={addActividad}
+                className="w-full py-3 px-4 bg-emerald-50 text-emerald-700 font-bold rounded-xl border-2 border-emerald-200 hover:bg-emerald-100 transition-all"
+              >
+                + Agregar Actividad
+              </button>
+            </div>
+          </Section>
+
+          {/* Tiempos No Efectivos */}
+          <Section 
+            title="Tiempos No Efectivos" 
+            icon={
+              <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          >
+            <div className="space-y-3">
+              {formData.tiemposNoEfectivos.length === 0 ? (
+                <div className="text-center py-4 text-slate-400 text-sm">
+                  No hay tiempos no efectivos
+                </div>
+              ) : (
+                formData.tiemposNoEfectivos.map((tiempo, idx) => (
+                  <ActivityCard
+                    key={idx}
+                    index={idx}
+                    data={tiempo}
+                    onUpdate={updateTiempoNoEfectivo}
+                    onRemove={removeTiempoNoEfectivo}
+                    canRemove={true}
+                    color="amber"
+                    labelField="motivo"
+                    placeholder="Ej: Mantención, Traslado"
+                  />
+                ))
+              )}
+              
+              <button
+                type="button"
+                onClick={addTiempoNoEfectivo}
+                className="w-full py-3 px-4 bg-amber-50 text-amber-700 font-bold rounded-xl border-2 border-amber-200 hover:bg-amber-100 transition-all"
+              >
+                + Agregar Tiempo No Efectivo
+              </button>
+            </div>
+          </Section>
+
+          {/* Métricas */}
+          <Section 
+            title="Combustible y Métricas" 
+            icon={
+              <svg className="w-5 h-5 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            }
+          >
+            <div className="space-y-4">
+              <InputField
+                label="Carga Combustible (litros)"
+                type="number"
+                value={formData.cargaCombustible}
+                onChange={(e) => setFormData({ ...formData, cargaCombustible: e.target.value })}
+                placeholder="0"
+                step="0.1"
+              />
+              <InputField
+                label="Horómetro"
+                type="number"
+                value={formData.horometro}
+                onChange={(e) => setFormData({ ...formData, horometro: e.target.value })}
+                placeholder="0"
+                step="0.1"
+              />
+              <InputField
+                label="Kilometraje"
+                type="number"
+                value={formData.kilometraje}
+                onChange={(e) => setFormData({ ...formData, kilometraje: e.target.value })}
+                placeholder="0"
+                step="0.1"
+              />
+            </div>
+          </Section>
+
+          {/* Estado */}
+          <Section 
+            title="Estado de Máquina" 
+            icon={
+              <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            }
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Estado</label>
+                <select
+                  value={formData.estadoMaquina}
+                  onChange={(e) => setFormData({ ...formData, estadoMaquina: e.target.value })}
+                  className="input-modern w-full"
+                  required
+                >
+                  <option value="operativa">✅ Operativa</option>
+                  <option value="mantencion">🔧 En Mantención</option>
+                  <option value="reparacion">⚠️ En Reparación</option>
+                  <option value="fuera_servicio">❌ Fuera de Servicio</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Observaciones</label>
+                <textarea
+                  value={formData.observaciones}
+                  onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
+                  className="input-modern w-full"
+                  rows="4"
+                  placeholder="Observaciones generales del reporte..."
+                />
+              </div>
+            </div>
+          </Section>
+        </form>
+
+        {/* Modal QR Scanner */}
+        {showQRScanner && (
+          <QRScannerModal
+            onScan={handleQRScan}
+            onClose={() => {
+              setShowQRScanner(false);
+              setQrError('');
+            }}
+            error={qrError}
+          />
+        )}
+
+        {/* Submit Button Fixed */}
+        <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-200 p-4 shadow-2xl">
+          <button
+            type="submit"
+            onClick={handleSubmit}
+            disabled={isLoading}
+            className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black rounded-xl shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+          >
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                </svg>
+                Guardando...
+              </span>
+            ) : (
+              '✅ Guardar Reporte'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Componentes auxiliares
+function Section({ title, icon, children }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+        <div className="flex-shrink-0">{icon}</div>
+        <h3 className="text-sm font-black text-slate-900">{title}</h3>
+      </div>
+      <div className="p-4">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function InputField({ label, ...props }) {
+  return (
+    <div>
+      <label className="block text-sm font-bold text-slate-700 mb-2">{label}</label>
+      <input {...props} className="input-modern w-full" />
+    </div>
+  );
+}
+
+function ActivityCard({ index, data, onUpdate, onRemove, canRemove, color = 'emerald', labelField = 'actividad', placeholder = 'Descripción' }) {
+  return (
+    <div className={`p-4 bg-${color}-50 rounded-xl border-2 border-${color}-200`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className={`text-xs font-black text-${color}-700`}>#{index + 1}</span>
+        {canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            className="text-red-600 text-xs font-bold hover:text-red-700"
+          >
+            ✕ Eliminar
+          </button>
+        )}
+      </div>
+      
+      <div className="space-y-3">
+        <input
+          type="text"
+          value={data[labelField]}
+          onChange={(e) => onUpdate(index, labelField, e.target.value)}
+          className="input-modern w-full text-sm"
+          placeholder={placeholder}
+          required
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">Inicio</label>
+            <input
+              type="time"
+              value={data.horaInicio}
+              onChange={(e) => onUpdate(index, 'horaInicio', e.target.value)}
+              className="input-modern w-full text-sm"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">Fin</label>
+            <input
+              type="time"
+              value={data.horaFin}
+              onChange={(e) => onUpdate(index, 'horaFin', e.target.value)}
+              className="input-modern w-full text-sm"
+              required
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Componente QR Scanner Modal
+function QRScannerModal({ onScan, onClose, error }) {
+  const [manualInput, setManualInput] = useState('');
+  const [scanning, setScanning] = useState(true);
+  const videoRef = React.useRef(null);
+  const streamRef = React.useRef(null);
+
+  useEffect(() => {
+    if (scanning) {
+      startCamera();
+    }
+    
+    return () => {
+      stopCamera();
+    };
+  }, [scanning]);
+
+  const startCamera = async () => {
+    try {
+      // Solicitar cámara trasera en móviles
+      const constraints = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      
+      // Iniciar escaneo
+      scanQRCode();
+    } catch (err) {
+      console.error('Error accediendo a la cámara:', err);
+      alert('No se pudo acceder a la cámara. Usa entrada manual.');
+      setScanning(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+  };
+
+  const scanQRCode = async () => {
+    if (!videoRef.current || !scanning) return;
+
+    try {
+      // Usar librería jsQR o html5-qrcode
+      // Por ahora, implementación simple con canvas
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      
+      const video = videoRef.current;
+      
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Aquí iría la decodificación QR (requiere librería jsQR)
+        // Por ahora, mostraremos el modo manual
+      }
+      
+      // Continuar escaneando
+      if (scanning) {
+        requestAnimationFrame(scanQRCode);
+      }
+    } catch (err) {
+      console.error('Error escaneando:', err);
+    }
+  };
+
+  const handleManualSubmit = () => {
+    if (manualInput.trim()) {
+      onScan(manualInput.trim());
+      setManualInput('');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center">
+      <div className="max-w-md w-full m-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            </svg>
+            <h3 className="font-black text-lg">Escanear QR</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4 space-y-4">
+          {/* Camera View */}
+          {scanning && (
+            <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-900">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              
+              {/* Overlay guía */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-64 border-4 border-purple-500 rounded-2xl shadow-lg shadow-purple-500/50">
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white rounded-tl-xl"></div>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white rounded-tr-xl"></div>
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white rounded-bl-xl"></div>
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white rounded-br-xl"></div>
+                </div>
+              </div>
+              
+              <div className="absolute bottom-4 left-0 right-0 text-center">
+                <div className="inline-block bg-black/50 backdrop-blur-sm text-white px-4 py-2 rounded-full text-sm font-bold">
+                  📱 Apunta al código QR de la máquina
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Instrucciones */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="text-sm text-blue-700 font-semibold mb-2">📸 Instrucciones:</div>
+            <ul className="text-xs text-blue-600 space-y-1">
+              <li>• Coloca el código QR dentro del marco</li>
+              <li>• Mantén el teléfono estable</li>
+              <li>• Asegura buena iluminación</li>
+            </ul>
+          </div>
+
+          {/* Manual Input */}
+          <div>
+            <div className="text-xs font-bold text-slate-600 mb-2 text-center">
+              O ingresa el código manualmente:
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleManualSubmit()}
+                placeholder="Ej: EX-01, RE-02..."
+                className="input-modern flex-1"
+              />
+              <button
+                onClick={handleManualSubmit}
+                disabled={!manualInput.trim()}
+                className="px-4 py-2 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✓
+              </button>
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3">
+              <div className="text-sm font-bold text-red-700">{error}</div>
+              <div className="text-xs text-red-600 mt-1">
+                Verifica que el código QR coincida con una máquina registrada
+              </div>
+            </div>
+          )}
+
+          {/* Botones */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setScanning(!scanning)}
+              className="flex-1 py-3 px-4 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition-all"
+            >
+              {scanning ? '⏸️ Pausar Cámara' : '▶️ Iniciar Cámara'}
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 px-4 bg-slate-600 text-white font-bold rounded-xl hover:bg-slate-700 transition-all"
+            >
+              ✕ Cerrar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
