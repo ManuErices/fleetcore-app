@@ -13,10 +13,62 @@ import Consolidado from "./pages/Consolidado.jsx";
 import Rendiciones from "./pages/Rendiciones.jsx";
 import Subcontratos from "./pages/Subcontratos.jsx";
 import ReportDetallado from "./pages/ReportDetallado.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
+import AppSelector from "./pages/AppSelector.jsx";
 import { auth, googleProvider } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
-function Shell({ user, onLogin, onLogout }) {
+// WorkFleet Shell - Solo Reporte Detallado
+function WorkFleetShell({ user, onLogout, onBackToSelector }) {
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header simplificado */}
+      <header className="sticky top-0 z-40 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 text-white shadow-lg">
+        <div className="max-w-[1400px] mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-xl font-black">Work<span className="text-purple-200">Fleet</span></h1>
+              <p className="text-xs text-purple-100">Reporte Detallado</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onBackToSelector}
+              className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-semibold"
+              title="Cambiar aplicación"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <button
+              onClick={onLogout}
+              className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+              title="Cerrar sesión"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Contenido - Solo Reporte Detallado */}
+      <main className="max-w-[1400px] mx-auto">
+        <ReportDetallado />
+      </main>
+    </div>
+  );
+}
+
+function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
@@ -29,7 +81,7 @@ function Shell({ user, onLogin, onLogout }) {
       <div className="fixed top-0 right-0 w-[1000px] h-[1000px] bg-gradient-radial from-blue-100/50 via-transparent to-transparent blur-3xl pointer-events-none" />
 
       {/* Header - Responsive */}
-      <header className="sticky top-0 z-50 glass-card border-b border-slate-200/50">
+      <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 lg:py-5">
           <div className="flex items-center justify-between">
             {/* Logo - Responsive */}
@@ -58,7 +110,7 @@ function Shell({ user, onLogin, onLogout }) {
             {/* Desktop: User + Mobile: Hamburger */}
             <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
               {/* User section - Siempre visible */}
-              {user ? (
+              {user && (
                 <div className="relative">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
@@ -115,7 +167,17 @@ function Shell({ user, onLogin, onLogout }) {
                           </div>
                         </div>
 
-                        <div className="p-2">
+                        <div className="p-2 space-y-1">
+                          <button
+                            onClick={onBackToSelector}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors"
+                          >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                            Cambiar Aplicación
+                          </button>
+                          
                           <button
                             onClick={onLogout}
                             className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-50 rounded-xl transition-colors"
@@ -130,17 +192,6 @@ function Shell({ user, onLogin, onLogout }) {
                     </>
                   )}
                 </div>
-              ) : (
-                <button
-                  onClick={onLogin}
-                  className="px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl font-semibold text-sm sm:text-base text-white bg-gradient-to-r from-blue-900 to-blue-700 hover:from-blue-800 hover:to-blue-600 shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z"/>
-                  </svg>
-                  <span className="hidden sm:inline">Ingresar con Google</span>
-                  <span className="sm:hidden">Ingresar</span>
-                </button>
               )}
 
               {/* Hamburger Menu - Solo mobile */}
@@ -346,11 +397,11 @@ function Shell({ user, onLogin, onLogout }) {
         {showMobileMenu && (
           <>
             <div 
-              className="lg:hidden fixed inset-0 bg-black/50 z-40 animate-fadeIn" 
+              className="lg:hidden fixed inset-0 bg-black/50 z-[60] animate-fadeIn" 
               onClick={() => setShowMobileMenu(false)}
             />
             
-            <div className="lg:hidden fixed inset-y-0 right-0 w-full max-w-sm bg-white z-50 shadow-2xl animate-slideInRight">
+            <div className="lg:hidden fixed inset-y-0 right-0 w-full max-w-sm bg-white z-[70] shadow-2xl animate-slideInRight">
               <div className="flex flex-col h-full">
                 {/* Mobile Menu Header */}
                 <div className="flex items-center justify-between p-4 border-b border-slate-200">
@@ -366,20 +417,41 @@ function Shell({ user, onLogin, onLogout }) {
                 </div>
 
                 {/* Mobile Menu Content */}
-                <nav className="flex-1 overflow-y-auto p-4 space-y-2">
-                  <MobileNavLink to="/" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
-                  <MobileNavLink to="/machines" label="Equipos" onClick={() => setShowMobileMenu(false)} />
-                  <MobileNavLink to="/logs" label="Diario de Obra" onClick={() => setShowMobileMenu(false)} />
-                  <MobileNavLink to="/calendar" label="Calendario" onClick={() => setShowMobileMenu(false)} />
-                  <MobileNavLink to="/fuel" label="Combustible" onClick={() => setShowMobileMenu(false)} />
+                <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+                  {/* Sección Principal */}
+                  <div className="space-y-1">
+                    <MobileNavLink to="/" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/machines" label="Equipos" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/logs" label="Diario de Obra" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/calendar" label="Calendario" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/fuel" label="Combustible" onClick={() => setShowMobileMenu(false)} />
+                  </div>
                   
-                  <div className="pt-2">
-                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-4 py-2">Producción</div>
+                  {/* Separador */}
+                  <div className="h-px bg-slate-200 my-4" />
+                  
+                  {/* Sección Producción */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
+                      <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Producción</span>
+                    </div>
                     <MobileNavLink to="/reporte-detallado" label="Reporte Detallado" onClick={() => setShowMobileMenu(false)} />
                   </div>
 
-                  <div className="pt-2">
-                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-4 py-2">Costos</div>
+                  {/* Separador */}
+                  <div className="h-px bg-slate-200 my-4" />
+
+                  {/* Sección Costos */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
+                      <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Costos</span>
+                    </div>
                     <MobileNavLink to="/payroll" label="Remuneraciones" onClick={() => setShowMobileMenu(false)} />
                     <MobileNavLink to="/payment-status" label="Estados de Pago" onClick={() => setShowMobileMenu(false)} />
                     <MobileNavLink to="/rendiciones" label="Rendiciones" onClick={() => setShowMobileMenu(false)} />
@@ -388,8 +460,18 @@ function Shell({ user, onLogin, onLogout }) {
                     <MobileNavLink to="/consolidado" label="Consolidado Total" onClick={() => setShowMobileMenu(false)} />
                   </div>
 
-                  <div className="pt-2">
-                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-4 py-2">Configuración</div>
+                  {/* Separador */}
+                  <div className="h-px bg-slate-200 my-4" />
+
+                  {/* Sección Configuración */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
+                      <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Configuración</span>
+                    </div>
                     <MobileNavLink to="/fuel-price" label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
                   </div>
                 </nav>
@@ -488,30 +570,35 @@ function MobileNavLink({ to, label, onClick }) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedApp, setSelectedApp] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
+      
+      // Cargar app seleccionada del localStorage
+      if (currentUser) {
+        const savedApp = localStorage.getItem('selectedApp');
+        setSelectedApp(savedApp);
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error("Error en login:", err);
-      alert("Error al iniciar sesión");
-    }
-  };
-
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      setSelectedApp(null);
+      localStorage.removeItem('selectedApp');
     } catch (err) {
       console.error("Error en logout:", err);
     }
+  };
+
+  const handleBackToSelector = () => {
+    setSelectedApp(null);
+    localStorage.removeItem('selectedApp');
   };
 
   if (loading) {
@@ -533,5 +620,21 @@ export default function App() {
     );
   }
 
-  return <Shell user={user} onLogin={handleLogin} onLogout={handleLogout} />;
+  // Si no hay usuario, mostrar página de login
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  // Si hay usuario pero no ha seleccionado app, mostrar selector
+  if (!selectedApp) {
+    return <AppSelector user={user} onLogout={handleLogout} onSelectApp={setSelectedApp} />;
+  }
+
+  // Si seleccionó WorkFleet, mostrar solo ReporteDetallado
+  if (selectedApp === 'workfleet') {
+    return <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />;
+  }
+
+  // Si seleccionó FleetCore, mostrar app completa
+  return <Shell user={user} onLogout={handleLogout} selectedApp={selectedApp} onBackToSelector={handleBackToSelector} />;
 }

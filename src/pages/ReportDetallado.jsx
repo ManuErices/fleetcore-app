@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { listActiveProjects, listMachines } from "../lib/db";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import jsQR from "jsqr";
 
 function isoToday() {
   return new Date().toISOString().split('T')[0];
@@ -127,20 +128,50 @@ export default function ReportDetallado() {
   const selectedMachine = machines.find(m => m.id === formData.machineId);
 
   // Función para manejar escaneo QR
-  const handleQRScan = (qrCode) => {
+  const handleQRScan = async (qrCode) => {
     if (!qrCode) return;
     
+    console.log(`🔍 Buscando máquina con QR: "${qrCode}"`);
     setQrError('');
     
-    // Buscar máquina por código QR
-    const machine = machines.find(m => m.qrCode === qrCode || m.code === qrCode || m.id === qrCode);
+    // Primero buscar en las máquinas cargadas
+    let machine = machines.find(m => 
+      m.qrCode === qrCode || 
+      m.code === qrCode || 
+      m.id === qrCode
+    );
+    
+    // Si no se encuentra localmente, buscar en Firebase por qrCode
+    if (!machine && selectedProject) {
+      try {
+        const machinesRef = collection(db, "machines");
+        const q = query(
+          machinesRef,
+          where("projectId", "==", selectedProject),
+          where("qrCode", "==", qrCode)
+        );
+        
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          const doc = querySnapshot.docs[0];
+          machine = { id: doc.id, ...doc.data() };
+          console.log(`✅ Máquina encontrada en Firebase:`, machine);
+        }
+      } catch (error) {
+        console.error("Error buscando en Firebase:", error);
+      }
+    }
     
     if (machine) {
       setFormData({ ...formData, machineId: machine.id });
       setShowQRScanner(false);
-      console.log(`✅ Máquina encontrada: ${machine.code} - ${machine.name}`);
+      console.log(`✅ Máquina seleccionada: ${machine.code} - ${machine.name}`);
+      alert(`✅ Máquina: ${machine.code} - ${machine.name}`);
     } else {
-      setQrError(`❌ No se encontró máquina con QR: ${qrCode}`);
+      const errorMsg = `❌ No se encontró máquina con QR: "${qrCode}"`;
+      setQrError(errorMsg);
+      console.error(errorMsg);
     }
   };
 
@@ -604,17 +635,30 @@ function QRScannerModal({ onScan, onClose, error }) {
     if (!videoRef.current || !scanning) return;
 
     try {
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      
       const video = videoRef.current;
       
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Decodificar QR con jsQR
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
+        
+        if (code) {
+          console.log("📱 QR detectado:", code.data);
+          setScanning(false);
+          stopCamera();
+          onScan(code.data);
+          return; // No continuar escaneando
+        }
       }
       
       if (scanning) {
@@ -622,6 +666,9 @@ function QRScannerModal({ onScan, onClose, error }) {
       }
     } catch (err) {
       console.error('Error escaneando:', err);
+      if (scanning) {
+        requestAnimationFrame(scanQRCode);
+      }
     }
   };
 
