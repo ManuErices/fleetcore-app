@@ -782,6 +782,22 @@ function QRScannerModal({ onScan, onClose, error }) {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Intentar decodificar QR usando jsQR
+        // Nota: Necesitas importar jsQR en el HTML
+        if (window.jsQR) {
+          const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
+          
+          if (code) {
+            console.log("✅ QR detectado:", code.data);
+            onScan(code.data);
+            setScanning(false);
+            stopCamera();
+            return;
+          }
+        }
       }
       
       if (scanning) {
@@ -789,6 +805,9 @@ function QRScannerModal({ onScan, onClose, error }) {
       }
     } catch (err) {
       console.error('Error escaneando:', err);
+      if (scanning) {
+        requestAnimationFrame(scanQRCode);
+      }
     }
   };
 
