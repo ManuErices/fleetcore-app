@@ -1,67 +1,17 @@
-import React, { useState, useEffect } from "react";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import React from "react";
 
 export default function AppSelector({ user, onLogout, onSelectApp }) {
-  const [userRole, setUserRole] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // Cargar rol del usuario desde Firebase
-  useEffect(() => {
-    const loadUserRole = async () => {
-      if (!user) return;
-      
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setUserRole(userData.role || 'operador'); // Por defecto 'operador'
-          console.log("✅ Rol de usuario cargado:", userData.role);
-        } else {
-          setUserRole('operador'); // Por defecto si no existe el documento
-        }
-      } catch (error) {
-        console.error("Error cargando rol de usuario:", error);
-        setUserRole('operador'); // Por defecto en caso de error
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUserRole();
-  }, [user]);
-
-  // Determinar si el usuario tiene acceso a cada aplicación
-  const canAccessFleetCore = userRole === 'administrador' || userRole === 'administrativo';
-  const canAccessWorkFleet = userRole === 'administrador' || userRole === 'operador';
-
   const handleSelectFleetCore = () => {
-    if (!canAccessFleetCore) {
-      alert('🔒 No tienes permisos para acceder a FleetCore');
-      return;
-    }
+    // Guardar preferencia en localStorage
     localStorage.setItem('selectedApp', 'fleetcore');
     onSelectApp('fleetcore');
   };
 
   const handleSelectWorkFleet = () => {
-    if (!canAccessWorkFleet) {
-      alert('🔒 No tienes permisos para acceder a WorkFleet');
-      return;
-    }
+    // Guardar preferencia en localStorage
     localStorage.setItem('selectedApp', 'workfleet');
     onSelectApp('workfleet');
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-xl">Cargando...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
@@ -108,37 +58,15 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           {/* FleetCore Card */}
           <div 
             onClick={handleSelectFleetCore}
-            className={`group relative ${canAccessFleetCore ? 'cursor-pointer' : 'cursor-not-allowed'} animate-fadeInUp`}
+            className="group relative cursor-pointer animate-fadeInUp"
           >
             {/* Glow effect */}
-            <div className={`absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-3xl blur-xl transition-opacity ${canAccessFleetCore ? 'opacity-50 group-hover:opacity-75' : 'opacity-20'}`} />
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-3xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
             
             {/* Card content */}
-            <div className={`relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 transition-all ${
-              canAccessFleetCore 
-                ? 'border-blue-200 hover:border-blue-400 group-hover:scale-105 group-hover:-translate-y-2' 
-                : 'border-slate-300 opacity-60'
-            }`}>
-              
-              {/* Overlay de bloqueo */}
-              {!canAccessFleetCore && (
-                <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-[2px] rounded-3xl flex items-center justify-center z-10">
-                  <div className="text-center">
-                    <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-700 flex items-center justify-center shadow-xl">
-                      <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                    </div>
-                    <div className="text-sm font-bold text-slate-700">Acceso Restringido</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {userRole === 'operador' ? 'Solo para Administrativos' : 'Contacta al administrador'}
-                    </div>
-                  </div>
-                </div>
-              )}
-              
+            <div className="relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 border-blue-200 hover:border-blue-400 transition-all group-hover:scale-105 group-hover:-translate-y-2">
               {/* Icon */}
-              <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessFleetCore ? 'group-hover:shadow-2xl' : ''}`}>
+              <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-xl group-hover:shadow-2xl transition-shadow">
                 <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -188,37 +116,15 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           {/* WorkFleet Card */}
           <div 
             onClick={handleSelectWorkFleet}
-            className={`group relative ${canAccessWorkFleet ? 'cursor-pointer' : 'cursor-not-allowed'} animate-fadeInUp stagger-2`}
+            className="group relative cursor-pointer animate-fadeInUp stagger-2"
           >
             {/* Glow effect */}
-            <div className={`absolute inset-0 bg-gradient-to-br from-purple-500 to-purple-700 rounded-3xl blur-xl transition-opacity ${canAccessWorkFleet ? 'opacity-50 group-hover:opacity-75' : 'opacity-20'}`} />
+            <div className="absolute inset-0 bg-gradient-to-br from-purple-500 to-purple-700 rounded-3xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
             
             {/* Card content */}
-            <div className={`relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 transition-all ${
-              canAccessWorkFleet 
-                ? 'border-purple-200 hover:border-purple-400 group-hover:scale-105 group-hover:-translate-y-2' 
-                : 'border-slate-300 opacity-60'
-            }`}>
-              
-              {/* Overlay de bloqueo */}
-              {!canAccessWorkFleet && (
-                <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-[2px] rounded-3xl flex items-center justify-center z-10">
-                  <div className="text-center">
-                    <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-700 flex items-center justify-center shadow-xl">
-                      <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2-2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                    </div>
-                    <div className="text-sm font-bold text-slate-700">Acceso Restringido</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {userRole === 'administrativo' ? 'Solo para Operadores' : 'Contacta al administrador'}
-                    </div>
-                  </div>
-                </div>
-              )}
-              
+            <div className="relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 border-purple-200 hover:border-purple-400 transition-all group-hover:scale-105 group-hover:-translate-y-2">
               {/* Icon */}
-              <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-900 to-purple-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessWorkFleet ? 'group-hover:shadow-2xl' : ''}`}>
+              <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-900 to-purple-700 flex items-center justify-center shadow-xl group-hover:shadow-2xl transition-shadow">
                 <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>

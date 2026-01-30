@@ -15,6 +15,7 @@ import Subcontratos from "./pages/Subcontratos.jsx";
 import ReportDetallado from "./pages/ReportDetallado.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import AppSelector from "./pages/AppSelector.jsx";
+import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
 import { auth, googleProvider } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
@@ -296,6 +297,21 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                         </svg>
                         Remuneraciones
                       </NavLink>
+                      <NavLink
+                        to="/reporte-workfleet"
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${
+                            isActive
+                              ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg"
+                              : "text-slate-700 hover:bg-slate-100"
+                          }`
+                        }
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>Reporte WorkFleet</span>
+                      </NavLink>
 
                       <NavLink
                         to="/payment-status"
@@ -497,6 +513,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
           <Route path="/fuel-price" element={<FuelPriceManager />} />
           <Route path="/subcontratos" element={<Subcontratos />} />
           <Route path="/reporte-detallado" element={<ReportDetallado />} />
+          <Route path="/reporte-workfleet" element={<ReporteWorkFleet />} />
         </Routes>
       </main>
 
