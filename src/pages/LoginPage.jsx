@@ -361,7 +361,7 @@ function RegisterModal({ onRegister, onClose, loading }) {
               type="text"
               value={formData.nombre}
               onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              placeholder="Juan Pérez"
+              placeholder="Nombre Apellido"
               className="input-modern w-full"
               required
             />

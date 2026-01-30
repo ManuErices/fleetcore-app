@@ -464,7 +464,7 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
               <div className="mt-3 p-3 bg-white rounded-lg border border-blue-200">
                 <strong>Clasificación automática:</strong>
                 <ul className="mt-2 space-y-1 ml-4 list-none text-xs">
-                  <li>✅ <strong>Productivo:</strong> Si tiene horas trabajadas (Horómetro Final > Inicial)</li>
+                  <li>✅ <strong>Productivo:</strong> Si tiene horas trabajadas (Horómetro Final &gt; Inicial)</li>
                   <li>🟡 <strong>Standby:</strong> Si está "Disponible", "Sin operador" pero sin horas</li>
                   <li>🔴 <strong>Downtime:</strong> Si está "Fuera de servicio", "Mantenimiento", "Taller"</li>
                 </ul>
