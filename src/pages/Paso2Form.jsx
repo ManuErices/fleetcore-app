@@ -6,6 +6,34 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
   const [horariosErrors, setHorariosErrors] = useState([]);
   const [totalHorasError, setTotalHorasError] = useState('');
 
+  // ✅ Función auxiliar para ajustar minutos a intervalos de 15 (0, 15, 30, 45)
+  const ajustarMinutos = (timeValue) => {
+    if (!timeValue || !timeValue.includes(':')) return timeValue;
+    
+    const [horas, minutos] = timeValue.split(':').map(Number);
+    
+    // Redondear minutos al intervalo de 15 más cercano
+    const minutosValidos = [0, 15, 30, 45];
+    let minutoAjustado = minutosValidos[0];
+    let menorDiferencia = Math.abs(minutos - minutosValidos[0]);
+    
+    for (let i = 1; i < minutosValidos.length; i++) {
+      const diferencia = Math.abs(minutos - minutosValidos[i]);
+      if (diferencia < menorDiferencia) {
+        menorDiferencia = diferencia;
+        minutoAjustado = minutosValidos[i];
+      }
+    }
+    
+    // Si el minuto ingresado ya es válido, no hacer nada
+    if (minutosValidos.includes(minutos)) {
+      return timeValue;
+    }
+    
+    // Devolver la hora ajustada
+    return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
+  };
+
   // ✅ NUEVO: Validar horarios en tiempo real
   useEffect(() => {
     const errors = [];
@@ -86,16 +114,16 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       const actErrors = { index: idx, horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
       
       if (act.horaInicio) {
-        // Validar hora inicial: debe ser mayor a 7:00 AM y menor a 7:00 PM
-        if (act.horaInicio <= "07:00" || act.horaInicio >= "19:00") {
-          actErrors.horaInicio = 'Debe ser mayor a 7:00 AM y menor a 7:00 PM';
+        // Validar hora inicial: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
+        if (act.horaInicio < "07:00" || act.horaInicio > "19:00") {
+          actErrors.horaInicio = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
         }
       }
       
       if (act.horaFin) {
-        // Validar hora final: debe ser mayor a 7:00 AM y menor a 7:00 PM
-        if (act.horaFin <= "07:00" || act.horaFin >= "19:00") {
-          actErrors.horaFin = 'Debe ser mayor a 7:00 AM y menor a 7:00 PM';
+        // Validar hora final: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
+        if (act.horaFin < "07:00" || act.horaFin > "19:00") {
+          actErrors.horaFin = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
         }
       }
       
@@ -104,7 +132,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         actErrors.duracion = 'La hora inicial debe ser menor que la final';
       }
       
-      // ✅ VALIDACIÓN GLOBAL: Verificar solapamiento con TODOS los horarios
+      // ✅ VALIDACIÓN GLOBAL: Verificar superposición con TODOS los horarios
       if (act.horaInicio && act.horaFin) {
         const inicioActual = act.horaInicio;
         const finActual = act.horaFin;
@@ -115,9 +143,9 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
             return;
           }
           
-          // Verificar si se solapan
+          // Verificar si se superponen
           if (inicioActual < otroHorario.fin && finActual > otroHorario.inicio) {
-            actErrors.solapamiento = `Se solapa con: ${otroHorario.nombre}`;
+            actErrors.solapamiento = `Se superpone con: ${otroHorario.nombre}`;
           }
         });
       }
@@ -132,9 +160,17 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   // Funciones para manejar actividades efectivas
   const addActividad = () => {
+    // Obtener la última actividad
+    const ultimaActividad = formData.actividadesEfectivas[formData.actividadesEfectivas.length - 1];
+    // La hora inicial de la nueva actividad es la hora final de la anterior
+    const horaInicialNueva = ultimaActividad?.horaFin || '';
+    
     setFormData({
       ...formData,
-      actividadesEfectivas: [...formData.actividadesEfectivas, { actividad: '', horaInicio: '', horaFin: '' }]
+      actividadesEfectivas: [
+        ...formData.actividadesEfectivas, 
+        { actividad: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
     });
   };
 
@@ -145,15 +181,27 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   const updateActividad = (index, field, value) => {
     const newActividades = [...formData.actividadesEfectivas];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
     newActividades[index][field] = value;
     setFormData({ ...formData, actividadesEfectivas: newActividades });
   };
 
   // Funciones para manejar tiempos no efectivos
   const addTiempoNoEfectivo = () => {
+    // Obtener el último tiempo no efectivo
+    const ultimoTiempo = formData.tiemposNoEfectivos[formData.tiemposNoEfectivos.length - 1];
+    // La hora inicial del nuevo tiempo es la hora final del anterior
+    const horaInicialNueva = ultimoTiempo?.horaFin || '';
+    
     setFormData({
       ...formData,
-      tiemposNoEfectivos: [...formData.tiemposNoEfectivos, { motivo: '', horaInicio: '', horaFin: '' }]
+      tiemposNoEfectivos: [
+        ...formData.tiemposNoEfectivos, 
+        { motivo: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
     });
   };
 
@@ -164,6 +212,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   const updateTiempoNoEfectivo = (index, field, value) => {
     const newTiempos = [...formData.tiemposNoEfectivos];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
     newTiempos[index][field] = value;
     setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
   };
@@ -208,9 +260,9 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       errors.push(totalHorasError);
     }
     
-    // ✅ Validar solapamientos globales
+    // ✅ Validar superposiciones globales
     if (horariosErrors.some(err => err.solapamiento)) {
-      errors.push('⚠️ Hay horarios que se solapan entre diferentes secciones. Por favor corrige los horarios.');
+      errors.push('⚠️ Hay horarios que se superponen entre diferentes secciones. Por favor corrige los horarios.');
     }
     
     return errors;
@@ -238,6 +290,38 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
   useEffect(() => {
     let totalMinutos = 0;
     
+    // Función auxiliar para verificar si un rango A cubre completamente un rango B
+    const rangoCubreCompletamente = (rangoA_inicio, rangoA_fin, rangoB_inicio, rangoB_fin) => {
+      const [hA_ini, mA_ini] = rangoA_inicio.split(':').map(Number);
+      const [hA_fin, mA_fin] = rangoA_fin.split(':').map(Number);
+      const [hB_ini, mB_ini] = rangoB_inicio.split(':').map(Number);
+      const [hB_fin, mB_fin] = rangoB_fin.split(':').map(Number);
+      
+      const minA_ini = hA_ini * 60 + mA_ini;
+      const minA_fin = hA_fin * 60 + mA_fin;
+      const minB_ini = hB_ini * 60 + mB_ini;
+      const minB_fin = hB_fin * 60 + mB_fin;
+      
+      // Rango A cubre completamente B si A empieza antes o igual y termina después o igual
+      return minA_ini <= minB_ini && minA_fin >= minB_fin;
+    };
+    
+    // Verificar si la colación está cubierta completamente por alguna actividad
+    let colacionCubierta = false;
+    if (formData.tiemposProgramados.colacion?.horaInicio && formData.tiemposProgramados.colacion?.horaFin) {
+      colacionCubierta = formData.actividadesEfectivas.some(act => {
+        if (act.horaInicio && act.horaFin) {
+          return rangoCubreCompletamente(
+            act.horaInicio, 
+            act.horaFin, 
+            formData.tiemposProgramados.colacion.horaInicio, 
+            formData.tiemposProgramados.colacion.horaFin
+          );
+        }
+        return false;
+      });
+    }
+    
     // Sumar actividades efectivas
     formData.actividadesEfectivas.forEach(act => {
       if (act.horaInicio && act.horaFin) {
@@ -258,8 +342,13 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       }
     });
     
-    // Sumar tiempos programados
-    Object.values(formData.tiemposProgramados).forEach(tiempo => {
+    // Sumar tiempos programados (EXCLUYENDO colación si está cubierta)
+    Object.entries(formData.tiemposProgramados).forEach(([key, tiempo]) => {
+      // Si es colación y está cubierta, no la sumamos
+      if (key === 'colacion' && colacionCubierta) {
+        return; // Skip colación
+      }
+      
       if (tiempo.horaInicio && tiempo.horaFin) {
         const [hInicio, mInicio] = tiempo.horaInicio.split(':').map(Number);
         const [hFin, mFin] = tiempo.horaFin.split(':').map(Number);
@@ -284,10 +373,11 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     
     if (totalHoras !== 12) {
       const diff = totalHoras - 12;
+      let mensajeExtra = colacionCubierta ? ' (Colación excluida - cubierta por actividad)' : '';
       if (diff > 0) {
-        setTotalHorasError(`⚠️ Tienes ${diff.toFixed(2)} horas de más. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)`);
+        setTotalHorasError(`⚠️ Tienes ${diff.toFixed(2)} horas de más. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)${mensajeExtra}`);
       } else {
-        setTotalHorasError(`⚠️ Te faltan ${Math.abs(diff).toFixed(2)} horas. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)`);
+        setTotalHorasError(`⚠️ Te faltan ${Math.abs(diff).toFixed(2)} horas. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)${mensajeExtra}`);
       }
     } else {
       setTotalHorasError('');
@@ -450,14 +540,14 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
             <button
               type="button"
               onClick={() => {
-                setFormData({ ...formData, tieneMantenciones: true });
-                if (!formData.mantenciones) {
-                  setFormData({ 
-                    ...formData, 
-                    tieneMantenciones: true,
-                    mantenciones: [{ descripcion: '', horaInicio: '', horaFin: '' }]
-                  });
-                }
+                // Siempre agregar la primera mantención automáticamente
+                setFormData({ 
+                  ...formData, 
+                  tieneMantenciones: true,
+                  mantenciones: (formData.mantenciones && formData.mantenciones.length > 0) 
+                    ? formData.mantenciones 
+                    : [{ descripcion: '', horaInicio: '', horaFin: '' }]
+                });
               }}
               className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm sm:text-base transition-all ${
                 formData.tieneMantenciones 
@@ -512,12 +602,19 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                           type="time"
                           value={mant.horaInicio || ''}
                           onChange={(e) => {
+                            const valorAjustado = ajustarMinutos(e.target.value);
                             const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : [])];
-                            newMants[idx] = { ...newMants[idx], horaInicio: e.target.value };
+                            newMants[idx] = { ...newMants[idx], horaInicio: valorAjustado };
                             setFormData({ ...formData, mantenciones: newMants });
                           }}
                           className="input-modern w-full text-sm"
+                          min="07:00"
+                          max="19:00"
+                          step="900"
                         />
+                        <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+                          Entre 7:00 AM y 7:00 PM (inclusive)
+                        </p>
                       </div>
                       <div>
                         <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
@@ -527,12 +624,19 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                           type="time"
                           value={mant.horaFin || ''}
                           onChange={(e) => {
+                            const valorAjustado = ajustarMinutos(e.target.value);
                             const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : [])];
-                            newMants[idx] = { ...newMants[idx], horaFin: e.target.value };
+                            newMants[idx] = { ...newMants[idx], horaFin: valorAjustado };
                             setFormData({ ...formData, mantenciones: newMants });
                           }}
                           className="input-modern w-full text-sm"
+                          min="07:00"
+                          max="19:00"
+                          step="900"
                         />
+                        <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+                          Entre 7:00 AM y 7:00 PM (inclusive)
+                        </p>
                       </div>
                     </div>
 
@@ -563,7 +667,13 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               <button
                 type="button"
                 onClick={() => {
-                  const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : []), { descripcion: '', horaInicio: '', horaFin: '' }];
+                  const mantenciones = Array.isArray(formData.mantenciones) ? formData.mantenciones : [];
+                  // Obtener la última mantención
+                  const ultimaMant = mantenciones[mantenciones.length - 1];
+                  // La hora inicial de la nueva mantención es la hora final de la anterior
+                  const horaInicialNueva = ultimaMant?.horaFin || '';
+                  
+                  const newMants = [...mantenciones, { descripcion: '', horaInicio: horaInicialNueva, horaFin: '' }];
                   setFormData({ ...formData, mantenciones: newMants });
                 }}
                 className="w-full py-3 border-2 border-dashed border-red-300 rounded-xl text-red-700 font-semibold hover:bg-red-50 transition-all"
@@ -685,9 +795,10 @@ function ActivityCard({ index, data, onUpdate, onRemove, canRemove, placeholder,
               className={`input-modern w-full text-sm ${errors.horaInicio ? 'border-red-300 bg-red-50' : ''}`}
               min="07:00"
               max="19:00"
+              step="900"
             />
             <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-              Mayor a 7:00 AM y Menor a 7:00 PM
+              Entre 7:00 AM y 7:00 PM (inclusive)
             </p>
             {/* ✅ Mensaje de error en tiempo real */}
             {errors.horaInicio && (
@@ -710,9 +821,10 @@ function ActivityCard({ index, data, onUpdate, onRemove, canRemove, placeholder,
               className={`input-modern w-full text-sm ${errors.horaFin ? 'border-red-300 bg-red-50' : ''}`}
               min="07:00"
               max="19:00"
+              step="900"
             />
             <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-              Mayor a 7:00 AM y Menor a 7:00 PM
+              Entre 7:00 AM y 7:00 PM (inclusive)
             </p>
             {/* ✅ Mensaje de error en tiempo real */}
             {errors.horaFin && (
@@ -789,7 +901,13 @@ function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, 
             value={horaInicio}
             onChange={(e) => onChangeInicio(e.target.value)}
             className="input-modern w-full text-sm"
+            min="07:00"
+            max="19:00"
+            step="900"
           />
+          <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+            Entre 7:00 AM y 7:00 PM (inclusive)
+          </p>
         </div>
         <div>
           <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
@@ -800,7 +918,13 @@ function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, 
             value={horaFin}
             onChange={(e) => onChangeFin(e.target.value)}
             className="input-modern w-full text-sm"
+            min="07:00"
+            max="19:00"
+            step="900"
           />
+          <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+            Entre 7:00 AM y 7:00 PM (inclusive)
+          </p>
         </div>
       </div>
 

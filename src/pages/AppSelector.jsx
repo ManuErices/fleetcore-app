@@ -17,21 +17,39 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
         
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          setUserRole(userData.role || 'operador'); // Por defecto 'operador'
-          console.log("✅ Rol de usuario cargado:", userData.role);
+          const role = userData.role || 'operador';
+          setUserRole(role);
+          console.log("✅ Rol de usuario cargado:", role);
+          
+          // Si es operador, redirigir automáticamente a WorkFleet
+          if (role === 'operador') {
+            console.log("🔄 Operador detectado - Redirigiendo a WorkFleet...");
+            localStorage.setItem('selectedApp', 'workfleet');
+            onSelectApp('workfleet');
+            return;
+          }
         } else {
-          setUserRole('operador'); // Por defecto si no existe el documento
+          setUserRole('operador');
+          // Si no existe el documento, asumir operador y redirigir a WorkFleet
+          console.log("🔄 Usuario sin rol - Redirigiendo a WorkFleet...");
+          localStorage.setItem('selectedApp', 'workfleet');
+          onSelectApp('workfleet');
+          return;
         }
       } catch (error) {
         console.error("Error cargando rol de usuario:", error);
-        setUserRole('operador'); // Por defecto en caso de error
+        setUserRole('operador');
+        // En caso de error, redirigir a WorkFleet como fallback
+        localStorage.setItem('selectedApp', 'workfleet');
+        onSelectApp('workfleet');
+        return;
       } finally {
         setLoading(false);
       }
     };
 
     loadUserRole();
-  }, [user]);
+  }, [user, onSelectApp]);
 
   // Determinar si el usuario tiene acceso a cada aplicación
   const canAccessFleetCore = userRole === 'administrador' || userRole === 'administrativo';

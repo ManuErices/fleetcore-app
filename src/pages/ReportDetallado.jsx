@@ -43,7 +43,7 @@ export default function ReportDetallado() {
     estadoMaquina: 'operativa',
     observaciones: '',
     // Parte 2
-    actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+    actividadesEfectivas: [{ actividad: '', horaInicio: '08:30', horaFin: '19:00' }], // 8:30 AM - 7:00 PM por defecto
     tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
     tiemposProgramados: {
       charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },
@@ -294,9 +294,17 @@ export default function ReportDetallado() {
   }, [formData.machineId, selectedProject]);
 
   const addActividad = () => {
+    // Obtener la última actividad
+    const ultimaActividad = formData.actividadesEfectivas[formData.actividadesEfectivas.length - 1];
+    // La hora inicial de la nueva actividad es la hora final de la anterior
+    const horaInicialNueva = ultimaActividad?.horaFin || '';
+    
     setFormData({
       ...formData,
-      actividadesEfectivas: [...formData.actividadesEfectivas, { actividad: '', horaInicio: '', horaFin: '' }]
+      actividadesEfectivas: [
+        ...formData.actividadesEfectivas, 
+        { actividad: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
     });
   };
 
@@ -305,16 +313,56 @@ export default function ReportDetallado() {
     setFormData({ ...formData, actividadesEfectivas: newActividades });
   };
 
+  // ✅ Función auxiliar para redondear minutos a intervalos de 15
+  const ajustarMinutos = (timeValue) => {
+    if (!timeValue || !timeValue.includes(':')) return timeValue;
+    
+    const [horas, minutos] = timeValue.split(':').map(Number);
+    
+    // Redondear minutos al intervalo de 15 más cercano
+    const minutosValidos = [0, 15, 30, 45];
+    let minutoAjustado = minutosValidos[0];
+    let menorDiferencia = Math.abs(minutos - minutosValidos[0]);
+    
+    for (let i = 1; i < minutosValidos.length; i++) {
+      const diferencia = Math.abs(minutos - minutosValidos[i]);
+      if (diferencia < menorDiferencia) {
+        menorDiferencia = diferencia;
+        minutoAjustado = minutosValidos[i];
+      }
+    }
+    
+    // Si el minuto ingresado ya es válido, no hacer nada
+    if (minutosValidos.includes(minutos)) {
+      return timeValue;
+    }
+    
+    // Devolver la hora ajustada
+    return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
+  };
+
   const updateActividad = (index, field, value) => {
     const newActividades = [...formData.actividadesEfectivas];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
     newActividades[index][field] = value;
     setFormData({ ...formData, actividadesEfectivas: newActividades });
   };
 
   const addTiempoNoEfectivo = () => {
+    // Obtener el último tiempo no efectivo
+    const ultimoTiempo = formData.tiemposNoEfectivos[formData.tiemposNoEfectivos.length - 1];
+    // La hora inicial del nuevo tiempo es la hora final del anterior
+    const horaInicialNueva = ultimoTiempo?.horaFin || '';
+    
     setFormData({
       ...formData,
-      tiemposNoEfectivos: [...formData.tiemposNoEfectivos, { motivo: '', horaInicio: '', horaFin: '' }]
+      tiemposNoEfectivos: [
+        ...formData.tiemposNoEfectivos, 
+        { motivo: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
     });
   };
 
@@ -325,6 +373,10 @@ export default function ReportDetallado() {
 
   const updateTiempoNoEfectivo = (index, field, value) => {
     const newTiempos = [...formData.tiemposNoEfectivos];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
     newTiempos[index][field] = value;
     setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
   };
@@ -449,7 +501,7 @@ export default function ReportDetallado() {
         operador: userNombre,
         rut: userRut,
         userId: user.uid,
-        actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+        actividadesEfectivas: [{ actividad: '', horaInicio: '08:30', horaFin: '19:00' }], // 8:30 AM - 7:00 PM por defecto
         tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
         tiemposProgramados: {
           charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },

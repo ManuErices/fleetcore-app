@@ -16,7 +16,6 @@ import ReportDetallado from "./pages/ReportDetallado.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import AppSelector from "./pages/AppSelector.jsx";
 import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
-import Pasajes from "./pages/Pasajes.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -470,23 +469,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                       </NavLink>
 
                       <NavLink
-                        to="/pasajes"
-                        onClick={() => setShowCostsMenu(false)}
-                        className={({ isActive }) =>
-                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
-                            isActive
-                              ? "bg-gradient-to-r from-sky-50 to-blue-50 text-sky-700"
-                              : "text-slate-900 hover:bg-gradient-to-r hover:from-sky-50 hover:to-blue-50"
-                          }`
-                        }
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                        </svg>
-                        Pasajes
-                      </NavLink>
-
-                      <NavLink
                         to="/subcontratos"
                         onClick={() => setShowCostsMenu(false)}
                         className={({ isActive }) =>
@@ -635,7 +617,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               <Route path="/consolidado" element={<Consolidado />} />
               <Route path="/machines" element={<Machines />} />
               <Route path="/rendiciones" element={<Rendiciones />} />
-              <Route path="/pasajes" element={<Pasajes />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
               <Route path="/fuel-price" element={<FuelPriceManager />} />
               <Route path="/subcontratos" element={<Subcontratos />} />
