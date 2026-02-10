@@ -1,957 +1,666 @@
 import React, { useState, useEffect } from "react";
 
-export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
+export default function Paso2FormTimeline({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
   
-  // ✅ NUEVO: Estado para errores de validación en tiempo real
-  const [horariosErrors, setHorariosErrors] = useState([]);
-  const [totalHorasError, setTotalHorasError] = useState('');
-
-  // ✅ Función auxiliar para ajustar minutos a intervalos de 15 (0, 15, 30, 45)
-  const ajustarMinutos = (timeValue) => {
-    if (!timeValue || !timeValue.includes(':')) return timeValue;
-    
-    const [horas, minutos] = timeValue.split(':').map(Number);
-    
-    // Redondear minutos al intervalo de 15 más cercano
-    const minutosValidos = [0, 15, 30, 45];
-    let minutoAjustado = minutosValidos[0];
-    let menorDiferencia = Math.abs(minutos - minutosValidos[0]);
-    
-    for (let i = 1; i < minutosValidos.length; i++) {
-      const diferencia = Math.abs(minutos - minutosValidos[i]);
-      if (diferencia < menorDiferencia) {
-        menorDiferencia = diferencia;
-        minutoAjustado = minutosValidos[i];
+  // Estados
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState(null);
+  const [dragEnd, setDragEnd] = useState(null);
+  const [showActivitySelector, setShowActivitySelector] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [conflictInfo, setConflictInfo] = useState(null);
+  
+  // PALETA PROFESIONAL - Tonos corporativos modernos
+  const COLORS = {
+    efectiva: {
+      primary: '#10b981', light: '#d1fae5', bg: '#ecfdf5', border: '#a7f3d0', text: '#065f46',
+      gradient: 'from-emerald-400 via-emerald-500 to-teal-600', icon: '✓', label: 'Productiva'
+    },
+    noefectiva: {
+      primary: '#f59e0b', light: '#fef3c7', bg: '#fffbeb', border: '#fde68a', text: '#78350f',
+      gradient: 'from-amber-400 via-amber-500 to-orange-500', icon: '⏸', label: 'Detenida'
+    },
+    charla: {
+      primary: '#3b82f6', light: '#dbeafe', bg: '#eff6ff', border: '#bfdbfe', text: '#1e3a8a',
+      gradient: 'from-blue-400 via-blue-500 to-blue-600', icon: '🛡️', label: 'Seguridad'
+    },
+    inspeccion: {
+      primary: '#8b5cf6', light: '#ede9fe', bg: '#f5f3ff', border: '#ddd6fe', text: '#5b21b6',
+      gradient: 'from-violet-400 via-violet-500 to-purple-600', icon: '🔧', label: 'Inspección'
+    },
+    colacion: {
+      primary: '#ec4899', light: '#fce7f3', bg: '#fdf2f8', border: '#fbcfe8', text: '#831843',
+      gradient: 'from-pink-400 via-pink-500 to-rose-600', icon: '🍽️', label: 'Colación'
+    }
+  };
+  
+  const generarFranjasHorarias = () => {
+    const franjas = [];
+    for (let hora = 7; hora <= 19; hora++) {
+      if (hora === 7) {
+        franjas.push({ hora, minuto: 30, label: "7:30" });
+      } else if (hora < 19) {
+        franjas.push({ hora, minuto: 0, label: `${hora}:00` });
+        franjas.push({ hora, minuto: 30, label: `${hora}:30` });
+      } else {
+        franjas.push({ hora, minuto: 0, label: "19:00" });
       }
     }
-    
-    // Si el minuto ingresado ya es válido, no hacer nada
-    if (minutosValidos.includes(minutos)) {
-      return timeValue;
-    }
-    
-    // Devolver la hora ajustada
-    return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
+    return franjas;
   };
 
-  // ✅ NUEVO: Validar horarios en tiempo real
-  useEffect(() => {
-    const errors = [];
+  const franjas = generarFranjasHorarias();
+
+  const horaAIndice = (horaStr) => {
+    if (!horaStr) return -1;
+    const [h, m] = horaStr.split(':').map(Number);
+    if (h === 7 && m === 30) return 0;
+    if (h < 7 || (h === 7 && m < 30)) return -1;
+    if (h > 19) return -1;
+    const horaBase = h - 7;
+    return horaBase * 2 - 1 + (m >= 30 ? 1 : 0);
+  };
+
+  const indiceAHora = (indice) => {
+    if (indice < 0 || indice >= franjas.length) return "";
+    const franja = franjas[indice];
+    return `${String(franja.hora).padStart(2, '0')}:${String(franja.minuto).padStart(2, '0')}`;
+  };
+
+  const getColorConfig = (tipo, subTipo) => {
+    if (tipo === 'efectiva') return COLORS.efectiva;
+    if (tipo === 'noefectivo') return COLORS.noefectiva;
+    if (tipo === 'programado') {
+      if (subTipo === 'charlaSegurid') return COLORS.charla;
+      if (subTipo === 'inspeccionEquipo') return COLORS.inspeccion;
+      if (subTipo === 'colacion') return COLORS.colacion;
+    }
+    return COLORS.efectiva;
+  };
+
+  const obtenerActividadesTimeline = () => {
+    const actividades = [];
     
-    // Recopilar TODOS los horarios de todas las secciones
-    const todosLosHorarios = [];
-    
-    // Agregar actividades efectivas
-    formData.actividadesEfectivas.forEach((act, idx) => {
+    formData.actividadesEfectivas?.forEach((act, idx) => {
       if (act.horaInicio && act.horaFin) {
-        todosLosHorarios.push({
-          inicio: act.horaInicio,
-          fin: act.horaFin,
-          tipo: 'actividadEfectiva',
-          indice: idx,
-          nombre: `Actividad Efectiva ${idx + 1}`
+        const config = getColorConfig('efectiva');
+        actividades.push({
+          id: `efectiva-${idx}`, tipo: 'efectiva',
+          nombre: act.actividad || `Actividad ${idx + 1}`,
+          horaInicio: act.horaInicio, horaFin: act.horaFin,
+          ...config, indice: idx
         });
       }
     });
-    
-    // Agregar tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
+
+    formData.tiemposNoEfectivos?.forEach((tiempo, idx) => {
       if (tiempo.horaInicio && tiempo.horaFin) {
-        todosLosHorarios.push({
-          inicio: tiempo.horaInicio,
-          fin: tiempo.horaFin,
-          tipo: 'tiempoNoEfectivo',
-          indice: idx,
-          nombre: `Tiempo No Efectivo ${idx + 1}`
+        const config = getColorConfig('noefectivo');
+        actividades.push({
+          id: `noefectivo-${idx}`, tipo: 'noefectivo',
+          nombre: tiempo.razon || `Detención ${idx + 1}`,
+          horaInicio: tiempo.horaInicio, horaFin: tiempo.horaFin,
+          ...config, indice: idx
         });
       }
     });
-    
-    // Agregar tiempos programados
-    const tiemposProg = formData.tiemposProgramados;
-    if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.charlaSegurid.horaInicio,
-        fin: tiemposProg.charlaSegurid.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Charla de Seguridad'
-      });
-    }
-    if (tiemposProg.inspeccionEquipo.horaInicio && tiemposProg.inspeccionEquipo.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.inspeccionEquipo.horaInicio,
-        fin: tiemposProg.inspeccionEquipo.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Inspección de Equipo'
-      });
-    }
-    if (tiemposProg.colacion.horaInicio && tiemposProg.colacion.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.colacion.horaInicio,
-        fin: tiemposProg.colacion.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Colación'
+
+    const tp = formData.tiemposProgramados;
+    if (tp?.charlaSegurid?.horaInicio && tp?.charlaSegurid?.horaFin) {
+      const config = getColorConfig('programado', 'charlaSegurid');
+      actividades.push({
+        id: 'charla', tipo: 'programado', subTipo: 'charlaSegurid',
+        nombre: 'Charla de Seguridad',
+        horaInicio: tp.charlaSegurid.horaInicio, horaFin: tp.charlaSegurid.horaFin,
+        ...config
       });
     }
     
-    // Agregar mantenciones si están activas
-    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
-      formData.mantenciones.forEach((mant, idx) => {
-        if (mant.horaInicio && mant.horaFin) {
-          todosLosHorarios.push({
-            inicio: mant.horaInicio,
-            fin: mant.horaFin,
-            tipo: 'mantencion',
-            indice: idx,
-            nombre: `Mantención ${idx + 1}`
-          });
-        }
+    if (tp?.inspeccionEquipo?.horaInicio && tp?.inspeccionEquipo?.horaFin) {
+      const config = getColorConfig('programado', 'inspeccionEquipo');
+      actividades.push({
+        id: 'inspeccion', tipo: 'programado', subTipo: 'inspeccionEquipo',
+        nombre: 'Inspección de Equipo',
+        horaInicio: tp.inspeccionEquipo.horaInicio, horaFin: tp.inspeccionEquipo.horaFin,
+        ...config
       });
     }
     
-    // Validar cada actividad efectiva
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      const actErrors = { index: idx, horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
-      
-      if (act.horaInicio) {
-        // Validar hora inicial: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
-        if (act.horaInicio < "07:00" || act.horaInicio > "19:00") {
-          actErrors.horaInicio = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
-        }
-      }
-      
-      if (act.horaFin) {
-        // Validar hora final: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
-        if (act.horaFin < "07:00" || act.horaFin > "19:00") {
-          actErrors.horaFin = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
-        }
-      }
-      
-      // Validar que hora inicial < hora final
-      if (act.horaInicio && act.horaFin && act.horaInicio >= act.horaFin) {
-        actErrors.duracion = 'La hora inicial debe ser menor que la final';
-      }
-      
-      // ✅ VALIDACIÓN GLOBAL: Verificar superposición con TODOS los horarios
-      if (act.horaInicio && act.horaFin) {
-        const inicioActual = act.horaInicio;
-        const finActual = act.horaFin;
-        
-        todosLosHorarios.forEach((otroHorario) => {
-          // No comparar consigo mismo
-          if (otroHorario.tipo === 'actividadEfectiva' && otroHorario.indice === idx) {
-            return;
-          }
-          
-          // Verificar si se superponen
-          if (inicioActual < otroHorario.fin && finActual > otroHorario.inicio) {
-            actErrors.solapamiento = `Se superpone con: ${otroHorario.nombre}`;
-          }
-        });
-      }
-      
-      if (actErrors.horaInicio || actErrors.horaFin || actErrors.duracion || actErrors.solapamiento) {
-        errors.push(actErrors);
-      }
-    });
-    
-    setHorariosErrors(errors);
-  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.tiemposProgramados, formData.mantenciones, formData.tieneMantenciones]);
-
-  // Funciones para manejar actividades efectivas
-  const addActividad = () => {
-    // Obtener la última actividad
-    const ultimaActividad = formData.actividadesEfectivas[formData.actividadesEfectivas.length - 1];
-    // La hora inicial de la nueva actividad es la hora final de la anterior
-    const horaInicialNueva = ultimaActividad?.horaFin || '';
-    
-    setFormData({
-      ...formData,
-      actividadesEfectivas: [
-        ...formData.actividadesEfectivas, 
-        { actividad: '', horaInicio: horaInicialNueva, horaFin: '' }
-      ]
-    });
-  };
-
-  const removeActividad = (index) => {
-    const newActividades = formData.actividadesEfectivas.filter((_, i) => i !== index);
-    setFormData({ ...formData, actividadesEfectivas: newActividades });
-  };
-
-  const updateActividad = (index, field, value) => {
-    const newActividades = [...formData.actividadesEfectivas];
-    // Si es un campo de hora, ajustar los minutos
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
+    if (tp?.colacion?.horaInicio && tp?.colacion?.horaFin) {
+      const config = getColorConfig('programado', 'colacion');
+      actividades.push({
+        id: 'colacion', tipo: 'programado', subTipo: 'colacion',
+        nombre: 'Colación',
+        horaInicio: tp.colacion.horaInicio, horaFin: tp.colacion.horaFin,
+        ...config
+      });
     }
-    newActividades[index][field] = value;
-    setFormData({ ...formData, actividadesEfectivas: newActividades });
+
+    return actividades;
   };
 
-  // Funciones para manejar tiempos no efectivos
-  const addTiempoNoEfectivo = () => {
-    // Obtener el último tiempo no efectivo
-    const ultimoTiempo = formData.tiemposNoEfectivos[formData.tiemposNoEfectivos.length - 1];
-    // La hora inicial del nuevo tiempo es la hora final del anterior
-    const horaInicialNueva = ultimoTiempo?.horaFin || '';
+  const detectarConflictos = (horaInicio, horaFin) => {
+    const inicioNuevo = horaAIndice(horaInicio);
+    const finNuevo = horaAIndice(horaFin);
+    const actividades = obtenerActividadesTimeline();
     
-    setFormData({
-      ...formData,
-      tiemposNoEfectivos: [
-        ...formData.tiemposNoEfectivos, 
-        { motivo: '', horaInicio: horaInicialNueva, horaFin: '' }
-      ]
+    return actividades.filter(act => {
+      const inicioAct = horaAIndice(act.horaInicio);
+      const finAct = horaAIndice(act.horaFin);
+      return (inicioNuevo < finAct && finNuevo > inicioAct);
     });
   };
 
-  const removeTiempoNoEfectivo = (index) => {
-    const newTiempos = formData.tiemposNoEfectivos.filter((_, i) => i !== index);
-    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
-  };
-
-  const updateTiempoNoEfectivo = (index, field, value) => {
-    const newTiempos = [...formData.tiemposNoEfectivos];
-    // Si es un campo de hora, ajustar los minutos
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
+  const eliminarActividad = (actividad) => {
+    if (actividad.tipo === 'efectiva') {
+      const nuevas = formData.actividadesEfectivas.filter((_, idx) => idx !== actividad.indice);
+      setFormData({ ...formData, actividadesEfectivas: nuevas });
+    } else if (actividad.tipo === 'noefectivo') {
+      const nuevos = formData.tiemposNoEfectivos.filter((_, idx) => idx !== actividad.indice);
+      setFormData({ ...formData, tiemposNoEfectivos: nuevos });
+    } else if (actividad.tipo === 'programado') {
+      const nuevosProgramados = { ...formData.tiemposProgramados };
+      nuevosProgramados[actividad.subTipo] = { horaInicio: '', horaFin: '' };
+      setFormData({ ...formData, tiemposProgramados: nuevosProgramados });
     }
-    newTiempos[index][field] = value;
-    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
   };
 
-  // Función para actualizar tiempos programados
-  const updateTiempoProgramado = (tipo, field, value) => {
-    setFormData({
-      ...formData,
-      tiemposProgramados: {
-        ...formData.tiemposProgramados,
-        [tipo]: {
-          ...formData.tiemposProgramados[tipo],
-          [field]: value
-        }
-      }
-    });
-  };
-
-  // ✅ Validar antes de enviar
-  const validateHorarios = () => {
-    const errors = [];
-    
-    // Validar rangos de horarios
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      if (act.horaInicio && act.horaFin) {
-        if (act.horaInicio <= "07:00" || act.horaInicio >= "19:00") {
-          errors.push(`Actividad ${idx + 1}: La hora inicial debe ser mayor a 7:00 AM y menor a 7:00 PM`);
-        }
-        
-        if (act.horaFin <= "07:00" || act.horaFin >= "19:00") {
-          errors.push(`Actividad ${idx + 1}: La hora final debe ser mayor a 7:00 AM y menor a 7:00 PM`);
-        }
-        
-        if (act.horaInicio >= act.horaFin) {
-          errors.push(`Actividad ${idx + 1}: La hora inicial debe ser menor que la hora final`);
-        }
-      }
-    });
-    
-    // Validar suma total
-    if (totalHorasError) {
-      errors.push(totalHorasError);
+  const actualizarHoraActividad = (actividad, nuevaHoraInicio, nuevaHoraFin) => {
+    if (actividad.tipo === 'efectiva') {
+      const nuevas = [...formData.actividadesEfectivas];
+      nuevas[actividad.indice] = { ...nuevas[actividad.indice], horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
+      setFormData({ ...formData, actividadesEfectivas: nuevas });
+    } else if (actividad.tipo === 'noefectivo') {
+      const nuevos = [...formData.tiemposNoEfectivos];
+      nuevos[actividad.indice] = { ...nuevos[actividad.indice], horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
+      setFormData({ ...formData, tiemposNoEfectivos: nuevos });
+    } else if (actividad.tipo === 'programado') {
+      const nuevosProgramados = { ...formData.tiemposProgramados };
+      nuevosProgramados[actividad.subTipo] = { horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
+      setFormData({ ...formData, tiemposProgramados: nuevosProgramados });
     }
-    
-    // ✅ Validar superposiciones globales
-    if (horariosErrors.some(err => err.solapamiento)) {
-      errors.push('⚠️ Hay horarios que se superponen entre diferentes secciones. Por favor corrige los horarios.');
-    }
-    
-    return errors;
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    
-    const horarioErrors = validateHorarios();
-    
-    if (horarioErrors.length > 0) {
-      alert('Errores de validación:\n\n' + horarioErrors.join('\n'));
+  const recortarActividad = (actividad, horaInicioNueva, horaFinNueva) => {
+    const inicioNuevo = horaAIndice(horaInicioNueva);
+    const finNuevo = horaAIndice(horaFinNueva);
+    const inicioAct = horaAIndice(actividad.horaInicio);
+    const finAct = horaAIndice(actividad.horaFin);
+
+    if (inicioNuevo <= inicioAct && finNuevo >= finAct) {
+      eliminarActividad(actividad);
       return;
     }
-    
-    onSubmit(e);
+    if (inicioNuevo > inicioAct && inicioNuevo < finAct) {
+      const nuevaHoraFin = indiceAHora(inicioNuevo);
+      actualizarHoraActividad(actividad, actividad.horaInicio, nuevaHoraFin);
+    }
+    if (finNuevo > inicioAct && finNuevo < finAct) {
+      const nuevaHoraInicio = indiceAHora(finNuevo);
+      actualizarHoraActividad(actividad, nuevaHoraInicio, actividad.horaFin);
+    }
   };
 
-  // ✅ Función para obtener errores de una actividad específica
-  const getActividadErrors = (index) => {
-    return horariosErrors.find(err => err.index === index) || { horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
+  const handleDragStart = (indice) => {
+    setIsDragging(true);
+    setDragStart(indice);
+    setDragEnd(indice);
   };
 
-  // ✅ NUEVO: Validar suma total de horas (debe ser 12)
-  useEffect(() => {
-    let totalMinutos = 0;
-    
-    // Función auxiliar para verificar si un rango A cubre completamente un rango B
-    const rangoCubreCompletamente = (rangoA_inicio, rangoA_fin, rangoB_inicio, rangoB_fin) => {
-      const [hA_ini, mA_ini] = rangoA_inicio.split(':').map(Number);
-      const [hA_fin, mA_fin] = rangoA_fin.split(':').map(Number);
-      const [hB_ini, mB_ini] = rangoB_inicio.split(':').map(Number);
-      const [hB_fin, mB_fin] = rangoB_fin.split(':').map(Number);
+  const handleDragMove = (indice) => {
+    if (isDragging) setDragEnd(indice);
+  };
+
+  const handleDragEnd = () => {
+    if (isDragging && dragStart !== null && dragEnd !== null) {
+      const inicioIndice = Math.min(dragStart, dragEnd);
+      const finIndice = Math.max(dragStart, dragEnd);
+      const horaInicio = indiceAHora(inicioIndice);
+      const horaFin = indiceAHora(finIndice + 1);
+      const conflictos = detectarConflictos(horaInicio, horaFin);
       
-      const minA_ini = hA_ini * 60 + mA_ini;
-      const minA_fin = hA_fin * 60 + mA_fin;
-      const minB_ini = hB_ini * 60 + mB_ini;
-      const minB_fin = hB_fin * 60 + mB_fin;
-      
-      // Rango A cubre completamente B si A empieza antes o igual y termina después o igual
-      return minA_ini <= minB_ini && minA_fin >= minB_fin;
-    };
-    
-    // Verificar si la colación está cubierta completamente por alguna actividad
-    let colacionCubierta = false;
-    if (formData.tiemposProgramados.colacion?.horaInicio && formData.tiemposProgramados.colacion?.horaFin) {
-      colacionCubierta = formData.actividadesEfectivas.some(act => {
-        if (act.horaInicio && act.horaFin) {
-          return rangoCubreCompletamente(
-            act.horaInicio, 
-            act.horaFin, 
-            formData.tiemposProgramados.colacion.horaInicio, 
-            formData.tiemposProgramados.colacion.horaFin
-          );
-        }
-        return false;
-      });
-    }
-    
-    // Sumar actividades efectivas
-    formData.actividadesEfectivas.forEach(act => {
-      if (act.horaInicio && act.horaFin) {
-        const [hInicio, mInicio] = act.horaInicio.split(':').map(Number);
-        const [hFin, mFin] = act.horaFin.split(':').map(Number);
-        const minutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
-        if (minutos > 0) totalMinutos += minutos;
-      }
-    });
-    
-    // Sumar tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach(tiempo => {
-      if (tiempo.horaInicio && tiempo.horaFin) {
-        const [hInicio, mInicio] = tiempo.horaInicio.split(':').map(Number);
-        const [hFin, mFin] = tiempo.horaFin.split(':').map(Number);
-        const minutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
-        if (minutos > 0) totalMinutos += minutos;
-      }
-    });
-    
-    // Sumar tiempos programados (EXCLUYENDO colación si está cubierta)
-    Object.entries(formData.tiemposProgramados).forEach(([key, tiempo]) => {
-      // Si es colación y está cubierta, no la sumamos
-      if (key === 'colacion' && colacionCubierta) {
-        return; // Skip colación
-      }
-      
-      if (tiempo.horaInicio && tiempo.horaFin) {
-        const [hInicio, mInicio] = tiempo.horaInicio.split(':').map(Number);
-        const [hFin, mFin] = tiempo.horaFin.split(':').map(Number);
-        const minutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
-        if (minutos > 0) totalMinutos += minutos;
-      }
-    });
-    
-    // Sumar mantenciones si están activas
-    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
-      formData.mantenciones.forEach(mant => {
-        if (mant.horaInicio && mant.horaFin) {
-          const [hInicio, mInicio] = mant.horaInicio.split(':').map(Number);
-          const [hFin, mFin] = mant.horaFin.split(':').map(Number);
-          const minutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
-          if (minutos > 0) totalMinutos += minutos;
-        }
-      });
-    }
-    
-    const totalHoras = totalMinutos / 60;
-    
-    if (totalHoras !== 12) {
-      const diff = totalHoras - 12;
-      let mensajeExtra = colacionCubierta ? ' (Colación excluida - cubierta por actividad)' : '';
-      if (diff > 0) {
-        setTotalHorasError(`⚠️ Tienes ${diff.toFixed(2)} horas de más. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)${mensajeExtra}`);
+      if (conflictos.length > 0) {
+        setConflictInfo({ horaInicio, horaFin, conflictos });
+        setShowConflictModal(true);
       } else {
-        setTotalHorasError(`⚠️ Te faltan ${Math.abs(diff).toFixed(2)} horas. Total actual: ${totalHoras.toFixed(2)}h (debe ser 12h)${mensajeExtra}`);
+        window.tempSelection = { horaInicio, horaFin };
+        setShowActivitySelector(true);
       }
-    } else {
-      setTotalHorasError('');
     }
-  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.tiemposProgramados, formData.mantenciones, formData.tieneMantenciones]);
+    setIsDragging(false);
+    setDragStart(null);
+    setDragEnd(null);
+  };
+
+  const confirmarReemplazo = () => {
+    const { horaInicio, horaFin, conflictos } = conflictInfo;
+    conflictos.forEach(act => recortarActividad(act, horaInicio, horaFin));
+    window.tempSelection = { horaInicio, horaFin };
+    setShowConflictModal(false);
+    setShowActivitySelector(true);
+  };
+
+  const agregarActividad = (tipo) => {
+    const { horaInicio, horaFin } = window.tempSelection || {};
+    if (!horaInicio || !horaFin) return;
+
+    if (tipo === 'efectiva') {
+      setFormData({
+        ...formData,
+        actividadesEfectivas: [...formData.actividadesEfectivas, { actividad: '', horaInicio, horaFin, observaciones: '' }]
+      });
+    } else if (tipo === 'noefectivo') {
+      setFormData({
+        ...formData,
+        tiemposNoEfectivos: [...formData.tiemposNoEfectivos, { razon: '', horaInicio, horaFin, observaciones: '' }]
+      });
+    } else if (tipo === 'charla') {
+      setFormData({
+        ...formData,
+        tiemposProgramados: { ...formData.tiemposProgramados, charlaSegurid: { horaInicio, horaFin } }
+      });
+    } else if (tipo === 'inspeccion') {
+      setFormData({
+        ...formData,
+        tiemposProgramados: { ...formData.tiemposProgramados, inspeccionEquipo: { horaInicio, horaFin } }
+      });
+    } else if (tipo === 'colacion') {
+      setFormData({
+        ...formData,
+        tiemposProgramados: { ...formData.tiemposProgramados, colacion: { horaInicio, horaFin } }
+      });
+    }
+    setShowActivitySelector(false);
+  };
+
+  const renderFranja = (franja, indice) => {
+    const actividades = obtenerActividadesTimeline();
+    const actividadEnFranja = actividades.find(act => {
+      const inicioAct = horaAIndice(act.horaInicio);
+      const finAct = horaAIndice(act.horaFin);
+      return indice >= inicioAct && indice < finAct;
+    });
+
+    const enSeleccion = isDragging && dragStart !== null && dragEnd !== null && 
+      indice >= Math.min(dragStart, dragEnd) && indice <= Math.max(dragStart, dragEnd);
+    const esInicioActividad = actividadEnFranja && horaAIndice(actividadEnFranja.horaInicio) === indice;
+    const esHoraEnPunto = franja.minuto === 0;
+
+    return (
+      <div key={indice} className={`flex items-stretch group ${esHoraEnPunto ? 'border-b-2 border-slate-300/50' : 'border-b border-slate-200/50'}`} data-indice={indice}>
+        <div className={`w-24 flex-shrink-0 flex items-center justify-center transition-all ${esHoraEnPunto ? 'bg-slate-900 text-white' : 'bg-slate-800 text-slate-300'}`}>
+          <span className={`block ${esHoraEnPunto ? 'text-base font-bold' : 'text-sm font-medium'}`}>{franja.label}</span>
+        </div>
+
+        <div
+          className={`flex-1 h-20 relative cursor-pointer transition-all duration-200 ${
+            actividadEnFranja ? `bg-gradient-to-r ${actividadEnFranja.gradient}` : 'bg-white hover:bg-slate-50'
+          } ${enSeleccion ? 'ring-4 ring-inset ring-blue-500 bg-blue-50' : ''} ${!actividadEnFranja && 'border-r border-slate-100'}`}
+          style={{ boxShadow: actividadEnFranja ? 'inset 0 2px 4px rgba(0,0,0,0.1)' : 'none' }}
+          onMouseDown={() => handleDragStart(indice)}
+          onMouseEnter={() => handleDragMove(indice)}
+          onMouseUp={handleDragEnd}
+          onTouchStart={(e) => { e.preventDefault(); handleDragStart(indice); }}
+          onTouchMove={(e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const element = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (element && element.closest('[data-indice]')) {
+              const indiceNuevo = parseInt(element.closest('[data-indice]').dataset.indice);
+              if (!isNaN(indiceNuevo)) handleDragMove(indiceNuevo);
+            }
+          }}
+          onTouchEnd={(e) => { e.preventDefault(); handleDragEnd(); }}
+        >
+          {esInicioActividad && (
+            <div className="absolute inset-0 flex items-center px-4">
+              <div className="flex items-center gap-2.5 bg-white/95 backdrop-blur-sm rounded-xl px-4 py-2 shadow-lg border border-white/50">
+                <span className="text-xl">{actividadEnFranja.icon}</span>
+                <div>
+                  <span className="text-sm font-bold text-slate-900 block leading-tight">{actividadEnFranja.nombre}</span>
+                  <span className="text-xs text-slate-600">{actividadEnFranja.horaInicio} - {actividadEnFranja.horaFin}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          {!actividadEnFranja && (
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity pointer-events-none">
+              <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 pb-20">
-      {/* Header con info de máquina */}
-      <div className="sticky top-0 z-10 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg mb-6">
-        <div className="max-w-4xl mx-auto p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs sm:text-sm opacity-90">Parte 2 de 2</div>
-              <div className="text-lg sm:text-xl font-black">Actividades y Tiempos</div>
+    <div className="min-h-screen bg-slate-50 -m-6 p-6 space-y-6">
+      {/* Header */}
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-8 py-6">
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-white/10 rounded-xl backdrop-blur-sm">
+              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
             </div>
-            {selectedMachine && (
-              <div className="text-right">
-                <div className="text-xs opacity-90">Máquina</div>
-                <div className="font-bold">{selectedMachine.code}</div>
+            <div className="flex-1">
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-white">Registro de Actividades</h1>
+                <span className="px-3 py-1 bg-white/20 text-white text-sm font-semibold rounded-lg backdrop-blur-sm">Paso 2 de 2</span>
               </div>
-            )}
+              <p className="text-slate-300 text-sm mt-1.5">Desliza verticalmente para seleccionar franjas horarias y asignar actividades</p>
+            </div>
           </div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-4 space-y-6">
-        
-        {/* ACTIVIDADES EFECTIVAS (Tiempo Efectivo) */}
-        <Section 
-          title="Actividades Efectivas" 
-          subtitle="Tiempo productivo de trabajo"
-          icon={
-            <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          }
-        >
-          <div className="space-y-3">
-            {formData.actividadesEfectivas.map((act, idx) => {
-              const errors = getActividadErrors(idx);
-              
-              return (
-                <ActivityCard
-                  key={idx}
-                  index={idx}
-                  data={act}
-                  onUpdate={updateActividad}
-                  onRemove={removeActividad}
-                  canRemove={formData.actividadesEfectivas.length > 1}
-                  placeholder="Ej: Reperfilado de Plataforma"
-                  color="green"
-                  errors={errors}
-                />
-              );
-            })}
-            
-            <button
-              type="button"
-              onClick={addActividad}
-              className="w-full py-3 border-2 border-dashed border-green-300 rounded-xl text-green-700 font-semibold hover:bg-green-50 transition-all"
-            >
-              + Agregar Actividad
-            </button>
+      {/* Timeline */}
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-slate-900 rounded-lg">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-900 text-lg">Timeline Diario</h2>
+              <p className="text-sm text-slate-500">7:30 AM → 7:00 PM</p>
+            </div>
           </div>
-        </Section>
+        </div>
 
-        {/* TIEMPOS NO EFECTIVOS */}
-        <Section 
-          title="Tiempos No Efectivos" 
-          subtitle="Tiempo improductivo"
-          icon={
-            <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          }
-        >
-          <div className="space-y-3">
-            {formData.tiemposNoEfectivos.map((tiempo, idx) => (
-              <ActivityCard
-                key={idx}
-                index={idx}
-                data={tiempo}
-                onUpdate={updateTiempoNoEfectivo}
-                onRemove={removeTiempoNoEfectivo}
-                canRemove={formData.tiemposNoEfectivos.length > 1}
-                placeholder="Ej: Traslado de Equipo"
-                color="amber"
-                labelActividad="Motivo"
-                errors={{}}
-              />
+        <div className="overflow-y-auto" style={{ maxHeight: '600px' }}>
+          {franjas.map((franja, idx) => renderFranja(franja, idx))}
+        </div>
+
+        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1 h-4 bg-slate-400 rounded-full"></div>
+            <h3 className="font-semibold text-slate-700 text-sm">Tipos de Actividad</h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {Object.entries(COLORS).map(([key, config]) => (
+              <div key={key} className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
+                <div className={`w-10 h-10 bg-gradient-to-br ${config.gradient} rounded-lg flex items-center justify-center text-lg shadow-sm`}>
+                  {config.icon}
+                </div>
+                <div className="text-xs">
+                  <div className="font-semibold text-slate-900">{config.label}</div>
+                </div>
+              </div>
             ))}
-            
-            <button
-              type="button"
-              onClick={addTiempoNoEfectivo}
-              className="w-full py-3 border-2 border-dashed border-amber-300 rounded-xl text-amber-700 font-semibold hover:bg-amber-50 transition-all"
-            >
-              + Agregar Tiempo No Efectivo
-            </button>
           </div>
-        </Section>
+        </div>
+      </div>
 
-        {/* TIEMPOS DE RESERVAS PROGRAMADAS */}
-        <Section 
-          title="Tiempos de Reservas Programadas" 
-          subtitle="Actividades diarias estándar"
-          icon={
-            <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          }
-        >
-          <div className="space-y-4">
-            {/* Charla de Seguridad */}
-            <ProgrammedTimeCard
-              title="Charla de Seguridad"
-              icon="🛡️"
-              horaInicio={formData.tiemposProgramados.charlaSegurid.horaInicio}
-              horaFin={formData.tiemposProgramados.charlaSegurid.horaFin}
-              onChangeInicio={(val) => updateTiempoProgramado('charlaSegurid', 'horaInicio', val)}
-              onChangeFin={(val) => updateTiempoProgramado('charlaSegurid', 'horaFin', val)}
-            />
-
-            {/* Inspección de Equipo */}
-            <ProgrammedTimeCard
-              title="Inspección de Equipo"
-              icon="🔧"
-              horaInicio={formData.tiemposProgramados.inspeccionEquipo.horaInicio}
-              horaFin={formData.tiemposProgramados.inspeccionEquipo.horaFin}
-              onChangeInicio={(val) => updateTiempoProgramado('inspeccionEquipo', 'horaInicio', val)}
-              onChangeFin={(val) => updateTiempoProgramado('inspeccionEquipo', 'horaFin', val)}
-            />
-
-            {/* Colación */}
-            <ProgrammedTimeCard
-              title="Colación"
-              icon="🍽️"
-              horaInicio={formData.tiemposProgramados.colacion.horaInicio}
-              horaFin={formData.tiemposProgramados.colacion.horaFin}
-              onChangeInicio={(val) => updateTiempoProgramado('colacion', 'horaInicio', val)}
-              onChangeFin={(val) => updateTiempoProgramado('colacion', 'horaFin', val)}
-            />
+      {/* Actividades Registradas */}
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-slate-900 rounded-lg">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-900 text-lg">Detalle de Actividades</h2>
+              <p className="text-sm text-slate-500">Completa las descripciones</p>
+            </div>
           </div>
-        </Section>
-
-        {/* MANTENCIONES */}
-        <Section 
-          title="Mantenciones" 
-          subtitle="¿Se realizaron mantenciones?"
-          icon={
-            <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          }
-        >
-          {/* Selector Sí/No */}
-          <div className="flex gap-3 mb-4">
-            <button
-              type="button"
-              onClick={() => {
-                // Siempre agregar la primera mantención automáticamente
-                setFormData({ 
-                  ...formData, 
-                  tieneMantenciones: true,
-                  mantenciones: (formData.mantenciones && formData.mantenciones.length > 0) 
-                    ? formData.mantenciones 
-                    : [{ descripcion: '', horaInicio: '', horaFin: '' }]
-                });
-              }}
-              className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                formData.tieneMantenciones 
-                  ? 'bg-red-600 text-white shadow-lg' 
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              ✅ Sí
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormData({ ...formData, tieneMantenciones: false, mantenciones: [] })}
-              className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                formData.tieneMantenciones === false
-                  ? 'bg-slate-600 text-white shadow-lg' 
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              ❌ No
-            </button>
-          </div>
-
-          {/* Div desplegable cuando es Sí */}
-          {formData.tieneMantenciones && (
-            <div className="space-y-3 animate-fadeIn">
-              {(Array.isArray(formData.mantenciones) ? formData.mantenciones : []).map((mant, idx) => (
-                <div key={idx} className="bg-red-50 border-2 border-red-200 rounded-xl p-3 sm:p-4">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-                        Descripción de Mantención
-                      </label>
-                      <input
-                        type="text"
-                        value={mant.descripcion || ''}
-                        onChange={(e) => {
-                          const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : [])];
-                          newMants[idx] = { ...newMants[idx], descripcion: e.target.value };
-                          setFormData({ ...formData, mantenciones: newMants });
-                        }}
-                        placeholder="Ej: Cambio de aceite, Revisión de frenos..."
-                        className="input-modern w-full text-sm"
-                      />
+        </div>
+        
+        <div className="p-6 space-y-4">
+          {formData.actividadesEfectivas?.map((act, idx) => {
+            const config = COLORS.efectiva;
+            return (
+              <div key={idx} style={{ backgroundColor: config.bg, borderColor: config.border }} className="border-2 rounded-xl p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg flex-shrink-0 shadow-sm`}>
+                    <span className="text-white text-xl">{config.icon}</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-1">
+                      <span style={{ color: config.text }} className="font-bold text-sm">Actividad Productiva #{idx + 1}</span>
+                      <span style={{ color: config.text, borderColor: config.border }} className="text-xs font-semibold bg-white px-3 py-1 rounded-lg border">
+                        {act.horaInicio} - {act.horaFin}
+                      </span>
                     </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-                          Hora Inicio
-                        </label>
-                        <input
-                          type="time"
-                          value={mant.horaInicio || ''}
-                          onChange={(e) => {
-                            const valorAjustado = ajustarMinutos(e.target.value);
-                            const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : [])];
-                            newMants[idx] = { ...newMants[idx], horaInicio: valorAjustado };
-                            setFormData({ ...formData, mantenciones: newMants });
-                          }}
-                          className="input-modern w-full text-sm"
-                          min="07:00"
-                          max="19:00"
-                          step="900"
-                        />
-                        <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-                          Entre 7:00 AM y 7:00 PM (inclusive)
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-                          Hora Fin
-                        </label>
-                        <input
-                          type="time"
-                          value={mant.horaFin || ''}
-                          onChange={(e) => {
-                            const valorAjustado = ajustarMinutos(e.target.value);
-                            const newMants = [...(Array.isArray(formData.mantenciones) ? formData.mantenciones : [])];
-                            newMants[idx] = { ...newMants[idx], horaFin: valorAjustado };
-                            setFormData({ ...formData, mantenciones: newMants });
-                          }}
-                          className="input-modern w-full text-sm"
-                          min="07:00"
-                          max="19:00"
-                          step="900"
-                        />
-                        <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-                          Entre 7:00 AM y 7:00 PM (inclusive)
-                        </p>
-                      </div>
-                    </div>
-
-                    {mant.horaInicio && mant.horaFin && (
-                      <div className="text-center py-1 px-3 bg-red-100 rounded-lg">
-                        <span className="text-xs font-bold text-red-700">
-                          Duración: {calcularDuracion(mant.horaInicio, mant.horaFin)}
-                        </span>
-                      </div>
-                    )}
-
-                    {(Array.isArray(formData.mantenciones) ? formData.mantenciones : []).length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newMants = (Array.isArray(formData.mantenciones) ? formData.mantenciones : []).filter((_, i) => i !== idx);
-                          setFormData({ ...formData, mantenciones: newMants });
-                        }}
-                        className="w-full py-2 bg-red-100 hover:bg-red-200 text-red-700 font-semibold text-sm rounded-lg transition-all"
-                      >
-                        🗑️ Eliminar
-                      </button>
-                    )}
                   </div>
                 </div>
-              ))}
+                <input
+                  type="text"
+                  placeholder="Ej: Excavación, Carga de material, Transporte..."
+                  value={act.actividad}
+                  onChange={(e) => {
+                    const nuevas = [...formData.actividadesEfectivas];
+                    nuevas[idx].actividad = e.target.value;
+                    setFormData({ ...formData, actividadesEfectivas: nuevas });
+                  }}
+                  style={{ borderColor: config.border }}
+                  className="w-full px-4 py-3 border-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+            );
+          })}
 
-              <button
-                type="button"
-                onClick={() => {
-                  const mantenciones = Array.isArray(formData.mantenciones) ? formData.mantenciones : [];
-                  // Obtener la última mantención
-                  const ultimaMant = mantenciones[mantenciones.length - 1];
-                  // La hora inicial de la nueva mantención es la hora final de la anterior
-                  const horaInicialNueva = ultimaMant?.horaFin || '';
-                  
-                  const newMants = [...mantenciones, { descripcion: '', horaInicio: horaInicialNueva, horaFin: '' }];
-                  setFormData({ ...formData, mantenciones: newMants });
-                }}
-                className="w-full py-3 border-2 border-dashed border-red-300 rounded-xl text-red-700 font-semibold hover:bg-red-50 transition-all"
-              >
-                + Agregar Mantención
-              </button>
+          {formData.tiemposNoEfectivos?.map((tiempo, idx) => {
+            const config = COLORS.noefectiva;
+            return (
+              <div key={idx} style={{ backgroundColor: config.bg, borderColor: config.border }} className="border-2 rounded-xl p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg flex-shrink-0 shadow-sm`}>
+                    <span className="text-white text-xl">{config.icon}</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-1">
+                      <span style={{ color: config.text }} className="font-bold text-sm">Tiempo No Productivo #{idx + 1}</span>
+                      <span style={{ color: config.text, borderColor: config.border }} className="text-xs font-semibold bg-white px-3 py-1 rounded-lg border">
+                        {tiempo.horaInicio} - {tiempo.horaFin}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Ej: Falla mecánica, Espera de camión, Clima adverso..."
+                  value={tiempo.razon}
+                  onChange={(e) => {
+                    const nuevos = [...formData.tiemposNoEfectivos];
+                    nuevos[idx].razon = e.target.value;
+                    setFormData({ ...formData, tiemposNoEfectivos: nuevos });
+                  }}
+                  style={{ borderColor: config.border }}
+                  className="w-full px-4 py-3 border-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+              </div>
+            );
+          })}
+
+          {formData.tiemposProgramados?.charlaSegurid?.horaInicio && (
+            <div style={{ backgroundColor: COLORS.charla.bg, borderColor: COLORS.charla.border }} className="border-2 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 bg-gradient-to-br ${COLORS.charla.gradient} rounded-lg shadow-sm`}>
+                  <span className="text-white text-xl">{COLORS.charla.icon}</span>
+                </div>
+                <div className="flex-1">
+                  <span style={{ color: COLORS.charla.text }} className="font-bold text-sm block">Charla de Seguridad</span>
+                  <span className="text-xs text-slate-600">
+                    {formData.tiemposProgramados.charlaSegurid.horaInicio} - {formData.tiemposProgramados.charlaSegurid.horaFin}
+                  </span>
+                </div>
+              </div>
             </div>
           )}
-        </Section>
 
-        {/* BOTONES DE NAVEGACIÓN */}
-        <div className="grid grid-cols-2 gap-4 pt-4">
-          {/* ✅ NUEVO: Alerta de suma total de horas */}
-          {totalHorasError && (
-            <div className="col-span-2 mb-4 flex items-start gap-3 p-4 bg-yellow-50 border-2 border-yellow-300 rounded-xl">
-              <svg className="w-6 h-6 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
-              </svg>
+          {formData.tiemposProgramados?.inspeccionEquipo?.horaInicio && (
+            <div style={{ backgroundColor: COLORS.inspeccion.bg, borderColor: COLORS.inspeccion.border }} className="border-2 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 bg-gradient-to-br ${COLORS.inspeccion.gradient} rounded-lg shadow-sm`}>
+                  <span className="text-white text-xl">{COLORS.inspeccion.icon}</span>
+                </div>
+                <div className="flex-1">
+                  <span style={{ color: COLORS.inspeccion.text }} className="font-bold text-sm block">Inspección de Equipo</span>
+                  <span className="text-xs text-slate-600">
+                    {formData.tiemposProgramados.inspeccionEquipo.horaInicio} - {formData.tiemposProgramados.inspeccionEquipo.horaFin}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {formData.tiemposProgramados?.colacion?.horaInicio && (
+            <div style={{ backgroundColor: COLORS.colacion.bg, borderColor: COLORS.colacion.border }} className="border-2 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 bg-gradient-to-br ${COLORS.colacion.gradient} rounded-lg shadow-sm`}>
+                  <span className="text-white text-xl">{COLORS.colacion.icon}</span>
+                </div>
+                <div className="flex-1">
+                  <span style={{ color: COLORS.colacion.text }} className="font-bold text-sm block">Colación</span>
+                  <span className="text-xs text-slate-600">
+                    {formData.tiemposProgramados.colacion.horaInicio} - {formData.tiemposProgramados.colacion.horaFin}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {formData.actividadesEfectivas?.length === 0 && formData.tiemposNoEfectivos?.length === 0 && 
+           !formData.tiemposProgramados?.charlaSegurid?.horaInicio && !formData.tiemposProgramados?.inspeccionEquipo?.horaInicio &&
+           !formData.tiemposProgramados?.colacion?.horaInicio && (
+            <div className="text-center py-16 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
+              <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              </div>
+              <p className="text-slate-600 font-semibold text-lg mb-2">Sin actividades registradas</p>
+              <p className="text-sm text-slate-400">Desliza sobre el timeline para comenzar</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal Conflicto */}
+      {showConflictModal && conflictInfo && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200">
+            <div className="bg-gradient-to-r from-orange-500 to-red-500 px-6 py-5 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-lg">
+                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white">Conflicto de Horarios</h3>
+                  <p className="text-orange-100 text-sm mt-0.5">Superposición detectada</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
+                <p className="font-semibold text-orange-900 mb-1 text-sm">Nuevo rango seleccionado:</p>
+                <p className="text-xl font-bold text-orange-700">{conflictInfo.horaInicio} → {conflictInfo.horaFin}</p>
+              </div>
+
               <div>
-                <div className="text-sm font-bold text-yellow-800 mb-1">Suma de Horarios Incorrecta</div>
-                <div className="text-xs text-yellow-700">{totalHorasError}</div>
+                <p className="font-semibold text-slate-800 mb-2 text-sm">Actividades afectadas:</p>
+                <div className="space-y-2">
+                  {conflictInfo.conflictos.map((conflicto, idx) => (
+                    <div key={idx} style={{ backgroundColor: conflicto.bg, borderColor: conflicto.border }} className="border-2 rounded-lg p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{conflicto.icon}</span>
+                        <div className="flex-1">
+                          <p className="font-bold text-sm text-slate-900">{conflicto.nombre}</p>
+                          <p className="text-xs text-slate-600">{conflicto.horaInicio} - {conflicto.horaFin}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-900">
+                  <strong>¿Continuar?</strong> La nueva actividad reemplazará o recortará las actividades existentes.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowConflictModal(false)} className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-all">
+                  Cancelar
+                </button>
+                <button onClick={confirmarReemplazo} className="flex-1 px-4 py-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-xl transition-all shadow-lg">
+                  Sí, reemplazar
+                </button>
               </div>
             </div>
-          )}
-          
-          <button
-            type="button"
-            onClick={onBack}
-            disabled={isLoading}
-            className="px-6 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-base sm:text-lg rounded-xl shadow-lg transition-all disabled:opacity-50"
-          >
-            ← Atrás
-          </button>
-          
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="px-6 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-base sm:text-lg rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
-          >
-            {isLoading ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="spinner w-5 h-5 border-white" />
-                Guardando...
-              </span>
-            ) : (
-              '✓ Guardar Reporte'
-            )}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-// Componente Section
-function Section({ title, subtitle, icon, children }) {
-  return (
-    <div className="glass-card rounded-2xl p-4 sm:p-6 shadow-lg border border-slate-200">
-      <div className="flex items-start gap-3 mb-4">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-100 to-white flex items-center justify-center shadow-md flex-shrink-0">
-          {icon}
-        </div>
-        <div className="flex-1">
-          <h3 className="text-base sm:text-lg font-black text-slate-900">{title}</h3>
-          {subtitle && <p className="text-xs sm:text-sm text-slate-600">{subtitle}</p>}
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// Componente ActivityCard (para actividades efectivas y tiempos no efectivos)
-function ActivityCard({ index, data, onUpdate, onRemove, canRemove, placeholder, color = "green", labelActividad = "Actividad", errors }) {
-  const colors = {
-    green: {
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-      text: 'text-green-700',
-      button: 'bg-green-600 hover:bg-green-700'
-    },
-    amber: {
-      bg: 'bg-amber-50',
-      border: 'border-amber-200',
-      text: 'text-amber-700',
-      button: 'bg-amber-600 hover:bg-amber-700'
-    }
-  };
-
-  const c = colors[color];
-
-  return (
-    <div className={`${c.bg} border-2 ${c.border} rounded-xl p-3 sm:p-4`}>
-      <div className="space-y-3">
-        {/* Actividad/Motivo */}
-        <div>
-          <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-            {labelActividad}
-          </label>
-          <input
-            type="text"
-            value={data.actividad || data.motivo || ''}
-            onChange={(e) => onUpdate(index, data.actividad !== undefined ? 'actividad' : 'motivo', e.target.value)}
-            placeholder={placeholder}
-            className="input-modern w-full text-sm"
-          />
-        </div>
-
-        {/* Horas */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-              Hora Inicio
-            </label>
-            <input
-              type="time"
-              value={data.horaInicio}
-              onChange={(e) => onUpdate(index, 'horaInicio', e.target.value)}
-              className={`input-modern w-full text-sm ${errors.horaInicio ? 'border-red-300 bg-red-50' : ''}`}
-              min="07:00"
-              max="19:00"
-              step="900"
-            />
-            <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-              Entre 7:00 AM y 7:00 PM (inclusive)
-            </p>
-            {/* ✅ Mensaje de error en tiempo real */}
-            {errors.horaInicio && (
-              <div className="flex items-center gap-1 mt-1">
-                <svg className="w-3 h-3 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
-                </svg>
-                <span className="text-[9px] sm:text-[10px] font-semibold text-red-700">{errors.horaInicio}</span>
-              </div>
-            )}
           </div>
-          <div>
-            <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-              Hora Fin
-            </label>
-            <input
-              type="time"
-              value={data.horaFin}
-              onChange={(e) => onUpdate(index, 'horaFin', e.target.value)}
-              className={`input-modern w-full text-sm ${errors.horaFin ? 'border-red-300 bg-red-50' : ''}`}
-              min="07:00"
-              max="19:00"
-              step="900"
-            />
-            <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-              Entre 7:00 AM y 7:00 PM (inclusive)
-            </p>
-            {/* ✅ Mensaje de error en tiempo real */}
-            {errors.horaFin && (
-              <div className="flex items-center gap-1 mt-1">
-                <svg className="w-3 h-3 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
-                </svg>
-                <span className="text-[9px] sm:text-[10px] font-semibold text-red-700">{errors.horaFin}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ✅ Error de duración */}
-        {errors.duracion && (
-          <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
-            <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
-            </svg>
-            <span className="text-xs font-semibold text-red-700">{errors.duracion}</span>
-          </div>
-        )}
-
-        {/* ✅ NUEVO: Error de solapamiento */}
-        {errors.solapamiento && (
-          <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
-            <svg className="w-4 h-4 text-orange-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
-            </svg>
-            <span className="text-xs font-semibold text-orange-700">{errors.solapamiento}</span>
-          </div>
-        )}
-
-        {/* Duración calculada */}
-        {data.horaInicio && data.horaFin && !errors.duracion && (
-          <div className={`text-center py-1 px-3 ${c.bg} rounded-lg`}>
-            <span className={`text-xs font-bold ${c.text}`}>
-              Duración: {calcularDuracion(data.horaInicio, data.horaFin)}
-            </span>
-          </div>
-        )}
-
-        {/* Botón eliminar */}
-        {canRemove && (
-          <button
-            type="button"
-            onClick={() => onRemove(index)}
-            className="w-full py-2 bg-red-100 hover:bg-red-200 text-red-700 font-semibold text-sm rounded-lg transition-all"
-          >
-            🗑️ Eliminar
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Componente ProgrammedTimeCard (para tiempos programados fijos)
-function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, onChangeFin }) {
-  return (
-    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-2xl">{icon}</span>
-        <div className="font-bold text-sm sm:text-base text-slate-900">{title}</div>
-      </div>
-      
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-            Hora Inicio
-          </label>
-          <input
-            type="time"
-            value={horaInicio}
-            onChange={(e) => onChangeInicio(e.target.value)}
-            className="input-modern w-full text-sm"
-            min="07:00"
-            max="19:00"
-            step="900"
-          />
-          <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-            Entre 7:00 AM y 7:00 PM (inclusive)
-          </p>
-        </div>
-        <div>
-          <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
-            Hora Fin
-          </label>
-          <input
-            type="time"
-            value={horaFin}
-            onChange={(e) => onChangeFin(e.target.value)}
-            className="input-modern w-full text-sm"
-            min="07:00"
-            max="19:00"
-            step="900"
-          />
-          <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
-            Entre 7:00 AM y 7:00 PM (inclusive)
-          </p>
-        </div>
-      </div>
-
-      {horaInicio && horaFin && (
-        <div className="mt-2 text-center py-1 px-3 bg-blue-100 rounded-lg">
-          <span className="text-xs font-bold text-blue-700">
-            {calcularDuracion(horaInicio, horaFin)}
-          </span>
         </div>
       )}
+
+      {/* Modal Selector */}
+      {showActivitySelector && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200">
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 px-6 py-5 rounded-t-2xl">
+              <h3 className="text-xl font-bold text-white">Tipo de Actividad</h3>
+              <p className="text-slate-300 text-sm mt-1">Selecciona una opción</p>
+            </div>
+            
+            <div className="p-5 space-y-3">
+              {[
+                { tipo: 'efectiva', config: COLORS.efectiva, titulo: 'Actividad Productiva', desc: 'Trabajo efectivo realizado' },
+                { tipo: 'noefectivo', config: COLORS.noefectiva, titulo: 'Tiempo No Productivo', desc: 'Detención, falla, espera' },
+                { tipo: 'charla', config: COLORS.charla, titulo: 'Charla de Seguridad', desc: 'Capacitación diaria' },
+                { tipo: 'inspeccion', config: COLORS.inspeccion, titulo: 'Inspección de Equipo', desc: 'Revisión pre-operacional' },
+                { tipo: 'colacion', config: COLORS.colacion, titulo: 'Colación', desc: 'Tiempo de alimentación' }
+              ].map(({ tipo, config, titulo, desc }) => (
+                <button
+                  key={tipo}
+                  onClick={() => agregarActividad(tipo)}
+                  className="w-full flex items-center gap-4 p-4 bg-gradient-to-r hover:shadow-lg border-2 rounded-xl transition-all group"
+                  style={{ 
+                    backgroundImage: `linear-gradient(to right, ${config.bg}, ${config.light})`,
+                    borderColor: config.border
+                  }}
+                >
+                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg shadow-md group-hover:scale-110 transition-transform`}>
+                    <span className="text-white text-2xl">{config.icon}</span>
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-bold text-slate-900">{titulo}</div>
+                    <div className="text-xs text-slate-600">{desc}</div>
+                  </div>
+                </button>
+              ))}
+
+              <button onClick={() => setShowActivitySelector(false)} className="w-full px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-all mt-2">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Botones Navegación */}
+      <div className="flex gap-4">
+        <button onClick={onBack} className="px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-all border-2 border-slate-200 shadow-sm">
+          ← Volver
+        </button>
+        <button
+          onClick={onSubmit}
+          disabled={isLoading}
+          className="flex-1 px-6 py-4 bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
+        >
+          {isLoading ? 'Guardando...' : '✓ Guardar Reporte'}
+        </button>
+      </div>
     </div>
   );
-}
-
-// Función helper para calcular duración
-function calcularDuracion(inicio, fin) {
-  if (!inicio || !fin) return '0:00';
-  
-  const [hInicio, mInicio] = inicio.split(':').map(Number);
-  const [hFin, mFin] = fin.split(':').map(Number);
-  
-  let totalMinutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
-  
-  if (totalMinutos < 0) totalMinutos += 24 * 60;
-  
-  const horas = Math.floor(totalMinutos / 60);
-  const minutos = totalMinutos % 60;
-  
-  return `${horas}:${minutos.toString().padStart(2, '0')}`;
 }

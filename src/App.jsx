@@ -17,6 +17,7 @@ import LoginPage from "./pages/LoginPage.jsx";
 import AppSelector from "./pages/AppSelector.jsx";
 import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
 import Pasajes from "./pages/Pasajes.jsx";
+import ReporteCombustible from "./pages/ReporteCombustible.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -525,7 +526,8 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               )}
             </div>
             
-            <NavTab to="/reporte-workfleet" label="Reporte WorkFleet" />
+            <NavTab to="/reporte-workfleet" label="Reporte WorkFleet" locked={userRole === 'mandante'} />
+            <NavTab to="/reporte-combustible" label="Reporte Combustible" locked={userRole === 'mandante'} />
           </nav>
         </div>
 
@@ -636,6 +638,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               <Route path="/machines" element={<Machines />} />
               <Route path="/rendiciones" element={<Rendiciones />} />
               <Route path="/pasajes" element={<Pasajes />} />
+              <Route path="/reporte-combustible" element={<ReporteCombustible />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
               <Route path="/fuel-price" element={<FuelPriceManager />} />
               <Route path="/subcontratos" element={<Subcontratos />} />

@@ -29,6 +29,7 @@ export default function ReporteWorkFleet() {
 
   // Listas únicas para selectores
   const [operadores, setOperadores] = useState([]);
+  const [empleados, setEmpleados] = useState([]);
 
   // Obtener rol del usuario actual desde Firebase
   useEffect(() => {
@@ -83,6 +84,15 @@ export default function ReporteWorkFleet() {
           ...doc.data()
         }));
         setMachines(machinesData);
+
+        // Cargar empleados
+        const empleadosRef = collection(db, 'employees');
+        const empleadosSnap = await getDocs(empleadosRef);
+        const empleadosData = empleadosSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setEmpleados(empleadosData);
       } catch (error) {
         console.error("Error cargando datos base:", error);
       }

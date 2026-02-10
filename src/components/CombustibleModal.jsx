@@ -1,0 +1,1316 @@
+import React, { useState, useEffect } from "react";
+import { collection, getDocs, addDoc } from "firebase/firestore";
+import { db, auth } from "../lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import SignaturePad from "./SignaturePad";
+
+export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados }) {
+  const [paso, setPaso] = useState(1); // 1: Control, 2: Tipo (Entrada/Entrega), 3: Formulario
+  const [tipoReporte, setTipoReporte] = useState(''); // 'entrada' o 'entrega'
+  const [loading, setLoading] = useState(false);
+  const [loadingEquipo, setLoadingEquipo] = useState(false);
+  const [loadingEmpresa, setLoadingEmpresa] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUserData, setCurrentUserData] = useState(null); // Datos del user desde Firebase
+  const [userRole, setUserRole] = useState('operador');
+  
+  // Estados para las firmas
+  const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
+  const [firmaReceptor, setFirmaReceptor] = useState(null); // Para ENTREGA
+  const [showModalFirmaRepartidor, setShowModalFirmaRepartidor] = useState(false);
+  const [showModalFirmaReceptor, setShowModalFirmaReceptor] = useState(false);
+  
+  // Estados para modales de creación rápida
+  const [showModalEquipoSurtidor, setShowModalEquipoSurtidor] = useState(false);
+  const [showModalEmpresa, setShowModalEmpresa] = useState(false);
+  
+  // Datos temporales para crear nuevos registros
+  const [nuevoEquipoSurtidor, setNuevoEquipoSurtidor] = useState({
+    patente: '',
+    nombre: '',
+    tipo: '',
+    marca: '',
+    modelo: ''
+  });
+  
+  const [nuevaEmpresa, setNuevaEmpresa] = useState({
+    nombre: '',
+    rut: ''
+  });
+  
+  // Listas locales que se actualizan cuando agregamos nuevos items
+  const [machinesLocal, setMachinesLocal] = useState([]);
+  const [empresasLocal, setEmpresasLocal] = useState([]);
+  
+  // Datos del formulario - Página 1 (Control de Combustible)
+  const [datosControl, setDatosControl] = useState({
+    projectId: '',
+    fecha: new Date().toISOString().split('T')[0],
+    repartidorId: '', // Surtidor
+    equipoSurtidorId: '' // Camión o equipo que entrega
+  });
+
+  // Datos ENTRADA de combustible (al estanque)
+  const [datosEntrada, setDatosEntrada] = useState({
+    origen: '',
+    tipoOrigen: '', // 'estacion' o 'estanque'
+    numeroDocumento: '', // Guía o Vale según tipoOrigen
+    fechaDocumento: new Date().toISOString().split('T')[0],
+    cantidad: '',
+    observaciones: ''
+  });
+
+  // Datos ENTREGA de combustible (a máquinas)
+  const [datosEntrega, setDatosEntrega] = useState({
+    empresa: '',
+    fecha: new Date().toISOString().split('T')[0],
+    operadorId: '', // Quien recibe
+    machineId: '',
+    horometroOdometro: '',
+    cantidadLitros: '',
+    observaciones: ''
+  });
+
+  // Detectar usuario actual
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Buscar datos del usuario actual en la colección "users"
+  useEffect(() => {
+    const cargarDatosUsuario = async () => {
+      if (currentUser && currentUser.uid) {
+        try {
+          console.log('🔍 Buscando usuario en Firebase:', currentUser.uid);
+          console.log('📧 Email:', currentUser.email);
+          
+          // Cargar todos los usuarios
+          const usersRef = collection(db, 'users');
+          const usersSnap = await getDocs(usersRef);
+          const usersData = usersSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          console.log('📋 Usuarios disponibles:', usersData);
+          
+          // Buscar por UID (preferido)
+          let userData = usersData.find(u => u.id === currentUser.uid);
+          
+          // Si no encuentra por UID, buscar por email
+          if (!userData) {
+            userData = usersData.find(u => 
+              u.email?.toLowerCase() === currentUser.email?.toLowerCase()
+            );
+          }
+          
+          if (userData) {
+            console.log('✅ Usuario encontrado:', userData);
+            setCurrentUserData(userData);
+            setUserRole(userData.role || 'operador');
+            
+            // Autocompletar repartidorId cuando se abre el modal
+            if (isOpen && !datosControl.repartidorId) {
+              setDatosControl(prev => ({
+                ...prev,
+                repartidorId: userData.id
+              }));
+            }
+          } else {
+            console.warn('⚠️ No se encontró usuario en la colección users');
+            console.log('💡 Verifica que exista un documento en users con id:', currentUser.uid);
+          }
+        } catch (error) {
+          console.error('❌ Error cargando datos de usuario:', error);
+        }
+      }
+    };
+    
+    if (isOpen) {
+      cargarDatosUsuario();
+    }
+  }, [currentUser, isOpen]);
+
+  // Inicializar listas locales cuando el modal se abre
+  useEffect(() => {
+    if (isOpen) {
+      setMachinesLocal(machines || []);
+      // Cargar empresas desde Firebase o usar vacío
+      cargarEmpresas();
+    }
+  }, [isOpen, machines]);
+
+  const cargarEmpresas = async () => {
+    try {
+      const empresasRef = collection(db, 'empresas_combustible');
+      const empresasSnap = await getDocs(empresasRef);
+      const empresasData = empresasSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setEmpresasLocal(empresasData);
+    } catch (error) {
+      console.error("Error cargando empresas:", error);
+      setEmpresasLocal([]);
+    }
+  };
+
+  const resetForm = () => {
+    setPaso(1);
+    setTipoReporte('');
+    setFirmaRepartidor(null);
+    setFirmaReceptor(null);
+    setDatosControl({
+      projectId: '',
+      fecha: new Date().toISOString().split('T')[0],
+      repartidorId: '',
+      equipoSurtidorId: ''
+    });
+    setDatosEntrada({
+      origen: '',
+      tipoOrigen: '',
+      numeroDocumento: '',
+      fechaDocumento: new Date().toISOString().split('T')[0],
+      cantidad: '',
+      observaciones: ''
+    });
+    setDatosEntrega({
+      empresa: '',
+      fecha: new Date().toISOString().split('T')[0],
+      operadorId: '',
+      machineId: '',
+      horometroOdometro: '',
+      cantidadLitros: '',
+      observaciones: ''
+    });
+  };
+
+  const handleCrearEquipoSurtidor = async () => {
+    console.log('🚀 Iniciando creación de equipo surtidor');
+    console.log('📝 Datos:', nuevoEquipoSurtidor);
+    
+    if (!nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre) {
+      alert("Patente y Nombre son obligatorios");
+      return;
+    }
+
+    try {
+      setLoadingEquipo(true);
+      console.log('💾 Guardando en Firebase...');
+      
+      const docRef = await addDoc(collection(db, 'machines'), {
+        patente: nuevoEquipoSurtidor.patente.toUpperCase(),
+        code: nuevoEquipoSurtidor.patente.toUpperCase(),
+        name: nuevoEquipoSurtidor.nombre,
+        tipo: nuevoEquipoSurtidor.tipo || 'Equipo Surtidor',
+        marca: nuevoEquipoSurtidor.marca || '',
+        modelo: nuevoEquipoSurtidor.modelo || '',
+        categoria: 'surtidor_combustible',
+        fechaCreacion: new Date().toISOString()
+      });
+
+      console.log('✅ Documento creado con ID:', docRef.id);
+
+      const nuevoEquipo = {
+        id: docRef.id,
+        patente: nuevoEquipoSurtidor.patente.toUpperCase(),
+        code: nuevoEquipoSurtidor.patente.toUpperCase(),
+        name: nuevoEquipoSurtidor.nombre,
+        tipo: nuevoEquipoSurtidor.tipo || 'Equipo Surtidor',
+        marca: nuevoEquipoSurtidor.marca || '',
+        modelo: nuevoEquipoSurtidor.modelo || ''
+      };
+
+      console.log('📋 Agregando a lista local:', nuevoEquipo);
+      setMachinesLocal([...machinesLocal, nuevoEquipo]);
+      
+      console.log('🎯 Autoseleccionando equipo:', docRef.id);
+      setDatosControl({...datosControl, equipoSurtidorId: docRef.id});
+      
+      setShowModalEquipoSurtidor(false);
+      setNuevoEquipoSurtidor({
+        patente: '',
+        nombre: '',
+        tipo: '',
+        marca: '',
+        modelo: ''
+      });
+      
+      console.log('🎉 Equipo surtidor creado exitosamente');
+      alert("✓ Equipo surtidor creado y seleccionado exitosamente");
+    } catch (error) {
+      console.error("❌ Error creando equipo:", error);
+      console.error("Detalles:", error.message);
+      alert(`Error al crear equipo surtidor: ${error.message}`);
+    } finally {
+      setLoadingEquipo(false);
+      console.log('🏁 Proceso finalizado');
+    }
+  };
+
+  const handleCrearEmpresa = async () => {
+    if (!nuevaEmpresa.nombre) {
+      alert("El nombre de la empresa es obligatorio");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const docRef = await addDoc(collection(db, 'empresas_combustible'), {
+        nombre: nuevaEmpresa.nombre,
+        rut: nuevaEmpresa.rut,
+        fechaCreacion: new Date().toISOString()
+      });
+
+      const nuevaEmp = {
+        id: docRef.id,
+        nombre: nuevaEmpresa.nombre,
+        rut: nuevaEmpresa.rut
+      };
+
+      setEmpresasLocal([...empresasLocal, nuevaEmp]);
+      setDatosEntrega({...datosEntrega, empresa: docRef.id});
+      setShowModalEmpresa(false);
+      setNuevaEmpresa({
+        nombre: '',
+        rut: ''
+      });
+      alert("Empresa creada exitosamente");
+    } catch (error) {
+      console.error("Error creando empresa:", error);
+      alert("Error al crear empresa");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    // Validación de usuario
+    if (!currentUserData) {
+      alert("Tu usuario no está registrado en el sistema. Por favor contacta al administrador para crear tu perfil en la colección 'users'.");
+      return;
+    }
+
+    // Validaciones
+    if (!datosControl.projectId || !datosControl.repartidorId) {
+      alert("Por favor completa los campos obligatorios del control de combustible");
+      return;
+    }
+
+    if (tipoReporte === 'entrada') {
+      if (!datosEntrada.tipoOrigen || !datosEntrada.numeroDocumento || !datosEntrada.cantidad) {
+        alert("Por favor completa los campos obligatorios de la entrada (Tipo Origen, Documento y Cantidad)");
+        return;
+      }
+      if (!firmaRepartidor) {
+        alert("Por favor firma el documento antes de guardar");
+        return;
+      }
+    } else if (tipoReporte === 'entrega') {
+      if (!datosEntrega.machineId || !datosEntrega.cantidadLitros) {
+        alert("Por favor completa los campos obligatorios de la entrega");
+        return;
+      }
+      if (!firmaReceptor) {
+        alert("Por favor firma el documento antes de guardar");
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+
+      // Generar número de reporte
+      const fecha = new Date();
+      const numeroReporte = `COMB-${tipoReporte.toUpperCase()}-${fecha.getFullYear()}${(fecha.getMonth() + 1).toString().padStart(2, '0')}${fecha.getDate().toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+
+      const dataToSave = {
+        tipo: tipoReporte,
+        numeroReporte,
+        ...datosControl,
+        fechaCreacion: new Date().toISOString(),
+        creadoPor: currentUser?.email || 'unknown',
+        repartidorNombre: currentUserData?.nombre || '',
+        repartidorRut: currentUserData?.rut || ''
+      };
+
+      if (tipoReporte === 'entrada') {
+        dataToSave.datosEntrada = {
+          ...datosEntrada,
+          cantidad: parseFloat(datosEntrada.cantidad)
+        };
+        dataToSave.firmaRepartidor = firmaRepartidor;
+        dataToSave.fechaFirma = new Date().toISOString();
+      } else {
+        dataToSave.datosEntrega = {
+          ...datosEntrega,
+          cantidadLitros: parseFloat(datosEntrega.cantidadLitros),
+          horometroOdometro: parseFloat(datosEntrega.horometroOdometro) || 0
+        };
+        dataToSave.firmaReceptor = firmaReceptor;
+        dataToSave.fechaFirma = new Date().toISOString();
+      }
+
+      await addDoc(collection(db, 'reportes_combustible'), dataToSave);
+
+      alert(`Reporte de ${tipoReporte === 'entrada' ? 'Entrada' : 'Entrega'} registrado exitosamente: ${numeroReporte}`);
+      handleClose();
+    } catch (error) {
+      console.error("Error guardando reporte:", error);
+      alert("Error al guardar el reporte");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[95vh] overflow-y-auto">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6 sticky top-0 z-10">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-black">Control de Combustible</h2>
+              <p className="text-orange-100 text-sm mt-1">
+                {paso === 1 && "Información del Control"}
+                {paso === 2 && "Selecciona el tipo de reporte"}
+                {paso === 3 && tipoReporte === 'entrada' && "Entrada de Combustible al Estanque"}
+                {paso === 3 && tipoReporte === 'entrega' && "Entrega de Combustible a Máquina"}
+              </p>
+            </div>
+            <button
+              onClick={handleClose}
+              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Indicador de pasos */}
+        <div className="bg-orange-50 p-4 border-b border-orange-200">
+          <div className="flex items-center justify-center gap-4">
+            <div className={`flex items-center gap-2 ${paso >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                1
+              </div>
+              <span className="text-sm font-semibold">Control</span>
+            </div>
+            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <div className={`flex items-center gap-2 ${paso >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                2
+              </div>
+              <span className="text-sm font-semibold">Tipo</span>
+            </div>
+            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <div className={`flex items-center gap-2 ${paso >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
+                3
+              </div>
+              <span className="text-sm font-semibold">Detalles</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Contenido */}
+        <div className="p-6">
+          {/* PASO 1: Control de Combustible */}
+          {paso === 1 && (
+            <div className="space-y-6">
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
+                <h3 className="text-lg font-black text-orange-900 mb-1">📋 Control de Combustible</h3>
+                <p className="text-sm text-orange-700">Información general del control (Página 1 de 2)</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Código Obra <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={datosControl.projectId}
+                    onChange={(e) => setDatosControl({...datosControl, projectId: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                  >
+                    <option value="">Seleccione obra</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Fecha <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={datosControl.fecha}
+                    onChange={(e) => setDatosControl({...datosControl, fecha: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
+                <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                      Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
+                    </label>
+                    <div className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg bg-amber-50 font-semibold text-amber-900 flex items-center gap-2">
+                      <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      <div className="flex-1">
+                        {currentUserData ? (
+                          <div>
+                            <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
+                            {currentUserData.rut && (
+                              <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>
+                            )}
+                            {currentUserData.email && (
+                              <div className="text-xs text-amber-600">{currentUserData.email}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-red-600 font-bold">⚠No se encontró usuario en el sistema</div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              Usuario: {currentUser?.email || 'Sin email'}
+                            </div>
+                            <div className="text-xs text-red-500 mt-1">
+                              Por favor contacta al administrador para crear tu perfil en la colección "users"
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {currentUserData && (
+                        <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </div>
+                    {currentUserData ? (
+                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Autocompletado con tu usuario
+                      </p>
+                    ) : (
+                      <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        Tu usuario no existe en la colección "users"
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                      Equipo Surtidor (Camión/Mochila)
+                      {userRole !== 'administrador' 
+                    }
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={datosControl.equipoSurtidorId}
+                        onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
+                        className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="">Seleccione equipo surtidor</option>
+                        {machinesLocal.filter(m => 
+                          m.name?.toLowerCase().includes('combustible') || 
+                          m.name?.toLowerCase().includes('camión') ||
+                          m.name?.toLowerCase().includes('mochila') ||
+                          m.categoria === 'surtidor_combustible'
+                        ).map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.patente || m.code} - {m.name}
+                          </option>
+                        ))}
+                      </select>
+                      {userRole === 'administrador' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowModalEquipoSurtidor(true)}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
+                          title="Agregar nuevo equipo surtidor"
+                        >
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Opcional: Camión o equipo que entrega el combustible</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-orange-200">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => setPaso(2)}
+                  disabled={!datosControl.projectId || !datosControl.repartidorId}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                >
+                  Siguiente →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 2: Tipo de Reporte */}
+          {paso === 2 && (
+            <div className="space-y-6">
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
+                <h3 className="text-lg font-black text-orange-900 mb-1">Tipo de Reporte</h3>
+                <p className="text-sm text-orange-700">Selecciona si es entrada o entrega de combustible</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* ENTRADA */}
+                <button
+                  onClick={() => {
+                    setTipoReporte('entrada');
+                    setPaso(3);
+                  }}
+                  className="group relative bg-gradient-to-br from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 border-3 border-green-300 hover:border-green-500 rounded-2xl p-8 transition-all hover:shadow-xl"
+                >
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <h4 className="text-xl font-black text-green-900 mb-2">ENTRADA</h4>
+                      <p className="text-sm text-green-700">Recepción de combustible al estanque</p>
+                      <p className="text-xs text-green-600 mt-2">• N° Guía • Cantidad • Origen</p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* ENTREGA */}
+                <button
+                  onClick={() => {
+                    setTipoReporte('entrega');
+                    setPaso(3);
+                  }}
+                  className="group relative bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-3 border-blue-300 hover:border-blue-500 rounded-2xl p-8 transition-all hover:shadow-xl"
+                >
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <h4 className="text-xl font-black text-blue-900 mb-2">ENTREGA</h4>
+                      <p className="text-sm text-blue-700">Entrega de combustible a máquina</p>
+                      <p className="text-xs text-blue-600 mt-2">• Máquina • Operador • Litros</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-orange-200">
+                <button
+                  onClick={() => setPaso(1)}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  ← Atrás
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 3a: ENTRADA DE COMBUSTIBLE */}
+          {paso === 3 && tipoReporte === 'entrada' && (
+            <div className="space-y-6">
+              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                <h3 className="text-lg font-black text-green-900 mb-1">⬇️ Entrada de Combustible</h3>
+                <p className="text-sm text-green-700">Recepción de combustible al estanque (Página 2 de 2)</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Tipo de Origen */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Tipo de Origen <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={datosEntrada.tipoOrigen}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, tipoOrigen: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                  >
+                    <option value="">Seleccione tipo</option>
+                    <option value="estacion">⛽ Estación de Servicio (Guía)</option>
+                    <option value="estanque">🛢️ Estanque (Vale)</option>
+                  </select>
+                </div>
+
+                {/* Origen - Agregar: Solo Admin */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Origen
+                    {userRole !== 'administrador'
+                  }
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={datosEntrada.origen}
+                      onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
+                      className="flex-1 px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    >
+                      <option value="">Seleccione origen</option>
+                      {empresasLocal.map(emp => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {userRole === 'administrador' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowModalEmpresa(true)}
+                        className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-sm transition-all"
+                        title="Agregar nuevo origen"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Número de Documento (Guía o Vale según tipo) */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    {datosEntrada.tipoOrigen === 'estacion' 
+                      ? 'N° de Guía' 
+                      : datosEntrada.tipoOrigen === 'estanque' 
+                      ? 'N° de Vale' 
+                      : 'N° de Documento'} <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={datosEntrada.numeroDocumento}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    placeholder={
+                      datosEntrada.tipoOrigen === 'estacion' 
+                        ? 'Ej: GD-12345' 
+                        : datosEntrada.tipoOrigen === 'estanque'
+                        ? 'Ej: VALE-001'
+                        : 'Número de documento'
+                    }
+                  />
+                </div>
+
+                {/* Fecha del Documento */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Fecha del Documento <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={datosEntrada.fechaDocumento}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, fechaDocumento: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                  />
+                </div>
+
+                {/* Cantidad */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Cantidad (Litros) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={datosEntrada.cantidad}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, cantidad: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    placeholder="Ej: 5000"
+                  />
+                </div>
+
+                {/* Info visual del tipo de documento */}
+                <div className="md:col-span-2 bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="text-sm text-blue-800">
+                      {datosEntrada.tipoOrigen === 'estacion' ? (
+                        <>
+                          <p className="font-bold">⛽ Estación de Servicio</p>
+                          <p className="mt-1">Se requiere <strong>Guía de Despacho</strong> del proveedor</p>
+                        </>
+                      ) : datosEntrada.tipoOrigen === 'estanque' ? (
+                        <>
+                          <p className="font-bold">🛢️ Estanque</p>
+                          <p className="mt-1">Se requiere <strong>Vale interno</strong> de autorización</p>
+                        </>
+                      ) : (
+                        <p>Seleccione el tipo de origen para continuar</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Observaciones */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Observaciones
+                  </label>
+                  <textarea
+                    value={datosEntrada.observaciones}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, observaciones: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px]"
+                    placeholder="Notas adicionales..."
+                  />
+                </div>
+              </div>
+
+              {/* Firma del Repartidor */}
+              <div className="mt-6">
+                <label className="block text-sm font-bold text-slate-700 mb-3">
+                  Firma del Repartidor de Combustible <span className="text-red-500">*</span>
+                </label>
+                
+                {firmaRepartidor ? (
+                  <div className="relative">
+                    <div className="border-2 border-green-500 rounded-xl p-4 bg-green-50">
+                      <img 
+                        src={firmaRepartidor} 
+                        alt="Firma del repartidor" 
+                        className="max-h-32 mx-auto"
+                      />
+                      <div className="flex justify-center gap-2 mt-3">
+                        <span className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full">
+                          ✓ Firmado
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFirmaRepartidor(null);
+                            setShowModalFirmaRepartidor(true);
+                          }}
+                          className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all"
+                        >
+                          Firmar nuevamente
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowModalFirmaRepartidor(true)}
+                    className="w-full px-6 py-4 border-2 border-dashed border-green-300 rounded-xl bg-green-50 hover:bg-green-100 transition-all group"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <svg className="w-12 h-12 text-green-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                      <span className="text-green-800 font-bold">Click para firmar</span>
+                      <span className="text-green-600 text-xs">Se abrirá una ventana para capturar tu firma</span>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-green-200">
+                <button
+                  onClick={() => setPaso(2)}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  ← Atrás
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading || !datosEntrada.numeroGuia || !datosEntrada.cantidad || !firmaRepartidor}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Guardando...' : '✓ Guardar Entrada'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 3b: ENTREGA DE COMBUSTIBLE */}
+          {paso === 3 && tipoReporte === 'entrega' && (
+            <div className="space-y-6">
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                <h3 className="text-lg font-black text-blue-900 mb-1">➡️ Entrega de Combustible</h3>
+                <p className="text-sm text-blue-700">Entrega de combustible a máquina (Página 2 de 2)</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Empresa
+                    {userRole !== 'administrador'
+                  }
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={datosEntrega.empresa}
+                      onChange={(e) => setDatosEntrega({...datosEntrega, empresa: e.target.value})}
+                      className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">Seleccione empresa</option>
+                      {empresasLocal.map(emp => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {userRole === 'administrador' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowModalEmpresa(true)}
+                        className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
+                        title="Agregar nueva empresa"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Fecha
+                  </label>
+                  <input
+                    type="date"
+                    value={datosEntrega.fecha}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, fecha: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Operador (Quien recibe) <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={datosEntrega.operadorId}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, operadorId: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">Seleccione operador</option>
+                    {empleados.map(emp => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.nombre} - {emp.rut || ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Máquina <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={datosEntrega.machineId}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, machineId: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">Seleccione máquina</option>
+                    {machines.filter(m => 
+                      !m.name?.toLowerCase().includes('combustible') && 
+                      !m.name?.toLowerCase().includes('mochila')
+                    ).map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.patente || m.code} - {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Horómetro / Odómetro
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={datosEntrega.horometroOdometro}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, horometroOdometro: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    placeholder="Ej: 1234.5"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Cantidad (Litros) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={datosEntrega.cantidadLitros}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, cantidadLitros: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    placeholder="Ej: 150.50"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Observaciones
+                  </label>
+                  <textarea
+                    value={datosEntrega.observaciones}
+                    onChange={(e) => setDatosEntrega({...datosEntrega, observaciones: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px]"
+                    placeholder="Notas adicionales..."
+                  />
+                </div>
+              </div>
+
+              {/* Firma del Receptor */}
+              <div className="mt-6">
+                <label className="block text-sm font-bold text-slate-700 mb-3">
+                  Firma del Receptor de Combustible <span className="text-red-500">*</span>
+                </label>
+                
+                {firmaReceptor ? (
+                  <div className="relative">
+                    <div className="border-2 border-blue-500 rounded-xl p-4 bg-blue-50">
+                      <img 
+                        src={firmaReceptor} 
+                        alt="Firma del receptor" 
+                        className="max-h-32 mx-auto"
+                      />
+                      <div className="flex justify-center gap-2 mt-3">
+                        <span className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full">
+                          ✓ Firmado
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFirmaReceptor(null);
+                            setShowModalFirmaReceptor(true);
+                          }}
+                          className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all"
+                        >
+                          Firmar nuevamente
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowModalFirmaReceptor(true)}
+                    className="w-full px-6 py-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 hover:bg-blue-100 transition-all group"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <svg className="w-12 h-12 text-blue-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                      <span className="text-blue-800 font-bold">Click para firmar</span>
+                      <span className="text-blue-600 text-xs">Se abrirá una ventana para capturar tu firma</span>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-blue-200">
+                <button
+                  onClick={() => setPaso(2)}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  ← Atrás
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Guardando...' : '✓ Guardar Entrega'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal: Nuevo Equipo Surtidor */}
+      {showModalEquipoSurtidor && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+            <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white p-6">
+              <h3 className="text-xl font-black">🚛 Nuevo Equipo Surtidor</h3>
+              <p className="text-amber-100 text-sm mt-1">Camión o equipo que entrega combustible</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Patente <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoEquipoSurtidor.patente}
+                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase()})}
+                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="Ej: AABB01"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Nombre <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoEquipoSurtidor.nombre}
+                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, nombre: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="Ej: Camión Combustible"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Tipo
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoEquipoSurtidor.tipo}
+                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, tipo: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="Ej: Camión, Mochila"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Marca
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoEquipoSurtidor.marca}
+                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, marca: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="Ej: Mercedes Benz"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                    Modelo
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoEquipoSurtidor.modelo}
+                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, modelo: e.target.value})}
+                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    placeholder="Ej: Actros 2644"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-amber-200">
+                <button
+                  onClick={() => {
+                    setShowModalEquipoSurtidor(false);
+                    setNuevoEquipoSurtidor({
+                      patente: '',
+                      nombre: '',
+                      tipo: '',
+                      marca: '',
+                      modelo: ''
+                    });
+                  }}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCrearEquipoSurtidor}
+                  disabled={loadingEquipo || !nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
+                >
+                  {loadingEquipo ? 'Creando...' : '✓ Crear Equipo'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Nueva Empresa */}
+      {showModalEmpresa && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+              <h3 className="text-xl font-black">🏢 Nueva Empresa</h3>
+              <p className="text-blue-100 text-sm mt-1">Empresa que recibe el combustible</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Nombre de la Empresa <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={nuevaEmpresa.nombre}
+                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, nombre: e.target.value})}
+                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  placeholder="Ej: Constructora ABC Ltda."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  RUT
+                </label>
+                <input
+                  type="text"
+                  value={nuevaEmpresa.rut}
+                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, rut: e.target.value})}
+                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  placeholder="Ej: 76.123.456-7"
+                />
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-blue-200">
+                <button
+                  onClick={() => {
+                    setShowModalEmpresa(false);
+                    setNuevaEmpresa({
+                      nombre: '',
+                      rut: ''
+                    });
+                  }}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCrearEmpresa}
+                  disabled={loading || !nuevaEmpresa.nombre}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Creando...' : '✓ Crear Empresa'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Firma del Repartidor */}
+      {showModalFirmaRepartidor && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+            <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-6">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-xl font-black">✍️ Firma del Repartidor</h3>
+                  <p className="text-green-100 text-sm mt-1">Dibuja tu firma en el recuadro</p>
+                </div>
+                <button
+                  onClick={() => setShowModalFirmaRepartidor(false)}
+                  className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <SignaturePad 
+                label=""
+                color="green"
+                onSave={(signatureData) => {
+                  setFirmaRepartidor(signatureData);
+                  setShowModalFirmaRepartidor(false);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Firma del Receptor */}
+      {showModalFirmaReceptor && (
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-xl font-black">✍️ Firma del Receptor</h3>
+                  <p className="text-blue-100 text-sm mt-1">Dibuja tu firma en el recuadro</p>
+                </div>
+                <button
+                  onClick={() => setShowModalFirmaReceptor(false)}
+                  className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <SignaturePad 
+                label=""
+                color="blue"
+                onSave={(signatureData) => {
+                  setFirmaReceptor(signatureData);
+                  setShowModalFirmaReceptor(false);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
