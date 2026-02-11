@@ -60,12 +60,10 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     clickedMinutes = Math.max(minMinutes, Math.min(maxMinutes, clickedMinutes));
     
     const clickedTime = minutesToTime(clickedMinutes);
+    const startMinutes = timeToMinutes(startTime);
     
-    // Si no hay tiempo de inicio o el click es antes del inicio, actualizar inicio
-    if (!startTime || clickedMinutes < timeToMinutes(startTime)) {
-      setStartTime(clickedTime);
-      setEndTime(clickedTime);
-    } else {
+    // Solo actualizar el final si es después del inicio
+    if (clickedMinutes > startMinutes) {
       setEndTime(clickedTime);
     }
   };
@@ -93,24 +91,11 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     
     const newTime = minutesToTime(newMinutes);
     const startMinutes = timeToMinutes(startTime);
-    const endMinutes = timeToMinutes(endTime);
 
-    if (dragType === 'start') {
-      if (newMinutes <= endMinutes) {
-        setStartTime(newTime);
-      }
-    } else if (dragType === 'end') {
+    // Solo permitir arrastrar el final
+    if (dragType === 'end') {
       if (newMinutes >= startMinutes) {
         setEndTime(newTime);
-      }
-    } else if (dragType === 'move') {
-      const duration = endMinutes - startMinutes;
-      const newStart = newMinutes;
-      const newEnd = newStart + duration;
-      
-      if (newEnd <= maxMinutes && newStart >= minMinutes) {
-        setStartTime(minutesToTime(newStart));
-        setEndTime(minutesToTime(newEnd));
       }
     }
   };
@@ -194,9 +179,10 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Información de tiempo seleccionado */}
           <div className="grid grid-cols-3 gap-2 sm:gap-4">
-            <div className="bg-green-50 border-2 border-green-200 rounded-xl p-3 sm:p-4 text-center">
-              <div className="text-[10px] sm:text-xs font-semibold text-green-700 mb-1">INICIO</div>
-              <div className="text-lg sm:text-2xl font-bold text-green-900 leading-tight">{formatTime12h(startTime)}</div>
+            <div className="bg-slate-50 border-2 border-slate-300 rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-[10px] sm:text-xs font-semibold text-slate-600 mb-1">INICIO (AUTO)</div>
+              <div className="text-lg sm:text-2xl font-bold text-slate-700 leading-tight">{formatTime12h(startTime)}</div>
+              <div className="text-[9px] text-slate-500 mt-0.5">Fijo</div>
             </div>
             <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-3 sm:p-4 text-center">
               <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1">DURACIÓN</div>
@@ -205,6 +191,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
             <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4 text-center">
               <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1">FIN</div>
               <div className="text-lg sm:text-2xl font-bold text-blue-900 leading-tight">{formatTime12h(endTime)}</div>
+              <div className="text-[9px] text-blue-600 mt-0.5">Ajustable</div>
             </div>
           </div>
 
@@ -235,7 +222,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
               onTouchMove={(e) => {
-                if (isDragging) {
+                if (isDragging && dragType === 'end') {
                   e.preventDefault();
                   const touch = e.touches[0];
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -252,25 +239,9 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   
                   const newTime = minutesToTime(newMinutes);
                   const startMinutes = timeToMinutes(startTime);
-                  const endMinutes = timeToMinutes(endTime);
 
-                  if (dragType === 'start') {
-                    if (newMinutes <= endMinutes) {
-                      setStartTime(newTime);
-                    }
-                  } else if (dragType === 'end') {
-                    if (newMinutes >= startMinutes) {
-                      setEndTime(newTime);
-                    }
-                  } else if (dragType === 'move') {
-                    const duration = endMinutes - startMinutes;
-                    const newStart = newMinutes;
-                    const newEnd = newStart + duration;
-                    
-                    if (newEnd <= maxMinutes && newStart >= minMinutes) {
-                      setStartTime(minutesToTime(newStart));
-                      setEndTime(minutesToTime(newEnd));
-                    }
+                  if (newMinutes >= startMinutes) {
+                    setEndTime(newTime);
                   }
                 }
               }}
@@ -320,29 +291,15 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
 
               {/* Rango seleccionado */}
               <div
-                className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded cursor-move shadow-lg transition-all"
+                className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded shadow-lg transition-all"
                 style={{
                   left: `${startPos}%`,
                   width: `${width}%`
                 }}
-                onMouseDown={(e) => handleMouseDown(e, 'move')}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  setIsDragging(true);
-                  setDragType('move');
-                }}
               >
-                {/* Handle de inicio */}
-                <div
-                  className="absolute left-0 top-0 bottom-0 w-6 sm:w-3 bg-green-500 cursor-ew-resize rounded-l hover:bg-green-600 active:bg-green-700 transition-colors flex items-center justify-center"
-                  onMouseDown={(e) => handleMouseDown(e, 'start')}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    setIsDragging(true);
-                    setDragType('start');
-                  }}
-                >
-                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white rounded"></div>
+                {/* Indicador de inicio (fijo - no arrastrable) */}
+                <div className="absolute left-0 top-0 bottom-0 w-6 sm:w-3 bg-slate-400 rounded-l flex items-center justify-center cursor-not-allowed">
+                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white/60 rounded"></div>
                 </div>
 
                 {/* Contenido del rango */}
@@ -352,7 +309,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   </span>
                 </div>
 
-                {/* Handle de fin */}
+                {/* Handle de fin (arrastrable) */}
                 <div
                   className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-blue-500 cursor-ew-resize rounded-r hover:bg-blue-600 active:bg-blue-700 transition-colors flex items-center justify-center"
                   onMouseDown={(e) => handleMouseDown(e, 'end')}
@@ -368,8 +325,8 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
             </div>
 
             <div className="text-center text-[10px] sm:text-xs text-slate-500 px-2">
-              💡 <span className="hidden sm:inline">Arrastra los extremos para ajustar • Arrastra el centro para mover • Haz clic para establecer</span>
-              <span className="sm:hidden">Toca los extremos verdes/azules para ajustar • Toca el centro para mover</span>
+              💡 <span className="hidden sm:inline">Arrastra el extremo azul para ajustar la hora final • El inicio es automático (fin de actividad anterior)</span>
+              <span className="sm:hidden">Toca el extremo azul para ajustar la hora final</span>
             </div>
           </div>
 
@@ -378,16 +335,14 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
             <div className="text-xs sm:text-sm font-semibold text-slate-700 mb-2 sm:mb-3">O ingresa manualmente:</div>
             <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Inicio</label>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Inicio (Fija)</label>
                 <input
                   type="time"
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
-                  min="07:00"
-                  max="19:00"
-                  step="900"
+                  disabled
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 bg-slate-100 text-slate-500 rounded-lg cursor-not-allowed"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">Automático: fin de actividad anterior</p>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">Hora Fin</label>
