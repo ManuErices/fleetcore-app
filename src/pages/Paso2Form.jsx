@@ -1,705 +1,1323 @@
 import React, { useState, useEffect } from "react";
 
-export default function Paso2FormTimeline({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
-  
-  // Estados
+// Componente Timeline Modal
+function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, title, existingSlots = [] }) {
+  const [startTime, setStartTime] = useState(initialStart || "07:00");
+  const [endTime, setEndTime] = useState(initialEnd || "07:00");
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState(null);
-  const [dragEnd, setDragEnd] = useState(null);
-  const [showActivitySelector, setShowActivitySelector] = useState(false);
-  const [showConflictModal, setShowConflictModal] = useState(false);
-  const [conflictInfo, setConflictInfo] = useState(null);
+  const [dragType, setDragType] = useState(null); // 'start', 'end', or 'move'
   
-  // PALETA PROFESIONAL - Tonos corporativos modernos
-  const COLORS = {
-    efectiva: {
-      primary: '#10b981', light: '#d1fae5', bg: '#ecfdf5', border: '#a7f3d0', text: '#065f46',
-      gradient: 'from-emerald-400 via-emerald-500 to-teal-600', icon: '✓', label: 'Productiva'
-    },
-    noefectiva: {
-      primary: '#f59e0b', light: '#fef3c7', bg: '#fffbeb', border: '#fde68a', text: '#78350f',
-      gradient: 'from-amber-400 via-amber-500 to-orange-500', icon: '⏸', label: 'Detenida'
-    },
-    charla: {
-      primary: '#3b82f6', light: '#dbeafe', bg: '#eff6ff', border: '#bfdbfe', text: '#1e3a8a',
-      gradient: 'from-blue-400 via-blue-500 to-blue-600', icon: '🛡️', label: 'Seguridad'
-    },
-    inspeccion: {
-      primary: '#8b5cf6', light: '#ede9fe', bg: '#f5f3ff', border: '#ddd6fe', text: '#5b21b6',
-      gradient: 'from-violet-400 via-violet-500 to-purple-600', icon: '🔧', label: 'Inspección'
-    },
-    colacion: {
-      primary: '#ec4899', light: '#fce7f3', bg: '#fdf2f8', border: '#fbcfe8', text: '#831843',
-      gradient: 'from-pink-400 via-pink-500 to-rose-600', icon: '🍽️', label: 'Colación'
+  useEffect(() => {
+    if (isOpen) {
+      setStartTime(initialStart || "07:00");
+      setEndTime(initialEnd || "07:00");
     }
-  };
-  
-  const generarFranjasHorarias = () => {
-    const franjas = [];
-    for (let hora = 7; hora <= 19; hora++) {
-      if (hora === 7) {
-        franjas.push({ hora, minuto: 30, label: "7:30" });
-      } else if (hora < 19) {
-        franjas.push({ hora, minuto: 0, label: `${hora}:00` });
-        franjas.push({ hora, minuto: 30, label: `${hora}:30` });
-      } else {
-        franjas.push({ hora, minuto: 0, label: "19:00" });
+  }, [isOpen, initialStart, initialEnd]);
+
+  if (!isOpen) return null;
+
+  // Generar slots de 15 minutos desde las 7:00 AM hasta las 7:00 PM
+  const generateTimeSlots = () => {
+    const slots = [];
+    for (let hour = 7; hour <= 19; hour++) {
+      for (let minute of [0, 15, 30, 45]) {
+        if (hour === 19 && minute > 0) break; // Solo hasta 19:00
+        const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        slots.push(time);
       }
     }
-    return franjas;
+    return slots;
   };
 
-  const franjas = generarFranjasHorarias();
+  const timeSlots = generateTimeSlots();
 
-  const horaAIndice = (horaStr) => {
-    if (!horaStr) return -1;
-    const [h, m] = horaStr.split(':').map(Number);
-    if (h === 7 && m === 30) return 0;
-    if (h < 7 || (h === 7 && m < 30)) return -1;
-    if (h > 19) return -1;
-    const horaBase = h - 7;
-    return horaBase * 2 - 1 + (m >= 30 ? 1 : 0);
+  const timeToMinutes = (time) => {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
   };
 
-  const indiceAHora = (indice) => {
-    if (indice < 0 || indice >= franjas.length) return "";
-    const franja = franjas[indice];
-    return `${String(franja.hora).padStart(2, '0')}:${String(franja.minuto).padStart(2, '0')}`;
+  const minutesToTime = (minutes) => {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
-  const getColorConfig = (tipo, subTipo) => {
-    if (tipo === 'efectiva') return COLORS.efectiva;
-    if (tipo === 'noefectivo') return COLORS.noefectiva;
-    if (tipo === 'programado') {
-      if (subTipo === 'charlaSegurid') return COLORS.charla;
-      if (subTipo === 'inspeccionEquipo') return COLORS.inspeccion;
-      if (subTipo === 'colacion') return COLORS.colacion;
-    }
-    return COLORS.efectiva;
+  const roundToNearest15 = (minutes) => {
+    return Math.round(minutes / 15) * 15;
   };
 
-  const obtenerActividadesTimeline = () => {
-    const actividades = [];
+  const handleTimelineClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
     
-    formData.actividadesEfectivas?.forEach((act, idx) => {
-      if (act.horaInicio && act.horaFin) {
-        const config = getColorConfig('efectiva');
-        actividades.push({
-          id: `efectiva-${idx}`, tipo: 'efectiva',
-          nombre: act.actividad || `Actividad ${idx + 1}`,
-          horaInicio: act.horaInicio, horaFin: act.horaFin,
-          ...config, indice: idx
-        });
-      }
-    });
-
-    formData.tiemposNoEfectivos?.forEach((tiempo, idx) => {
-      if (tiempo.horaInicio && tiempo.horaFin) {
-        const config = getColorConfig('noefectivo');
-        actividades.push({
-          id: `noefectivo-${idx}`, tipo: 'noefectivo',
-          nombre: tiempo.razon || `Detención ${idx + 1}`,
-          horaInicio: tiempo.horaInicio, horaFin: tiempo.horaFin,
-          ...config, indice: idx
-        });
-      }
-    });
-
-    const tp = formData.tiemposProgramados;
-    if (tp?.charlaSegurid?.horaInicio && tp?.charlaSegurid?.horaFin) {
-      const config = getColorConfig('programado', 'charlaSegurid');
-      actividades.push({
-        id: 'charla', tipo: 'programado', subTipo: 'charlaSegurid',
-        nombre: 'Charla de Seguridad',
-        horaInicio: tp.charlaSegurid.horaInicio, horaFin: tp.charlaSegurid.horaFin,
-        ...config
-      });
-    }
+    const minMinutes = 7 * 60; // 7:00 AM
+    const maxMinutes = 19 * 60; // 7:00 PM
+    const totalMinutes = maxMinutes - minMinutes;
     
-    if (tp?.inspeccionEquipo?.horaInicio && tp?.inspeccionEquipo?.horaFin) {
-      const config = getColorConfig('programado', 'inspeccionEquipo');
-      actividades.push({
-        id: 'inspeccion', tipo: 'programado', subTipo: 'inspeccionEquipo',
-        nombre: 'Inspección de Equipo',
-        horaInicio: tp.inspeccionEquipo.horaInicio, horaFin: tp.inspeccionEquipo.horaFin,
-        ...config
-      });
-    }
+    let clickedMinutes = minMinutes + (percentage * totalMinutes);
+    clickedMinutes = roundToNearest15(clickedMinutes);
+    clickedMinutes = Math.max(minMinutes, Math.min(maxMinutes, clickedMinutes));
     
-    if (tp?.colacion?.horaInicio && tp?.colacion?.horaFin) {
-      const config = getColorConfig('programado', 'colacion');
-      actividades.push({
-        id: 'colacion', tipo: 'programado', subTipo: 'colacion',
-        nombre: 'Colación',
-        horaInicio: tp.colacion.horaInicio, horaFin: tp.colacion.horaFin,
-        ...config
-      });
-    }
-
-    return actividades;
-  };
-
-  const detectarConflictos = (horaInicio, horaFin) => {
-    const inicioNuevo = horaAIndice(horaInicio);
-    const finNuevo = horaAIndice(horaFin);
-    const actividades = obtenerActividadesTimeline();
+    const clickedTime = minutesToTime(clickedMinutes);
     
-    return actividades.filter(act => {
-      const inicioAct = horaAIndice(act.horaInicio);
-      const finAct = horaAIndice(act.horaFin);
-      return (inicioNuevo < finAct && finNuevo > inicioAct);
-    });
-  };
-
-  const eliminarActividad = (actividad) => {
-    if (actividad.tipo === 'efectiva') {
-      const nuevas = formData.actividadesEfectivas.filter((_, idx) => idx !== actividad.indice);
-      setFormData({ ...formData, actividadesEfectivas: nuevas });
-    } else if (actividad.tipo === 'noefectivo') {
-      const nuevos = formData.tiemposNoEfectivos.filter((_, idx) => idx !== actividad.indice);
-      setFormData({ ...formData, tiemposNoEfectivos: nuevos });
-    } else if (actividad.tipo === 'programado') {
-      const nuevosProgramados = { ...formData.tiemposProgramados };
-      nuevosProgramados[actividad.subTipo] = { horaInicio: '', horaFin: '' };
-      setFormData({ ...formData, tiemposProgramados: nuevosProgramados });
+    // Si no hay tiempo de inicio o el click es antes del inicio, actualizar inicio
+    if (!startTime || clickedMinutes < timeToMinutes(startTime)) {
+      setStartTime(clickedTime);
+      setEndTime(clickedTime);
+    } else {
+      setEndTime(clickedTime);
     }
   };
 
-  const actualizarHoraActividad = (actividad, nuevaHoraInicio, nuevaHoraFin) => {
-    if (actividad.tipo === 'efectiva') {
-      const nuevas = [...formData.actividadesEfectivas];
-      nuevas[actividad.indice] = { ...nuevas[actividad.indice], horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
-      setFormData({ ...formData, actividadesEfectivas: nuevas });
-    } else if (actividad.tipo === 'noefectivo') {
-      const nuevos = [...formData.tiemposNoEfectivos];
-      nuevos[actividad.indice] = { ...nuevos[actividad.indice], horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
-      setFormData({ ...formData, tiemposNoEfectivos: nuevos });
-    } else if (actividad.tipo === 'programado') {
-      const nuevosProgramados = { ...formData.tiemposProgramados };
-      nuevosProgramados[actividad.subTipo] = { horaInicio: nuevaHoraInicio, horaFin: nuevaHoraFin };
-      setFormData({ ...formData, tiemposProgramados: nuevosProgramados });
-    }
-  };
-
-  const recortarActividad = (actividad, horaInicioNueva, horaFinNueva) => {
-    const inicioNuevo = horaAIndice(horaInicioNueva);
-    const finNuevo = horaAIndice(horaFinNueva);
-    const inicioAct = horaAIndice(actividad.horaInicio);
-    const finAct = horaAIndice(actividad.horaFin);
-
-    if (inicioNuevo <= inicioAct && finNuevo >= finAct) {
-      eliminarActividad(actividad);
-      return;
-    }
-    if (inicioNuevo > inicioAct && inicioNuevo < finAct) {
-      const nuevaHoraFin = indiceAHora(inicioNuevo);
-      actualizarHoraActividad(actividad, actividad.horaInicio, nuevaHoraFin);
-    }
-    if (finNuevo > inicioAct && finNuevo < finAct) {
-      const nuevaHoraInicio = indiceAHora(finNuevo);
-      actualizarHoraActividad(actividad, nuevaHoraInicio, actividad.horaFin);
-    }
-  };
-
-  const handleDragStart = (indice) => {
+  const handleMouseDown = (e, type) => {
+    e.stopPropagation();
     setIsDragging(true);
-    setDragStart(indice);
-    setDragEnd(indice);
+    setDragType(type);
   };
 
-  const handleDragMove = (indice) => {
-    if (isDragging) setDragEnd(indice);
-  };
+  const handleMouseMove = (e) => {
+    if (!isDragging) return;
 
-  const handleDragEnd = () => {
-    if (isDragging && dragStart !== null && dragEnd !== null) {
-      const inicioIndice = Math.min(dragStart, dragEnd);
-      const finIndice = Math.max(dragStart, dragEnd);
-      const horaInicio = indiceAHora(inicioIndice);
-      const horaFin = indiceAHora(finIndice + 1);
-      const conflictos = detectarConflictos(horaInicio, horaFin);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const percentage = x / rect.width;
+    
+    const minMinutes = 7 * 60;
+    const maxMinutes = 19 * 60;
+    const totalMinutes = maxMinutes - minMinutes;
+    
+    let newMinutes = minMinutes + (percentage * totalMinutes);
+    newMinutes = roundToNearest15(newMinutes);
+    newMinutes = Math.max(minMinutes, Math.min(maxMinutes, newMinutes));
+    
+    const newTime = minutesToTime(newMinutes);
+    const startMinutes = timeToMinutes(startTime);
+    const endMinutes = timeToMinutes(endTime);
+
+    if (dragType === 'start') {
+      if (newMinutes <= endMinutes) {
+        setStartTime(newTime);
+      }
+    } else if (dragType === 'end') {
+      if (newMinutes >= startMinutes) {
+        setEndTime(newTime);
+      }
+    } else if (dragType === 'move') {
+      const duration = endMinutes - startMinutes;
+      const newStart = newMinutes;
+      const newEnd = newStart + duration;
       
-      if (conflictos.length > 0) {
-        setConflictInfo({ horaInicio, horaFin, conflictos });
-        setShowConflictModal(true);
-      } else {
-        window.tempSelection = { horaInicio, horaFin };
-        setShowActivitySelector(true);
+      if (newEnd <= maxMinutes && newStart >= minMinutes) {
+        setStartTime(minutesToTime(newStart));
+        setEndTime(minutesToTime(newEnd));
       }
     }
+  };
+
+  const handleMouseUp = () => {
     setIsDragging(false);
-    setDragStart(null);
-    setDragEnd(null);
+    setDragType(null);
   };
 
-  const confirmarReemplazo = () => {
-    const { horaInicio, horaFin, conflictos } = conflictInfo;
-    conflictos.forEach(act => recortarActividad(act, horaInicio, horaFin));
-    window.tempSelection = { horaInicio, horaFin };
-    setShowConflictModal(false);
-    setShowActivitySelector(true);
+  const getPosition = (time) => {
+    const minMinutes = 7 * 60;
+    const maxMinutes = 19 * 60;
+    const totalMinutes = maxMinutes - minMinutes;
+    const timeMinutes = timeToMinutes(time);
+    return ((timeMinutes - minMinutes) / totalMinutes) * 100;
   };
 
-  const agregarActividad = (tipo) => {
-    const { horaInicio, horaFin } = window.tempSelection || {};
-    if (!horaInicio || !horaFin) return;
+  const startPos = getPosition(startTime);
+  const endPos = getPosition(endTime);
+  const width = endPos - startPos;
 
-    if (tipo === 'efectiva') {
-      setFormData({
-        ...formData,
-        actividadesEfectivas: [...formData.actividadesEfectivas, { actividad: '', horaInicio, horaFin, observaciones: '' }]
-      });
-    } else if (tipo === 'noefectivo') {
-      setFormData({
-        ...formData,
-        tiemposNoEfectivos: [...formData.tiemposNoEfectivos, { razon: '', horaInicio, horaFin, observaciones: '' }]
-      });
-    } else if (tipo === 'charla') {
-      setFormData({
-        ...formData,
-        tiemposProgramados: { ...formData.tiemposProgramados, charlaSegurid: { horaInicio, horaFin } }
-      });
-    } else if (tipo === 'inspeccion') {
-      setFormData({
-        ...formData,
-        tiemposProgramados: { ...formData.tiemposProgramados, inspeccionEquipo: { horaInicio, horaFin } }
-      });
-    } else if (tipo === 'colacion') {
-      setFormData({
-        ...formData,
-        tiemposProgramados: { ...formData.tiemposProgramados, colacion: { horaInicio, horaFin } }
-      });
-    }
-    setShowActivitySelector(false);
+  const formatTime12h = (time24) => {
+    const [h, m] = time24.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
   };
 
-  const renderFranja = (franja, indice) => {
-    const actividades = obtenerActividadesTimeline();
-    const actividadEnFranja = actividades.find(act => {
-      const inicioAct = horaAIndice(act.horaInicio);
-      const finAct = horaAIndice(act.horaFin);
-      return indice >= inicioAct && indice < finAct;
+  const calculateDuration = () => {
+    const start = timeToMinutes(startTime);
+    const end = timeToMinutes(endTime);
+    const diff = end - start;
+    const hours = Math.floor(diff / 60);
+    const minutes = diff % 60;
+    return `${hours}h ${minutes}m`;
+  };
+
+  const isOverlapping = () => {
+    const start = timeToMinutes(startTime);
+    const end = timeToMinutes(endTime);
+    
+    return existingSlots.some(slot => {
+      const slotStart = timeToMinutes(slot.start);
+      const slotEnd = timeToMinutes(slot.end);
+      return start < slotEnd && end > slotStart;
     });
+  };
 
-    const enSeleccion = isDragging && dragStart !== null && dragEnd !== null && 
-      indice >= Math.min(dragStart, dragEnd) && indice <= Math.max(dragStart, dragEnd);
-    
-    // Calcular si es la franja del medio (para mostrar texto)
-    const esFranjaMedia = actividadEnFranja ? (() => {
-      const inicioAct = horaAIndice(actividadEnFranja.horaInicio);
-      const finAct = horaAIndice(actividadEnFranja.horaFin);
-      const totalFranjas = finAct - inicioAct;
-      const franjaMedio = inicioAct + Math.floor(totalFranjas / 2);
-      return indice === franjaMedio;
-    })() : false;
-    
-    const esHoraEnPunto = franja.minuto === 0;
-
-    return (
-      <div key={indice} className={`flex items-stretch group ${esHoraEnPunto ? 'border-b-2 border-slate-300/50' : 'border-b border-slate-200/30'}`} data-indice={indice}>
-        {/* Hora label - más compacto */}
-        <div className={`w-16 flex-shrink-0 flex items-center justify-center transition-all ${esHoraEnPunto ? 'bg-slate-900 text-white' : 'bg-slate-800 text-slate-300'}`}>
-          <span className={`block ${esHoraEnPunto ? 'text-xs font-bold' : 'text-[10px] font-medium'}`}>{franja.label}</span>
-        </div>
-
-        {/* Franja - altura reducida a 40px */}
-        <div
-          className={`flex-1 h-10 relative cursor-pointer transition-all duration-150 active:scale-[0.98] ${
-            actividadEnFranja ? `bg-gradient-to-r ${actividadEnFranja.gradient}` : 'bg-white active:bg-slate-100'
-          } ${enSeleccion ? 'ring-2 ring-inset ring-blue-500 bg-blue-100' : ''} ${!actividadEnFranja && 'border-r border-slate-100'}`}
-          style={{ 
-            boxShadow: actividadEnFranja ? 'inset 0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            touchAction: 'none'
-          }}
-          onMouseDown={() => handleDragStart(indice)}
-          onMouseEnter={() => handleDragMove(indice)}
-          onMouseUp={handleDragEnd}
-          onTouchStart={(e) => { 
-            e.preventDefault(); 
-            handleDragStart(indice); 
-          }}
-          onTouchMove={(e) => {
-            e.preventDefault();
-            const touch = e.touches[0];
-            const element = document.elementFromPoint(touch.clientX, touch.clientY);
-            if (element && element.closest('[data-indice]')) {
-              const indiceNuevo = parseInt(element.closest('[data-indice]').dataset.indice);
-              if (!isNaN(indiceNuevo)) handleDragMove(indiceNuevo);
-            }
-          }}
-          onTouchEnd={(e) => { 
-            e.preventDefault(); 
-            handleDragEnd(); 
-          }}
-        >
-          {/* Nombre de actividad - mostrar en franja central */}
-          {esFranjaMedia && actividadEnFranja && (
-            <div className="absolute inset-0 flex items-center justify-center px-2">
-              <div className="flex items-center gap-1.5 max-w-full">
-                <span className="text-base flex-shrink-0 drop-shadow-md">{actividadEnFranja.icon}</span>
-                <span className="text-xs font-bold text-white/90 truncate drop-shadow-lg" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}>
-                  {actividadEnFranja.nombre}
-                </span>
-              </div>
-            </div>
-          )}
-          
-          {/* Indicador táctil */}
-          {!actividadEnFranja && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-1 h-4 bg-slate-200 rounded-full opacity-30"></div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+  const handleConfirm = () => {
+    if (startTime && endTime && timeToMinutes(startTime) < timeToMinutes(endTime)) {
+      onConfirm(startTime, endTime);
+      onClose();
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 -m-6 p-6 space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm flex-shrink-0">
-              <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6 rounded-t-3xl sm:rounded-t-2xl">
+          {/* Barra de arrastre en móvil */}
+          <div className="sm:hidden w-12 h-1.5 bg-white/30 rounded-full mx-auto mb-3"></div>
+          
+          <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl md:text-2xl font-bold text-white">Actividades</h1>
-                <span className="px-2.5 py-1 bg-white/20 text-white text-xs font-semibold rounded-lg backdrop-blur-sm">
-                  Paso 2/2
-                </span>
-              </div>
-              <p className="text-slate-300 text-xs md:text-sm mt-1">
-                👆 Toca y arrastra para seleccionar horario
-              </p>
+              <h2 className="text-xl sm:text-2xl font-bold">{title || "Seleccionar Horario"}</h2>
+              <p className="text-indigo-100 text-xs sm:text-sm mt-1">Arrastra o toca para establecer</p>
             </div>
-          </div>
-        </div>
-        
-        {/* Indicador de arrastre activo */}
-        {isDragging && (
-          <div className="bg-blue-500 px-4 py-2.5 flex items-center gap-2 border-t-2 border-blue-400">
-            <svg className="w-5 h-5 text-white animate-pulse flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
-            </svg>
-            <span className="text-white text-sm font-semibold">
-              Seleccionando... Suelta para confirmar
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Timeline */}
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-slate-900 rounded-lg">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            <button
+              onClick={onClose}
+              className="w-10 h-10 sm:w-10 sm:h-10 rounded-full bg-white/20 hover:bg-white/30 active:bg-white/40 flex items-center justify-center transition-colors flex-shrink-0"
+            >
+              <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+          {/* Información de tiempo seleccionado */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="bg-green-50 border-2 border-green-200 rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-[10px] sm:text-xs font-semibold text-green-700 mb-1">INICIO</div>
+              <div className="text-lg sm:text-2xl font-bold text-green-900 leading-tight">{formatTime12h(startTime)}</div>
             </div>
-            <div>
-              <h2 className="font-bold text-slate-900 text-lg">Timeline Diario</h2>
-              <p className="text-sm text-slate-500">Desliza para seleccionar • 24 franjas</p>
+            <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1">DURACIÓN</div>
+              <div className="text-lg sm:text-2xl font-bold text-purple-900 leading-tight">{calculateDuration()}</div>
+            </div>
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4 text-center">
+              <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1">FIN</div>
+              <div className="text-lg sm:text-2xl font-bold text-blue-900 leading-tight">{formatTime12h(endTime)}</div>
             </div>
           </div>
-        </div>
 
-        {/* Timeline completo visible - SIN scroll */}
-        <div className="w-full">
-          <div className="flex flex-col">
-            {franjas.map((franja, idx) => renderFranja(franja, idx))}
-          </div>
-        </div>
-
-        <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-1 h-4 bg-slate-400 rounded-full"></div>
-            <h3 className="font-semibold text-slate-700 text-sm">Tipos de Actividad</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {Object.entries(COLORS).map(([key, config]) => (
-              <div key={key} className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
-                <div className={`w-10 h-10 bg-gradient-to-br ${config.gradient} rounded-lg flex items-center justify-center text-lg shadow-sm`}>
-                  {config.icon}
-                </div>
-                <div className="text-xs">
-                  <div className="font-semibold text-slate-900">{config.label}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Actividades Registradas */}
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-slate-900 rounded-lg">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          {isOverlapping() && (
+            <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
+              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
               </svg>
-            </div>
-            <div>
-              <h2 className="font-bold text-slate-900 text-lg">Detalle de Actividades</h2>
-              <p className="text-sm text-slate-500">Completa las descripciones</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-6 space-y-4">
-          {formData.actividadesEfectivas?.map((act, idx) => {
-            const config = COLORS.efectiva;
-            return (
-              <div key={idx} style={{ backgroundColor: config.bg, borderColor: config.border }} className="border-2 rounded-xl p-4 hover:shadow-md transition-shadow">
-                <div className="flex items-start gap-3 mb-3">
-                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg flex-shrink-0 shadow-sm`}>
-                    <span className="text-white text-xl">{config.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-1">
-                      <span style={{ color: config.text }} className="font-bold text-sm">Actividad Productiva #{idx + 1}</span>
-                      <span style={{ color: config.text, borderColor: config.border }} className="text-xs font-semibold bg-white px-3 py-1 rounded-lg border">
-                        {act.horaInicio} - {act.horaFin}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Ej: Excavación, Carga de material, Transporte..."
-                  value={act.actividad}
-                  onChange={(e) => {
-                    const nuevas = [...formData.actividadesEfectivas];
-                    nuevas[idx].actividad = e.target.value;
-                    setFormData({ ...formData, actividadesEfectivas: nuevas });
-                  }}
-                  style={{ borderColor: config.border }}
-                  className="w-full px-4 py-3 border-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                />
-              </div>
-            );
-          })}
-
-          {formData.tiemposNoEfectivos?.map((tiempo, idx) => {
-            const config = COLORS.noefectiva;
-            return (
-              <div key={idx} style={{ backgroundColor: config.bg, borderColor: config.border }} className="border-2 rounded-xl p-4 hover:shadow-md transition-shadow">
-                <div className="flex items-start gap-3 mb-3">
-                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg flex-shrink-0 shadow-sm`}>
-                    <span className="text-white text-xl">{config.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-1">
-                      <span style={{ color: config.text }} className="font-bold text-sm">Tiempo No Productivo #{idx + 1}</span>
-                      <span style={{ color: config.text, borderColor: config.border }} className="text-xs font-semibold bg-white px-3 py-1 rounded-lg border">
-                        {tiempo.horaInicio} - {tiempo.horaFin}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Ej: Falla mecánica, Espera de camión, Clima adverso..."
-                  value={tiempo.razon}
-                  onChange={(e) => {
-                    const nuevos = [...formData.tiemposNoEfectivos];
-                    nuevos[idx].razon = e.target.value;
-                    setFormData({ ...formData, tiemposNoEfectivos: nuevos });
-                  }}
-                  style={{ borderColor: config.border }}
-                  className="w-full px-4 py-3 border-2 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
-            );
-          })}
-
-          {formData.tiemposProgramados?.charlaSegurid?.horaInicio && (
-            <div style={{ backgroundColor: COLORS.charla.bg, borderColor: COLORS.charla.border }} className="border-2 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 bg-gradient-to-br ${COLORS.charla.gradient} rounded-lg shadow-sm`}>
-                  <span className="text-white text-xl">{COLORS.charla.icon}</span>
-                </div>
-                <div className="flex-1">
-                  <span style={{ color: COLORS.charla.text }} className="font-bold text-sm block">Charla de Seguridad</span>
-                  <span className="text-xs text-slate-600">
-                    {formData.tiemposProgramados.charlaSegurid.horaInicio} - {formData.tiemposProgramados.charlaSegurid.horaFin}
-                  </span>
-                </div>
+              <div className="flex-1">
+                <div className="font-bold text-orange-900 text-sm sm:text-base">⚠️ Horario Superpuesto</div>
+                <div className="text-xs sm:text-sm text-orange-700 mt-0.5">Este horario se superpone con otra actividad</div>
               </div>
             </div>
           )}
 
-          {formData.tiemposProgramados?.inspeccionEquipo?.horaInicio && (
-            <div style={{ backgroundColor: COLORS.inspeccion.bg, borderColor: COLORS.inspeccion.border }} className="border-2 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 bg-gradient-to-br ${COLORS.inspeccion.gradient} rounded-lg shadow-sm`}>
-                  <span className="text-white text-xl">{COLORS.inspeccion.icon}</span>
-                </div>
-                <div className="flex-1">
-                  <span style={{ color: COLORS.inspeccion.text }} className="font-bold text-sm block">Inspección de Equipo</span>
-                  <span className="text-xs text-slate-600">
-                    {formData.tiemposProgramados.inspeccionEquipo.horaInicio} - {formData.tiemposProgramados.inspeccionEquipo.horaFin}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {formData.tiemposProgramados?.colacion?.horaInicio && (
-            <div style={{ backgroundColor: COLORS.colacion.bg, borderColor: COLORS.colacion.border }} className="border-2 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 bg-gradient-to-br ${COLORS.colacion.gradient} rounded-lg shadow-sm`}>
-                  <span className="text-white text-xl">{COLORS.colacion.icon}</span>
-                </div>
-                <div className="flex-1">
-                  <span style={{ color: COLORS.colacion.text }} className="font-bold text-sm block">Colación</span>
-                  <span className="text-xs text-slate-600">
-                    {formData.tiemposProgramados.colacion.horaInicio} - {formData.tiemposProgramados.colacion.horaFin}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {formData.actividadesEfectivas?.length === 0 && formData.tiemposNoEfectivos?.length === 0 && 
-           !formData.tiemposProgramados?.charlaSegurid?.horaInicio && !formData.tiemposProgramados?.inspeccionEquipo?.horaInicio &&
-           !formData.tiemposProgramados?.colacion?.horaInicio && (
-            <div className="text-center py-16 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
-              <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-10 h-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-              </div>
-              <p className="text-slate-600 font-semibold text-lg mb-2">Sin actividades registradas</p>
-              <p className="text-sm text-slate-400">Desliza sobre el timeline para comenzar</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Modal Conflicto */}
-      {showConflictModal && conflictInfo && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200">
-            <div className="bg-gradient-to-r from-orange-500 to-red-500 px-6 py-5 rounded-t-2xl">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-white/20 rounded-lg">
-                  <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-white">Conflicto de Horarios</h3>
-                  <p className="text-orange-100 text-sm mt-0.5">Superposición detectada</p>
-                </div>
-              </div>
+          {/* Timeline interactivo */}
+          <div className="space-y-2 sm:space-y-3">
+            <div className="flex items-center justify-between text-xs sm:text-sm font-semibold text-slate-700 px-1">
+              <span>7 AM</span>
+              <span className="text-slate-500 text-[10px] sm:text-xs">Toca y arrastra</span>
+              <span>7 PM</span>
             </div>
             
-            <div className="p-6 space-y-4">
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <p className="font-semibold text-orange-900 mb-1 text-sm">Nuevo rango seleccionado:</p>
-                <p className="text-xl font-bold text-orange-700">{conflictInfo.horaInicio} → {conflictInfo.horaFin}</p>
-              </div>
+            <div
+              className="relative h-32 sm:h-24 bg-slate-100 rounded-xl cursor-pointer select-none touch-none"
+              onClick={handleTimelineClick}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onTouchMove={(e) => {
+                if (isDragging) {
+                  e.preventDefault();
+                  const touch = e.touches[0];
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
+                  const percentage = x / rect.width;
+                  
+                  const minMinutes = 7 * 60;
+                  const maxMinutes = 19 * 60;
+                  const totalMinutes = maxMinutes - minMinutes;
+                  
+                  let newMinutes = minMinutes + (percentage * totalMinutes);
+                  newMinutes = roundToNearest15(newMinutes);
+                  newMinutes = Math.max(minMinutes, Math.min(maxMinutes, newMinutes));
+                  
+                  const newTime = minutesToTime(newMinutes);
+                  const startMinutes = timeToMinutes(startTime);
+                  const endMinutes = timeToMinutes(endTime);
 
-              <div>
-                <p className="font-semibold text-slate-800 mb-2 text-sm">Actividades afectadas:</p>
-                <div className="space-y-2">
-                  {conflictInfo.conflictos.map((conflicto, idx) => (
-                    <div key={idx} style={{ backgroundColor: conflicto.bg, borderColor: conflicto.border }} className="border-2 rounded-lg p-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{conflicto.icon}</span>
-                        <div className="flex-1">
-                          <p className="font-bold text-sm text-slate-900">{conflicto.nombre}</p>
-                          <p className="text-xs text-slate-600">{conflicto.horaInicio} - {conflicto.horaFin}</p>
-                        </div>
+                  if (dragType === 'start') {
+                    if (newMinutes <= endMinutes) {
+                      setStartTime(newTime);
+                    }
+                  } else if (dragType === 'end') {
+                    if (newMinutes >= startMinutes) {
+                      setEndTime(newTime);
+                    }
+                  } else if (dragType === 'move') {
+                    const duration = endMinutes - startMinutes;
+                    const newStart = newMinutes;
+                    const newEnd = newStart + duration;
+                    
+                    if (newEnd <= maxMinutes && newStart >= minMinutes) {
+                      setStartTime(minutesToTime(newStart));
+                      setEndTime(minutesToTime(newEnd));
+                    }
+                  }
+                }
+              }}
+              onTouchEnd={handleMouseUp}
+            >
+              {/* Marcadores de hora */}
+              <div className="absolute inset-0 flex">
+                {[7, 9, 11, 13, 15, 17, 19].map((hour) => {
+                  const pos = ((hour - 7) / 12) * 100;
+                  return (
+                    <div
+                      key={hour}
+                      className="absolute top-0 bottom-0 w-px bg-slate-300"
+                      style={{ left: `${pos}%` }}
+                    >
+                      <div className="absolute -top-7 sm:-top-6 left-1/2 -translate-x-1/2 text-[10px] sm:text-xs text-slate-500 font-medium">
+                        {hour > 12 ? hour - 12 : hour}{hour >= 12 ? 'p' : 'a'}
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-900">
-                  <strong>¿Continuar?</strong> La nueva actividad reemplazará o recortará las actividades existentes.
-                </p>
-              </div>
+              {/* Slots existentes (en gris) */}
+              {existingSlots.map((slot, idx) => {
+                const slotStart = getPosition(slot.start);
+                const slotEnd = getPosition(slot.end);
+                const slotWidth = slotEnd - slotStart;
+                
+                return (
+                  <div
+                    key={idx}
+                    className="absolute top-0 bottom-0 bg-slate-300/60 border-2 border-slate-400 rounded"
+                    style={{
+                      left: `${slotStart}%`,
+                      width: `${slotWidth}%`
+                    }}
+                  >
+                    <div className="absolute inset-0 flex items-center justify-center px-1">
+                      <span className="text-[9px] sm:text-xs font-semibold text-slate-600 truncate">
+                        {slot.label || 'Ocupado'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
 
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowConflictModal(false)} className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-all">
-                  Cancelar
-                </button>
-                <button onClick={confirmarReemplazo} className="flex-1 px-4 py-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-xl transition-all shadow-lg">
-                  Sí, reemplazar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Selector */}
-      {showActivitySelector && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200">
-            <div className="bg-gradient-to-r from-slate-900 to-slate-800 px-6 py-5 rounded-t-2xl">
-              <h3 className="text-xl font-bold text-white">Tipo de Actividad</h3>
-              <p className="text-slate-300 text-sm mt-1">Selecciona una opción</p>
-            </div>
-            
-            <div className="p-5 space-y-3">
-              {[
-                { tipo: 'efectiva', config: COLORS.efectiva, titulo: 'Actividad Productiva', desc: 'Trabajo efectivo realizado' },
-                { tipo: 'noefectivo', config: COLORS.noefectiva, titulo: 'Tiempo No Productivo', desc: 'Detención, falla, espera' },
-                { tipo: 'charla', config: COLORS.charla, titulo: 'Charla de Seguridad', desc: 'Capacitación diaria' },
-                { tipo: 'inspeccion', config: COLORS.inspeccion, titulo: 'Inspección de Equipo', desc: 'Revisión pre-operacional' },
-                { tipo: 'colacion', config: COLORS.colacion, titulo: 'Colación', desc: 'Tiempo de alimentación' }
-              ].map(({ tipo, config, titulo, desc }) => (
-                <button
-                  key={tipo}
-                  onClick={() => agregarActividad(tipo)}
-                  className="w-full flex items-center gap-4 p-4 bg-gradient-to-r hover:shadow-lg border-2 rounded-xl transition-all group"
-                  style={{ 
-                    backgroundImage: `linear-gradient(to right, ${config.bg}, ${config.light})`,
-                    borderColor: config.border
+              {/* Rango seleccionado */}
+              <div
+                className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded cursor-move shadow-lg transition-all"
+                style={{
+                  left: `${startPos}%`,
+                  width: `${width}%`
+                }}
+                onMouseDown={(e) => handleMouseDown(e, 'move')}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  setIsDragging(true);
+                  setDragType('move');
+                }}
+              >
+                {/* Handle de inicio */}
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-6 sm:w-3 bg-green-500 cursor-ew-resize rounded-l hover:bg-green-600 active:bg-green-700 transition-colors flex items-center justify-center"
+                  onMouseDown={(e) => handleMouseDown(e, 'start')}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    setIsDragging(true);
+                    setDragType('start');
                   }}
                 >
-                  <div className={`p-3 bg-gradient-to-br ${config.gradient} rounded-lg shadow-md group-hover:scale-110 transition-transform`}>
-                    <span className="text-white text-2xl">{config.icon}</span>
-                  </div>
-                  <div className="text-left flex-1">
-                    <div className="font-bold text-slate-900">{titulo}</div>
-                    <div className="text-xs text-slate-600">{desc}</div>
-                  </div>
-                </button>
-              ))}
+                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white rounded"></div>
+                </div>
 
-              <button onClick={() => setShowActivitySelector(false)} className="w-full px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-all mt-2">
-                Cancelar
-              </button>
+                {/* Contenido del rango */}
+                <div className="absolute inset-0 flex items-center justify-center px-4">
+                  <span className="text-white font-bold text-xs sm:text-sm truncate">
+                    {formatTime12h(startTime)} - {formatTime12h(endTime)}
+                  </span>
+                </div>
+
+                {/* Handle de fin */}
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-blue-500 cursor-ew-resize rounded-r hover:bg-blue-600 active:bg-blue-700 transition-colors flex items-center justify-center"
+                  onMouseDown={(e) => handleMouseDown(e, 'end')}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    setIsDragging(true);
+                    setDragType('end');
+                  }}
+                >
+                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white rounded"></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-center text-[10px] sm:text-xs text-slate-500 px-2">
+              💡 <span className="hidden sm:inline">Arrastra los extremos para ajustar • Arrastra el centro para mover • Haz clic para establecer</span>
+              <span className="sm:hidden">Toca los extremos verdes/azules para ajustar • Toca el centro para mover</span>
+            </div>
+          </div>
+
+          {/* Inputs manuales como alternativa */}
+          <div className="border-t pt-3 sm:pt-4">
+            <div className="text-xs sm:text-sm font-semibold text-slate-700 mb-2 sm:mb-3">O ingresa manualmente:</div>
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Inicio</label>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  min="07:00"
+                  max="19:00"
+                  step="900"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Fin</label>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  min="07:00"
+                  max="19:00"
+                  step="900"
+                />
+              </div>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Botones Navegación */}
-      <div className="flex gap-4">
-        <button onClick={onBack} className="px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-all border-2 border-slate-200 shadow-sm">
-          ← Volver
-        </button>
-        <button
-          onClick={onSubmit}
-          disabled={isLoading}
-          className="flex-1 px-6 py-4 bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
-        >
-          {isLoading ? 'Guardando...' : '✓ Guardar Reporte'}
-        </button>
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-slate-50 p-4 sm:p-6 rounded-b-3xl sm:rounded-b-2xl border-t flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4">
+          <button
+            onClick={onClose}
+            className="order-2 sm:order-1 px-6 py-4 sm:py-3 bg-slate-200 active:bg-slate-300 text-slate-700 font-semibold rounded-xl sm:rounded-lg transition-colors text-base"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime)}
+            className="order-1 sm:order-2 px-8 py-4 sm:py-3 bg-gradient-to-r from-indigo-600 to-purple-600 active:from-indigo-700 active:to-purple-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-xl sm:rounded-lg transition-all shadow-lg disabled:shadow-none text-base"
+          >
+            ✓ Confirmar Horario
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
+  
+  // ✅ NUEVO: Estado para errores de validación en tiempo real
+  const [horariosErrors, setHorariosErrors] = useState([]);
+  const [totalHorasError, setTotalHorasError] = useState('');
+  
+  // Estados para el modal
+  const [timelineModal, setTimelineModal] = useState({
+    isOpen: false,
+    type: null, // 'actividadEfectiva', 'tiempoNoEfectivo', 'tiempoProgramado', 'mantencion'
+    index: null,
+    title: '',
+    initialStart: '',
+    initialEnd: ''
+  });
+
+  // ✅ Función auxiliar para ajustar minutos a intervalos de 15 (0, 15, 30, 45)
+  const ajustarMinutos = (timeValue) => {
+    if (!timeValue || !timeValue.includes(':')) return timeValue;
+    
+    const [horas, minutos] = timeValue.split(':').map(Number);
+    
+    // Redondear minutos al intervalo de 15 más cercano
+    const minutosValidos = [0, 15, 30, 45];
+    let minutoAjustado = minutosValidos[0];
+    let menorDiferencia = Math.abs(minutos - minutosValidos[0]);
+    
+    for (let i = 1; i < minutosValidos.length; i++) {
+      const diferencia = Math.abs(minutos - minutosValidos[i]);
+      if (diferencia < menorDiferencia) {
+        menorDiferencia = diferencia;
+        minutoAjustado = minutosValidos[i];
+      }
+    }
+    
+    // Si el minuto ingresado ya es válido, no hacer nada
+    if (minutosValidos.includes(minutos)) {
+      return timeValue;
+    }
+    
+    // Devolver la hora ajustada
+    return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
+  };
+
+  // Función para abrir el modal de timeline
+  const openTimelineModal = (type, index, title, initialStart, initialEnd) => {
+    setTimelineModal({
+      isOpen: true,
+      type,
+      index,
+      title,
+      initialStart: initialStart || '07:00',
+      initialEnd: initialEnd || '07:00'
+    });
+  };
+
+  // Función para cerrar el modal
+  const closeTimelineModal = () => {
+    setTimelineModal({
+      isOpen: false,
+      type: null,
+      index: null,
+      title: '',
+      initialStart: '',
+      initialEnd: ''
+    });
+  };
+
+  // Función para obtener todos los slots existentes (para mostrar en el timeline)
+  const getExistingSlots = (excludeType, excludeIndex) => {
+    const slots = [];
+    
+    // Actividades efectivas
+    formData.actividadesEfectivas.forEach((act, idx) => {
+      if (act.horaInicio && act.horaFin) {
+        if (excludeType !== 'actividadEfectiva' || excludeIndex !== idx) {
+          slots.push({
+            start: act.horaInicio,
+            end: act.horaFin,
+            label: `Actividad ${idx + 1}`
+          });
+        }
+      }
+    });
+    
+    // Tiempos no efectivos
+    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
+      if (tiempo.horaInicio && tiempo.horaFin) {
+        if (excludeType !== 'tiempoNoEfectivo' || excludeIndex !== idx) {
+          slots.push({
+            start: tiempo.horaInicio,
+            end: tiempo.horaFin,
+            label: `No Efectivo ${idx + 1}`
+          });
+        }
+      }
+    });
+    
+    // Tiempos programados
+    const tiemposProg = formData.tiemposProgramados;
+    if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
+      if (excludeType !== 'charlaSegurid') {
+        slots.push({
+          start: tiemposProg.charlaSegurid.horaInicio,
+          end: tiemposProg.charlaSegurid.horaFin,
+          label: 'Charla Seguridad'
+        });
+      }
+    }
+    if (tiemposProg.inspeccionEquipo.horaInicio && tiemposProg.inspeccionEquipo.horaFin) {
+      if (excludeType !== 'inspeccionEquipo') {
+        slots.push({
+          start: tiemposProg.inspeccionEquipo.horaInicio,
+          end: tiemposProg.inspeccionEquipo.horaFin,
+          label: 'Inspección Equipo'
+        });
+      }
+    }
+    if (tiemposProg.colacion.horaInicio && tiemposProg.colacion.horaFin) {
+      if (excludeType !== 'colacion') {
+        slots.push({
+          start: tiemposProg.colacion.horaInicio,
+          end: tiemposProg.colacion.horaFin,
+          label: 'Colación'
+        });
+      }
+    }
+    
+    // Mantenciones
+    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
+      formData.mantenciones.forEach((mant, idx) => {
+        if (mant.horaInicio && mant.horaFin) {
+          if (excludeType !== 'mantencion' || excludeIndex !== idx) {
+            slots.push({
+              start: mant.horaInicio,
+              end: mant.horaFin,
+              label: `Mantención ${idx + 1}`
+            });
+          }
+        }
+      });
+    }
+    
+    return slots;
+  };
+
+  // Función para confirmar el horario desde el modal
+  const handleTimelineConfirm = (startTime, endTime) => {
+    const { type, index } = timelineModal;
+    
+    if (type === 'actividadEfectiva') {
+      updateActividad(index, 'horaInicio', startTime);
+      updateActividad(index, 'horaFin', endTime);
+    } else if (type === 'tiempoNoEfectivo') {
+      updateTiempoNoEfectivo(index, 'horaInicio', startTime);
+      updateTiempoNoEfectivo(index, 'horaFin', endTime);
+    } else if (type === 'charlaSegurid') {
+      updateTiempoProgramado('charlaSegurid', 'horaInicio', startTime);
+      updateTiempoProgramado('charlaSegurid', 'horaFin', endTime);
+    } else if (type === 'inspeccionEquipo') {
+      updateTiempoProgramado('inspeccionEquipo', 'horaInicio', startTime);
+      updateTiempoProgramado('inspeccionEquipo', 'horaFin', endTime);
+    } else if (type === 'colacion') {
+      updateTiempoProgramado('colacion', 'horaInicio', startTime);
+      updateTiempoProgramado('colacion', 'horaFin', endTime);
+    } else if (type === 'mantencion') {
+      updateMantencion(index, 'horaInicio', startTime);
+      updateMantencion(index, 'horaFin', endTime);
+    }
+  };
+
+  // ✅ NUEVO: Validar horarios en tiempo real
+  useEffect(() => {
+    const errors = [];
+    
+    // Recopilar TODOS los horarios de todas las secciones
+    const todosLosHorarios = [];
+    
+    // Agregar actividades efectivas
+    formData.actividadesEfectivas.forEach((act, idx) => {
+      if (act.horaInicio && act.horaFin) {
+        todosLosHorarios.push({
+          inicio: act.horaInicio,
+          fin: act.horaFin,
+          tipo: 'actividadEfectiva',
+          indice: idx,
+          nombre: `Actividad Efectiva ${idx + 1}`
+        });
+      }
+    });
+    
+    // Agregar tiempos no efectivos
+    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
+      if (tiempo.horaInicio && tiempo.horaFin) {
+        todosLosHorarios.push({
+          inicio: tiempo.horaInicio,
+          fin: tiempo.horaFin,
+          tipo: 'tiempoNoEfectivo',
+          indice: idx,
+          nombre: `Tiempo No Efectivo ${idx + 1}`
+        });
+      }
+    });
+    
+    // Agregar tiempos programados
+    const tiemposProg = formData.tiemposProgramados;
+    if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
+      todosLosHorarios.push({
+        inicio: tiemposProg.charlaSegurid.horaInicio,
+        fin: tiemposProg.charlaSegurid.horaFin,
+        tipo: 'tiempoProgramado',
+        nombre: 'Charla de Seguridad'
+      });
+    }
+    if (tiemposProg.inspeccionEquipo.horaInicio && tiemposProg.inspeccionEquipo.horaFin) {
+      todosLosHorarios.push({
+        inicio: tiemposProg.inspeccionEquipo.horaInicio,
+        fin: tiemposProg.inspeccionEquipo.horaFin,
+        tipo: 'tiempoProgramado',
+        nombre: 'Inspección de Equipo'
+      });
+    }
+    if (tiemposProg.colacion.horaInicio && tiemposProg.colacion.horaFin) {
+      todosLosHorarios.push({
+        inicio: tiemposProg.colacion.horaInicio,
+        fin: tiemposProg.colacion.horaFin,
+        tipo: 'tiempoProgramado',
+        nombre: 'Colación'
+      });
+    }
+    
+    // Agregar mantenciones si están activas
+    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
+      formData.mantenciones.forEach((mant, idx) => {
+        if (mant.horaInicio && mant.horaFin) {
+          todosLosHorarios.push({
+            inicio: mant.horaInicio,
+            fin: mant.horaFin,
+            tipo: 'mantencion',
+            indice: idx,
+            nombre: `Mantención ${idx + 1}`
+          });
+        }
+      });
+    }
+    
+    // Validar cada actividad efectiva
+    formData.actividadesEfectivas.forEach((act, idx) => {
+      const actErrors = { index: idx, horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
+      
+      if (act.horaInicio) {
+        // Validar hora inicial: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
+        if (act.horaInicio < "07:00" || act.horaInicio > "19:00") {
+          actErrors.horaInicio = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
+        }
+      }
+      
+      if (act.horaFin) {
+        // Validar hora final: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
+        if (act.horaFin < "07:00" || act.horaFin > "19:00") {
+          actErrors.horaFin = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
+        }
+      }
+      
+      // Validar que hora inicial < hora final
+      if (act.horaInicio && act.horaFin && act.horaInicio >= act.horaFin) {
+        actErrors.duracion = 'La hora inicial debe ser menor que la final';
+      }
+      
+      // ✅ VALIDACIÓN GLOBAL: Verificar superposición con TODOS los horarios
+      if (act.horaInicio && act.horaFin) {
+        const inicioActual = act.horaInicio;
+        const finActual = act.horaFin;
+        
+        todosLosHorarios.forEach((otroHorario) => {
+          // No comparar consigo mismo
+          if (otroHorario.tipo === 'actividadEfectiva' && otroHorario.indice === idx) {
+            return;
+          }
+          
+          // Verificar si se superponen
+          if (inicioActual < otroHorario.fin && finActual > otroHorario.inicio) {
+            actErrors.solapamiento = `Se superpone con: ${otroHorario.nombre}`;
+          }
+        });
+      }
+      
+      if (actErrors.horaInicio || actErrors.horaFin || actErrors.duracion || actErrors.solapamiento) {
+        errors.push(actErrors);
+      }
+    });
+    
+    setHorariosErrors(errors);
+  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.tiemposProgramados, formData.mantenciones, formData.tieneMantenciones]);
+
+  // Funciones para manejar actividades efectivas
+  const addActividad = () => {
+    // Obtener la última actividad
+    const ultimaActividad = formData.actividadesEfectivas[formData.actividadesEfectivas.length - 1];
+    // La hora inicial de la nueva actividad es la hora final de la anterior
+    const horaInicialNueva = ultimaActividad?.horaFin || '';
+    
+    setFormData({
+      ...formData,
+      actividadesEfectivas: [
+        ...formData.actividadesEfectivas, 
+        { actividad: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
+    });
+  };
+
+  const removeActividad = (index) => {
+    const newActividades = formData.actividadesEfectivas.filter((_, i) => i !== index);
+    setFormData({ ...formData, actividadesEfectivas: newActividades });
+  };
+
+  const updateActividad = (index, field, value) => {
+    const newActividades = [...formData.actividadesEfectivas];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
+    newActividades[index][field] = value;
+    setFormData({ ...formData, actividadesEfectivas: newActividades });
+  };
+
+  // Funciones para manejar tiempos no efectivos
+  const addTiempoNoEfectivo = () => {
+    // Obtener el último tiempo no efectivo
+    const ultimoTiempo = formData.tiemposNoEfectivos[formData.tiemposNoEfectivos.length - 1];
+    // La hora inicial del nuevo tiempo es la hora final del anterior
+    const horaInicialNueva = ultimoTiempo?.horaFin || '';
+    
+    setFormData({
+      ...formData,
+      tiemposNoEfectivos: [
+        ...formData.tiemposNoEfectivos, 
+        { motivo: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
+    });
+  };
+
+  const removeTiempoNoEfectivo = (index) => {
+    const newTiempos = formData.tiemposNoEfectivos.filter((_, i) => i !== index);
+    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+  };
+
+  const updateTiempoNoEfectivo = (index, field, value) => {
+    const newTiempos = [...formData.tiemposNoEfectivos];
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
+    newTiempos[index][field] = value;
+    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+  };
+
+  // Funciones para manejar tiempos programados
+  const updateTiempoProgramado = (tipo, field, value) => {
+    // Si es un campo de hora, ajustar los minutos
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
+    setFormData({
+      ...formData,
+      tiemposProgramados: {
+        ...formData.tiemposProgramados,
+        [tipo]: {
+          ...formData.tiemposProgramados[tipo],
+          [field]: value
+        }
+      }
+    });
+  };
+
+  // Funciones para manejar mantenciones
+  const addMantencion = () => {
+    const ultimaMantencion = formData.mantenciones[formData.mantenciones.length - 1];
+    const horaInicialNueva = ultimaMantencion?.horaFin || '';
+    
+    setFormData({
+      ...formData,
+      mantenciones: [
+        ...formData.mantenciones,
+        { tipo: '', horaInicio: horaInicialNueva, horaFin: '' }
+      ]
+    });
+  };
+
+  const removeMantencion = (index) => {
+    const newMantenciones = formData.mantenciones.filter((_, i) => i !== index);
+    setFormData({ ...formData, mantenciones: newMantenciones });
+  };
+
+  const updateMantencion = (index, field, value) => {
+    const newMantenciones = [...formData.mantenciones];
+    if ((field === 'horaInicio' || field === 'horaFin') && value) {
+      value = ajustarMinutos(value);
+    }
+    newMantenciones[index][field] = value;
+    setFormData({ ...formData, mantenciones: newMantenciones });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    // Validaciones antes de enviar...
+    let errores = [];
+    
+    // 1. Validar que cada actividad tenga todos los campos
+    formData.actividadesEfectivas.forEach((act, idx) => {
+      if (!act.actividad || !act.horaInicio || !act.horaFin) {
+        errores.push(`Actividad Efectiva ${idx + 1}: Todos los campos son obligatorios`);
+      }
+    });
+    
+    // 2. Validar tiempos no efectivos
+    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
+      if (!tiempo.motivo || !tiempo.horaInicio || !tiempo.horaFin) {
+        errores.push(`Tiempo No Efectivo ${idx + 1}: Todos los campos son obligatorios`);
+      }
+    });
+    
+    // 3. Validar tiempos programados
+    const tp = formData.tiemposProgramados;
+    if (!tp.charlaSegurid.horaInicio || !tp.charlaSegurid.horaFin) {
+      errores.push('Charla de Seguridad: Debe tener hora de inicio y fin');
+    }
+    if (!tp.inspeccionEquipo.horaInicio || !tp.inspeccionEquipo.horaFin) {
+      errores.push('Inspección de Equipo: Debe tener hora de inicio y fin');
+    }
+    if (!tp.colacion.horaInicio || !tp.colacion.horaFin) {
+      errores.push('Colación: Debe tener hora de inicio y fin');
+    }
+    
+    // 4. Si hay mantenciones, validar
+    if (formData.tieneMantenciones) {
+      formData.mantenciones.forEach((mant, idx) => {
+        if (!mant.tipo || !mant.horaInicio || !mant.horaFin) {
+          errores.push(`Mantención ${idx + 1}: Todos los campos son obligatorios`);
+        }
+      });
+    }
+    
+    // 5. Validar que no haya errores de horarios
+    if (horariosErrors.length > 0) {
+      errores.push('Hay errores en los horarios. Por favor corrígelos antes de continuar.');
+    }
+    
+    if (errores.length > 0) {
+      alert('Por favor corrige los siguientes errores:\n\n' + errores.join('\n'));
+      return;
+    }
+    
+    onSubmit(e);
+  };
+
+  return (
+    <>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Header con máquina seleccionada */}
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6 rounded-xl shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold">Paso 2: Registro de Actividades</h2>
+              <p className="text-indigo-100 text-sm">Máquina: {selectedMachine?.name || 'No seleccionada'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* SECCIÓN 1: Actividades Efectivas */}
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-green-200">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">✅</span>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Actividades Efectivas</h3>
+            </div>
+            <button
+              type="button"
+              onClick={addActividad}
+              className="px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
+            >
+              + Agregar
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {formData.actividadesEfectivas.map((act, index) => {
+              const errors = horariosErrors.find(e => e.index === index) || { horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
+              const existingSlots = getExistingSlots('actividadEfectiva', index);
+              
+              return (
+                <ActivityCard
+                  key={index}
+                  index={index}
+                  data={act}
+                  onUpdate={updateActividad}
+                  onRemove={removeActividad}
+                  errors={errors}
+                  canRemove={formData.actividadesEfectivas.length > 1}
+                  color="green"
+                  labelActividad="Actividad"
+                  placeholder="Ej: Excavación, Carga, etc."
+                  onOpenTimeline={() => openTimelineModal(
+                    'actividadEfectiva',
+                    index,
+                    `Actividad Efectiva ${index + 1}`,
+                    act.horaInicio,
+                    act.horaFin
+                  )}
+                  existingSlots={existingSlots}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SECCIÓN 2: Tiempos No Efectivos */}
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-amber-200">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">⏸️</span>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Tiempos No Efectivos</h3>
+            </div>
+            <button
+              type="button"
+              onClick={addTiempoNoEfectivo}
+              className="px-3 sm:px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
+            >
+              + Agregar
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {formData.tiemposNoEfectivos.map((tiempo, index) => {
+              const existingSlots = getExistingSlots('tiempoNoEfectivo', index);
+              
+              return (
+                <ActivityCard
+                  key={index}
+                  index={index}
+                  data={tiempo}
+                  onUpdate={updateTiempoNoEfectivo}
+                  onRemove={removeTiempoNoEfectivo}
+                  errors={{}}
+                  canRemove={formData.tiemposNoEfectivos.length > 1}
+                  color="amber"
+                  labelActividad="Motivo"
+                  placeholder="Ej: Espera por operador, falla mecánica, etc."
+                  onOpenTimeline={() => openTimelineModal(
+                    'tiempoNoEfectivo',
+                    index,
+                    `Tiempo No Efectivo ${index + 1}`,
+                    tiempo.horaInicio,
+                    tiempo.horaFin
+                  )}
+                  existingSlots={existingSlots}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SECCIÓN 3: Tiempos Programados */}
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-blue-200">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-3xl">⏰</span>
+            <h3 className="text-lg sm:text-xl font-bold text-slate-900">Tiempos Programados</h3>
+          </div>
+
+          <div className="space-y-3">
+            <ProgrammedTimeCard
+              title="Charla de Seguridad"
+              icon="🦺"
+              horaInicio={formData.tiemposProgramados.charlaSegurid.horaInicio}
+              horaFin={formData.tiemposProgramados.charlaSegurid.horaFin}
+              onChangeInicio={(v) => updateTiempoProgramado('charlaSegurid', 'horaInicio', v)}
+              onChangeFin={(v) => updateTiempoProgramado('charlaSegurid', 'horaFin', v)}
+              onOpenTimeline={() => openTimelineModal(
+                'charlaSegurid',
+                null,
+                'Charla de Seguridad',
+                formData.tiemposProgramados.charlaSegurid.horaInicio,
+                formData.tiemposProgramados.charlaSegurid.horaFin
+              )}
+              existingSlots={getExistingSlots('charlaSegurid')}
+            />
+            
+            <ProgrammedTimeCard
+              title="Inspección de Equipo"
+              icon="🔍"
+              horaInicio={formData.tiemposProgramados.inspeccionEquipo.horaInicio}
+              horaFin={formData.tiemposProgramados.inspeccionEquipo.horaFin}
+              onChangeInicio={(v) => updateTiempoProgramado('inspeccionEquipo', 'horaInicio', v)}
+              onChangeFin={(v) => updateTiempoProgramado('inspeccionEquipo', 'horaFin', v)}
+              onOpenTimeline={() => openTimelineModal(
+                'inspeccionEquipo',
+                null,
+                'Inspección de Equipo',
+                formData.tiemposProgramados.inspeccionEquipo.horaInicio,
+                formData.tiemposProgramados.inspeccionEquipo.horaFin
+              )}
+              existingSlots={getExistingSlots('inspeccionEquipo')}
+            />
+            
+            <ProgrammedTimeCard
+              title="Colación"
+              icon="🍽️"
+              horaInicio={formData.tiemposProgramados.colacion.horaInicio}
+              horaFin={formData.tiemposProgramados.colacion.horaFin}
+              onChangeInicio={(v) => updateTiempoProgramado('colacion', 'horaInicio', v)}
+              onChangeFin={(v) => updateTiempoProgramado('colacion', 'horaFin', v)}
+              onOpenTimeline={() => openTimelineModal(
+                'colacion',
+                null,
+                'Colación',
+                formData.tiemposProgramados.colacion.horaInicio,
+                formData.tiemposProgramados.colacion.horaFin
+              )}
+              existingSlots={getExistingSlots('colacion')}
+            />
+          </div>
+        </div>
+
+        {/* SECCIÓN 4: Mantenciones (Opcional) */}
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-orange-200">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">🔧</span>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Mantenciones</h3>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.tieneMantenciones}
+                onChange={(e) => setFormData({ ...formData, tieneMantenciones: e.target.checked })}
+                className="w-5 h-5 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+              />
+              <span className="text-sm font-semibold text-slate-700">¿Hubo mantenciones?</span>
+            </label>
+          </div>
+
+          {formData.tieneMantenciones && (
+            <>
+              <button
+                type="button"
+                onClick={addMantencion}
+                className="w-full mb-3 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
+              >
+                + Agregar Mantención
+              </button>
+
+              <div className="space-y-3">
+                {formData.mantenciones.map((mant, index) => {
+                  const existingSlots = getExistingSlots('mantencion', index);
+                  
+                  return (
+                    <div key={index} className="bg-orange-50 border-2 border-orange-200 rounded-xl p-3 sm:p-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
+                            Tipo de Mantención
+                          </label>
+                          <input
+                            type="text"
+                            value={mant.tipo}
+                            onChange={(e) => updateMantencion(index, 'tipo', e.target.value)}
+                            placeholder="Ej: Preventiva, Correctiva, etc."
+                            className="input-modern w-full text-sm"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openTimelineModal(
+                              'mantencion',
+                              index,
+                              `Mantención ${index + 1}`,
+                              mant.horaInicio,
+                              mant.horaFin
+                            )}
+                            className="flex-1 px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+                          >
+                            <svg className="w-6 h-6 sm:w-4 sm:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="text-base sm:text-sm">Seleccionar Horario</span>
+                          </button>
+                        </div>
+
+                        {mant.horaInicio && mant.horaFin && (
+                          <div className="text-center py-3 sm:py-2 px-3 bg-orange-100 rounded-xl sm:rounded-lg">
+                            <span className="text-sm font-bold text-orange-700">
+                              {mant.horaInicio} - {mant.horaFin} ({calcularDuracion(mant.horaInicio, mant.horaFin)})
+                            </span>
+                          </div>
+                        )}
+
+                        {formData.mantenciones.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeMantencion(index)}
+                            className="w-full py-2 bg-red-100 hover:bg-red-200 text-red-700 font-semibold text-sm rounded-lg transition-all"
+                          >
+                            🗑️ Eliminar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Botones de navegación */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg transition-all"
+          >
+            ← Volver
+          </button>
+          <button
+            type="submit"
+            disabled={isLoading || horariosErrors.length > 0}
+            className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-lg transition-all shadow-lg disabled:shadow-none"
+          >
+            {isLoading ? 'Guardando...' : 'Guardar Registro →'}
+          </button>
+        </div>
+      </form>
+
+      {/* Modal de Timeline */}
+      <TimelineModal
+        isOpen={timelineModal.isOpen}
+        onClose={closeTimelineModal}
+        onConfirm={handleTimelineConfirm}
+        initialStart={timelineModal.initialStart}
+        initialEnd={timelineModal.initialEnd}
+        title={timelineModal.title}
+        existingSlots={timelineModal.isOpen ? getExistingSlots(timelineModal.type, timelineModal.index) : []}
+      />
+    </>
+  );
+}
+
+// Componente ActivityCard actualizado con botón de timeline
+function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, existingSlots }) {
+  const colors = {
+    green: {
+      bg: 'bg-green-50',
+      border: 'border-green-200',
+      text: 'text-green-700',
+      button: 'bg-green-600 hover:bg-green-700'
+    },
+    amber: {
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+      text: 'text-amber-700',
+      button: 'bg-amber-600 hover:bg-amber-700'
+    }
+  };
+
+  const c = colors[color];
+
+  return (
+    <div className={`${c.bg} border-2 ${c.border} rounded-xl p-3 sm:p-4`}>
+      <div className="space-y-3">
+        {/* Actividad/Motivo */}
+        <div>
+          <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
+            {labelActividad}
+          </label>
+          <input
+            type="text"
+            value={data.actividad || data.motivo || ''}
+            onChange={(e) => onUpdate(index, data.actividad !== undefined ? 'actividad' : 'motivo', e.target.value)}
+            placeholder={placeholder}
+            className="input-modern w-full text-sm"
+          />
+        </div>
+
+        {/* Botón para abrir timeline */}
+        <button
+          type="button"
+          onClick={onOpenTimeline}
+          className="w-full px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm sm:text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+        >
+          <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-base sm:text-sm">Seleccionar Horario</span>
+        </button>
+
+        {/* Mostrar horario seleccionado */}
+        {data.horaInicio && data.horaFin && !errors.duracion && (
+          <div className={`text-center py-3 sm:py-2 px-3 ${c.bg} rounded-xl sm:rounded-lg border-2 ${c.border}`}>
+            <span className={`text-sm sm:text-sm font-bold ${c.text}`}>
+              {data.horaInicio} - {data.horaFin} • Duración: {calcularDuracion(data.horaInicio, data.horaFin)}
+            </span>
+          </div>
+        )}
+
+        {/* ✅ Error de duración */}
+        {errors.duracion && (
+          <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+            <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
+            </svg>
+            <span className="text-xs font-semibold text-red-700">{errors.duracion}</span>
+          </div>
+        )}
+
+        {/* ✅ NUEVO: Error de solapamiento */}
+        {errors.solapamiento && (
+          <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+            <svg className="w-4 h-4 text-orange-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
+            </svg>
+            <span className="text-xs font-semibold text-orange-700">{errors.solapamiento}</span>
+          </div>
+        )}
+
+        {/* Botón eliminar */}
+        {canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            className="w-full py-2 bg-red-100 hover:bg-red-200 text-red-700 font-semibold text-sm rounded-lg transition-all"
+          >
+            🗑️ Eliminar
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Componente ProgrammedTimeCard actualizado con botón de timeline
+function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, onChangeFin, onOpenTimeline, existingSlots }) {
+  return (
+    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-2xl">{icon}</span>
+        <div className="font-bold text-sm sm:text-base text-slate-900">{title}</div>
+      </div>
+      
+      {/* Botón para abrir timeline */}
+      <button
+        type="button"
+        onClick={onOpenTimeline}
+        className="w-full mb-3 px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+      >
+        <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="text-base sm:text-sm">Seleccionar Horario</span>
+      </button>
+
+      {horaInicio && horaFin && (
+        <div className="text-center py-3 sm:py-2 px-3 bg-blue-100 rounded-xl sm:rounded-lg border-2 border-blue-300">
+          <span className="text-sm font-bold text-blue-700">
+            {horaInicio} - {horaFin} • {calcularDuracion(horaInicio, horaFin)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Función helper para calcular duración
+function calcularDuracion(inicio, fin) {
+  if (!inicio || !fin) return '0:00';
+  
+  const [hInicio, mInicio] = inicio.split(':').map(Number);
+  const [hFin, mFin] = fin.split(':').map(Number);
+  
+  let totalMinutos = (hFin * 60 + mFin) - (hInicio * 60 + mInicio);
+  
+  if (totalMinutos < 0) totalMinutos += 24 * 60;
+  
+  const horas = Math.floor(totalMinutos / 60);
+  const minutos = totalMinutos % 60;
+  
+  return `${horas}:${minutos.toString().padStart(2, '0')}`;
 }
