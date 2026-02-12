@@ -2,15 +2,15 @@ import React, { useState, useEffect } from "react";
 
 // Componente Timeline Modal
 function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, title, existingSlots = [] }) {
-  const [startTime, setStartTime] = useState(initialStart || "07:00");
-  const [endTime, setEndTime] = useState(initialEnd || "07:00");
+  const [startTime, setStartTime] = useState(initialStart || null);
+  const [endTime, setEndTime] = useState(initialEnd || null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState(null); // 'start', 'end', or 'move'
   
   useEffect(() => {
     if (isOpen) {
-      setStartTime(initialStart || "07:00");
-      setEndTime(initialEnd || "07:00");
+      setStartTime(initialStart || null);
+      setEndTime(initialEnd || null);
     }
   }, [isOpen, initialStart, initialEnd]);
 
@@ -60,11 +60,34 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     clickedMinutes = Math.max(minMinutes, Math.min(maxMinutes, clickedMinutes));
     
     const clickedTime = minutesToTime(clickedMinutes);
-    const startMinutes = timeToMinutes(startTime);
     
-    // Solo actualizar el final si es después del inicio
-    if (clickedMinutes > startMinutes) {
-      setEndTime(clickedTime);
+    // Si no hay inicio, establecer el inicio y automáticamente el fin 1 minuto después
+    if (!startTime) {
+      let finalStartMinutes = clickedMinutes;
+      let finalEndMinutes = clickedMinutes + 1;
+      
+      // Si el fin se pasaría del máximo, ajustar el inicio hacia atrás
+      if (finalEndMinutes > maxMinutes) {
+        finalEndMinutes = maxMinutes;
+        finalStartMinutes = maxMinutes - 1;
+      }
+      
+      setStartTime(minutesToTime(finalStartMinutes));
+      setEndTime(minutesToTime(finalEndMinutes));
+    } 
+    // Si hay inicio pero no hay fin, establecer el fin
+    else if (!endTime) {
+      const startMinutes = timeToMinutes(startTime);
+      if (clickedMinutes > startMinutes) {
+        setEndTime(clickedTime);
+      }
+    }
+    // Si ambos están establecidos, mover el fin
+    else {
+      const startMinutes = timeToMinutes(startTime);
+      if (clickedMinutes > startMinutes) {
+        setEndTime(clickedTime);
+      }
     }
   };
 
@@ -75,7 +98,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   const handleMouseMove = (e) => {
-    if (!isDragging) return;
+    if (!isDragging || !startTime) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
@@ -106,6 +129,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   const getPosition = (time) => {
+    if (!time) return 0;
     const minMinutes = 7 * 60;
     const maxMinutes = 19 * 60;
     const totalMinutes = maxMinutes - minMinutes;
@@ -113,11 +137,12 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     return ((timeMinutes - minMinutes) / totalMinutes) * 100;
   };
 
-  const startPos = getPosition(startTime);
-  const endPos = getPosition(endTime);
+  const startPos = startTime ? getPosition(startTime) : 0;
+  const endPos = endTime ? getPosition(endTime) : 0;
   const width = endPos - startPos;
 
   const formatTime12h = (time24) => {
+    if (!time24) return '--:--';
     const [h, m] = time24.split(':').map(Number);
     const period = h >= 12 ? 'PM' : 'AM';
     const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
@@ -125,6 +150,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   const calculateDuration = () => {
+    if (!startTime || !endTime) return '0h 0m';
     const start = timeToMinutes(startTime);
     const end = timeToMinutes(endTime);
     const diff = end - start;
@@ -134,6 +160,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   const isOverlapping = () => {
+    if (!startTime || !endTime) return false;
     const start = timeToMinutes(startTime);
     const end = timeToMinutes(endTime);
     
@@ -178,22 +205,33 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
         {/* Body */}
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Información de tiempo seleccionado */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-4">
-            <div className="bg-slate-50 border-2 border-slate-300 rounded-xl p-3 sm:p-4 text-center">
-              <div className="text-[10px] sm:text-xs font-semibold text-slate-600 mb-1">INICIO (AUTO)</div>
-              <div className="text-lg sm:text-2xl font-bold text-slate-700 leading-tight">{formatTime12h(startTime)}</div>
-              <div className="text-[9px] text-slate-500 mt-0.5">Fijo</div>
+          {!startTime && !endTime ? (
+            <div className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center">
+              <div className="text-slate-400 text-sm sm:text-base font-medium">
+                👆 Haz clic en el timeline para seleccionar un horario
+              </div>
+              <div className="text-slate-400 text-xs mt-1">
+                Primer clic: inicio • Segundo clic: fin
+              </div>
             </div>
-            <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-3 sm:p-4 text-center">
-              <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1">DURACIÓN</div>
-              <div className="text-lg sm:text-2xl font-bold text-purple-900 leading-tight">{calculateDuration()}</div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <div className="bg-slate-50 border-2 border-slate-300 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-[10px] sm:text-xs font-semibold text-slate-600 mb-1">INICIO</div>
+                <div className="text-lg sm:text-2xl font-bold text-slate-700 leading-tight">{formatTime12h(startTime)}</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">Seleccionado</div>
+              </div>
+              <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1">DURACIÓN</div>
+                <div className="text-lg sm:text-2xl font-bold text-purple-900 leading-tight">{calculateDuration()}</div>
+              </div>
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1">FIN</div>
+                <div className="text-lg sm:text-2xl font-bold text-blue-900 leading-tight">{formatTime12h(endTime)}</div>
+                <div className="text-[9px] text-blue-600 mt-0.5">Ajustable</div>
+              </div>
             </div>
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4 text-center">
-              <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1">FIN</div>
-              <div className="text-lg sm:text-2xl font-bold text-blue-900 leading-tight">{formatTime12h(endTime)}</div>
-              <div className="text-[9px] text-blue-600 mt-0.5">Ajustable</div>
-            </div>
-          </div>
+          )}
 
           {isOverlapping() && (
             <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
@@ -222,7 +260,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
               onTouchMove={(e) => {
-                if (isDragging && dragType === 'end') {
+                if (isDragging && dragType === 'end' && startTime) {
                   e.preventDefault();
                   const touch = e.touches[0];
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -290,43 +328,45 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
               })}
 
               {/* Rango seleccionado */}
-              <div
-                className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded shadow-lg transition-all"
-                style={{
-                  left: `${startPos}%`,
-                  width: `${width}%`
-                }}
-              >
-                {/* Indicador de inicio (fijo - no arrastrable) */}
-                <div className="absolute left-0 top-0 bottom-0 w-6 sm:w-3 bg-slate-400 rounded-l flex items-center justify-center cursor-not-allowed">
-                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white/60 rounded"></div>
-                </div>
-
-                {/* Contenido del rango */}
-                <div className="absolute inset-0 flex items-center justify-center px-4">
-                  <span className="text-white font-bold text-xs sm:text-sm truncate">
-                    {formatTime12h(startTime)} - {formatTime12h(endTime)}
-                  </span>
-                </div>
-
-                {/* Handle de fin (arrastrable) */}
+              {startTime && endTime && width > 0 && (
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-blue-500 cursor-ew-resize rounded-r hover:bg-blue-600 active:bg-blue-700 transition-colors flex items-center justify-center"
-                  onMouseDown={(e) => handleMouseDown(e, 'end')}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    setIsDragging(true);
-                    setDragType('end');
+                  className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded shadow-lg transition-all"
+                  style={{
+                    left: `${startPos}%`,
+                    width: `${width}%`
                   }}
                 >
-                  <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white rounded"></div>
+                  {/* Indicador de inicio */}
+                  <div className="absolute left-0 top-0 bottom-0 w-6 sm:w-3 bg-slate-400 rounded-l flex items-center justify-center cursor-pointer hover:bg-slate-500">
+                    <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white/60 rounded"></div>
+                  </div>
+
+                  {/* Contenido del rango */}
+                  <div className="absolute inset-0 flex items-center justify-center px-4">
+                    <span className="text-white font-bold text-xs sm:text-sm truncate">
+                      {formatTime12h(startTime)} - {formatTime12h(endTime)}
+                    </span>
+                  </div>
+
+                  {/* Handle de fin (arrastrable) */}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-blue-500 cursor-ew-resize rounded-r hover:bg-blue-600 active:bg-blue-700 transition-colors flex items-center justify-center"
+                    onMouseDown={(e) => handleMouseDown(e, 'end')}
+                    onTouchStart={(e) => {
+                      e.stopPropagation();
+                      setIsDragging(true);
+                      setDragType('end');
+                    }}
+                  >
+                    <div className="w-1.5 sm:w-1 h-10 sm:h-8 bg-white rounded"></div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="text-center text-[10px] sm:text-xs text-slate-500 px-2">
-              💡 <span className="hidden sm:inline">Arrastra el extremo azul para ajustar la hora final • El inicio es automático (fin de actividad anterior)</span>
-              <span className="sm:hidden">Toca el extremo azul para ajustar la hora final</span>
+              💡 <span className="hidden sm:inline">Haz clic para seleccionar inicio y fin • Arrastra el extremo azul para ajustar</span>
+              <span className="sm:hidden">Toca para seleccionar horario • Arrastra el extremo azul para ajustar</span>
             </div>
           </div>
 
@@ -335,20 +375,42 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
             <div className="text-xs sm:text-sm font-semibold text-slate-700 mb-2 sm:mb-3">O ingresa manualmente:</div>
             <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Inicio (Fija)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Hora Inicio</label>
                 <input
                   type="time"
-                  value={startTime}
-                  disabled
-                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 bg-slate-100 text-slate-500 rounded-lg cursor-not-allowed"
+                  value={startTime || ''}
+                  onChange={(e) => {
+                    const newStart = e.target.value;
+                    // Establecer automáticamente el fin 1 minuto después
+                    if (newStart) {
+                      const startMinutes = timeToMinutes(newStart);
+                      let finalStartMinutes = startMinutes;
+                      let endMinutes = startMinutes + 1;
+                      const maxMinutes = 19 * 60;
+                      
+                      // Si el fin se pasaría del máximo, ajustar el inicio hacia atrás
+                      if (endMinutes > maxMinutes) {
+                        endMinutes = maxMinutes;
+                        finalStartMinutes = maxMinutes - 1;
+                      }
+                      
+                      setStartTime(minutesToTime(finalStartMinutes));
+                      setEndTime(minutesToTime(endMinutes));
+                    } else {
+                      setStartTime(newStart);
+                    }
+                  }}
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  min="07:00"
+                  max="18:59"
+                  step="900"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">Automático: fin de actividad anterior</p>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">Hora Fin</label>
                 <input
                   type="time"
-                  value={endTime}
+                  value={endTime || ''}
                   onChange={(e) => setEndTime(e.target.value)}
                   className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
                   min="07:00"
@@ -425,15 +487,119 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
   };
 
+  // Función para obtener la última hora final donde se puede continuar
+  // Busca la última actividad QUE TENGA DATOS, en el orden del formulario
+  // IGNORA tiempos programados (Charla, Inspección, Colación) ya que son fijos
+  const getUltimaHoraFinal = () => {
+    let ultimaHora = '08:30'; // Cambiar de 07:00 a 08:30 (después de inspección)
+    
+    // Buscar en ORDEN INVERSO (de abajo hacia arriba del formulario)
+    // para encontrar la última actividad que se completó
+    
+    // 3. Mantenciones (si están activas)
+    if (formData.tieneMantenciones && formData.mantenciones.length > 0) {
+      for (let i = formData.mantenciones.length - 1; i >= 0; i--) {
+        if (formData.mantenciones[i].horaFin) {
+          console.log('✅ Última hora final:', formData.mantenciones[i].horaFin, 'de mantención', i + 1);
+          return formData.mantenciones[i].horaFin;
+        }
+      }
+    }
+    
+    // 2. Tiempos No Efectivos
+    if (formData.tiemposNoEfectivos.length > 0) {
+      for (let i = formData.tiemposNoEfectivos.length - 1; i >= 0; i--) {
+        if (formData.tiemposNoEfectivos[i].horaFin) {
+          console.log('✅ Última hora final:', formData.tiemposNoEfectivos[i].horaFin, 'de tiempoNoEfectivo', i + 1);
+          return formData.tiemposNoEfectivos[i].horaFin;
+        }
+      }
+    }
+    
+    // 1. Actividades Efectivas
+    if (formData.actividadesEfectivas.length > 0) {
+      for (let i = formData.actividadesEfectivas.length - 1; i >= 0; i--) {
+        if (formData.actividadesEfectivas[i].horaFin) {
+          console.log('✅ Última hora final:', formData.actividadesEfectivas[i].horaFin, 'de actividadEfectiva', i + 1);
+          return formData.actividadesEfectivas[i].horaFin;
+        }
+      }
+    }
+    
+    console.log('⚠️ No hay horas finales, retornando 08:30');
+    return ultimaHora;
+  };
+
+  // Función para calcular el inicio correcto de una actividad específica
+  const getInicioParaActividad = (type, index) => {
+    // Si es la primera actividad de su tipo y no hay nada antes, empieza en 08:30 (después de inspección)
+    if (type === 'actividadEfectiva' && index === 0 && 
+        formData.tiemposNoEfectivos.length === 0 && 
+        (!formData.tieneMantenciones || formData.mantenciones.length === 0)) {
+      return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+    }
+    
+    // Para actividades efectivas, buscar la anterior en el array
+    if (type === 'actividadEfectiva' && index > 0) {
+      const actividadAnterior = formData.actividadesEfectivas[index - 1];
+      if (actividadAnterior && actividadAnterior.horaFin) {
+        // ✅ Aplicar lógica de colación
+        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
+        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
+        
+        if (actividadAnterior.horaFin >= horaColacionInicio && actividadAnterior.horaFin < horaColacionFin) {
+          return horaColacionFin; // Saltar la colación
+        }
+        return actividadAnterior.horaFin;
+      }
+    }
+    
+    // Para tiempos no efectivos, buscar el anterior en el array
+    if (type === 'tiempoNoEfectivo' && index > 0) {
+      const tiempoAnterior = formData.tiemposNoEfectivos[index - 1];
+      if (tiempoAnterior && tiempoAnterior.horaFin) {
+        // ✅ Aplicar lógica de colación
+        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
+        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
+        
+        if (tiempoAnterior.horaFin >= horaColacionInicio && tiempoAnterior.horaFin < horaColacionFin) {
+          return horaColacionFin; // Saltar la colación
+        }
+        return tiempoAnterior.horaFin;
+      }
+    }
+    
+    // Para mantenciones, buscar la anterior en el array
+    if (type === 'mantencion' && index > 0) {
+      const mantencionAnterior = formData.mantenciones[index - 1];
+      if (mantencionAnterior && mantencionAnterior.horaFin) {
+        // ✅ Aplicar lógica de colación
+        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
+        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
+        
+        if (mantencionAnterior.horaFin >= horaColacionInicio && mantencionAnterior.horaFin < horaColacionFin) {
+          return horaColacionFin; // Saltar la colación
+        }
+        return mantencionAnterior.horaFin;
+      }
+    }
+    
+    // Si no hay actividad anterior en el mismo tipo, usar 08:30 (fin de inspección)
+    return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+  };
+
   // Función para abrir el modal de timeline
   const openTimelineModal = (type, index, title, initialStart, initialEnd) => {
+    // SIEMPRE recalcular el inicio correcto basado en la posición
+    const horaInicio = getInicioParaActividad(type, index);
+    
     setTimelineModal({
       isOpen: true,
       type,
       index,
       title,
-      initialStart: initialStart || '07:00',
-      initialEnd: initialEnd || '07:00'
+      initialStart: horaInicio,
+      initialEnd: initialEnd || horaInicio
     });
   };
 
@@ -552,6 +718,68 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     }
   };
 
+  // ✅ NUEVO: Sincronizar automáticamente los inicios de actividades cuando cambien los finales
+  useEffect(() => {
+    // Para actividades efectivas: cada inicio debe ser el fin de la anterior
+    const actividadesActualizadas = [...formData.actividadesEfectivas];
+    let huboChanges = false;
+    
+    for (let i = 1; i < actividadesActualizadas.length; i++) {
+      const actividadAnterior = actividadesActualizadas[i - 1];
+      const actividadActual = actividadesActualizadas[i];
+      
+      if (actividadAnterior.horaFin && actividadActual.horaInicio !== actividadAnterior.horaFin) {
+        actividadesActualizadas[i].horaInicio = actividadAnterior.horaFin;
+        huboChanges = true;
+      }
+    }
+    
+    // Para tiempos no efectivos: cada inicio debe ser el fin del anterior
+    const tiemposActualizados = [...formData.tiemposNoEfectivos];
+    for (let i = 1; i < tiemposActualizados.length; i++) {
+      const tiempoAnterior = tiemposActualizados[i - 1];
+      const tiempoActual = tiemposActualizados[i];
+      
+      if (tiempoAnterior.horaFin && tiempoActual.horaInicio !== tiempoAnterior.horaFin) {
+        tiemposActualizados[i].horaInicio = tiempoAnterior.horaFin;
+        huboChanges = true;
+      }
+    }
+    
+    // Para mantenciones: cada inicio debe ser el fin de la anterior
+    if (formData.tieneMantenciones) {
+      const mantencionesActualizadas = [...formData.mantenciones];
+      for (let i = 1; i < mantencionesActualizadas.length; i++) {
+        const mantencionAnterior = mantencionesActualizadas[i - 1];
+        const mantencionActual = mantencionesActualizadas[i];
+        
+        if (mantencionAnterior.horaFin && mantencionActual.horaInicio !== mantencionAnterior.horaFin) {
+          mantencionesActualizadas[i].horaInicio = mantencionAnterior.horaFin;
+          huboChanges = true;
+        }
+      }
+      
+      if (huboChanges) {
+        setFormData({
+          ...formData,
+          actividadesEfectivas: actividadesActualizadas,
+          tiemposNoEfectivos: tiemposActualizados,
+          mantenciones: mantencionesActualizadas
+        });
+      }
+    } else if (huboChanges) {
+      setFormData({
+        ...formData,
+        actividadesEfectivas: actividadesActualizadas,
+        tiemposNoEfectivos: tiemposActualizados
+      });
+    }
+  }, [
+    formData.actividadesEfectivas.map(a => a.horaFin).join(','),
+    formData.tiemposNoEfectivos.map(t => t.horaFin).join(','),
+    formData.mantenciones.map(m => m.horaFin).join(',')
+  ]);
+
   // ✅ NUEVO: Validar horarios en tiempo real
   useEffect(() => {
     const errors = [];
@@ -585,7 +813,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       }
     });
     
-    // Agregar tiempos programados
+    // ✅ NUEVO: Agregar tiempos programados a la validación
     const tiemposProg = formData.tiemposProgramados;
     if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
       todosLosHorarios.push({
@@ -674,14 +902,72 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     });
     
     setHorariosErrors(errors);
-  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.tiemposProgramados, formData.mantenciones, formData.tieneMantenciones]);
+  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.mantenciones, formData.tieneMantenciones]);
+
+  // ✅ NUEVA: Función inteligente para calcular la hora inicial de nuevas actividades
+  const calcularHoraInicialInteligente = () => {
+    console.log('🔍 Calculando hora inicial inteligente...');
+    
+    // Buscar la última hora final entre TODAS las actividades (sin importar si hay vacías)
+    let ultimaHoraFinal = null;
+    
+    // Revisar actividades efectivas
+    formData.actividadesEfectivas.forEach((act, idx) => {
+      if (act.horaFin) {
+        console.log(`📌 Actividad Efectiva ${idx + 1} tiene horaFin: ${act.horaFin}`);
+        if (!ultimaHoraFinal || act.horaFin > ultimaHoraFinal) {
+          ultimaHoraFinal = act.horaFin;
+        }
+      }
+    });
+    
+    // Revisar tiempos no efectivos
+    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
+      if (tiempo.horaFin) {
+        console.log(`📌 Tiempo No Efectivo ${idx + 1} tiene horaFin: ${tiempo.horaFin}`);
+        if (!ultimaHoraFinal || tiempo.horaFin > ultimaHoraFinal) {
+          ultimaHoraFinal = tiempo.horaFin;
+        }
+      }
+    });
+    
+    // Revisar mantenciones
+    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
+      formData.mantenciones.forEach((mant, idx) => {
+        if (mant.horaFin) {
+          console.log(`📌 Mantención ${idx + 1} tiene horaFin: ${mant.horaFin}`);
+          if (!ultimaHoraFinal || mant.horaFin > ultimaHoraFinal) {
+            ultimaHoraFinal = mant.horaFin;
+          }
+        }
+      });
+    }
+
+    // Si no encontramos ninguna hora final, usar fin de Inspección (08:30)
+    if (!ultimaHoraFinal) {
+      console.log('⚠️ No se encontró ninguna horaFin definida, retornando 08:30');
+      return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+    }
+
+    console.log(`✅ Última hora final encontrada: ${ultimaHoraFinal}`);
+
+    // ✅ LÓGICA DE COLACIÓN: Si la última actividad termina a las 13:00 o después (pero antes de 14:00),
+    // la siguiente debe empezar a las 14:00 para respetar la colación
+    const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
+    const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
+    
+    if (ultimaHoraFinal >= horaColacionInicio && ultimaHoraFinal < horaColacionFin) {
+      console.log(`🍽️ Última hora (${ultimaHoraFinal}) está en horario de colación, saltando a ${horaColacionFin}`);
+      return horaColacionFin; // Empezar después de colación
+    }
+
+    console.log(`✅ Retornando última hora final: ${ultimaHoraFinal}`);
+    return ultimaHoraFinal;
+  };
 
   // Funciones para manejar actividades efectivas
   const addActividad = () => {
-    // Obtener la última actividad
-    const ultimaActividad = formData.actividadesEfectivas[formData.actividadesEfectivas.length - 1];
-    // La hora inicial de la nueva actividad es la hora final de la anterior
-    const horaInicialNueva = ultimaActividad?.horaFin || '';
+    const horaInicialNueva = calcularHoraInicialInteligente();
     
     setFormData({
       ...formData,
@@ -709,10 +995,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   // Funciones para manejar tiempos no efectivos
   const addTiempoNoEfectivo = () => {
-    // Obtener el último tiempo no efectivo
-    const ultimoTiempo = formData.tiemposNoEfectivos[formData.tiemposNoEfectivos.length - 1];
-    // La hora inicial del nuevo tiempo es la hora final del anterior
-    const horaInicialNueva = ultimoTiempo?.horaFin || '';
+    const horaInicialNueva = calcularHoraInicialInteligente();
     
     setFormData({
       ...formData,
@@ -758,8 +1041,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   // Funciones para manejar mantenciones
   const addMantencion = () => {
-    const ultimaMantencion = formData.mantenciones[formData.mantenciones.length - 1];
-    const horaInicialNueva = ultimaMantencion?.horaFin || '';
+    const horaInicialNueva = calcularHoraInicialInteligente();
     
     setFormData({
       ...formData,
@@ -804,16 +1086,25 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       }
     });
     
-    // 3. Validar tiempos programados
+    // 3. Validar tiempos programados (solo si tienen algún dato)
     const tp = formData.tiemposProgramados;
-    if (!tp.charlaSegurid.horaInicio || !tp.charlaSegurid.horaFin) {
-      errores.push('Charla de Seguridad: Debe tener hora de inicio y fin');
+    
+    // Charla de Seguridad: si tiene inicio o fin, debe tener ambos
+    if ((tp.charlaSegurid.horaInicio && !tp.charlaSegurid.horaFin) || 
+        (!tp.charlaSegurid.horaInicio && tp.charlaSegurid.horaFin)) {
+      errores.push('Charla de Seguridad: Si se registra, debe tener hora de inicio y fin');
     }
-    if (!tp.inspeccionEquipo.horaInicio || !tp.inspeccionEquipo.horaFin) {
-      errores.push('Inspección de Equipo: Debe tener hora de inicio y fin');
+    
+    // Inspección de Equipo: si tiene inicio o fin, debe tener ambos
+    if ((tp.inspeccionEquipo.horaInicio && !tp.inspeccionEquipo.horaFin) || 
+        (!tp.inspeccionEquipo.horaInicio && tp.inspeccionEquipo.horaFin)) {
+      errores.push('Inspección de Equipo: Si se registra, debe tener hora de inicio y fin');
     }
-    if (!tp.colacion.horaInicio || !tp.colacion.horaFin) {
-      errores.push('Colación: Debe tener hora de inicio y fin');
+    
+    // Colación: si tiene inicio o fin, debe tener ambos
+    if ((tp.colacion.horaInicio && !tp.colacion.horaFin) || 
+        (!tp.colacion.horaInicio && tp.colacion.horaFin)) {
+      errores.push('Colación: Si se registra, debe tener hora de inicio y fin');
     }
     
     // 4. Si hay mantenciones, validar
@@ -957,13 +1248,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
           </div>
 
           <div className="space-y-3">
-            <ProgrammedTimeCard
+            <TiempoProgramadoCard
               title="Charla de Seguridad"
               icon="🦺"
-              horaInicio={formData.tiemposProgramados.charlaSegurid.horaInicio}
-              horaFin={formData.tiemposProgramados.charlaSegurid.horaFin}
-              onChangeInicio={(v) => updateTiempoProgramado('charlaSegurid', 'horaInicio', v)}
-              onChangeFin={(v) => updateTiempoProgramado('charlaSegurid', 'horaFin', v)}
+              data={formData.tiemposProgramados.charlaSegurid}
               onOpenTimeline={() => openTimelineModal(
                 'charlaSegurid',
                 null,
@@ -974,13 +1262,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               existingSlots={getExistingSlots('charlaSegurid')}
             />
             
-            <ProgrammedTimeCard
+            <TiempoProgramadoCard
               title="Inspección de Equipo"
               icon="🔍"
-              horaInicio={formData.tiemposProgramados.inspeccionEquipo.horaInicio}
-              horaFin={formData.tiemposProgramados.inspeccionEquipo.horaFin}
-              onChangeInicio={(v) => updateTiempoProgramado('inspeccionEquipo', 'horaInicio', v)}
-              onChangeFin={(v) => updateTiempoProgramado('inspeccionEquipo', 'horaFin', v)}
+              data={formData.tiemposProgramados.inspeccionEquipo}
               onOpenTimeline={() => openTimelineModal(
                 'inspeccionEquipo',
                 null,
@@ -991,13 +1276,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               existingSlots={getExistingSlots('inspeccionEquipo')}
             />
             
-            <ProgrammedTimeCard
+            <TiempoProgramadoCard
               title="Colación"
               icon="🍽️"
-              horaInicio={formData.tiemposProgramados.colacion.horaInicio}
-              horaFin={formData.tiemposProgramados.colacion.horaFin}
-              onChangeInicio={(v) => updateTiempoProgramado('colacion', 'horaInicio', v)}
-              onChangeFin={(v) => updateTiempoProgramado('colacion', 'horaFin', v)}
+              data={formData.tiemposProgramados.colacion}
               onOpenTimeline={() => openTimelineModal(
                 'colacion',
                 null,
@@ -1124,6 +1406,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
       {/* Modal de Timeline */}
       <TimelineModal
+        key={`${timelineModal.type}-${timelineModal.index}-${timelineModal.initialStart}`}
         isOpen={timelineModal.isOpen}
         onClose={closeTimelineModal}
         onConfirm={handleTimelineConfirm}
@@ -1228,8 +1511,8 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
   );
 }
 
-// Componente ProgrammedTimeCard actualizado con botón de timeline
-function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, onChangeFin, onOpenTimeline, existingSlots }) {
+// Componente TiempoProgramadoCard (para tiempos programados manuales)
+function TiempoProgramadoCard({ title, icon, data, onOpenTimeline, existingSlots }) {
   return (
     <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4">
       <div className="flex items-center gap-2 mb-3">
@@ -1241,7 +1524,7 @@ function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, 
       <button
         type="button"
         onClick={onOpenTimeline}
-        className="w-full mb-3 px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+        className="w-full px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
       >
         <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1249,10 +1532,11 @@ function ProgrammedTimeCard({ title, icon, horaInicio, horaFin, onChangeInicio, 
         <span className="text-base sm:text-sm">Seleccionar Horario</span>
       </button>
 
-      {horaInicio && horaFin && (
-        <div className="text-center py-3 sm:py-2 px-3 bg-blue-100 rounded-xl sm:rounded-lg border-2 border-blue-300">
+      {/* Mostrar horario seleccionado */}
+      {data.horaInicio && data.horaFin && (
+        <div className="text-center py-3 sm:py-2 px-3 bg-blue-100 rounded-xl sm:rounded-lg border-2 border-blue-300 mt-3">
           <span className="text-sm font-bold text-blue-700">
-            {horaInicio} - {horaFin} • {calcularDuracion(horaInicio, horaFin)}
+            {data.horaInicio} - {data.horaFin} • Duración: {calcularDuracion(data.horaInicio, data.horaFin)}
           </span>
         </div>
       )}

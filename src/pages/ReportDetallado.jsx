@@ -43,7 +43,7 @@ export default function ReportDetallado() {
     estadoMaquina: 'operativa',
     observaciones: '',
     // Parte 2
-    actividadesEfectivas: [{ actividad: '', horaInicio: '08:30', horaFin: '19:00' }], // 8:30 AM - 7:00 PM por defecto
+    actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
     tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
     tiemposProgramados: {
       charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },
@@ -501,7 +501,7 @@ export default function ReportDetallado() {
         operador: userNombre,
         rut: userRut,
         userId: user.uid,
-        actividadesEfectivas: [{ actividad: '', horaInicio: '08:30', horaFin: '19:00' }], // 8:30 AM - 7:00 PM por defecto
+        actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
         tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
         tiemposProgramados: {
           charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },
