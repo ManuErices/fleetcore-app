@@ -46,6 +46,54 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     return Math.round(minutes / 15) * 15;
   };
 
+  // Función para verificar si un tiempo cae dentro de un slot ocupado
+  const isTimeInOccupiedSlot = (timeInMinutes) => {
+    return existingSlots.some(slot => {
+      const slotStart = timeToMinutes(slot.start);
+      const slotEnd = timeToMinutes(slot.end);
+      return timeInMinutes >= slotStart && timeInMinutes < slotEnd;
+    });
+  };
+
+  // Función para calcular espacios disponibles
+  const getAvailableSlots = () => {
+    const minMinutes = 7 * 60; // 7:00 AM
+    const maxMinutes = 19 * 60; // 7:00 PM
+    
+    // Ordenar slots existentes por hora de inicio
+    const sortedSlots = [...existingSlots].sort((a, b) => 
+      timeToMinutes(a.start) - timeToMinutes(b.start)
+    );
+    
+    const availableSlots = [];
+    let currentStart = minMinutes;
+    
+    sortedSlots.forEach(slot => {
+      const slotStart = timeToMinutes(slot.start);
+      const slotEnd = timeToMinutes(slot.end);
+      
+      // Si hay un espacio antes de este slot
+      if (currentStart < slotStart) {
+        availableSlots.push({
+          start: minutesToTime(currentStart),
+          end: minutesToTime(slotStart)
+        });
+      }
+      
+      currentStart = Math.max(currentStart, slotEnd);
+    });
+    
+    // Agregar el espacio final si existe
+    if (currentStart < maxMinutes) {
+      availableSlots.push({
+        start: minutesToTime(currentStart),
+        end: minutesToTime(maxMinutes)
+      });
+    }
+    
+    return availableSlots;
+  };
+
   const handleTimelineClick = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -159,20 +207,22 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     return `${hours}h ${minutes}m`;
   };
 
-  const isOverlapping = () => {
-    if (!startTime || !endTime) return false;
+  const getOverlappingSlot = () => {
+    if (!startTime || !endTime) return null;
     const start = timeToMinutes(startTime);
     const end = timeToMinutes(endTime);
     
-    return existingSlots.some(slot => {
+    return existingSlots.find(slot => {
       const slotStart = timeToMinutes(slot.start);
       const slotEnd = timeToMinutes(slot.end);
       return start < slotEnd && end > slotStart;
     });
   };
 
+  const overlappingSlot = getOverlappingSlot();
+
   const handleConfirm = () => {
-    if (startTime && endTime && timeToMinutes(startTime) < timeToMinutes(endTime)) {
+    if (startTime && endTime && timeToMinutes(startTime) < timeToMinutes(endTime) && !overlappingSlot) {
       onConfirm(startTime, endTime);
       onClose();
     }
@@ -233,14 +283,37 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
             </div>
           )}
 
-          {isOverlapping() && (
+          {overlappingSlot && (
             <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
               <svg className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
               </svg>
               <div className="flex-1">
                 <div className="font-bold text-orange-900 text-sm sm:text-base">⚠️ Horario Superpuesto</div>
-                <div className="text-xs sm:text-sm text-orange-700 mt-0.5">Este horario se superpone con otra actividad</div>
+                <div className="text-xs sm:text-sm text-orange-700 mt-0.5">
+                  Se solapa con: <strong>{overlappingSlot.label}</strong> ({overlappingSlot.start} - {overlappingSlot.end})
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Mensaje informativo de espacios disponibles */}
+          {existingSlots.length > 0 && !overlappingSlot && (
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" />
+                </svg>
+                <div className="flex-1">
+                  <div className="font-bold text-blue-900 text-sm">Espacios Disponibles</div>
+                  <div className="text-xs text-blue-700 mt-1">
+                    {getAvailableSlots().map((slot, idx) => (
+                      <span key={idx} className="inline-block bg-blue-100 px-2 py-1 rounded mr-1 mb-1">
+                        {slot.start} - {slot.end}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -303,24 +376,36 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                 })}
               </div>
 
-              {/* Slots existentes (en gris) */}
+              {/* Slots existentes (en gris o rojo si hay solapamiento) */}
               {existingSlots.map((slot, idx) => {
                 const slotStart = getPosition(slot.start);
                 const slotEnd = getPosition(slot.end);
                 const slotWidth = slotEnd - slotStart;
                 
+                // Verificar si este slot está causando el solapamiento actual
+                const isConflicting = overlappingSlot && 
+                  slot.start === overlappingSlot.start && 
+                  slot.end === overlappingSlot.end &&
+                  slot.label === overlappingSlot.label;
+                
                 return (
                   <div
                     key={idx}
-                    className="absolute top-0 bottom-0 bg-slate-300/60 border-2 border-slate-400 rounded"
+                    className={`absolute top-0 bottom-0 rounded border-2 transition-all ${
+                      isConflicting 
+                        ? 'bg-red-400/70 border-red-600 shadow-lg z-10' 
+                        : 'bg-slate-300/60 border-slate-400'
+                    }`}
                     style={{
                       left: `${slotStart}%`,
                       width: `${slotWidth}%`
                     }}
                   >
                     <div className="absolute inset-0 flex items-center justify-center px-1">
-                      <span className="text-[9px] sm:text-xs font-semibold text-slate-600 truncate">
-                        {slot.label || 'Ocupado'}
+                      <span className={`text-[9px] sm:text-xs font-semibold truncate ${
+                        isConflicting ? 'text-white' : 'text-slate-600'
+                      }`}>
+                        {isConflicting ? '⚠️ ' : ''}{slot.label || 'Ocupado'}
                       </span>
                     </div>
                   </div>
@@ -330,7 +415,11 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
               {/* Rango seleccionado */}
               {startTime && endTime && width > 0 && (
                 <div
-                  className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded shadow-lg transition-all"
+                  className={`absolute top-0 bottom-0 rounded shadow-lg transition-all ${
+                    overlappingSlot 
+                      ? 'bg-gradient-to-r from-red-500 to-orange-500' 
+                      : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                  }`}
                   style={{
                     left: `${startPos}%`,
                     width: `${width}%`
@@ -344,7 +433,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   {/* Contenido del rango */}
                   <div className="absolute inset-0 flex items-center justify-center px-4">
                     <span className="text-white font-bold text-xs sm:text-sm truncate">
-                      {formatTime12h(startTime)} - {formatTime12h(endTime)}
+                      {overlappingSlot ? '⚠️ ' : ''}{formatTime12h(startTime)} - {formatTime12h(endTime)}
                     </span>
                   </div>
 
@@ -432,10 +521,10 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime)}
+            disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime) || overlappingSlot}
             className="order-1 sm:order-2 px-8 py-4 sm:py-3 bg-gradient-to-r from-indigo-600 to-purple-600 active:from-indigo-700 active:to-purple-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-xl sm:rounded-lg transition-all shadow-lg disabled:shadow-none text-base"
           >
-            ✓ Confirmar Horario
+            {overlappingSlot ? '⚠️ Horario Superpuesto' : '✓ Confirmar Horario'}
           </button>
         </div>
       </div>
@@ -487,105 +576,76 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
   };
 
+  // Helper para convertir tiempo a minutos
+  const timeToMinutes = (time) => {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
   // Función para obtener la última hora final donde se puede continuar
-  // Busca la última actividad QUE TENGA DATOS, en el orden del formulario
-  // IGNORA tiempos programados (Charla, Inspección, Colación) ya que son fijos
+  // Busca entre TODOS los tipos y retorna la más reciente cronológicamente
   const getUltimaHoraFinal = () => {
-    let ultimaHora = '08:30'; // Cambiar de 07:00 a 08:30 (después de inspección)
+    let ultimaHora = '08:30'; // Hora por defecto (después de inspección)
+    let ultimaHoraEnMinutos = timeToMinutes(ultimaHora);
     
-    // Buscar en ORDEN INVERSO (de abajo hacia arriba del formulario)
-    // para encontrar la última actividad que se completó
-    
-    // 3. Mantenciones (si están activas)
-    if (formData.tieneMantenciones && formData.mantenciones.length > 0) {
-      for (let i = formData.mantenciones.length - 1; i >= 0; i--) {
-        if (formData.mantenciones[i].horaFin) {
-          console.log('✅ Última hora final:', formData.mantenciones[i].horaFin, 'de mantención', i + 1);
-          return formData.mantenciones[i].horaFin;
-        }
-      }
-    }
-    
-    // 2. Tiempos No Efectivos
-    if (formData.tiemposNoEfectivos.length > 0) {
-      for (let i = formData.tiemposNoEfectivos.length - 1; i >= 0; i--) {
-        if (formData.tiemposNoEfectivos[i].horaFin) {
-          console.log('✅ Última hora final:', formData.tiemposNoEfectivos[i].horaFin, 'de tiempoNoEfectivo', i + 1);
-          return formData.tiemposNoEfectivos[i].horaFin;
-        }
-      }
-    }
-    
-    // 1. Actividades Efectivas
+    // Buscar en Actividades Efectivas
     if (formData.actividadesEfectivas.length > 0) {
-      for (let i = formData.actividadesEfectivas.length - 1; i >= 0; i--) {
-        if (formData.actividadesEfectivas[i].horaFin) {
-          console.log('✅ Última hora final:', formData.actividadesEfectivas[i].horaFin, 'de actividadEfectiva', i + 1);
-          return formData.actividadesEfectivas[i].horaFin;
+      formData.actividadesEfectivas.forEach(act => {
+        if (act.horaFin) {
+          const finEnMinutos = timeToMinutes(act.horaFin);
+          if (finEnMinutos > ultimaHoraEnMinutos) {
+            ultimaHora = act.horaFin;
+            ultimaHoraEnMinutos = finEnMinutos;
+          }
         }
-      }
+      });
     }
     
-    console.log('⚠️ No hay horas finales, retornando 08:30');
+    // Buscar en Tiempos No Efectivos
+    if (formData.tiemposNoEfectivos.length > 0) {
+      formData.tiemposNoEfectivos.forEach(tiempo => {
+        if (tiempo.horaFin) {
+          const finEnMinutos = timeToMinutes(tiempo.horaFin);
+          if (finEnMinutos > ultimaHoraEnMinutos) {
+            ultimaHora = tiempo.horaFin;
+            ultimaHoraEnMinutos = finEnMinutos;
+          }
+        }
+      });
+    }
+    
+    // Buscar en Mantenciones
+    if (formData.tieneMantenciones && formData.mantenciones.length > 0) {
+      formData.mantenciones.forEach(mant => {
+        if (mant.horaFin) {
+          const finEnMinutos = timeToMinutes(mant.horaFin);
+          if (finEnMinutos > ultimaHoraEnMinutos) {
+            ultimaHora = mant.horaFin;
+            ultimaHoraEnMinutos = finEnMinutos;
+          }
+        }
+      });
+    }
+    
     return ultimaHora;
   };
 
   // Función para calcular el inicio correcto de una actividad específica
   const getInicioParaActividad = (type, index) => {
-    // Si es la primera actividad de su tipo y no hay nada antes, empieza en 08:30 (después de inspección)
-    if (type === 'actividadEfectiva' && index === 0 && 
-        formData.tiemposNoEfectivos.length === 0 && 
-        (!formData.tieneMantenciones || formData.mantenciones.length === 0)) {
-      return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+    // ✅ SIEMPRE usar la última hora final GLOBAL para evitar solapamientos
+    // Esto asegura que cada nueva actividad inicie donde terminó la última,
+    // sin importar su tipo
+    const ultimaHoraGlobal = getUltimaHoraFinal();
+    
+    // Aplicar lógica de colación también aquí
+    const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
+    const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
+    
+    if (ultimaHoraGlobal >= horaColacionInicio && ultimaHoraGlobal < horaColacionFin) {
+      return horaColacionFin; // Saltar la colación
     }
     
-    // Para actividades efectivas, buscar la anterior en el array
-    if (type === 'actividadEfectiva' && index > 0) {
-      const actividadAnterior = formData.actividadesEfectivas[index - 1];
-      if (actividadAnterior && actividadAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (actividadAnterior.horaFin >= horaColacionInicio && actividadAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return actividadAnterior.horaFin;
-      }
-    }
-    
-    // Para tiempos no efectivos, buscar el anterior en el array
-    if (type === 'tiempoNoEfectivo' && index > 0) {
-      const tiempoAnterior = formData.tiemposNoEfectivos[index - 1];
-      if (tiempoAnterior && tiempoAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (tiempoAnterior.horaFin >= horaColacionInicio && tiempoAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return tiempoAnterior.horaFin;
-      }
-    }
-    
-    // Para mantenciones, buscar la anterior en el array
-    if (type === 'mantencion' && index > 0) {
-      const mantencionAnterior = formData.mantenciones[index - 1];
-      if (mantencionAnterior && mantencionAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (mantencionAnterior.horaFin >= horaColacionInicio && mantencionAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return mantencionAnterior.horaFin;
-      }
-    }
-    
-    // Si no hay actividad anterior en el mismo tipo, usar 08:30 (fin de inspección)
-    return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+    return ultimaHoraGlobal;
   };
 
   // Función para abrir el modal de timeline
