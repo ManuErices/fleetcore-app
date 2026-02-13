@@ -650,8 +650,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
   // Función para abrir el modal de timeline
   const openTimelineModal = (type, index, title, initialStart, initialEnd) => {
-    // SIEMPRE recalcular el inicio correcto basado en la posición
-    const horaInicio = getInicioParaActividad(type, index);
+    // Si ya tiene horarios guardados (editando), usarlos
+    // Si no tiene horarios (nueva actividad), calcular el inicio automático
+    const horaInicio = initialStart || getInicioParaActividad(type, index);
+    const horaFin = initialEnd || horaInicio;
     
     setTimelineModal({
       isOpen: true,
@@ -659,7 +661,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       index,
       title,
       initialStart: horaInicio,
-      initialEnd: initialEnd || horaInicio
+      initialEnd: horaFin
     });
   };
 
@@ -1189,6 +1191,37 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     onSubmit(e);
   };
 
+  // Función para resetear todas las actividades
+  const resetearActividades = () => {
+    const confirmacion = window.confirm(
+      '⚠️ ¿Estás seguro de que deseas vaciar todas las actividades?\n\n' +
+      'Esto borrará:\n' +
+      `• ${formData.actividadesEfectivas.length} Actividad(es) Efectiva(s)\n` +
+      `• ${formData.tiemposNoEfectivos.length} Tiempo(s) No Efectivo(s)\n` +
+      `• ${formData.tieneMantenciones ? formData.mantenciones.length : 0} Mantención(es)\n` +
+      '• Todos los horarios de Tiempos Programados\n\n' +
+      'Esta acción no se puede deshacer.'
+    );
+    
+    if (confirmacion) {
+      setFormData({
+        ...formData,
+        actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+        tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
+        tiemposProgramados: {
+          charlaSegurid: { horaInicio: '', horaFin: '' },
+          inspeccionEquipo: { horaInicio: '', horaFin: '' },
+          colacion: { horaInicio: '', horaFin: '' }
+        },
+        tieneMantenciones: false,
+        mantenciones: [{ tipo: '', horaInicio: '', horaFin: '' }]
+      });
+      
+      // Mostrar confirmación
+      alert('✅ Todas las actividades han sido vaciadas correctamente.');
+    }
+  };
+
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -1205,6 +1238,20 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               <p className="text-indigo-100 text-sm">Máquina: {selectedMachine?.name || 'No seleccionada'}</p>
             </div>
           </div>
+        </div>
+
+        {/* Botón para resetear/vaciar todas las actividades */}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={resetearActividades}
+            className="px-4 py-2 bg-red-50 hover:bg-red-100 border-2 border-red-300 text-red-700 font-semibold text-sm rounded-lg transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Vaciar Todas las Actividades
+          </button>
         </div>
 
         {/* SECCIÓN 1: Actividades Efectivas */}
