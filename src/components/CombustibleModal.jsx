@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { collection, getDocs, addDoc } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import VoucherGenerator from './VoucherGenerator';
 import SignaturePad from "./SignaturePad";
 
 export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados }) {
@@ -13,6 +14,10 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserData, setCurrentUserData] = useState(null); // Datos del user desde Firebase
   const [userRole, setUserRole] = useState('operador');
+
+
+  const [showVoucherModal, setShowVoucherModal] = useState(false);
+  const [lastReportData, setLastReportData] = useState(null);
   
   // Estados para las firmas
   const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
@@ -361,8 +366,74 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       await addDoc(collection(db, 'reportes_combustible'), dataToSave);
 
-      alert(`Reporte de ${tipoReporte === 'entrada' ? 'Entrada' : 'Entrega'} registrado exitosamente: ${numeroReporte}`);
+      console.log('✅ Reporte guardado en Firebase');
+      console.log('📝 Tipo de reporte:', tipoReporte);
+
+      if (tipoReporte === 'entrega') {
+      console.log('🎯 Es una entrega, preparando modal de voucher...');
+      const projectInfo = projects?.find(p => p.id === datosControl.projectId);
+      const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
+      const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
+      const empresaInfo = empresasLocal?.find(e => e.id === datosEntrega.empresa);
+      
+      // NUEVO: Obtener información del repartidor y equipo surtidor
+      const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
+      const equipoSurtidorInfo = machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
+      
+      console.log('📊 Información recopilada:', {
+        projectInfo,
+        machineInfo,
+        operadorInfo,
+        empresaInfo,
+        repartidorInfo,
+        equipoSurtidorInfo
+      });
+      
+      setLastReportData({
+        reportData: {
+          ...dataToSave,
+          numeroReporte,
+          fecha: datosControl.fecha,
+          cantidadLitros: datosEntrega.cantidadLitros,
+          horometroOdometro: datosEntrega.horometroOdometro,
+          firmaReceptor,
+          firmaRepartidor
+        },
+        projectName: projectInfo?.nombre || 'N/A',
+        machineInfo: {
+          patente: machineInfo?.patente || '',
+          codigo: machineInfo?.codigo || '',
+          nombre: machineInfo?.nombre || '',
+          type: machineInfo?.type || '',      // Tipo de máquina para "Tipo Maquina"
+          code: machineInfo?.code || ''        // Código para "Maquina"
+        },
+        operadorInfo: {
+          nombre: operadorInfo?.nombre || '',
+          rut: operadorInfo?.rut || ''
+        },
+        empresaInfo: empresaInfo ? {
+          nombre: empresaInfo.nombre || '',
+          rut: empresaInfo.rut || ''
+        } : null,
+        repartidorInfo: {
+          nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
+          rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
+        },
+        equipoSurtidorInfo: equipoSurtidorInfo ? {
+          nombre: equipoSurtidorInfo.nombre || '',
+          patente: equipoSurtidorInfo.patente || '',
+          tipo: equipoSurtidorInfo.tipo || ''
+        } : null
+      });
+      
+      console.log('💾 lastReportData guardado:', lastReportData);
+      console.log('🎭 Mostrando modal de voucher...');
+      setShowVoucherModal(true);
+      resetForm();
+    } else {
+      alert(`Reporte de Entrada registrado exitosamente: ${numeroReporte}`);
       handleClose();
+    }
     } catch (error) {
       console.error("Error guardando reporte:", error);
       alert("Error al guardar el reporte");
@@ -1272,6 +1343,20 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   setShowModalFirmaRepartidor(false);
                 }}
               />
+              {showVoucherModal && lastReportData && (
+              <VoucherGenerator
+                reportData={lastReportData.reportData}
+                projectName={lastReportData.projectName}
+                machineInfo={lastReportData.machineInfo}
+                operadorInfo={lastReportData.operadorInfo}
+                empresaInfo={lastReportData.empresaInfo}
+                onClose={() => {
+                  setShowVoucherModal(false);
+                  setLastReportData(null);
+                  onClose();
+                }}
+            />
+          )}
             </div>
           </div>
         </div>
@@ -1309,6 +1394,24 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal del generador de voucher térmico */}
+      {showVoucherModal && lastReportData && (
+        <VoucherGenerator
+          reportData={lastReportData.reportData}
+          projectName={lastReportData.projectName}
+          machineInfo={lastReportData.machineInfo}
+          operadorInfo={lastReportData.operadorInfo}
+          empresaInfo={lastReportData.empresaInfo}
+          repartidorInfo={lastReportData.repartidorInfo}
+          equipoSurtidorInfo={lastReportData.equipoSurtidorInfo}
+          onClose={() => {
+            setShowVoucherModal(false);
+            setLastReportData(null);
+            onClose();
+          }}
+        />
       )}
 
     </div>

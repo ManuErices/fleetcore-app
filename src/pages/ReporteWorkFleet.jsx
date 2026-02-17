@@ -461,33 +461,39 @@ export default function ReporteWorkFleet() {
         // Consolidar y ordenar actividades
         const todasActividades = [];
 
-        if (reporte.actividadesEfectivas) {
+        if (reporte.actividadesEfectivas && Array.isArray(reporte.actividadesEfectivas) && reporte.actividadesEfectivas.length > 0) {
           reporte.actividadesEfectivas.forEach(act => {
-            todasActividades.push({
-              tipo: 'Operativa',
-              titulo: act.actividad,
-              inicio: act.horaInicio,
-              fin: act.horaFin,
-              duracion: calcularDuracionMinutos(act.horaInicio, act.horaFin),
-              color: [34, 197, 94],
-              bgColor: [240, 253, 244],
-              borderColor: [187, 247, 208]
-            });
+            // Solo agregar si tiene los datos mínimos necesarios
+            if (act && act.horaInicio && act.horaFin) {
+              todasActividades.push({
+                tipo: 'Operativa',
+                titulo: act.actividad || 'Sin descripción',
+                inicio: act.horaInicio,
+                fin: act.horaFin,
+                duracion: calcularDuracionMinutos(act.horaInicio, act.horaFin),
+                color: [34, 197, 94],
+                bgColor: [240, 253, 244],
+                borderColor: [187, 247, 208]
+              });
+            }
           });
         }
 
-        if (reporte.tiemposNoEfectivos) {
+        if (reporte.tiemposNoEfectivos && Array.isArray(reporte.tiemposNoEfectivos) && reporte.tiemposNoEfectivos.length > 0) {
           reporte.tiemposNoEfectivos.forEach(t => {
-            todasActividades.push({
-              tipo: 'Detención',
-              titulo: t.motivo,
-              inicio: t.horaInicio,
-              fin: t.horaFin,
-              duracion: calcularDuracionMinutos(t.horaInicio, t.horaFin),
-              color: [234, 179, 8],
-              bgColor: [254, 252, 232],
-              borderColor: [253, 224, 71]
-            });
+            // Solo agregar si tiene los datos mínimos necesarios
+            if (t && t.horaInicio && t.horaFin) {
+              todasActividades.push({
+                tipo: 'Detención',
+                titulo: t.motivo || 'Sin motivo especificado',
+                inicio: t.horaInicio,
+                fin: t.horaFin,
+                duracion: calcularDuracionMinutos(t.horaInicio, t.horaFin),
+                color: [234, 179, 8],
+                bgColor: [254, 252, 232],
+                borderColor: [253, 224, 71]
+              });
+            }
           });
         }
 
@@ -530,23 +536,29 @@ export default function ReporteWorkFleet() {
           }
         }
 
-        if (reporte.mantenciones) {
+        if (reporte.mantenciones && Array.isArray(reporte.mantenciones) && reporte.mantenciones.length > 0) {
           reporte.mantenciones.forEach(m => {
-            todasActividades.push({
-              tipo: 'Mantención',
-              titulo: m.descripcion,
-              inicio: m.horaInicio,
-              fin: m.horaFin,
-              duracion: calcularDuracionMinutos(m.horaInicio, m.horaFin),
-              color: [239, 68, 68],
-              bgColor: [254, 242, 242],
-              borderColor: [254, 202, 202]
-            });
+            // Solo agregar si tiene los datos mínimos necesarios
+            if (m && m.horaInicio && m.horaFin) {
+              todasActividades.push({
+                tipo: 'Mantención',
+                titulo: m.descripcion || 'Mantención sin descripción',
+                inicio: m.horaInicio,
+                fin: m.horaFin,
+                duracion: calcularDuracionMinutos(m.horaInicio, m.horaFin),
+                color: [239, 68, 68],
+                bgColor: [254, 242, 242],
+                borderColor: [254, 202, 202]
+              });
+            }
           });
         }
 
         // Ordenar cronológicamente
         todasActividades.sort((a, b) => {
+          // Validar que ambos tengan inicio válido
+          if (!a.inicio || !b.inicio) return 0;
+          
           const [hA, mA] = a.inicio.split(':').map(Number);
           const [hB, mB] = b.inicio.split(':').map(Number);
           return (hA * 60 + mA) - (hB * 60 + mB);
@@ -609,19 +621,21 @@ export default function ReporteWorkFleet() {
           doc.setFont(undefined, 'normal');
           doc.setTextColor(55, 65, 81);
           xPos += colWidths[0] - 2;
-          const tituloTruncado = act.titulo.length > 35 ? act.titulo.substring(0, 35) + '...' : act.titulo;
+          const titulo = act.titulo || 'Sin descripción';
+          const tituloTruncado = titulo.length > 35 ? titulo.substring(0, 35) + '...' : titulo;
           doc.text(tituloTruncado, xPos, yPos + 5);
           
           xPos += colWidths[1];
-          doc.text(act.inicio, xPos, yPos + 5);
+          doc.text(act.inicio || '--:--', xPos, yPos + 5);
           
           xPos += colWidths[2];
-          doc.text(act.fin, xPos, yPos + 5);
+          doc.text(act.fin || '--:--', xPos, yPos + 5);
           
           doc.setFont(undefined, 'bold');
           xPos += colWidths[3];
-          const horas = Math.floor(act.duracion / 60);
-          const mins = act.duracion % 60;
+          const duracion = act.duracion || 0;
+          const horas = Math.floor(duracion / 60);
+          const mins = duracion % 60;
           doc.text(`${horas}h ${mins}m`, xPos, yPos + 5);
 
           // Borde inferior
@@ -864,77 +878,64 @@ export default function ReporteWorkFleet() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-      {/* Header - Estilo moderno con colores teal/cyan */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br from-teal-600 to-cyan-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
-                Reportes WorkFleet
-              </h1>
-              <p className="text-slate-600 mt-0.5 sm:mt-1 text-xs sm:text-sm">
-                Visualiza y exporta reportes detallados
-              </p>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4 sm:p-6 lg:p-8">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto mb-8">
+        <div className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 rounded-2xl shadow-2xl p-8 relative overflow-hidden">
+          <div className="absolute inset-0 bg-grid opacity-10"></div>
+          <div className="relative z-10">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-black text-white tracking-tight">Reportes de Maquinaria</h1>
+                  <p className="text-indigo-100 text-sm mt-1">Control y gestión de reportes de equipos</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Filtros */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Filtros</h2>
-            <button
-              onClick={limpiarFiltros}
-              className="text-sm text-teal-600 hover:text-teal-800 font-semibold transition-colors"
-            >
-              Limpiar filtros
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      {/* Filtros */}
+      <div className="max-w-7xl mx-auto mb-6">
+        <div className="bg-white rounded-xl shadow-md p-6 border-2 border-indigo-100">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             {/* Fecha Inicio */}
             <div>
-              <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-2">
-                Fecha Inicial
-              </label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Inicio</label>
               <input
                 type="date"
                 value={filtros.fechaInicio}
                 onChange={(e) => handleFiltroChange('fechaInicio', e.target.value)}
-                className="input-modern text-sm sm:text-base"
+                className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               />
             </div>
 
             {/* Fecha Fin */}
             <div>
-              <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-2">
-                Fecha Final
-              </label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Fin</label>
               <input
                 type="date"
                 value={filtros.fechaFin}
                 onChange={(e) => handleFiltroChange('fechaFin', e.target.value)}
-                className="input-modern text-sm sm:text-base"
+                className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               />
             </div>
 
             {/* Proyecto/Obra */}
             <div>
-              <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-2">
-                Obra
-              </label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
               <select
                 value={filtros.proyecto}
                 onChange={(e) => handleFiltroChange('proyecto', e.target.value)}
-                className="input-modern text-sm sm:text-base"
+                className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               >
-                <option value="">Todas las obras</option>
+                <option value="">Todos</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -943,15 +944,13 @@ export default function ReporteWorkFleet() {
 
             {/* Máquina */}
             <div>
-              <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-2">
-                Máquina
-              </label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Máquina</label>
               <select
                 value={filtros.maquina}
                 onChange={(e) => handleFiltroChange('maquina', e.target.value)}
-                className="input-modern text-sm sm:text-base"
+                className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               >
-                <option value="">Todas las máquinas</option>
+                <option value="">Todas</option>
                 {machines.map(m => (
                   <option key={m.id} value={m.id}>{m.code || m.patente || m.name}</option>
                 ))}
@@ -960,15 +959,13 @@ export default function ReporteWorkFleet() {
 
             {/* Operador */}
             <div>
-              <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-2">
-                Operador
-              </label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Operador</label>
               <select
                 value={filtros.operador}
                 onChange={(e) => handleFiltroChange('operador', e.target.value)}
-                className="input-modern text-sm sm:text-base"
+                className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               >
-                <option value="">Todos los operadores</option>
+                <option value="">Todos</option>
                 {operadores.map(o => (
                   <option key={o} value={o}>{o}</option>
                 ))}
@@ -976,105 +973,110 @@ export default function ReporteWorkFleet() {
             </div>
           </div>
 
-          {/* Resumen y botones de acción */}
-          <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="px-3 py-1.5 bg-teal-100 text-teal-700 rounded-lg">
-                <span className="text-sm font-bold">{reportesFiltrados.length}</span>
-                <span className="text-xs ml-1">reportes</span>
-              </div>
-              {filtros.fechaInicio && (
-                <div className="text-xs text-slate-600">
-                  desde <span className="font-semibold">{filtros.fechaInicio}</span>
-                </div>
-              )}
-              {filtros.fechaFin && (
-                <div className="text-xs text-slate-600">
-                  hasta <span className="font-semibold">{filtros.fechaFin}</span>
-                </div>
-              )}
-            </div>
-            
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setShowPreview(true)}
-                disabled={reportesFiltrados.length === 0}
-                className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-slate-600 hover:bg-slate-700 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                Previsualizar
-              </button>
-              <button
-                onClick={descargarPDFMasivoDetallado}
-                disabled={reportesSeleccionados.length === 0}
-                className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                PDF Detallado ({reportesSeleccionados.length})
-              </button>
-              <button
-                onClick={descargarExcel}
-                disabled={reportesFiltrados.length === 0}
-                className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Excel
-              </button>
-              <button
-                onClick={descargarPDF}
-                disabled={reportesFiltrados.length === 0}
-                className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                PDF Resumen
-              </button>
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-200">
+            <button
+              onClick={limpiarFiltros}
+              className="px-4 py-2 text-sm text-indigo-600 hover:text-indigo-800 font-semibold transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Limpiar Filtros
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Botones de Acción */}
+      <div className="max-w-7xl mx-auto mb-6">
+        <div className="bg-white rounded-xl shadow-md p-4 border-2 border-indigo-100">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => setShowPreview(true)}
+              disabled={reportesFiltrados.length === 0}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-slate-600 hover:bg-slate-700 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Previsualizar
+            </button>
+            <button
+              onClick={descargarPDFMasivoDetallado}
+              disabled={reportesSeleccionados.length === 0}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              PDF Detallado ({reportesSeleccionados.length})
+            </button>
+            <button
+              onClick={descargarExcel}
+              disabled={reportesFiltrados.length === 0}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Excel
+            </button>
+            <button
+              onClick={descargarPDF}
+              disabled={reportesFiltrados.length === 0}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              PDF Resumen
+            </button>
+            <div className="flex-1"></div>
+            <div className="text-sm text-slate-600 flex items-center gap-2">
+              <span className="font-semibold">Total registros:</span>
+              <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full font-bold">
+                {reportesFiltrados.length}
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabla de reportes - Estilo profesional con colores teal */}
-      <div className="glass-card rounded-xl sm:rounded-2xl overflow-hidden animate-fadeInUp">
-        {/* Mensaje informativo para mandantes */}
-        {userRole === 'mandante' && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-bold text-blue-900 mb-1">Vista de Mandante</h3>
-                <p className="text-xs text-blue-700">
-                  Como mandante, solo visualiza reportes que han sido <strong>validados y firmados</strong> por un administrador. 
-                  Puede seleccionar reportes y descargar PDFs detallados de los mismos.
-                </p>
+      {/* Tabla de reportes - Estilo profesional con colores indigo/purple */}
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-indigo-100">
+          {/* Mensaje informativo para mandantes */}
+          {userRole === 'mandante' && (
+            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-b-2 border-indigo-200 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-indigo-900 mb-1">Vista de Mandante</h3>
+                  <p className="text-xs text-indigo-700">
+                    Como mandante, solo visualiza reportes que han sido <strong>validados y firmados</strong> por un administrador. 
+                    Puede seleccionar reportes y descargar PDFs detallados de los mismos.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gradient-to-r from-teal-600 via-cyan-600 to-teal-600 text-white">
-              <tr>
-                <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider w-12">
-                  <input
-                    type="checkbox"
-                    checked={todosSeleccionados}
-                    onChange={toggleSeleccionarTodos}
-                    className="w-4 h-4 rounded border-white/30 text-teal-600 focus:ring-2 focus:ring-white/50 cursor-pointer"
-                  />
-                </th>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 text-white">
+                <tr>
+                  <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider w-12">
+                    <input
+                      type="checkbox"
+                      checked={todosSeleccionados}
+                      onChange={toggleSeleccionarTodos}
+                      className="w-4 h-4 rounded border-white/30 text-indigo-600 focus:ring-2 focus:ring-white/50 cursor-pointer"
+                    />
+                  </th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Obra</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
@@ -1085,25 +1087,27 @@ export default function ReporteWorkFleet() {
                 <th className="px-2 py-4 text-center text-xs font-bold uppercase tracking-wider" colSpan="3">Kilometraje</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Comb.</th>
                 <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firmado</th>
-              </tr>
-              <tr className="bg-teal-700">
-                <th></th>
-                <th colSpan="6"></th>
-                <th className="px-1 py-2 text-xs font-semibold">Ini</th>
-                <th className="px-1 py-2 text-xs font-semibold">Fin</th>
-                <th className="px-1 py-2 text-xs font-semibold">Trab.</th>
-                <th className="px-1 py-2 text-xs font-semibold">Ini</th>
-                <th className="px-1 py-2 text-xs font-semibold">Fin</th>
-                <th className="px-1 py-2 text-xs font-semibold">Rec.</th>
-                <th colSpan="2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {reportesFiltrados.length === 0 ? (
+                </tr>
+              </thead>
+              <thead className="bg-indigo-700">
+                <tr>
+                  <th></th>
+                  <th colSpan="6"></th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Ini</th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Fin</th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Trab.</th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Ini</th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Fin</th>
+                  <th className="px-1 py-2 text-xs font-semibold text-white">Rec.</th>
+                  <th colSpan="2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-indigo-100">
+                {reportesFiltrados.length === 0 ? (
                 <tr>
                   <td colSpan="15" className="px-6 py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center gap-3">
-                      <svg className="w-16 h-16 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-16 h-16 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                       <p className="font-semibold">No se encontraron reportes</p>
@@ -1127,26 +1131,26 @@ export default function ReporteWorkFleet() {
                     : '0';
 
                   return (
-                    <tr key={reporte.id} className={`hover:bg-teal-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                    <tr key={reporte.id} className={`hover:bg-indigo-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-indigo-50/30'}`}>
                       <td className="px-3 py-3 text-center">
                         <input
                           type="checkbox"
                           checked={reportesSeleccionados.includes(reporte.id)}
                           onChange={() => toggleReporteSeleccionado(reporte.id)}
-                          className="w-4 h-4 rounded border-slate-300 text-teal-600 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                          className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                         />
                       </td>
                       <td className="px-3 py-3 text-sm">
                         <button
                           onClick={() => setReporteDetalle(reporte)}
-                          className="font-black text-teal-600 hover:text-teal-800 hover:underline transition-colors"
+                          className="font-black text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
                         >
                           {reporte.numeroReporte}
                         </button>
                       </td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.projectName || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.fecha}</td>
-                      <td className="px-3 py-3 text-sm font-semibold text-cyan-600">{reporte.machinePatente || '-'}</td>
+                      <td className="px-3 py-3 text-sm font-semibold text-indigo-600">{reporte.machinePatente || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.operador}</td>
                       <td className="px-3 py-3 text-sm text-slate-600">{reporte.rut}</td>
                       <td className="px-1 py-3 text-sm text-slate-900 text-center">{reporte.horometroInicial || '0'}</td>
@@ -1182,6 +1186,7 @@ export default function ReporteWorkFleet() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
 
       {/* Modal de Detalle del Reporte */}
@@ -1297,10 +1302,10 @@ export default function ReporteWorkFleet() {
       {showPreview && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden animate-fadeIn">
-            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-black">Previsualización de Reportes</h2>
-                <p className="text-purple-100 text-sm mt-1">{reportesFiltrados.length} reportes seleccionados</p>
+                <p className="text-indigo-100 text-sm mt-1">{reportesFiltrados.length} reportes seleccionados</p>
               </div>
               <button
                 onClick={() => setShowPreview(false)}
@@ -1323,7 +1328,7 @@ export default function ReporteWorkFleet() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 font-semibold">N° Reporte</p>
-                        <p className="text-sm font-bold text-purple-600">{reporte.numeroReporte}</p>
+                        <p className="text-sm font-bold text-indigo-600">{reporte.numeroReporte}</p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-500 font-semibold">Operador</p>

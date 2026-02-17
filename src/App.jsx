@@ -22,6 +22,12 @@ import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
+// ========================================
+// COMPONENTES PWA Y OFFLINE
+// ========================================
+import ConnectionStatus from "./components/ConnectionStatus";
+import InstallPWA from "./components/InstallPWA";
+
 // WorkFleet Shell - Solo Reporte Detallado
 function WorkFleetShell({ user, onLogout, onBackToSelector }) {
   return (
@@ -30,15 +36,11 @@ function WorkFleetShell({ user, onLogout, onBackToSelector }) {
       <header className="sticky top-0 z-40 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 text-white shadow-lg">
         <div className="max-w-[1400px] mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-xl font-black">Work<span className="text-purple-200">Fleet</span></h1>
-              <p className="text-xs text-purple-100">Reporte Detallado</p>
-            </div>
+            <img 
+              src="/Logo_versio_n_movil.png" 
+              alt="Work Fleet Logo" 
+              className="h-12 w-auto object-contain brightness-0 invert"
+            />
           </div>
 
           <div className="flex items-center gap-2">
@@ -76,6 +78,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
+  const [showReporteWorkFleetMenu, setShowReporteWorkFleetMenu] = useState(false); // ✅ NUEVO ESTADO
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
 
@@ -115,25 +118,19 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
           <div className="flex items-center justify-between">
             {/* Logo - Responsive */}
             <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
-              <div className="relative group">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-orange-500 rounded-xl sm:rounded-2xl blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
-                
-                <div className="relative w-12 h-12 sm:w-14 sm:h-14 lg:w-16 lg:h-16 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-lg transform group-hover:scale-105 transition-transform">
-                  <svg className="w-6 h-6 sm:w-7 sm:h-7 lg:w-9 lg:h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-              </div>
+              {/* Logo móvil - visible en pantallas pequeñas */}
+              <img 
+                src="/Logo_versio_n_movil.png" 
+                alt="Fleet Core Logo" 
+                className="h-10 sm:h-12 w-auto object-contain block md:hidden"
+              />
               
-              <div>
-                <h1 className="text-lg sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight">
-                  Fleet<span className="bg-gradient-to-r from-blue-900 to-blue-600 bg-clip-text text-transparent">Core</span>
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-600 mt-0.5 font-medium hidden sm:block">
-                  El núcleo de tu operación • Nuevo Cobre
-                </p>
-              </div>
+              {/* Logo completo - visible en pantallas medianas y grandes */}
+              <img 
+                src="/Logo.png" 
+                alt="Fleet Core Logo" 
+                className="h-12 lg:h-16 w-auto object-contain hidden md:block"
+              />
             </div>
 
             {/* Desktop: User + Mobile: Hamburger */}
@@ -526,8 +523,66 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               )}
             </div>
             
-            <NavTab to="/reporte-workfleet" label="Reporte WorkFleet" locked={userRole === 'mandante'} />
-            <NavTab to="/reporte-combustible" label="Reporte Combustible" locked={userRole === 'mandante'} />
+            {/* ✅ NUEVO: Menú Reporte WorkFleet */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowReporteWorkFleetMenu(!showReporteWorkFleetMenu);
+                  setShowCostsMenu(false);
+                  setShowProductionMenu(false);
+                }}
+                className="flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              >
+                Reportes WorkFleet
+                <svg className={`w-4 h-4 transition-transform ${showReporteWorkFleetMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showReporteWorkFleetMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowReporteWorkFleetMenu(false)} />
+                  <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
+                    <div className="p-2 space-y-1">
+                      <NavLink
+                        to="/reporte-workfleet"
+                        onClick={() => setShowReporteWorkFleetMenu(false)}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
+                            isActive
+                              ? "bg-gradient-to-r from-teal-50 to-cyan-50 text-teal-700"
+                              : "text-slate-900 hover:bg-gradient-to-r hover:from-teal-50 hover:to-cyan-50"
+                          }`
+                        }
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Reporte Maquinaria
+                      </NavLink>
+
+                      <NavLink
+                        to="/reporte-combustible"
+                        onClick={() => setShowReporteWorkFleetMenu(false)}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
+                            isActive
+                              ? "bg-gradient-to-r from-orange-50 to-amber-50 text-orange-700"
+                              : "text-slate-900 hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50"
+                          }`
+                        }
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+                        </svg>
+                        Reporte Combustible
+                      </NavLink>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </nav>
         </div>
 
@@ -577,6 +632,21 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                       <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Producción</span>
                     </div>
                     <MobileNavLink to="/reporte-detallado" label="Reporte Detallado" onClick={() => setShowMobileMenu(false)} />
+                  </div>
+
+                  {/* Separador */}
+                  <div className="h-px bg-slate-200 my-4" />
+
+                  {/* ✅ NUEVO: Sección Reporte WorkFleet */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
+                      <svg className="w-4 h-4 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">📊 Reporte WorkFleet</span>
+                    </div>
+                    <MobileNavLink to="/reporte-workfleet" label="📋 Reporte Maquinaria" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/reporte-combustible" label="⛽ Reporte Combustible" onClick={() => setShowMobileMenu(false)} />
                   </div>
 
                   {/* Separador */}
@@ -656,12 +726,11 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-slate-600">
             <div className="flex items-center gap-2">
-              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center">
-                <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </div>
+              <img 
+                src="/Logo_versio_n_movil.png" 
+                alt="Fleet Core" 
+                className="h-6 w-auto object-contain"
+              />
               <span className="font-medium">FleetCore by <strong>MPF Ingeniería Civil SpA</strong></span>
             </div>
             <div className="text-center sm:text-right">
@@ -771,14 +840,12 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="text-center">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center animate-pulse">
-            <svg className="w-6 h-6 sm:w-8 sm:h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <div className="text-xl sm:text-2xl font-black text-slate-900">
-            Fleet<span className="bg-gradient-to-r from-blue-900 to-blue-600 bg-clip-text text-transparent">Core</span>
+          <div className="mb-4 flex justify-center animate-pulse">
+            <img 
+              src="/Logo_versio_n_movil.png" 
+              alt="Fleet Core" 
+              className="h-16 sm:h-20 w-auto object-contain"
+            />
           </div>
           <div className="text-xs sm:text-sm text-slate-600 mt-2">Cargando...</div>
         </div>
@@ -798,9 +865,21 @@ export default function App() {
 
   // Si seleccionó WorkFleet, mostrar solo ReporteDetallado
   if (selectedApp === 'workfleet') {
-    return <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />;
+    return (
+      <>
+        <ConnectionStatus />
+        <InstallPWA />
+        <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </>
+    );
   }
 
   // Si seleccionó FleetCore, mostrar app completa
-  return <Shell user={user} onLogout={handleLogout} selectedApp={selectedApp} onBackToSelector={handleBackToSelector} />;
+  return (
+    <>
+      <ConnectionStatus />
+      <InstallPWA />
+      <Shell user={user} onLogout={handleLogout} selectedApp={selectedApp} onBackToSelector={handleBackToSelector} />
+    </>
+  );
 }
