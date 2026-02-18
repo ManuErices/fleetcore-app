@@ -158,9 +158,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               {/* Icon */}
               <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessFleetCore ? 'group-hover:shadow-2xl' : ''}`}>
                 <img
-                  src="/icon-192x192.png"
+                  src="/favicon.svg"
                   alt="FleetCore"
-                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain" style={{mixBlendMode:"screen"}}
+                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain"
                 />
               </div>
 
@@ -239,9 +239,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               {/* Icon */}
               <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-900 to-purple-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessWorkFleet ? 'group-hover:shadow-2xl' : ''}`}>
                 <img
-                  src="/icon-192x192.png"
+                  src="/favicon.svg"
                   alt="WorkFleet"
-                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain" style={{mixBlendMode:"screen"}}
+                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain"
                 />
               </div>
 

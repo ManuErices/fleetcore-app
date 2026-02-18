@@ -38,9 +38,14 @@ function WorkFleetShell({ user, onLogout, onBackToSelector }) {
         <div className="max-w-[1400px] mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img 
-              src="/icon-192x192.png" 
+              src="/favicon.svg" 
               alt="Work Fleet Logo" 
-              className="h-10 w-10 object-contain" style={{mixBlendMode:"screen"}}
+              className="h-10 w-10 object-contain block sm:hidden"
+            />
+            <img 
+              src="/logo-header.svg" 
+              alt="Work Fleet Logo" 
+              className="h-10 w-auto object-contain hidden sm:block"
             />
           </div>
 
@@ -119,18 +124,17 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
           <div className="flex items-center justify-between">
             {/* Logo - Responsive */}
             <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
-              {/* Logo móvil - visible en pantallas pequeñas */}
+              {/* Logo móvil - solo escudo */}
               <img 
-                src="/icon-192x192.png" 
+                src="/favicon.svg" 
                 alt="Fleet Core Logo" 
-                className="h-10 w-10 object-contain block md:hidden" style={{mixBlendMode:"screen"}}
+                className="h-10 w-10 object-contain block sm:hidden"
               />
-              
-              {/* Logo completo - visible en pantallas medianas y grandes */}
+              {/* Logo completo - visible en sm y superior */}
               <img 
-                src="/icon-192x192.png" 
+                src="/logo-header.svg" 
                 alt="Fleet Core Logo" 
-                className="h-12 w-12 object-contain hidden md:block" style={{mixBlendMode:"screen"}}
+                className="h-10 w-auto object-contain hidden sm:block"
               />
             </div>
 
@@ -728,9 +732,9 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-slate-600">
             <div className="flex items-center gap-2">
               <img 
-                src="/icon-192x192.png" 
+                src="/favicon.svg" 
                 alt="Fleet Core" 
-                className="h-6 w-6 object-contain" style={{mixBlendMode:"multiply"}}
+                className="h-6 w-6 object-contain"
               />
               <span className="font-medium">FleetCore by <strong>MPF Ingeniería Civil SpA</strong></span>
             </div>
@@ -843,9 +847,9 @@ export default function App() {
         <div className="text-center">
           <div className="mb-4 flex justify-center animate-pulse">
             <img
-              src="/icon-192x192.png"
+              src="/favicon.svg"
               alt="Fleet Core"
-              className="h-20 sm:h-24 w-auto object-contain" style={{mixBlendMode:"screen"}}
+              className="h-20 sm:h-24 w-auto object-contain"
             />
           </div>
           <div className="text-sm sm:text-base font-bold text-white mt-2">Fleet<span className="text-blue-300">Core</span></div>

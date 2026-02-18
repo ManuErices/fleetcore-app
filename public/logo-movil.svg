@@ -1,0 +1,40 @@
+<svg width="200" height="130" viewBox="0 0 200 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradientes del escudo -->
+    <linearGradient id="shieldOuter3" x1="24" y1="0" x2="24" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2A3F5F"/>
+      <stop offset="100%" stop-color="#0F1C2E"/>
+    </linearGradient>
+    <linearGradient id="shieldInner3" x1="12" y1="10" x2="38" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6B9AF7"/>
+      <stop offset="40%" stop-color="#3B6FE0"/>
+      <stop offset="100%" stop-color="#2248A8"/>
+    </linearGradient>
+    <!-- Gradientes del texto -->
+    <linearGradient id="fleetGrad3" x1="0" y1="0" x2="0" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2A3F5F"/>
+      <stop offset="100%" stop-color="#0F1C2E"/>
+    </linearGradient>
+    <linearGradient id="coreGrad3" x1="90" y1="0" x2="175" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6B9AF7"/>
+      <stop offset="40%" stop-color="#3B6FE0"/>
+      <stop offset="100%" stop-color="#2248A8"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Escudo (icono) centrado arriba -->
+  <g transform="translate(76, 7)">
+    <path d="M24 1.5 C24 1.5 46 9 46 9 L46 30 C46 42.5 36.5 51.5 24 55 C11.5 51.5 2 42.5 2 30 L2 9 C2 9 24 1.5 24 1.5Z" fill="url(#shieldOuter3)"/>
+    <path d="M24 7.5 C24 7.5 41 13.5 41 13.5 L41 30 C41 40 33.5 47.5 24 50.5 C14.5 47.5 7 40 7 30 L7 13.5 C7 13.5 24 7.5 24 7.5Z" fill="url(#shieldInner3)"/>
+    <path d="M24 7.5 C24 7.5 41 13.5 41 13.5 L41 20 C30 17 18 17 7 20 L7 13.5 C7 13.5 24 7.5 24 7.5Z" fill="white" opacity="0.1"/>
+    <rect x="14.5" y="26" width="4.5" height="13" rx="2" fill="white" opacity="0.9"/>
+    <rect x="21.75" y="21" width="4.5" height="18" rx="2" fill="white" opacity="0.9"/>
+    <rect x="29" y="24" width="4.5" height="15" rx="2" fill="white" opacity="0.9"/>
+  </g>
+  
+  <!-- Texto FleetCore centrado abajo -->
+  <g transform="translate(12, 75)">
+    <text x="0" y="30" font-family="Plus Jakarta Sans, Arial, sans-serif" font-weight="800" font-size="32" letter-spacing="-0.3" fill="url(#fleetGrad3)">Fleet</text>
+    <text x="86" y="30" font-family="Plus Jakarta Sans, Arial, sans-serif" font-weight="800" font-size="32" letter-spacing="-0.3" fill="url(#coreGrad3)">Core</text>
+  </g>
+</svg>
