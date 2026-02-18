@@ -27,6 +27,7 @@ import { doc, getDoc } from "firebase/firestore";
 // ========================================
 import ConnectionStatus from "./components/ConnectionStatus";
 import InstallPWA from "./components/InstallPWA";
+import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 
 // WorkFleet Shell - Solo Reporte Detallado
 function WorkFleetShell({ user, onLogout, onBackToSelector }) {
@@ -37,9 +38,9 @@ function WorkFleetShell({ user, onLogout, onBackToSelector }) {
         <div className="max-w-[1400px] mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img 
-              src="/Logo_versio_n_movil.png" 
+              src="/icon-192x192.png" 
               alt="Work Fleet Logo" 
-              className="h-12 w-auto object-contain brightness-0 invert"
+              className="h-10 w-10 object-contain" style={{mixBlendMode:"screen"}}
             />
           </div>
 
@@ -120,16 +121,16 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
             <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
               {/* Logo móvil - visible en pantallas pequeñas */}
               <img 
-                src="/Logo_versio_n_movil.png" 
+                src="/icon-192x192.png" 
                 alt="Fleet Core Logo" 
-                className="h-10 sm:h-12 w-auto object-contain block md:hidden"
+                className="h-10 w-10 object-contain block md:hidden" style={{mixBlendMode:"screen"}}
               />
               
               {/* Logo completo - visible en pantallas medianas y grandes */}
               <img 
-                src="/Logo.png" 
+                src="/icon-192x192.png" 
                 alt="Fleet Core Logo" 
-                className="h-12 lg:h-16 w-auto object-contain hidden md:block"
+                className="h-12 w-12 object-contain hidden md:block" style={{mixBlendMode:"screen"}}
               />
             </div>
 
@@ -727,9 +728,9 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-slate-600">
             <div className="flex items-center gap-2">
               <img 
-                src="/Logo_versio_n_movil.png" 
+                src="/icon-192x192.png" 
                 alt="Fleet Core" 
-                className="h-6 w-auto object-contain"
+                className="h-6 w-6 object-contain" style={{mixBlendMode:"multiply"}}
               />
               <span className="font-medium">FleetCore by <strong>MPF Ingeniería Civil SpA</strong></span>
             </div>
@@ -838,16 +839,17 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-slate-900 flex items-center justify-center p-4">
         <div className="text-center">
           <div className="mb-4 flex justify-center animate-pulse">
-            <img 
-              src="/Logo_versio_n_movil.png" 
-              alt="Fleet Core" 
-              className="h-16 sm:h-20 w-auto object-contain"
+            <img
+              src="/icon-192x192.png"
+              alt="Fleet Core"
+              className="h-20 sm:h-24 w-auto object-contain" style={{mixBlendMode:"screen"}}
             />
           </div>
-          <div className="text-xs sm:text-sm text-slate-600 mt-2">Cargando...</div>
+          <div className="text-sm sm:text-base font-bold text-white mt-2">Fleet<span className="text-blue-300">Core</span></div>
+          <div className="text-xs text-blue-200 mt-1">Cargando...</div>
         </div>
       </div>
     );
@@ -869,6 +871,7 @@ export default function App() {
       <>
         <ConnectionStatus />
         <InstallPWA />
+        <SessionExpiryIndicator />
         <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
       </>
     );
@@ -879,6 +882,7 @@ export default function App() {
     <>
       <ConnectionStatus />
       <InstallPWA />
+      <SessionExpiryIndicator />
       <Shell user={user} onLogout={handleLogout} selectedApp={selectedApp} onBackToSelector={handleBackToSelector} />
     </>
   );

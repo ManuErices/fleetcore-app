@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -58,6 +58,79 @@ export const db = firestoreInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const storage = getStorage(app);
+
+// ============================================
+// PERSISTENCIA DE SESIÓN (AUTH)
+// ============================================
+// Mantener la sesión por 20 días mínimo, incluso sin internet
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log("🔐 PERSISTENCIA DE SESIÓN HABILITADA");
+    console.log("📱 Tu sesión se mantendrá por 20 días sin internet");
+    
+    // Guardar timestamp de último login para tracking
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        const lastLogin = localStorage.getItem('lastLogin');
+        const now = Date.now();
+        
+        if (!lastLogin) {
+          // Primera vez, guardar timestamp
+          localStorage.setItem('lastLogin', now.toString());
+          localStorage.setItem('sessionDuration', '20'); // 20 días
+          console.log("✅ Sesión iniciada - válida por 20 días");
+        } else {
+          // Verificar si han pasado más de 20 días
+          const daysPassed = (now - parseInt(lastLogin)) / (1000 * 60 * 60 * 24);
+          const daysRemaining = Math.max(0, 20 - Math.floor(daysPassed));
+          
+          if (daysPassed < 20) {
+            console.log(`✅ Sesión válida - ${daysRemaining} días restantes`);
+          } else {
+            console.log("⚠️ Sesión expirada - necesitas reconectarte a internet");
+          }
+        }
+      }
+    });
+  })
+  .catch((error) => {
+    console.error("❌ Error configurando persistencia de sesión:", error);
+  });
+
+// ============================================
+// UTILIDADES DE SESIÓN
+// ============================================
+
+/**
+ * Obtiene los días restantes de la sesión offline
+ */
+export function getSessionDaysRemaining() {
+  const lastLogin = localStorage.getItem('lastLogin');
+  if (!lastLogin) return null;
+  
+  const now = Date.now();
+  const daysPassed = (now - parseInt(lastLogin)) / (1000 * 60 * 60 * 24);
+  const daysRemaining = Math.max(0, 20 - Math.floor(daysPassed));
+  
+  return {
+    daysRemaining,
+    daysPassed: Math.floor(daysPassed),
+    expiresAt: new Date(parseInt(lastLogin) + (20 * 24 * 60 * 60 * 1000)),
+    isExpired: daysPassed >= 20
+  };
+}
+
+/**
+ * Renueva el timestamp de sesión (llamar cuando se conecta a internet)
+ */
+export function renewSession() {
+  if (auth.currentUser) {
+    localStorage.setItem('lastLogin', Date.now().toString());
+    console.log("🔄 Sesión renovada - válida por 20 días más");
+    return true;
+  }
+  return false;
+}
 
 // ============================================
 // ESTADO DE CONEXIÓN
