@@ -685,6 +685,9 @@ export default function ReportDetallado() {
                       </div>
                       <div className="flex-1">
                         <div className="text-xs font-bold text-purple-600 mb-1">✅ MÁQUINA ESCANEADA</div>
+                        {selectedMachine.type && (
+                          <div className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-1">{selectedMachine.type}</div>
+                        )}
                         <div className="text-xl sm:text-2xl font-black text-purple-900">{selectedMachine.code}</div>
                         <div className="text-sm text-purple-700">{selectedMachine.name}</div>
                       </div>

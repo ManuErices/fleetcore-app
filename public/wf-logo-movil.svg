@@ -1,0 +1,37 @@
+<svg width="200" height="140" viewBox="0 0 200 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shieldGradV" x1="24" y1="0" x2="24" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C0392B"/>
+      <stop offset="100%" stop-color="#7B1010"/>
+    </linearGradient>
+    <filter id="shadowV">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#00000030"/>
+    </filter>
+  </defs>
+
+  <!-- Ícono centrado -->
+  <g transform="translate(76, 4)">
+    <path d="M24 2 L43 13 L43 35 L24 46 L5 35 L5 13 Z" fill="url(#shieldGradV)" filter="url(#shadowV)"/>
+    <path d="M24 2 L43 13 L43 19 C33 15.5 15 15.5 5 19 L5 13 Z" fill="white" opacity="0.13"/>
+    <path d="M24 5.5 L40.5 15 L40.5 33 L24 42.5 L7.5 33 L7.5 15 Z" fill="none" stroke="white" stroke-opacity="0.18" stroke-width="0.8"/>
+    <!-- Destornillador -->
+    <g transform="rotate(45, 24, 24)">
+      <rect x="21" y="8" width="6" height="9" rx="2" fill="white" opacity="0.95"/>
+      <rect x="22.8" y="17" width="2.4" height="14" rx="1" fill="white" opacity="0.9"/>
+      <rect x="21.5" y="31" width="5" height="1.5" rx="0.5" fill="white" opacity="0.95"/>
+    </g>
+    <!-- Llave -->
+    <g transform="rotate(-45, 24, 24)">
+      <rect x="22" y="29" width="4" height="11" rx="1.5" fill="white" opacity="0.95"/>
+      <path d="M19 10 L19 18 L22 18 L22 14.5 L26 14.5 L26 18 L29 18 L29 10 L26 10 L26 13 L22 13 L22 10 Z" fill="white" opacity="0.95"/>
+      <rect x="22" y="18" width="4" height="11" rx="1" fill="white" opacity="0.9"/>
+    </g>
+  </g>
+
+  <!-- Texto -->
+  <text x="100" y="74" text-anchor="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-weight="900" font-size="28" letter-spacing="-0.5">
+    <tspan fill="#1a1a2e">Work</tspan><tspan fill="#C0392B"> Fleet</tspan>
+  </text>
+  <line x1="72" y1="84" x2="128" y2="84" stroke="#C0392B" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <text x="100" y="102" text-anchor="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-weight="500" font-size="10.5" fill="#6b7280" letter-spacing="1.8">EL NÚCLEO DE TU OPERACIÓN</text>
+</svg>

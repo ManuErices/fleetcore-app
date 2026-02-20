@@ -4,7 +4,7 @@ import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import CombustibleDetalleModal from "../components/CombustibleDetalleModal";
 import CombustibleModal from "../components/CombustibleModal";
 
@@ -274,6 +274,236 @@ export default function ReporteCombustible() {
     XLSX.writeFile(wb, `Reportes_Combustible_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
+
+  // PDF Detallado por reporte seleccionado
+  const descargarPDFDetallado = () => {
+    if (reportesSeleccionados.length === 0) {
+      alert('Por favor seleccione al menos un reporte');
+      return;
+    }
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const reportesAGenerar = reportes.filter(r => reportesSeleccionados.includes(r.id));
+
+    reportesAGenerar.forEach((reporte, index) => {
+      if (index > 0) doc.addPage();
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 20;
+      const contentWidth = pageWidth - margin * 2;
+      let yPos = margin;
+
+      // ── HEADER ──────────────────────────────────────────────
+      doc.setFillColor(194, 57, 43); // Granate/Naranja
+      doc.rect(0, 0, pageWidth, 45, 'F');
+
+      // Logo placeholder
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(margin, 10, 35, 25, 2, 2, 'F');
+      doc.setFontSize(7);
+      doc.setTextColor(194, 57, 43);
+      doc.setFont(undefined, 'bold');
+      doc.text('MPF', margin + 12, 18);
+      doc.setFontSize(5);
+      doc.text('INGENIERÍA', margin + 9, 23);
+      doc.text('CIVIL', margin + 13, 27);
+
+      // Título
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(18);
+      doc.setFont(undefined, 'bold');
+      doc.text('CONTROL DE COMBUSTIBLE', margin + 45, 20);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      const tipoLabel = reporte.tipo === 'entrada' ? 'ENTRADA AL ESTANQUE' : 'ENTREGA A MÁQUINA';
+      doc.text(tipoLabel, margin + 45, 27);
+      doc.setFontSize(8);
+      doc.text(`Fecha: ${reporte.fecha || reporte.fechaCreacion?.split('T')[0] || ''}`, margin + 45, 33);
+      doc.text(`Proyecto: ${reporte.projectName || ''}`, margin + 45, 38);
+
+      // Badge tipo
+      const badgeColor = reporte.tipo === 'entrada' ? [234, 179, 8] : [249, 115, 22];
+      doc.setFillColor(...badgeColor);
+      doc.roundedRect(pageWidth - margin - 35, 12, 33, 10, 2, 2, 'F');
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(reporte.tipo === 'entrada' ? 'ENTRADA' : 'ENTREGA', pageWidth - margin - 31, 18);
+
+      yPos = 55;
+
+      // ── INFORMACIÓN DEL SURTIDOR ───────────────────────────
+      doc.setDrawColor(209, 213, 219);
+      doc.setLineWidth(0.5);
+      doc.line(margin, yPos, pageWidth - margin, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(194, 57, 43);
+      doc.text('INFORMACIÓN DEL CONTROL', margin, yPos);
+      yPos += 7;
+
+      const colWidth = contentWidth / 2;
+
+      // Col izquierda - Surtidor
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(107, 114, 128);
+      doc.text('REPARTIDOR / SURTIDOR', margin, yPos);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(55, 65, 81);
+      doc.setFontSize(9);
+      doc.text(`Nombre: ${reporte.repartidorNombre || 'N/A'}`, margin, yPos + 6);
+      doc.text(`RUT: ${reporte.repartidorRut || 'N/A'}`, margin, yPos + 12);
+
+      // Col derecha - Equipo surtidor
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(107, 114, 128);
+      doc.text('EQUIPO SURTIDOR', margin + colWidth, yPos);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(55, 65, 81);
+      doc.setFontSize(9);
+      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoSurtidor = equipoId ? machines.find(m => m.id === equipoId) : null;
+      doc.text(`Equipo: ${equipoSurtidor?.name || equipoSurtidor?.patente || 'No especificado'}`, margin + colWidth, yPos + 6);
+      doc.text(`Obra: ${reporte.projectName || 'N/A'}`, margin + colWidth, yPos + 12);
+
+      yPos += 22;
+
+      // ── DETALLES ESPECÍFICOS ───────────────────────────────
+      doc.setDrawColor(209, 213, 219);
+      doc.line(margin, yPos, pageWidth - margin, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(194, 57, 43);
+      doc.text(reporte.tipo === 'entrada' ? 'DATOS DE ENTRADA' : 'DATOS DE ENTREGA', margin, yPos);
+      yPos += 10;
+
+      if (reporte.tipo === 'entrada' && reporte.datosEntrada) {
+        const d = reporte.datosEntrada;
+        // Caja cantidad litros
+        doc.setFillColor(255, 247, 237);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'F');
+        doc.setDrawColor(249, 115, 22);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'S');
+
+        doc.setFontSize(24);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(194, 65, 12);
+        doc.text(`${d.cantidad || 0} L`, pageWidth / 2, yPos + 18, { align: 'center' });
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(107, 114, 128);
+        doc.text('LITROS INGRESADOS AL ESTANQUE', pageWidth / 2, yPos + 25, { align: 'center' });
+
+        yPos += 38;
+
+        // Datos adicionales entrada
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(55, 65, 81);
+        if (d.proveedor) doc.text(`Proveedor: ${d.proveedor}`, margin, yPos);
+        if (d.nDocumento) doc.text(`N° Documento: ${d.nDocumento}`, margin + colWidth, yPos);
+        if (d.proveedor || d.nDocumento) yPos += 8;
+        if (d.observaciones) {
+          doc.text(`Observaciones: ${d.observaciones}`, margin, yPos);
+          yPos += 8;
+        }
+
+      } else if (reporte.tipo === 'entrega' && reporte.datosEntrega) {
+        const d = reporte.datosEntrega;
+        const machine = machines.find(m => m.id === d.machineId);
+        const operador = empleados.find(e => e.id === d.operadorId);
+
+        // Fila máquina + operador
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(107, 114, 128);
+        doc.text('MÁQUINA RECEPTORA', margin, yPos);
+        doc.text('OPERADOR', margin + colWidth, yPos);
+        yPos += 5;
+
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(55, 65, 81);
+        doc.setFontSize(9);
+        doc.text(`Patente: ${machine?.patente || d.machineId || 'N/A'}`, margin, yPos);
+        doc.text(`Nombre: ${machine?.name || 'N/A'}`, margin, yPos + 6);
+        doc.text(`Horómetro: ${d.horometroOdometro || '0'} hrs`, margin, yPos + 12);
+        doc.text(`Nombre: ${operador?.nombre || 'N/A'}`, margin + colWidth, yPos);
+        doc.text(`RUT: ${operador?.rut || 'N/A'}`, margin + colWidth, yPos + 6);
+        yPos += 20;
+
+        // Caja litros
+        doc.setFillColor(255, 247, 237);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'F');
+        doc.setDrawColor(249, 115, 22);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'S');
+
+        doc.setFontSize(24);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(194, 65, 12);
+        doc.text(`${d.cantidadLitros || 0} L`, pageWidth / 2, yPos + 18, { align: 'center' });
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(107, 114, 128);
+        doc.text('LITROS ENTREGADOS A MÁQUINA', pageWidth / 2, yPos + 25, { align: 'center' });
+
+        yPos += 38;
+        if (d.observaciones) {
+          doc.setFontSize(9);
+          doc.setFont(undefined, 'normal');
+          doc.setTextColor(55, 65, 81);
+          doc.text(`Observaciones: ${d.observaciones}`, margin, yPos);
+          yPos += 10;
+        }
+      }
+
+      // ── FIRMA Y VALIDACIÓN ─────────────────────────────────
+      if (reporte.firmado) {
+        if (yPos > pageHeight - 40) { doc.addPage(); yPos = margin; }
+
+        doc.setFillColor(236, 253, 245);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'F');
+        doc.setDrawColor(16, 185, 129);
+        doc.setLineWidth(1);
+        doc.roundedRect(margin, yPos, contentWidth, 30, 2, 2, 'S');
+
+        doc.setFillColor(16, 185, 129);
+        doc.circle(margin + 8, yPos + 10, 5, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text('✓', margin + 6, yPos + 12);
+
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor(16, 185, 129);
+        doc.text('REPORTE VALIDADO', margin + 18, yPos + 8);
+
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(55, 65, 81);
+        if (reporte.firmaAdmin) {
+          doc.text(`Validado por: ${reporte.firmaAdmin.nombre}`, margin + 18, yPos + 15);
+          doc.text(`Fecha: ${new Date(reporte.firmaAdmin.timestamp).toLocaleString('es-CL')}`, margin + 18, yPos + 21);
+        }
+        doc.setFontSize(6);
+        doc.setTextColor(107, 114, 128);
+        doc.text('Documento validado digitalmente.', margin + 18, yPos + 27);
+      }
+    });
+
+    doc.save(`Reportes_Combustible_Detallado_${new Date().toISOString().split('T')[0]}.pdf`);
+    setReportesSeleccionados([]);
+  };
+
   const descargarPDF = () => {
     if (reportesFiltrados.length === 0) {
       alert("No hay reportes para exportar");
@@ -302,7 +532,7 @@ export default function ReporteCombustible() {
       r.cantidadLitros
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       head: [['Fecha', 'N° Reporte', 'Obra', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
       body: tableData,
       startY: 30,
@@ -344,16 +574,6 @@ export default function ReporteCombustible() {
                   <p className="text-orange-100 text-sm mt-1">Control y gestión de entregas de combustible</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowCombustibleModal(true)}
-                className="px-6 py-3 bg-white hover:bg-orange-50 text-orange-700 font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                </svg>
-                Reporte Combustible
-              </button>
             </div>
           </div>
         </div>
@@ -429,6 +649,16 @@ export default function ReporteCombustible() {
       <div className="max-w-7xl mx-auto mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border-2 border-orange-100">
           <div className="flex flex-wrap gap-3">
+            <button
+              onClick={descargarPDFDetallado}
+              disabled={reportesSeleccionados.length === 0}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-slate-700 to-slate-900 hover:from-slate-600 hover:to-slate-800 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              PDF Detallado ({reportesSeleccionados.length})
+            </button>
             <button
               onClick={descargarExcel}
               disabled={reportesFiltrados.length === 0}
@@ -616,6 +846,150 @@ export default function ReporteCombustible() {
       />
 
       {/* Modal de Detalle del Reporte de Combustible */}
+
+      {/* Panel de Análisis en Tiempo Real */}
+      {reportesFiltrados.length > 0 && (() => {
+        const totalReportes = reportesFiltrados.length;
+        const firmados = reportesFiltrados.filter(r => r.firmado).length;
+
+        let totalLitros = 0, litrosEntradas = 0, litrosEntregas = 0;
+        let cntEntradas = 0, cntEntregas = 0;
+        const porMaquina = {};
+
+        reportesFiltrados.forEach(r => {
+          const litros = parseFloat(r.cantidad) || 0;
+          totalLitros += litros;
+          if (r.tipo === 'entrada') {
+            litrosEntradas += litros;
+            cntEntradas++;
+          } else {
+            litrosEntregas += litros;
+            cntEntregas++;
+            const key = r.machinePatente || r.machineName || r.machineId || 'Sin patente';
+            if (!porMaquina[key]) porMaquina[key] = { litros: 0, reportes: 0 };
+            porMaquina[key].litros += litros;
+            porMaquina[key].reportes += 1;
+          }
+        });
+
+        const eficienciaValidacion = Math.round((firmados / totalReportes) * 100);
+        const promEntradas = cntEntradas > 0 ? litrosEntradas / cntEntradas : 0;
+        const promEntregas = cntEntregas > 0 ? litrosEntregas / cntEntregas : 0;
+        const topMaquinas = Object.entries(porMaquina).sort((a, b) => b[1].litros - a[1].litros).slice(0, 3);
+        const efColor = eficienciaValidacion >= 80 ? 'text-emerald-600' : eficienciaValidacion >= 50 ? 'text-amber-600' : 'text-red-500';
+        const efBg = eficienciaValidacion >= 80 ? 'bg-emerald-50 border-emerald-200' : eficienciaValidacion >= 50 ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
+
+        return (
+          <div className="max-w-7xl mx-auto mb-6 mt-6">
+            <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+              {/* Header */}
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style={{background: 'linear-gradient(135deg, #EA580C 0%, #9A3412 100%)'}}>
+                <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span className="text-sm font-bold text-white">Análisis en tiempo real</span>
+                <span className="ml-auto text-xs text-white/50">{totalReportes} reporte{totalReportes !== 1 ? 's' : ''}</span>
+              </div>
+
+              <div className="p-5 space-y-5">
+                {/* KPIs */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Total Litros</div>
+                    <div className="text-2xl font-black text-orange-700">{totalLitros.toFixed(0)} L</div>
+                    <div className="text-xs text-slate-400 mt-0.5">combustible total</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Promedio</div>
+                    <div className="text-2xl font-black text-slate-900">{(totalLitros / totalReportes).toFixed(0)} L</div>
+                    <div className="text-xs text-slate-400 mt-0.5">litros / reporte</div>
+                  </div>
+                  <div className={`rounded-xl p-4 border ${efBg}`}>
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Validación</div>
+                    <div className={`text-2xl font-black ${efColor}`}>{eficienciaValidacion}%</div>
+                    <div className="text-xs text-slate-400 mt-0.5">reportes firmados</div>
+                    <div className="text-xs text-slate-500 mt-1">{firmados}/{totalReportes} validados</div>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Entradas</div>
+                    <div className="text-2xl font-black text-amber-700">{litrosEntradas.toFixed(0)} L</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{cntEntradas} registro{cntEntradas !== 1 ? 's' : ''}</div>
+                    <div className="text-xs text-slate-500 mt-1">prom {promEntradas.toFixed(0)} L/entrada</div>
+                  </div>
+                  <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Entregas</div>
+                    <div className="text-2xl font-black text-red-700">{litrosEntregas.toFixed(0)} L</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{cntEntregas} registro{cntEntregas !== 1 ? 's' : ''}</div>
+                    <div className="text-xs text-slate-500 mt-1">prom {promEntregas.toFixed(0)} L/entrega</div>
+                  </div>
+                </div>
+
+                {/* Desglose + Top máquinas */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Desglose entradas vs entregas */}
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Desglose por Tipo</div>
+                    <div className="space-y-2.5">
+                      {[
+                        { label: 'Entradas al estanque', litros: litrosEntradas, cnt: cntEntradas, color: 'bg-amber-500' },
+                        { label: 'Entregas a máquinas', litros: litrosEntregas, cnt: cntEntregas, color: 'bg-red-500' },
+                      ].map(({ label, litros, cnt, color }) => {
+                        const pct = totalLitros > 0 ? (litros / totalLitros) * 100 : 0;
+                        const prom = cnt > 0 ? litros / cnt : 0;
+                        return (
+                          <div key={label}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <div className={`w-2 h-2 rounded-full ${color}`}></div>
+                                <span className="text-slate-700">{label}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-bold text-slate-800">{litros.toFixed(0)} L</span>
+                                <span className="text-slate-400 ml-1">({pct.toFixed(0)}%)</span>
+                                {cnt > 0 && <span className="text-slate-400 ml-1">· prom {prom.toFixed(0)} L</span>}
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div className={`h-full ${color} rounded-full`} style={{width: `${pct}%`}}></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Top máquinas por litros */}
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Top Máquinas por Litros</div>
+                    {topMaquinas.length > 0 ? (
+                      <div className="space-y-3">
+                        {topMaquinas.map(([patente, data], i) => {
+                          const pct = litrosEntregas > 0 ? (data.litros / litrosEntregas) * 100 : 0;
+                          const colors = ['bg-slate-800', 'bg-slate-600', 'bg-slate-400'];
+                          return (
+                            <div key={patente}>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="font-semibold text-slate-700">{patente}</span>
+                                <span className="text-slate-500">{data.litros.toFixed(0)} L · {data.reportes} rep.</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div className={`h-full ${colors[i]} rounded-full`} style={{width: `${pct}%`}}></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-400 text-center py-4">Sin entregas registradas</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {reporteDetalle && (
         <CombustibleDetalleModal
           reporte={reporteDetalle}

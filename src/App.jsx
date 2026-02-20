@@ -18,6 +18,8 @@ import AppSelector from "./pages/AppSelector.jsx";
 import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
 import Pasajes from "./pages/Pasajes.jsx";
 import ReporteCombustible from "./pages/ReporteCombustible.jsx";
+import CombustibleModal from "./components/CombustibleModal";
+import CombustiblePage from "./components/CombustiblePage";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -31,22 +33,27 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 
 // WorkFleet Shell - Solo Reporte Detallado
 function WorkFleetShell({ user, onLogout, onBackToSelector }) {
+  const [view, setView] = useState('menu'); // 'menu' | 'maquinaria' | 'combustible'
+
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header simplificado */}
-      <header className="sticky top-0 z-40 bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-700 text-white shadow-lg">
-        <div className="max-w-[1400px] mx-auto px-4 py-4 flex items-center justify-between">
+      {/* Header */}
+      <header className="sticky top-0 z-40 backdrop-blur-md bg-white/10 border-b border-white/20 shadow-sm">
+        <div className="max-w-[1400px] mx-auto px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img 
-              src="/favicon.svg" 
-              alt="Work Fleet Logo" 
-              className="h-10 w-10 object-contain block sm:hidden"
-            />
-            <img 
-              src="/logo-header.svg" 
-              alt="Work Fleet Logo" 
-              className="h-10 w-auto object-contain hidden sm:block"
-            />
+            {/* Botón volver al menú si estamos en una vista */}
+            {view !== 'menu' && (
+              <button
+                onClick={() => setView('menu')}
+                className="p-2 bg-white/15 hover:bg-white/25 rounded-lg transition-colors mr-1"
+                title="Volver"
+              >
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            <img src="/wf-logo.svg" alt="Work Fleet Logo" className="h-14 w-auto object-contain" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -72,9 +79,55 @@ function WorkFleetShell({ user, onLogout, onBackToSelector }) {
         </div>
       </header>
 
-      {/* Contenido - Solo Reporte Detallado */}
+      {/* Contenido */}
       <main className="max-w-[1400px] mx-auto">
-        <ReportDetallado />
+        {view === 'menu' && (
+          <div className="flex flex-col items-center justify-center min-h-[70vh] px-4 gap-6">
+            <h1 className="text-2xl font-black text-slate-800 mb-2">¿Qué deseas registrar?</h1>
+
+            {/* Botón Reporte Maquinaria */}
+            <button
+              onClick={() => setView('maquinaria')}
+              className="w-full max-w-sm bg-white rounded-2xl shadow-lg border-2 border-slate-200 hover:border-purple-400 hover:shadow-xl transition-all p-6 flex items-center gap-5 group"
+            >
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-700 flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
+                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                </svg>
+              </div>
+              <div className="text-left">
+                <div className="text-lg font-black text-slate-900">Reporte Maquinaria</div>
+                <div className="text-sm text-slate-500 mt-0.5">Registro diario de equipos</div>
+              </div>
+              <svg className="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            {/* Botón Reporte Combustible */}
+            <button
+              onClick={() => setView('combustible')}
+              className="w-full max-w-sm bg-white rounded-2xl shadow-lg border-2 border-slate-200 hover:border-orange-400 hover:shadow-xl transition-all p-6 flex items-center gap-5 group"
+            >
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
+                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+                </svg>
+              </div>
+              <div className="text-left">
+                <div className="text-lg font-black text-slate-900">Reporte Combustible</div>
+                <div className="text-sm text-slate-500 mt-0.5">Registro de surtidores</div>
+              </div>
+              <svg className="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {view === 'maquinaria' && <ReportDetallado />}
+        {view === 'combustible' && <CombustiblePage onClose={() => setView('menu')} />}
       </main>
     </div>
   );
@@ -120,7 +173,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
 
       {/* Header - Responsive */}
       <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 lg:py-5">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-1 sm:py-2">
           <div className="flex items-center justify-between">
             {/* Logo - Responsive */}
             <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
@@ -128,13 +181,13 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               <img 
                 src="/favicon.svg" 
                 alt="Fleet Core Logo" 
-                className="h-10 w-10 object-contain block sm:hidden"
+                className="h-14 w-14 object-contain block sm:hidden"
               />
               {/* Logo completo - visible en sm y superior */}
               <img 
                 src="/logo-header.svg" 
                 alt="Fleet Core Logo" 
-                className="h-10 w-auto object-contain hidden sm:block"
+                className="h-14 w-auto object-contain hidden sm:block"
               />
             </div>
 
@@ -595,20 +648,22 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
         {showMobileMenu && (
           <>
             <div 
-              className="lg:hidden fixed inset-0 bg-black/50 z-[60] animate-fadeIn" 
+              className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" 
               onClick={() => setShowMobileMenu(false)}
             />
             
-            <div className="lg:hidden fixed inset-y-0 right-0 w-full max-w-sm bg-white z-[70] shadow-2xl animate-slideInRight">
-              <div className="flex flex-col h-full">
+            <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
                 {/* Mobile Menu Header */}
-                <div className="flex items-center justify-between p-4 border-b border-slate-200">
-                  <h2 className="text-lg font-black text-slate-900">Menú</h2>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{background: 'linear-gradient(135deg, #2A3F5F 0%, #0F1C2E 100%)'}}>
+                  <div className="flex items-center gap-3">
+                    <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
+                    <h2 className="text-base font-black text-white">Menú</h2>
+                  </div>
                   <button
                     onClick={() => setShowMobileMenu(false)}
-                    className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                    className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors"
                   >
-                    <svg className="w-6 h-6 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
@@ -631,10 +686,10 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                   {/* Sección Producción */}
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 px-4 py-2 mb-2">
-                      <svg className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Producción</span>
+                      <span className="text-xs font-black text-slate-500 uppercase tracking-wider text-slate-500">Producción</span>
                     </div>
                     <MobileNavLink to="/reporte-detallado" label="Reporte Detallado" onClick={() => setShowMobileMenu(false)} />
                   </div>
@@ -645,13 +700,13 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                   {/* ✅ NUEVO: Sección Reporte WorkFleet */}
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 px-4 py-2 mb-2">
-                      <svg className="w-4 h-4 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">📊 Reporte WorkFleet</span>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider text-slate-500">WorkFleet</span>
                     </div>
-                    <MobileNavLink to="/reporte-workfleet" label="📋 Reporte Maquinaria" onClick={() => setShowMobileMenu(false)} />
-                    <MobileNavLink to="/reporte-combustible" label="⛽ Reporte Combustible" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/reporte-workfleet" label="Reporte Maquinaria" onClick={() => setShowMobileMenu(false)} />
+                    <MobileNavLink to="/reporte-combustible" label="Reporte Combustible" onClick={() => setShowMobileMenu(false)} />
                   </div>
 
                   {/* Separador */}
@@ -660,10 +715,10 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                   {/* Sección Costos */}
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 px-4 py-2 mb-2">
-                      <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                       </svg>
-                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Costos</span>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider text-slate-500">Costos</span>
                     </div>
                     <MobileNavLink to="/payroll" label="Remuneraciones" onClick={() => setShowMobileMenu(false)} />
                     <MobileNavLink to="/payment-status" label="Estados de Pago" onClick={() => setShowMobileMenu(false)} />
@@ -688,7 +743,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                     <MobileNavLink to="/fuel-price" label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
                   </div>
                 </nav>
-              </div>
             </div>
           </>
         )}

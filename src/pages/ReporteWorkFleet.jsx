@@ -987,6 +987,8 @@ export default function ReporteWorkFleet() {
         </div>
       </div>
 
+
+
       {/* Botones de Acción */}
       <div className="max-w-7xl mx-auto mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border-2 border-indigo-100">
@@ -1189,6 +1191,178 @@ export default function ReporteWorkFleet() {
       </div>
       </div>
 
+
+      {/* Panel de Análisis en Tiempo Real */}
+      {reportesFiltrados.length > 0 && (() => {
+        const totalReportes = reportesFiltrados.length;
+        const firmados = reportesFiltrados.filter(r => r.firmado).length;
+
+        let totalHoras = 0, totalKm = 0, totalCombustible = 0;
+        let horasEfectivas = 0, horasNoEfectivas = 0, horasMantenciones = 0, horasProgramadas = 0;
+        let cntEfectivas = 0, cntNoEfectivas = 0, cntMantenciones = 0, cntProgramadas = 0;
+        let minHoras = Infinity, maxHoras = -Infinity;
+
+        const calcMin = (ini, fin) => {
+          if (!ini || !fin) return 0;
+          const [hI, mI] = ini.split(':').map(Number);
+          const [hF, mF] = fin.split(':').map(Number);
+          return Math.max(0, (hF * 60 + mF) - (hI * 60 + mI));
+        };
+
+        const porMaquina = {};
+
+        reportesFiltrados.forEach(r => {
+          // Horas totales = columna Trab. = horometroFinal - horometroInicial
+          const horas = (parseFloat(r.horometroFinal) || 0) - (parseFloat(r.horometroInicial) || 0);
+          const km = (parseFloat(r.kilometrajeFinal) || 0) - (parseFloat(r.kilometrajeInicial) || 0);
+          const comb = parseFloat(r.cargaCombustible) || 0;
+          totalHoras += horas;
+          totalKm += km;
+          totalCombustible += comb;
+          if (horas > 0) { minHoras = Math.min(minHoras, horas); maxHoras = Math.max(maxHoras, horas); }
+
+          // Desglose horas por tipo de actividad (en horas decimales)
+          r.actividadesEfectivas?.forEach(a => { const h = calcMin(a.horaInicio, a.horaFin) / 60; horasEfectivas += h; if (h > 0) cntEfectivas++; });
+          r.tiemposNoEfectivos?.forEach(t => { const h = calcMin(t.horaInicio, t.horaFin) / 60; horasNoEfectivas += h; if (h > 0) cntNoEfectivas++; });
+          r.mantenciones?.forEach(m => { const h = calcMin(m.horaInicio, m.horaFin) / 60; horasMantenciones += h; if (h > 0) cntMantenciones++; });
+          const tp = r.tiemposProgramados;
+          if (tp) {
+            const hC = calcMin(tp.charlaSegurid?.horaInicio, tp.charlaSegurid?.horaFin) / 60;
+            const hI = calcMin(tp.inspeccionEquipo?.horaInicio, tp.inspeccionEquipo?.horaFin) / 60;
+            const hCol = calcMin(tp.colacion?.horaInicio, tp.colacion?.horaFin) / 60;
+            horasProgramadas += hC + hI + hCol;
+            if (hC > 0) cntProgramadas++; if (hI > 0) cntProgramadas++; if (hCol > 0) cntProgramadas++;
+          }
+
+          // Top máquinas
+          const key = r.machinePatente || r.machineId;
+          if (!porMaquina[key]) porMaquina[key] = { horas: 0, reportes: 0 };
+          porMaquina[key].horas += horas;
+          porMaquina[key].reportes += 1;
+        });
+
+        const horasPromedio = totalReportes > 0 ? (totalHoras / totalReportes) : 0;
+        const eficienciaValidacion = totalReportes > 0 ? Math.round((firmados / totalReportes) * 100) : 0;
+        const combustiblePorHora = totalHoras > 0 ? (totalCombustible / totalHoras) : 0;
+        const kmPorHora = totalHoras > 0 ? (totalKm / totalHoras) : 0;
+        const topMaquinas = Object.entries(porMaquina).sort((a, b) => b[1].horas - a[1].horas).slice(0, 3);
+        const efColor = eficienciaValidacion >= 80 ? 'text-emerald-600' : eficienciaValidacion >= 50 ? 'text-amber-600' : 'text-red-500';
+        const efBg = eficienciaValidacion >= 80 ? 'bg-emerald-50 border-emerald-200' : eficienciaValidacion >= 50 ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
+
+        const totalDesglose = horasEfectivas + horasNoEfectivas + horasMantenciones + horasProgramadas;
+
+        return (
+          <div className="max-w-7xl mx-auto mb-6 mt-6">
+            <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style={{background: 'linear-gradient(135deg, #2A3F5F 0%, #0F1C2E 100%)'}}>
+                <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span className="text-sm font-bold text-white">Análisis en tiempo real</span>
+                <span className="ml-auto text-xs text-white/50">{totalReportes} reporte{totalReportes !== 1 ? 's' : ''}</span>
+              </div>
+
+              <div className="p-5 space-y-5">
+                {/* KPIs */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Horas Totales</div>
+                    <div className="text-2xl font-black text-slate-900">{totalHoras.toFixed(1)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">hrs (Σ col. Trab.)</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Promedio Diario</div>
+                    <div className="text-2xl font-black text-slate-900">{horasPromedio.toFixed(1)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">hrs / reporte</div>
+                  </div>
+                  <div className={`rounded-xl p-4 border ${efBg}`}>
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Validación</div>
+                    <div className={`text-2xl font-black ${efColor}`}>{eficienciaValidacion}%</div>
+                    <div className="text-xs text-slate-400 mt-0.5">reportes firmados</div>
+                    <div className="text-xs text-slate-500 mt-1">{firmados}/{totalReportes} validados</div>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Combustible</div>
+                    <div className="text-2xl font-black text-amber-700">{totalCombustible.toFixed(0)}L</div>
+                    <div className="text-xs text-slate-400 mt-0.5">total cargado</div>
+                    <div className="text-xs text-slate-500 mt-1">{combustiblePorHora.toFixed(1)} L/hr</div>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Kilometraje</div>
+                    <div className="text-2xl font-black text-blue-700">{totalKm.toFixed(0)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">km recorridos</div>
+                    <div className="text-xs text-slate-500 mt-1">{kmPorHora.toFixed(1)} km/hr</div>
+                  </div>
+                </div>
+
+                {/* Desglose + Top máquinas */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Desglose horas por tipo */}
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Desglose de Horas por Tipo</div>
+                    <div className="space-y-2.5">
+                      {[
+                        { label: 'Efectivas', hrs: horasEfectivas, cnt: cntEfectivas, color: 'bg-red-500' },
+                        { label: 'No Efectivas', hrs: horasNoEfectivas, cnt: cntNoEfectivas, color: 'bg-amber-500' },
+                        { label: 'Mantenciones', hrs: horasMantenciones, cnt: cntMantenciones, color: 'bg-slate-500' },
+                        { label: 'Tiempo de Reservas', hrs: horasProgramadas, cnt: cntProgramadas, color: 'bg-blue-400' },
+                      ].map(({ label, hrs, cnt, color }) => {
+                        const pct = totalDesglose > 0 ? (hrs / totalDesglose) * 100 : 0;
+                        const prom = cnt > 0 ? (hrs / cnt) : 0;
+                        return (
+                          <div key={label}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <div className={`w-2 h-2 rounded-full ${color}`}></div>
+                                <span className="text-slate-700">{label}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-bold text-slate-800">{hrs.toFixed(1)} hrs</span>
+                                <span className="text-slate-400 ml-1">({pct.toFixed(0)}%)</span>
+                                {cnt > 0 && <span className="text-slate-400 ml-1">· prom {prom.toFixed(1)}h</span>}
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <div className={`h-full ${color} rounded-full`} style={{width: `${pct}%`}}></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                    </div>
+                  </div>
+
+                  {/* Top máquinas */}
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Top Máquinas por Horas</div>
+                    {topMaquinas.length > 0 ? (
+                      <div className="space-y-3">
+                        {topMaquinas.map(([patente, data], i) => {
+                          const pct = totalHoras > 0 ? (data.horas / totalHoras) * 100 : 0;
+                          const colors = ['bg-slate-800', 'bg-slate-600', 'bg-slate-400'];
+                          return (
+                            <div key={patente}>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="font-semibold text-slate-700">{patente}</span>
+                                <span className="text-slate-500">{data.horas.toFixed(1)} hrs · {data.reportes} rep.</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div className={`h-full ${colors[i]} rounded-full`} style={{width: `${pct}%`}}></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-400 text-center py-4">Sin datos</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {/* Modal de Detalle del Reporte */}
       {reporteDetalle && (
         <ReporteDetalleModal

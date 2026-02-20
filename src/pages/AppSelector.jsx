@@ -156,23 +156,13 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               )}
               
               {/* Icon */}
-              <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessFleetCore ? 'group-hover:shadow-2xl' : ''}`}>
+              <div className="mx-auto mb-6 flex items-center justify-center">
                 <img
-                  src="/favicon.svg"
+                  src="/logo-movil2.svg"
                   alt="FleetCore"
-                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain"
+                  className="h-28 sm:h-32 w-auto object-contain"
                 />
               </div>
-
-              {/* Title */}
-              <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mb-4 text-center">
-                Fleet<span className="text-blue-600">Core</span>
-              </h2>
-
-              {/* Description */}
-              <p className="text-slate-600 text-center mb-6 text-sm sm:text-base">
-                Sistema completo de gestión de maquinaria y proyectos
-              </p>
 
               {/* Features */}
               <ul className="space-y-3 mb-8">
@@ -237,23 +227,13 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               )}
               
               {/* Icon */}
-              <div className={`w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-900 to-purple-700 flex items-center justify-center shadow-xl transition-shadow ${canAccessWorkFleet ? 'group-hover:shadow-2xl' : ''}`}>
+              <div className="mx-auto mb-6 flex items-center justify-center">
                 <img
-                  src="/favicon.svg"
+                  src="/wf-logo-movil.svg"
                   alt="WorkFleet"
-                  className="w-14 h-14 sm:w-16 sm:h-16 object-contain"
+                  className="h-28 sm:h-32 w-auto object-contain"
                 />
               </div>
-
-              {/* Title */}
-              <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mb-4 text-center">
-                Work<span className="text-purple-600">Fleet</span>
-              </h2>
-
-              {/* Description */}
-              <p className="text-slate-600 text-center mb-6 text-sm sm:text-base">
-                Aplicación móvil para operadores en terreno
-              </p>
 
               {/* Features */}
               <ul className="space-y-3 mb-8">

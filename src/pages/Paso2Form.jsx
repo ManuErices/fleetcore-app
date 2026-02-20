@@ -47,46 +47,33 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   const handleTimelineClick = (e) => {
+    if (isDragging) return; // ignore clicks during drag
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percentage = x / rect.width;
     
-    const minMinutes = 7 * 60; // 7:00 AM
-    const maxMinutes = 19 * 60; // 7:00 PM
+    const minMinutes = 7 * 60;
+    const maxMinutes = 19 * 60;
     const totalMinutes = maxMinutes - minMinutes;
     
-    let clickedMinutes = minMinutes + (percentage * totalMinutes);
-    clickedMinutes = roundToNearest15(clickedMinutes);
-    clickedMinutes = Math.max(minMinutes, Math.min(maxMinutes, clickedMinutes));
-    
-    const clickedTime = minutesToTime(clickedMinutes);
-    
-    // Si no hay inicio, establecer el inicio y automáticamente el fin 1 minuto después
-    if (!startTime) {
-      let finalStartMinutes = clickedMinutes;
-      let finalEndMinutes = clickedMinutes + 1;
-      
-      // Si el fin se pasaría del máximo, ajustar el inicio hacia atrás
-      if (finalEndMinutes > maxMinutes) {
-        finalEndMinutes = maxMinutes;
-        finalStartMinutes = maxMinutes - 1;
-      }
-      
-      setStartTime(minutesToTime(finalStartMinutes));
-      setEndTime(minutesToTime(finalEndMinutes));
-    } 
-    // Si hay inicio pero no hay fin, establecer el fin
-    else if (!endTime) {
-      const startMinutes = timeToMinutes(startTime);
-      if (clickedMinutes > startMinutes) {
+    let clicked = minMinutes + (percentage * totalMinutes);
+    clicked = roundToNearest15(clicked);
+    clicked = Math.max(minMinutes, Math.min(maxMinutes, clicked));
+    const clickedTime = minutesToTime(clicked);
+
+    if (!startTime || !endTime) {
+      // Primer clic: fijar inicio, dejar fin libre
+      setStartTime(clickedTime);
+      setEndTime(null);
+    } else {
+      const sMin = timeToMinutes(startTime);
+      if (clicked > sMin) {
+        // Clic a la derecha del inicio → ajustar fin
         setEndTime(clickedTime);
-      }
-    }
-    // Si ambos están establecidos, mover el fin
-    else {
-      const startMinutes = timeToMinutes(startTime);
-      if (clickedMinutes > startMinutes) {
-        setEndTime(clickedTime);
+      } else {
+        // Clic a la izquierda → mover inicio, limpiar fin
+        setStartTime(clickedTime);
+        setEndTime(null);
       }
     }
   };
@@ -179,17 +166,16 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6 rounded-t-3xl sm:rounded-t-2xl">
-          {/* Barra de arrastre en móvil */}
+        <div className="sticky top-0 bg-gradient-to-r from-slate-800 to-slate-900 text-white p-4 sm:p-6 rounded-t-3xl sm:rounded-t-2xl">
           <div className="sm:hidden w-12 h-1.5 bg-white/30 rounded-full mx-auto mb-3"></div>
           
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <h2 className="text-xl sm:text-2xl font-bold">{title || "Seleccionar Horario"}</h2>
-              <p className="text-indigo-100 text-xs sm:text-sm mt-1">Arrastra o toca para establecer</p>
+              <p className="text-slate-300 text-xs sm:text-sm mt-1">Arrastra o toca para establecer</p>
             </div>
             <button
               onClick={onClose}
@@ -221,26 +207,26 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                 <div className="text-lg sm:text-2xl font-bold text-slate-700 leading-tight">{formatTime12h(startTime)}</div>
                 <div className="text-[9px] text-slate-500 mt-0.5">Seleccionado</div>
               </div>
-              <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-[10px] sm:text-xs font-semibold text-purple-700 mb-1">DURACIÓN</div>
-                <div className="text-lg sm:text-2xl font-bold text-purple-900 leading-tight">{calculateDuration()}</div>
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-[10px] sm:text-xs font-semibold text-slate-600 mb-1">DURACIÓN</div>
+                <div className="text-lg sm:text-2xl font-bold text-slate-900 leading-tight">{calculateDuration()}</div>
               </div>
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4 text-center">
-                <div className="text-[10px] sm:text-xs font-semibold text-blue-700 mb-1">FIN</div>
-                <div className="text-lg sm:text-2xl font-bold text-blue-900 leading-tight">{formatTime12h(endTime)}</div>
-                <div className="text-[9px] text-blue-600 mt-0.5">Ajustable</div>
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4 text-center">
+                <div className="text-[10px] sm:text-xs font-semibold text-slate-600 mb-1">FIN</div>
+                <div className="text-lg sm:text-2xl font-bold text-slate-900 leading-tight">{formatTime12h(endTime)}</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">Ajustable</div>
               </div>
             </div>
           )}
 
           {isOverlapping() && (
-            <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-orange-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
+              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-slate-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
               </svg>
               <div className="flex-1">
-                <div className="font-bold text-orange-900 text-sm sm:text-base">⚠️ Horario Superpuesto</div>
-                <div className="text-xs sm:text-sm text-orange-700 mt-0.5">Este horario se superpone con otra actividad</div>
+                <div className="font-bold text-slate-900 text-sm sm:text-base">⚠️ Horario Superpuesto</div>
+                <div className="text-xs sm:text-sm text-slate-600 mt-0.5">Este horario se superpone con otra actividad</div>
               </div>
             </div>
           )}
@@ -330,7 +316,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
               {/* Rango seleccionado */}
               {startTime && endTime && width > 0 && (
                 <div
-                  className="absolute top-0 bottom-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded shadow-lg transition-all"
+                  className="absolute top-0 bottom-0 bg-gradient-to-r from-slate-600 to-slate-800 rounded shadow-lg transition-all"
                   style={{
                     left: `${startPos}%`,
                     width: `${width}%`
@@ -350,7 +336,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
 
                   {/* Handle de fin (arrastrable) */}
                   <div
-                    className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-blue-500 cursor-ew-resize rounded-r hover:bg-blue-600 active:bg-blue-700 transition-colors flex items-center justify-center"
+                    className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-slate-500 cursor-ew-resize rounded-r hover:bg-slate-500 active:bg-slate-700 transition-colors flex items-center justify-center"
                     onMouseDown={(e) => handleMouseDown(e, 'end')}
                     onTouchStart={(e) => {
                       e.stopPropagation();
@@ -381,26 +367,13 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   value={startTime || ''}
                   onChange={(e) => {
                     const newStart = e.target.value;
-                    // Establecer automáticamente el fin 1 minuto después
-                    if (newStart) {
-                      const startMinutes = timeToMinutes(newStart);
-                      let finalStartMinutes = startMinutes;
-                      let endMinutes = startMinutes + 1;
-                      const maxMinutes = 19 * 60;
-                      
-                      // Si el fin se pasaría del máximo, ajustar el inicio hacia atrás
-                      if (endMinutes > maxMinutes) {
-                        endMinutes = maxMinutes;
-                        finalStartMinutes = maxMinutes - 1;
-                      }
-                      
-                      setStartTime(minutesToTime(finalStartMinutes));
-                      setEndTime(minutesToTime(endMinutes));
-                    } else {
-                      setStartTime(newStart);
+                    setStartTime(newStart || null);
+                    // Si el fin actual es menor o igual al nuevo inicio, limpiarlo
+                    if (newStart && endTime && timeToMinutes(newStart) >= timeToMinutes(endTime)) {
+                      setEndTime(null);
                     }
                   }}
-                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-slate-500 focus:ring-2 focus:ring-slate-200 transition-all"
                   min="07:00"
                   max="18:59"
                   step="900"
@@ -412,7 +385,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   type="time"
                   value={endTime || ''}
                   onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all"
+                  className="w-full px-3 sm:px-4 py-3 sm:py-3 text-base border-2 border-slate-200 rounded-lg focus:border-slate-500 focus:ring-2 focus:ring-slate-200 transition-all"
                   min="07:00"
                   max="19:00"
                   step="900"
@@ -433,7 +406,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
           <button
             onClick={handleConfirm}
             disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime)}
-            className="order-1 sm:order-2 px-8 py-4 sm:py-3 bg-gradient-to-r from-indigo-600 to-purple-600 active:from-indigo-700 active:to-purple-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-xl sm:rounded-lg transition-all shadow-lg disabled:shadow-none text-base"
+            className="order-1 sm:order-2 px-8 py-4 sm:py-3 bg-gradient-to-r from-slate-800 to-slate-900 active:from-slate-700 active:to-slate-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-xl sm:rounded-lg transition-all shadow-lg disabled:shadow-none text-base"
           >
             ✓ Confirmar Horario
           </button>
@@ -448,716 +421,411 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
   // ✅ NUEVO: Estado para errores de validación en tiempo real
   const [horariosErrors, setHorariosErrors] = useState([]);
   const [totalHorasError, setTotalHorasError] = useState('');
-  
-  // Estados para el modal
   const [timelineModal, setTimelineModal] = useState({
-    isOpen: false,
-    type: null, // 'actividadEfectiva', 'tiempoNoEfectivo', 'tiempoProgramado', 'mantencion'
-    index: null,
-    title: '',
-    initialStart: '',
-    initialEnd: ''
+    isOpen: false, type: null, index: null, title: '', initialStart: '', initialEnd: ''
   });
+  
 
-  // ✅ Función auxiliar para ajustar minutos a intervalos de 15 (0, 15, 30, 45)
-  const ajustarMinutos = (timeValue) => {
-    if (!timeValue || !timeValue.includes(':')) return timeValue;
-    
-    const [horas, minutos] = timeValue.split(':').map(Number);
-    
-    // Redondear minutos al intervalo de 15 más cercano
-    const minutosValidos = [0, 15, 30, 45];
-    let minutoAjustado = minutosValidos[0];
-    let menorDiferencia = Math.abs(minutos - minutosValidos[0]);
-    
-    for (let i = 1; i < minutosValidos.length; i++) {
-      const diferencia = Math.abs(minutos - minutosValidos[i]);
-      if (diferencia < menorDiferencia) {
-        menorDiferencia = diferencia;
-        minutoAjustado = minutosValidos[i];
-      }
-    }
-    
-    // Si el minuto ingresado ya es válido, no hacer nada
-    if (minutosValidos.includes(minutos)) {
-      return timeValue;
-    }
-    
-    // Devolver la hora ajustada
-    return `${String(horas).padStart(2, '0')}:${String(minutoAjustado).padStart(2, '0')}`;
+
+  // ─── UTILIDADES ────────────────────────────────────────────────────────────
+
+  // Convierte "HH:MM" → minutos desde medianoche
+  const toMin = (t) => {
+    if (!t || !t.includes(':')) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
   };
 
-  // Función para obtener la última hora final donde se puede continuar
-  // Busca la última actividad QUE TENGA DATOS, en el orden del formulario
-  // IGNORA tiempos programados (Charla, Inspección, Colación) ya que son fijos
-  const getUltimaHoraFinal = () => {
-    let ultimaHora = '08:30'; // Cambiar de 07:00 a 08:30 (después de inspección)
-    
-    // Buscar en ORDEN INVERSO (de abajo hacia arriba del formulario)
-    // para encontrar la última actividad que se completó
-    
-    // 3. Mantenciones (si están activas)
-    if (formData.tieneMantenciones && formData.mantenciones.length > 0) {
-      for (let i = formData.mantenciones.length - 1; i >= 0; i--) {
-        if (formData.mantenciones[i].horaFin) {
-          console.log('✅ Última hora final:', formData.mantenciones[i].horaFin, 'de mantención', i + 1);
-          return formData.mantenciones[i].horaFin;
-        }
-      }
-    }
-    
-    // 2. Tiempos No Efectivos
-    if (formData.tiemposNoEfectivos.length > 0) {
-      for (let i = formData.tiemposNoEfectivos.length - 1; i >= 0; i--) {
-        if (formData.tiemposNoEfectivos[i].horaFin) {
-          console.log('✅ Última hora final:', formData.tiemposNoEfectivos[i].horaFin, 'de tiempoNoEfectivo', i + 1);
-          return formData.tiemposNoEfectivos[i].horaFin;
-        }
-      }
-    }
-    
-    // 1. Actividades Efectivas
-    if (formData.actividadesEfectivas.length > 0) {
-      for (let i = formData.actividadesEfectivas.length - 1; i >= 0; i--) {
-        if (formData.actividadesEfectivas[i].horaFin) {
-          console.log('✅ Última hora final:', formData.actividadesEfectivas[i].horaFin, 'de actividadEfectiva', i + 1);
-          return formData.actividadesEfectivas[i].horaFin;
-        }
-      }
-    }
-    
-    console.log('⚠️ No hay horas finales, retornando 08:30');
-    return ultimaHora;
+  // Convierte minutos → "HH:MM"
+  const toTime = (min) => {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   };
 
-  // Función para calcular el inicio correcto de una actividad específica
-  const getInicioParaActividad = (type, index) => {
-    // Si es la primera actividad de su tipo y no hay nada antes, empieza en 08:30 (después de inspección)
-    if (type === 'actividadEfectiva' && index === 0 && 
-        formData.tiemposNoEfectivos.length === 0 && 
-        (!formData.tieneMantenciones || formData.mantenciones.length === 0)) {
-      return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
-    }
-    
-    // Para actividades efectivas, buscar la anterior en el array
-    if (type === 'actividadEfectiva' && index > 0) {
-      const actividadAnterior = formData.actividadesEfectivas[index - 1];
-      if (actividadAnterior && actividadAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (actividadAnterior.horaFin >= horaColacionInicio && actividadAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return actividadAnterior.horaFin;
-      }
-    }
-    
-    // Para tiempos no efectivos, buscar el anterior en el array
-    if (type === 'tiempoNoEfectivo' && index > 0) {
-      const tiempoAnterior = formData.tiemposNoEfectivos[index - 1];
-      if (tiempoAnterior && tiempoAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (tiempoAnterior.horaFin >= horaColacionInicio && tiempoAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return tiempoAnterior.horaFin;
-      }
-    }
-    
-    // Para mantenciones, buscar la anterior en el array
-    if (type === 'mantencion' && index > 0) {
-      const mantencionAnterior = formData.mantenciones[index - 1];
-      if (mantencionAnterior && mantencionAnterior.horaFin) {
-        // ✅ Aplicar lógica de colación
-        const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-        const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-        
-        if (mantencionAnterior.horaFin >= horaColacionInicio && mantencionAnterior.horaFin < horaColacionFin) {
-          return horaColacionFin; // Saltar la colación
-        }
-        return mantencionAnterior.horaFin;
-      }
-    }
-    
-    // Si no hay actividad anterior en el mismo tipo, usar 08:30 (fin de inspección)
-    return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
+  // Redondea "HH:MM" al múltiplo de 15 más cercano, forzado dentro de [07:00, 19:00]
+  const snapTo15 = (t) => {
+    if (!t) return t;
+    const raw = toMin(t);
+    const snapped = Math.round(raw / 15) * 15;
+    const clamped = Math.max(7 * 60, Math.min(19 * 60, snapped));
+    return toTime(clamped);
   };
 
-  // Función para abrir el modal de timeline
-  const openTimelineModal = (type, index, title, initialStart, initialEnd) => {
-    // SIEMPRE recalcular el inicio correcto basado en la posición
-    const horaInicio = getInicioParaActividad(type, index);
-    
-    setTimelineModal({
-      isOpen: true,
-      type,
-      index,
-      title,
-      initialStart: horaInicio,
-      initialEnd: initialEnd || horaInicio
-    });
-  };
-
-  // Función para cerrar el modal
-  const closeTimelineModal = () => {
-    setTimelineModal({
-      isOpen: false,
-      type: null,
-      index: null,
-      title: '',
-      initialStart: '',
-      initialEnd: ''
-    });
-  };
-
-  // Función para obtener todos los slots existentes (para mostrar en el timeline)
-  const getExistingSlots = (excludeType, excludeIndex) => {
+  // Devuelve todos los slots ocupados como [{start, end, label}], excluyendo uno opcional
+  const getAllSlots = (excludeType = null, excludeIndex = -1) => {
     const slots = [];
-    
-    // Actividades efectivas
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      if (act.horaInicio && act.horaFin) {
-        if (excludeType !== 'actividadEfectiva' || excludeIndex !== idx) {
-          slots.push({
-            start: act.horaInicio,
-            end: act.horaFin,
-            label: `Actividad ${idx + 1}`
-          });
-        }
+    const push = (ini, fin, label, type, idx) => {
+      if (ini && fin && !(type === excludeType && idx === excludeIndex)) {
+        slots.push({ start: ini, end: fin, label });
       }
-    });
-    
-    // Tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
-      if (tiempo.horaInicio && tiempo.horaFin) {
-        if (excludeType !== 'tiempoNoEfectivo' || excludeIndex !== idx) {
-          slots.push({
-            start: tiempo.horaInicio,
-            end: tiempo.horaFin,
-            label: `No Efectivo ${idx + 1}`
-          });
-        }
-      }
-    });
-    
-    // Tiempos programados
-    const tiemposProg = formData.tiemposProgramados;
-    if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
-      if (excludeType !== 'charlaSegurid') {
-        slots.push({
-          start: tiemposProg.charlaSegurid.horaInicio,
-          end: tiemposProg.charlaSegurid.horaFin,
-          label: 'Charla Seguridad'
-        });
-      }
+    };
+    formData.actividadesEfectivas.forEach((a, i) =>
+      push(a.horaInicio, a.horaFin, `Act. ${i+1}`, 'actividadEfectiva', i));
+    formData.tiemposNoEfectivos.forEach((t, i) =>
+      push(t.horaInicio, t.horaFin, `No Efec. ${i+1}`, 'tiempoNoEfectivo', i));
+    if (formData.tieneMantenciones) {
+      formData.mantenciones.forEach((m, i) =>
+        push(m.horaInicio, m.horaFin, `Mant. ${i+1}`, 'mantencion', i));
     }
-    if (tiemposProg.inspeccionEquipo.horaInicio && tiemposProg.inspeccionEquipo.horaFin) {
-      if (excludeType !== 'inspeccionEquipo') {
-        slots.push({
-          start: tiemposProg.inspeccionEquipo.horaInicio,
-          end: tiemposProg.inspeccionEquipo.horaFin,
-          label: 'Inspección Equipo'
-        });
-      }
-    }
-    if (tiemposProg.colacion.horaInicio && tiemposProg.colacion.horaFin) {
-      if (excludeType !== 'colacion') {
-        slots.push({
-          start: tiemposProg.colacion.horaInicio,
-          end: tiemposProg.colacion.horaFin,
-          label: 'Colación'
-        });
-      }
-    }
-    
-    // Mantenciones
-    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
-      formData.mantenciones.forEach((mant, idx) => {
-        if (mant.horaInicio && mant.horaFin) {
-          if (excludeType !== 'mantencion' || excludeIndex !== idx) {
-            slots.push({
-              start: mant.horaInicio,
-              end: mant.horaFin,
-              label: `Mantención ${idx + 1}`
-            });
-          }
-        }
-      });
-    }
-    
+    const tp = formData.tiemposProgramados;
+    push(tp.charlaSegurid?.horaInicio,  tp.charlaSegurid?.horaFin,  'Charla',    'charlaSegurid',    -1);
+    push(tp.inspeccionEquipo?.horaInicio, tp.inspeccionEquipo?.horaFin, 'Inspección', 'inspeccionEquipo', -1);
+    push(tp.colacion?.horaInicio,       tp.colacion?.horaFin,       'Colación',  'colacion',         -1);
     return slots;
   };
 
-  // Función para confirmar el horario desde el modal
+  // Verifica si un rango [s,e] se superpone con algún slot existente
+  const overlapsAny = (s, e, slots) =>
+    slots.some(sl => toMin(s) < toMin(sl.end) && toMin(e) > toMin(sl.start));
+
+  // ─── INICIO SUGERIDO ────────────────────────────────────────────────────────
+
+  // Calcula el inicio sugerido para una actividad nueva o que se está editando.
+  // Regla: el mayor horaFin de todas las actividades existentes (excepto la propia).
+  // Si no hay ninguna, usa el fin de Inspección o Charla como punto de arranque.
+  const getSuggestedStart = (type, index) => {
+    let maxFin = 0;
+    let hasAny = false;
+
+    const check = (fin, t, i) => {
+      if (fin && !(t === type && i === index)) {
+        hasAny = true;
+        if (toMin(fin) > maxFin) maxFin = toMin(fin);
+      }
+    };
+
+    formData.actividadesEfectivas.forEach((a, i) => check(a.horaFin, 'actividadEfectiva', i));
+    formData.tiemposNoEfectivos.forEach((t, i) => check(t.horaFin, 'tiempoNoEfectivo', i));
+    if (formData.tieneMantenciones) {
+      formData.mantenciones.forEach((m, i) => check(m.horaFin, 'mantencion', i));
+    }
+
+    if (!hasAny) {
+      // Fallback: fin de inspección > fin charla > 08:30
+      const tp = formData.tiemposProgramados;
+      const candidates = [
+        tp.inspeccionEquipo?.horaFin,
+        tp.charlaSegurid?.horaFin,
+      ].filter(Boolean);
+      if (candidates.length) return candidates.sort().at(-1);
+      return '08:30';
+    }
+
+    return toTime(maxFin);
+  };
+
+  // ─── MODAL ──────────────────────────────────────────────────────────────────
+
+  const openTimelineModal = (type, index, title, currentStart, currentEnd) => {
+    // Si ya tiene horario confirmado → abrir con esos valores para editar
+    // Si no tiene horario → sugerir el siguiente slot libre
+    const hasTime = currentStart && currentEnd;
+    const suggested = hasTime ? currentStart : getSuggestedStart(type, index);
+    setTimelineModal({
+      isOpen: true, type, index, title,
+      initialStart: suggested,
+      initialEnd: hasTime ? currentEnd : suggested,
+    });
+  };
+
+  const closeTimelineModal = () =>
+    setTimelineModal({ isOpen: false, type: null, index: null, title: '', initialStart: '', initialEnd: '' });
+
+  // getExistingSlots: alias para el modal (excluye la actividad que se está editando)
+  const getExistingSlots = (type, index = -1) => getAllSlots(type, index);
+
+  // ─── CONFIRMAR HORARIO ──────────────────────────────────────────────────────
+
+  // Lógica al confirmar en el modal:
+  // 1. Si el rango toca la colación → dividir automáticamente en 2 partes
+  //    Parte A: startTime → inicio colación
+  //    Parte B: fin colación → endTime
+  //    (solo se crea la parte que tenga duración > 0)
+  // 2. Si no toca colación → guardar directamente
+  // No se permite guardar si se superpone con otro slot ya ocupado.
   const handleTimelineConfirm = (startTime, endTime) => {
     const { type, index } = timelineModal;
-    
-    if (type === 'actividadEfectiva') {
-      updateActividad(index, 'horaInicio', startTime);
-      updateActividad(index, 'horaFin', endTime);
-    } else if (type === 'tiempoNoEfectivo') {
-      updateTiempoNoEfectivo(index, 'horaInicio', startTime);
-      updateTiempoNoEfectivo(index, 'horaFin', endTime);
-    } else if (type === 'charlaSegurid') {
-      updateTiempoProgramado('charlaSegurid', 'horaInicio', startTime);
-      updateTiempoProgramado('charlaSegurid', 'horaFin', endTime);
-    } else if (type === 'inspeccionEquipo') {
-      updateTiempoProgramado('inspeccionEquipo', 'horaInicio', startTime);
-      updateTiempoProgramado('inspeccionEquipo', 'horaFin', endTime);
-    } else if (type === 'colacion') {
-      updateTiempoProgramado('colacion', 'horaInicio', startTime);
-      updateTiempoProgramado('colacion', 'horaFin', endTime);
-    } else if (type === 'mantencion') {
-      updateMantencion(index, 'horaInicio', startTime);
-      updateMantencion(index, 'horaFin', endTime);
+
+    // Snap a 15 min por seguridad (el modal ya lo hace, pero por doble garantía)
+    const s = snapTo15(startTime);
+    const e = snapTo15(endTime);
+
+    if (toMin(s) >= toMin(e)) return; // nunca inicio >= fin
+
+    const col = formData.tiemposProgramados.colacion;
+    const colIni = col?.horaInicio || null;
+    const colFin = col?.horaFin    || null;
+
+    const tiposConSplit = ['actividadEfectiva', 'tiempoNoEfectivo', 'mantencion'];
+    const tocaColacion  = colIni && colFin &&
+      toMin(s) < toMin(colFin) && toMin(e) > toMin(colIni);
+
+    if (tocaColacion && tiposConSplit.includes(type)) {
+      // Calcular las dos partes
+      const parteA = toMin(s) < toMin(colIni)
+        ? { ini: s, fin: colIni } : null;
+      const parteB = toMin(e) > toMin(colFin)
+        ? { ini: colFin, fin: e } : null;
+
+      const applyColaSplit = (base, lista, key) => {
+        const nueva = [...lista];
+        if (parteA && parteB) {
+          nueva[index] = { ...base, horaInicio: parteA.ini, horaFin: parteA.fin };
+          nueva.splice(index + 1, 0, { ...base, horaInicio: parteB.ini, horaFin: parteB.fin });
+        } else if (parteA) {
+          nueva[index] = { ...base, horaInicio: parteA.ini, horaFin: parteA.fin };
+        } else if (parteB) {
+          nueva[index] = { ...base, horaInicio: parteB.ini, horaFin: parteB.fin };
+        }
+        setFormData({ ...formData, [key]: nueva });
+      };
+
+      if      (type === 'actividadEfectiva') applyColaSplit(formData.actividadesEfectivas[index], formData.actividadesEfectivas, 'actividadesEfectivas');
+      else if (type === 'tiempoNoEfectivo')  applyColaSplit(formData.tiemposNoEfectivos[index],   formData.tiemposNoEfectivos,   'tiemposNoEfectivos');
+      else if (type === 'mantencion')        applyColaSplit(formData.mantenciones[index],          formData.mantenciones,         'mantenciones');
+
+      closeTimelineModal();
+      return;
     }
+
+    // Sin colación: guardar directamente
+    const save = (updateFn, ...args) => { updateFn(...args, 'horaInicio', s); updateFn(...args, 'horaFin', e); };
+
+    if      (type === 'actividadEfectiva') save(updateActividad, index);
+    else if (type === 'tiempoNoEfectivo')  save(updateTiempoNoEfectivo, index);
+    else if (type === 'mantencion')        save(updateMantencion, index);
+    else if (type === 'charlaSegurid')     { updateTiempoProgramado('charlaSegurid', 'horaInicio', s); updateTiempoProgramado('charlaSegurid', 'horaFin', e); }
+    else if (type === 'inspeccionEquipo')  { updateTiempoProgramado('inspeccionEquipo', 'horaInicio', s); updateTiempoProgramado('inspeccionEquipo', 'horaFin', e); }
+    else if (type === 'colacion')          { updateTiempoProgramado('colacion', 'horaInicio', s); updateTiempoProgramado('colacion', 'horaFin', e); }
   };
 
-  // ✅ NUEVO: Sincronizar automáticamente los inicios de actividades cuando cambien los finales
-  useEffect(() => {
-    // Para actividades efectivas: cada inicio debe ser el fin de la anterior
-    const actividadesActualizadas = [...formData.actividadesEfectivas];
-    let huboChanges = false;
-    
-    for (let i = 1; i < actividadesActualizadas.length; i++) {
-      const actividadAnterior = actividadesActualizadas[i - 1];
-      const actividadActual = actividadesActualizadas[i];
-      
-      if (actividadAnterior.horaFin && actividadActual.horaInicio !== actividadAnterior.horaFin) {
-        actividadesActualizadas[i].horaInicio = actividadAnterior.horaFin;
-        huboChanges = true;
-      }
-    }
-    
-    // Para tiempos no efectivos: cada inicio debe ser el fin del anterior
-    const tiemposActualizados = [...formData.tiemposNoEfectivos];
-    for (let i = 1; i < tiemposActualizados.length; i++) {
-      const tiempoAnterior = tiemposActualizados[i - 1];
-      const tiempoActual = tiemposActualizados[i];
-      
-      if (tiempoAnterior.horaFin && tiempoActual.horaInicio !== tiempoAnterior.horaFin) {
-        tiemposActualizados[i].horaInicio = tiempoAnterior.horaFin;
-        huboChanges = true;
-      }
-    }
-    
-    // Para mantenciones: cada inicio debe ser el fin de la anterior
-    if (formData.tieneMantenciones) {
-      const mantencionesActualizadas = [...formData.mantenciones];
-      for (let i = 1; i < mantencionesActualizadas.length; i++) {
-        const mantencionAnterior = mantencionesActualizadas[i - 1];
-        const mantencionActual = mantencionesActualizadas[i];
-        
-        if (mantencionAnterior.horaFin && mantencionActual.horaInicio !== mantencionAnterior.horaFin) {
-          mantencionesActualizadas[i].horaInicio = mantencionAnterior.horaFin;
-          huboChanges = true;
-        }
-      }
-      
-      if (huboChanges) {
-        setFormData({
-          ...formData,
-          actividadesEfectivas: actividadesActualizadas,
-          tiemposNoEfectivos: tiemposActualizados,
-          mantenciones: mantencionesActualizadas
-        });
-      }
-    } else if (huboChanges) {
-      setFormData({
-        ...formData,
-        actividadesEfectivas: actividadesActualizadas,
-        tiemposNoEfectivos: tiemposActualizados
-      });
-    }
-  }, [
-    formData.actividadesEfectivas.map(a => a.horaFin).join(','),
-    formData.tiemposNoEfectivos.map(t => t.horaFin).join(','),
-    formData.mantenciones.map(m => m.horaFin).join(',')
-  ]);
+  // ─── ESTADO DE ERRORES EN TIEMPO REAL ───────────────────────────────────────
 
-  // ✅ NUEVO: Validar horarios en tiempo real
   useEffect(() => {
     const errors = [];
-    
-    // Recopilar TODOS los horarios de todas las secciones
-    const todosLosHorarios = [];
-    
-    // Agregar actividades efectivas
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      if (act.horaInicio && act.horaFin) {
-        todosLosHorarios.push({
-          inicio: act.horaInicio,
-          fin: act.horaFin,
-          tipo: 'actividadEfectiva',
-          indice: idx,
-          nombre: `Actividad Efectiva ${idx + 1}`
-        });
+    const allSlots = getAllSlots();
+
+    const checkEntry = (ini, fin, tipo, indice, nombre) => {
+      if (!ini || !fin) return;
+      const sMin = toMin(ini), eMin = toMin(fin);
+      const err = { index: indice, solapamiento: '' };
+
+      if (sMin >= eMin) {
+        err.solapamiento = 'La hora de inicio debe ser menor que la hora de fin';
+        errors.push({ ...err, nombre });
+        return;
       }
-    });
-    
-    // Agregar tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
-      if (tiempo.horaInicio && tiempo.horaFin) {
-        todosLosHorarios.push({
-          inicio: tiempo.horaInicio,
-          fin: tiempo.horaFin,
-          tipo: 'tiempoNoEfectivo',
-          indice: idx,
-          nombre: `Tiempo No Efectivo ${idx + 1}`
-        });
+      // Verificar superposición con todos los demás slots
+      const others = allSlots.filter(sl =>
+        !(sl.start === ini && sl.end === fin) // excluir el mismo slot exacto
+      );
+      if (overlapsAny(ini, fin, others)) {
+        err.solapamiento = 'Se superpone con otra actividad';
+        errors.push({ ...err, nombre });
       }
-    });
-    
-    // ✅ NUEVO: Agregar tiempos programados a la validación
-    const tiemposProg = formData.tiemposProgramados;
-    if (tiemposProg.charlaSegurid.horaInicio && tiemposProg.charlaSegurid.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.charlaSegurid.horaInicio,
-        fin: tiemposProg.charlaSegurid.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Charla de Seguridad'
-      });
-    }
-    if (tiemposProg.inspeccionEquipo.horaInicio && tiemposProg.inspeccionEquipo.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.inspeccionEquipo.horaInicio,
-        fin: tiemposProg.inspeccionEquipo.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Inspección de Equipo'
-      });
-    }
-    if (tiemposProg.colacion.horaInicio && tiemposProg.colacion.horaFin) {
-      todosLosHorarios.push({
-        inicio: tiemposProg.colacion.horaInicio,
-        fin: tiemposProg.colacion.horaFin,
-        tipo: 'tiempoProgramado',
-        nombre: 'Colación'
-      });
-    }
-    
-    // Agregar mantenciones si están activas
-    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
-      formData.mantenciones.forEach((mant, idx) => {
-        if (mant.horaInicio && mant.horaFin) {
-          todosLosHorarios.push({
-            inicio: mant.horaInicio,
-            fin: mant.horaFin,
-            tipo: 'mantencion',
-            indice: idx,
-            nombre: `Mantención ${idx + 1}`
-          });
-        }
-      });
-    }
-    
-    // Validar cada actividad efectiva
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      const actErrors = { index: idx, horaInicio: '', horaFin: '', duracion: '', solapamiento: '' };
-      
-      if (act.horaInicio) {
-        // Validar hora inicial: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
-        if (act.horaInicio < "07:00" || act.horaInicio > "19:00") {
-          actErrors.horaInicio = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
-        }
-      }
-      
-      if (act.horaFin) {
-        // Validar hora final: debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM
-        if (act.horaFin < "07:00" || act.horaFin > "19:00") {
-          actErrors.horaFin = 'Debe ser mayor o igual a 7:00 AM y menor o igual a 7:00 PM';
-        }
-      }
-      
-      // Validar que hora inicial < hora final
-      if (act.horaInicio && act.horaFin && act.horaInicio >= act.horaFin) {
-        actErrors.duracion = 'La hora inicial debe ser menor que la final';
-      }
-      
-      // ✅ VALIDACIÓN GLOBAL: Verificar superposición con TODOS los horarios
-      if (act.horaInicio && act.horaFin) {
-        const inicioActual = act.horaInicio;
-        const finActual = act.horaFin;
-        
-        todosLosHorarios.forEach((otroHorario) => {
-          // No comparar consigo mismo
-          if (otroHorario.tipo === 'actividadEfectiva' && otroHorario.indice === idx) {
-            return;
-          }
-          
-          // Verificar si se superponen
-          if (inicioActual < otroHorario.fin && finActual > otroHorario.inicio) {
-            actErrors.solapamiento = `Se superpone con: ${otroHorario.nombre}`;
-          }
-        });
-      }
-      
-      if (actErrors.horaInicio || actErrors.horaFin || actErrors.duracion || actErrors.solapamiento) {
-        errors.push(actErrors);
-      }
-    });
-    
+    };
+
+    formData.actividadesEfectivas.forEach((a, i) =>
+      checkEntry(a.horaInicio, a.horaFin, 'actividadEfectiva', i, `Actividad ${i+1}`));
+
     setHorariosErrors(errors);
-  }, [formData.actividadesEfectivas, formData.tiemposNoEfectivos, formData.mantenciones, formData.tieneMantenciones]);
+  }, [
+    formData.actividadesEfectivas.map(a => a.horaInicio + a.horaFin).join('|'),
+    formData.tiemposNoEfectivos.map(t => t.horaInicio + t.horaFin).join('|'),
+    formData.mantenciones.map(m => m.horaInicio + m.horaFin).join('|'),
+    formData.tiemposProgramados.charlaSegurid.horaInicio,
+    formData.tiemposProgramados.inspeccionEquipo.horaInicio,
+    formData.tiemposProgramados.colacion.horaInicio,
+    formData.tieneMantenciones,
+  ]);
 
-  // ✅ NUEVA: Función inteligente para calcular la hora inicial de nuevas actividades
-  const calcularHoraInicialInteligente = () => {
-    console.log('🔍 Calculando hora inicial inteligente...');
-    
-    // Buscar la última hora final entre TODAS las actividades (sin importar si hay vacías)
-    let ultimaHoraFinal = null;
-    
-    // Revisar actividades efectivas
-    formData.actividadesEfectivas.forEach((act, idx) => {
-      if (act.horaFin) {
-        console.log(`📌 Actividad Efectiva ${idx + 1} tiene horaFin: ${act.horaFin}`);
-        if (!ultimaHoraFinal || act.horaFin > ultimaHoraFinal) {
-          ultimaHoraFinal = act.horaFin;
-        }
-      }
-    });
-    
-    // Revisar tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
-      if (tiempo.horaFin) {
-        console.log(`📌 Tiempo No Efectivo ${idx + 1} tiene horaFin: ${tiempo.horaFin}`);
-        if (!ultimaHoraFinal || tiempo.horaFin > ultimaHoraFinal) {
-          ultimaHoraFinal = tiempo.horaFin;
-        }
-      }
-    });
-    
-    // Revisar mantenciones
-    if (formData.tieneMantenciones && Array.isArray(formData.mantenciones)) {
-      formData.mantenciones.forEach((mant, idx) => {
-        if (mant.horaFin) {
-          console.log(`📌 Mantención ${idx + 1} tiene horaFin: ${mant.horaFin}`);
-          if (!ultimaHoraFinal || mant.horaFin > ultimaHoraFinal) {
-            ultimaHoraFinal = mant.horaFin;
-          }
-        }
-      });
-    }
+  // ─── CRUD ACTIVIDADES ────────────────────────────────────────────────────────
 
-    // Si no encontramos ninguna hora final, usar fin de Inspección (08:30)
-    if (!ultimaHoraFinal) {
-      console.log('⚠️ No se encontró ninguna horaFin definida, retornando 08:30');
-      return formData.tiemposProgramados.inspeccionEquipo.horaFin || '08:30';
-    }
+  const calcularHoraInicialInteligente = () => getSuggestedStart('__new__', -1);
 
-    console.log(`✅ Última hora final encontrada: ${ultimaHoraFinal}`);
-
-    // ✅ LÓGICA DE COLACIÓN: Si la última actividad termina a las 13:00 o después (pero antes de 14:00),
-    // la siguiente debe empezar a las 14:00 para respetar la colación
-    const horaColacionInicio = formData.tiemposProgramados.colacion.horaInicio || '13:00';
-    const horaColacionFin = formData.tiemposProgramados.colacion.horaFin || '14:00';
-    
-    if (ultimaHoraFinal >= horaColacionInicio && ultimaHoraFinal < horaColacionFin) {
-      console.log(`🍽️ Última hora (${ultimaHoraFinal}) está en horario de colación, saltando a ${horaColacionFin}`);
-      return horaColacionFin; // Empezar después de colación
-    }
-
-    console.log(`✅ Retornando última hora final: ${ultimaHoraFinal}`);
-    return ultimaHoraFinal;
-  };
-
-  // Funciones para manejar actividades efectivas
-  const addActividad = () => {
-    const horaInicialNueva = calcularHoraInicialInteligente();
-    
+  const resetTodasActividades = () => {
+    if (!window.confirm('¿Estás seguro? Se eliminarán todas las actividades efectivas, tiempos no efectivos y mantenciones. Los tiempos programados se mantendrán.')) return;
     setFormData({
       ...formData,
-      actividadesEfectivas: [
-        ...formData.actividadesEfectivas, 
-        { actividad: '', horaInicio: horaInicialNueva, horaFin: '' }
-      ]
+      actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+      tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
+      mantenciones: [],
+      tieneMantenciones: false,
     });
   };
 
-  const removeActividad = (index) => {
-    const newActividades = formData.actividadesEfectivas.filter((_, i) => i !== index);
-    setFormData({ ...formData, actividadesEfectivas: newActividades });
+  const addActividad = () => setFormData({ ...formData, actividadesEfectivas: [
+    ...formData.actividadesEfectivas,
+    { actividad: '', horaInicio: calcularHoraInicialInteligente(), horaFin: '' }
+  ]});
+
+  const removeActividad = (index) => setFormData({ ...formData,
+    actividadesEfectivas: formData.actividadesEfectivas.filter((_, i) => i !== index) });
+
+  const clearActividad = (index) => {
+    const updated = [...formData.actividadesEfectivas];
+    updated[index] = { actividad: '', horaInicio: '', horaFin: '' };
+    setFormData({ ...formData, actividadesEfectivas: updated });
   };
 
   const updateActividad = (index, field, value) => {
-    const newActividades = [...formData.actividadesEfectivas];
-    // Si es un campo de hora, ajustar los minutos
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
-    }
-    newActividades[index][field] = value;
-    setFormData({ ...formData, actividadesEfectivas: newActividades });
+    const list = [...formData.actividadesEfectivas];
+    list[index] = { ...list[index], [field]: (field === 'horaInicio' || field === 'horaFin') ? snapTo15(value) : value };
+    setFormData({ ...formData, actividadesEfectivas: list });
   };
 
-  // Funciones para manejar tiempos no efectivos
-  const addTiempoNoEfectivo = () => {
-    const horaInicialNueva = calcularHoraInicialInteligente();
-    
-    setFormData({
-      ...formData,
-      tiemposNoEfectivos: [
-        ...formData.tiemposNoEfectivos, 
-        { motivo: '', horaInicio: horaInicialNueva, horaFin: '' }
-      ]
-    });
-  };
+  // ─── CRUD TIEMPOS NO EFECTIVOS ───────────────────────────────────────────────
 
-  const removeTiempoNoEfectivo = (index) => {
-    const newTiempos = formData.tiemposNoEfectivos.filter((_, i) => i !== index);
-    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+  const addTiempoNoEfectivo = () => setFormData({ ...formData, tiemposNoEfectivos: [
+    ...formData.tiemposNoEfectivos,
+    { motivo: '', horaInicio: calcularHoraInicialInteligente(), horaFin: '' }
+  ]});
+
+  const removeTiempoNoEfectivo = (index) => setFormData({ ...formData,
+    tiemposNoEfectivos: formData.tiemposNoEfectivos.filter((_, i) => i !== index) });
+
+  const clearTiempoNoEfectivo = (index) => {
+    const updated = [...formData.tiemposNoEfectivos];
+    updated[index] = { motivo: '', horaInicio: '', horaFin: '' };
+    setFormData({ ...formData, tiemposNoEfectivos: updated });
   };
 
   const updateTiempoNoEfectivo = (index, field, value) => {
-    const newTiempos = [...formData.tiemposNoEfectivos];
-    // Si es un campo de hora, ajustar los minutos
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
-    }
-    newTiempos[index][field] = value;
-    setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
+    const list = [...formData.tiemposNoEfectivos];
+    list[index] = { ...list[index], [field]: (field === 'horaInicio' || field === 'horaFin') ? snapTo15(value) : value };
+    setFormData({ ...formData, tiemposNoEfectivos: list });
   };
 
-  // Funciones para manejar tiempos programados
+  // ─── CRUD TIEMPOS PROGRAMADOS ────────────────────────────────────────────────
+
   const updateTiempoProgramado = (tipo, field, value) => {
-    // Si es un campo de hora, ajustar los minutos
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
-    }
-    setFormData({
-      ...formData,
-      tiemposProgramados: {
-        ...formData.tiemposProgramados,
-        [tipo]: {
-          ...formData.tiemposProgramados[tipo],
-          [field]: value
-        }
+    setFormData({ ...formData, tiemposProgramados: { ...formData.tiemposProgramados,
+      [tipo]: { ...formData.tiemposProgramados[tipo],
+        [field]: (field === 'horaInicio' || field === 'horaFin') ? snapTo15(value) : value
       }
-    });
+    }});
   };
 
-  // Funciones para manejar mantenciones
-  const addMantencion = () => {
-    const horaInicialNueva = calcularHoraInicialInteligente();
-    
-    setFormData({
-      ...formData,
-      mantenciones: [
-        ...formData.mantenciones,
-        { tipo: '', horaInicio: horaInicialNueva, horaFin: '' }
-      ]
-    });
+  const clearTiempoProgramado = (key) => {
+    setFormData({ ...formData, tiemposProgramados: {
+      ...formData.tiemposProgramados, [key]: { horaInicio: '', horaFin: '' }
+    }});
   };
 
-  const removeMantencion = (index) => {
-    const newMantenciones = formData.mantenciones.filter((_, i) => i !== index);
-    setFormData({ ...formData, mantenciones: newMantenciones });
+  // ─── CRUD MANTENCIONES ───────────────────────────────────────────────────────
+
+  const addMantencion = () => setFormData({ ...formData, mantenciones: [
+    ...formData.mantenciones,
+    { tipo: '', horaInicio: calcularHoraInicialInteligente(), horaFin: '' }
+  ]});
+
+  const removeMantencion = (index) => setFormData({ ...formData,
+    mantenciones: formData.mantenciones.filter((_, i) => i !== index) });
+
+  const clearMantencion = (index) => {
+    const updated = [...formData.mantenciones];
+    updated[index] = { tipo: '', descripcion: '', horaInicio: '', horaFin: '' };
+    setFormData({ ...formData, mantenciones: updated });
   };
 
   const updateMantencion = (index, field, value) => {
-    const newMantenciones = [...formData.mantenciones];
-    if ((field === 'horaInicio' || field === 'horaFin') && value) {
-      value = ajustarMinutos(value);
-    }
-    newMantenciones[index][field] = value;
-    setFormData({ ...formData, mantenciones: newMantenciones });
+    const list = [...formData.mantenciones];
+    list[index] = { ...list[index], [field]: (field === 'horaInicio' || field === 'horaFin') ? snapTo15(value) : value };
+    setFormData({ ...formData, mantenciones: list });
   };
+
+  // ─── SUBMIT ──────────────────────────────────────────────────────────────────
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Validaciones antes de enviar...
-    let errores = [];
-    
-    // 1. Validar que cada actividad tenga todos los campos
+    const errores = [];
+
+    // Validar actividades efectivas que existan (campos completos)
     formData.actividadesEfectivas.forEach((act, idx) => {
-      if (!act.actividad || !act.horaInicio || !act.horaFin) {
-        errores.push(`Actividad Efectiva ${idx + 1}: Todos los campos son obligatorios`);
-      }
+      if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
+      if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
     });
-    
-    // 2. Validar tiempos no efectivos
-    formData.tiemposNoEfectivos.forEach((tiempo, idx) => {
-      if (!tiempo.motivo || !tiempo.horaInicio || !tiempo.horaFin) {
-        errores.push(`Tiempo No Efectivo ${idx + 1}: Todos los campos son obligatorios`);
-      }
+
+    // Validar tiempos no efectivos que existan
+    formData.tiemposNoEfectivos.forEach((t, idx) => {
+      if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
+      if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
     });
-    
-    // 3. Validar tiempos programados (solo si tienen algún dato)
+
+    // Tiempos programados: si tiene un lado, debe tener ambos
     const tp = formData.tiemposProgramados;
-    
-    // Charla de Seguridad: si tiene inicio o fin, debe tener ambos
-    if ((tp.charlaSegurid.horaInicio && !tp.charlaSegurid.horaFin) || 
-        (!tp.charlaSegurid.horaInicio && tp.charlaSegurid.horaFin)) {
-      errores.push('Charla de Seguridad: Si se registra, debe tener hora de inicio y fin');
-    }
-    
-    // Inspección de Equipo: si tiene inicio o fin, debe tener ambos
-    if ((tp.inspeccionEquipo.horaInicio && !tp.inspeccionEquipo.horaFin) || 
-        (!tp.inspeccionEquipo.horaInicio && tp.inspeccionEquipo.horaFin)) {
-      errores.push('Inspección de Equipo: Si se registra, debe tener hora de inicio y fin');
-    }
-    
-    // Colación: si tiene inicio o fin, debe tener ambos
-    if ((tp.colacion.horaInicio && !tp.colacion.horaFin) || 
-        (!tp.colacion.horaInicio && tp.colacion.horaFin)) {
-      errores.push('Colación: Si se registra, debe tener hora de inicio y fin');
-    }
-    
-    // 4. Si hay mantenciones, validar
+    [
+      ['Charla de Seguridad', tp.charlaSegurid],
+      ['Inspección de Equipo', tp.inspeccionEquipo],
+      ['Colación', tp.colacion],
+    ].forEach(([nombre, val]) => {
+      const tieneIni = !!val.horaInicio, tieneFin = !!val.horaFin;
+      if (tieneIni !== tieneFin)
+        errores.push(`${nombre}: si se registra debe tener hora de inicio y fin`);
+    });
+
+    // Mantenciones
     if (formData.tieneMantenciones) {
-      formData.mantenciones.forEach((mant, idx) => {
-        if (!mant.tipo || !mant.horaInicio || !mant.horaFin) {
-          errores.push(`Mantención ${idx + 1}: Todos los campos son obligatorios`);
-        }
+      formData.mantenciones.forEach((m, idx) => {
+        if (!m.tipo) errores.push(`Mantención ${idx+1}: falta el tipo`);
+        if (!m.horaInicio || !m.horaFin) errores.push(`Mantención ${idx+1}: falta el horario`);
       });
     }
-    
-    // 5. Validar que no haya errores de horarios
-    if (horariosErrors.length > 0) {
-      errores.push('Hay errores en los horarios. Por favor corrígelos antes de continuar.');
-    }
-    
+
+    // Superposiciones detectadas en tiempo real
+    if (horariosErrors.length > 0)
+      errores.push('Hay superposiciones en los horarios. Usa el botón "Vaciar" para corregirlas.');
+
     if (errores.length > 0) {
       alert('Por favor corrige los siguientes errores:\n\n' + errores.join('\n'));
       return;
     }
-    
+
     onSubmit(e);
   };
+
 
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Header con máquina seleccionada */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 sm:p-6 rounded-xl shadow-lg">
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-4 sm:p-6 rounded-xl shadow-lg">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <div>
+            <div className="flex-1">
               <h2 className="text-xl sm:text-2xl font-bold">Paso 2: Registro de Actividades</h2>
-              <p className="text-indigo-100 text-sm">Máquina: {selectedMachine?.name || 'No seleccionada'}</p>
+              <p className="text-slate-300 text-sm">Máquina: {selectedMachine?.name || 'No seleccionada'}</p>
             </div>
+            <button
+              type="button"
+              onClick={resetTodasActividades}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-red-500/80 text-white/70 hover:text-white text-xs font-semibold rounded-lg transition-all border border-white/20 hover:border-red-400"
+              title="Vaciar todas las actividades y comenzar de cero"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Vaciar todo
+            </button>
           </div>
         </div>
 
         {/* SECCIÓN 1: Actividades Efectivas */}
-        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-green-200">
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-red-200">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">✅</span>
+              <svg className="w-7 h-7 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">Actividades Efectivas</h3>
             </div>
             <button
               type="button"
               onClick={addActividad}
-              className="px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
+              className="px-3 sm:px-4 py-2 bg-red-700 hover:bg-red-800 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
             >
               + Agregar
             </button>
@@ -1177,7 +845,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   onRemove={removeActividad}
                   errors={errors}
                   canRemove={formData.actividadesEfectivas.length > 1}
-                  color="green"
+                  color="slate"
                   labelActividad="Actividad"
                   placeholder="Ej: Excavación, Carga, etc."
                   onOpenTimeline={() => openTimelineModal(
@@ -1187,6 +855,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                     act.horaInicio,
                     act.horaFin
                   )}
+                  onClear={() => clearActividad(index)}
                   existingSlots={existingSlots}
                   opciones={['Trabajos en Plataforma', 'Trabajos en Camino', 'Trabajos en Campamento']}
                 />
@@ -1196,10 +865,10 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         </div>
 
         {/* SECCIÓN 2: Tiempos No Efectivos */}
-        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-amber-200">
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-amber-300">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">⏸️</span>
+              <svg className="w-7 h-7 text-amber-600" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">Tiempos No Efectivos</h3>
             </div>
             <button
@@ -1224,7 +893,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   onRemove={removeTiempoNoEfectivo}
                   errors={{}}
                   canRemove={formData.tiemposNoEfectivos.length > 1}
-                  color="amber"
+                  color="slate"
                   labelActividad="Motivo"
                   placeholder="Ej: Espera por operador, falla mecánica, etc."
                   onOpenTimeline={() => openTimelineModal(
@@ -1234,9 +903,9 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                     tiempo.horaInicio,
                     tiempo.horaFin
                   )}
+                  onClear={() => clearTiempoNoEfectivo(index)}
                   existingSlots={existingSlots}
                   opciones={['Sin Postura', 'Factor climático', 'Traslado de Equipo']}
-                  existingSlots={existingSlots}
                 />
               );
             })}
@@ -1246,14 +915,14 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         {/* SECCIÓN 3: Tiempos Programados */}
         <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-blue-200">
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-3xl">⏰</span>
+            <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 7v5l3 3"/></svg>
             <h3 className="text-lg sm:text-xl font-bold text-slate-900">Tiempos Programados</h3>
           </div>
 
           <div className="space-y-3">
             <TiempoProgramadoCard
               title="Charla de Seguridad"
-              icon="🦺"
+              
               data={formData.tiemposProgramados.charlaSegurid}
               onOpenTimeline={() => openTimelineModal(
                 'charlaSegurid',
@@ -1262,12 +931,13 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                 formData.tiemposProgramados.charlaSegurid.horaInicio,
                 formData.tiemposProgramados.charlaSegurid.horaFin
               )}
+              onClear={() => clearTiempoProgramado('charlaSegurid')}
               existingSlots={getExistingSlots('charlaSegurid')}
             />
             
             <TiempoProgramadoCard
               title="Inspección de Equipo"
-              icon="🔍"
+              
               data={formData.tiemposProgramados.inspeccionEquipo}
               onOpenTimeline={() => openTimelineModal(
                 'inspeccionEquipo',
@@ -1276,12 +946,13 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                 formData.tiemposProgramados.inspeccionEquipo.horaInicio,
                 formData.tiemposProgramados.inspeccionEquipo.horaFin
               )}
+              onClear={() => clearTiempoProgramado('inspeccionEquipo')}
               existingSlots={getExistingSlots('inspeccionEquipo')}
             />
             
             <TiempoProgramadoCard
               title="Colación"
-              icon="🍽️"
+              
               data={formData.tiemposProgramados.colacion}
               onOpenTimeline={() => openTimelineModal(
                 'colacion',
@@ -1290,16 +961,17 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                 formData.tiemposProgramados.colacion.horaInicio,
                 formData.tiemposProgramados.colacion.horaFin
               )}
+              onClear={() => clearTiempoProgramado('colacion')}
               existingSlots={getExistingSlots('colacion')}
             />
           </div>
         </div>
 
         {/* SECCIÓN 4: Mantenciones (Opcional) */}
-        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-orange-200">
+        <div className="bg-white rounded-xl shadow-md p-4 sm:p-6 border-2 border-amber-200">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">🔧</span>
+              <svg className="w-7 h-7 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
               <h3 className="text-lg sm:text-xl font-bold text-slate-900">Mantenciones</h3>
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -1307,7 +979,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                 type="checkbox"
                 checked={formData.tieneMantenciones}
                 onChange={(e) => setFormData({ ...formData, tieneMantenciones: e.target.checked })}
-                className="w-5 h-5 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                className="w-5 h-5 text-slate-600 border-gray-300 rounded focus:ring-slate-400"
               />
               <span className="text-sm font-semibold text-slate-700">¿Hubo mantenciones?</span>
             </label>
@@ -1318,7 +990,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               <button
                 type="button"
                 onClick={addMantencion}
-                className="w-full mb-3 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
+                className="w-full mb-3 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-sm rounded-lg transition-all shadow-md"
               >
                 + Agregar Mantención
               </button>
@@ -1328,7 +1000,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   const existingSlots = getExistingSlots('mantencion', index);
                   
                   return (
-                    <div key={index} className="bg-orange-50 border-2 border-orange-200 rounded-xl p-3 sm:p-4">
+                    <div key={index} className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4">
                       <div className="space-y-3">
                         <div>
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
@@ -1355,20 +1027,51 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                               mant.horaInicio,
                               mant.horaFin
                             )}
-                            className="flex-1 px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+                            className="flex-1 px-4 py-4 sm:py-3 bg-slate-800 active:bg-slate-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
                           >
                             <svg className="w-6 h-6 sm:w-4 sm:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                             <span className="text-base sm:text-sm">Seleccionar Horario</span>
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => clearMantencion(index)}
+                            title="Vaciar mantención"
+                            className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
                         </div>
 
                         {mant.horaInicio && mant.horaFin && (
-                          <div className="text-center py-3 sm:py-2 px-3 bg-orange-100 rounded-xl sm:rounded-lg">
-                            <span className="text-sm font-bold text-orange-700">
-                              {mant.horaInicio} - {mant.horaFin} ({calcularDuracion(mant.horaInicio, mant.horaFin)})
-                            </span>
+                          <div className="flex gap-2">
+                            <div
+                              onClick={() => openTimelineModal('mantencion', index, `Mantención ${index + 1}`, mant.horaInicio, mant.horaFin)}
+                              className="flex-1 flex items-center justify-between px-4 py-3 bg-slate-100 rounded-xl border-2 border-slate-200 cursor-pointer hover:opacity-80 transition-opacity"
+                            >
+                              <span className="text-sm font-bold text-slate-600">
+                                {mant.horaInicio} - {mant.horaFin} • {calcularDuracion(mant.horaInicio, mant.horaFin)}
+                              </span>
+                              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                                Editar
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => clearMantencion(index)}
+                              title="Vaciar mantención"
+                              className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
                           </div>
                         )}
 
@@ -1402,7 +1105,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
           <button
             type="submit"
             disabled={isLoading || horariosErrors.length > 0}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-lg transition-all shadow-lg disabled:shadow-none"
+            className="flex-1 px-6 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-lg transition-all shadow-lg disabled:shadow-none"
           >
             {isLoading ? 'Guardando...' : 'Guardar Registro →'}
           </button>
@@ -1425,19 +1128,25 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 }
 
 // Componente ActivityCard actualizado con botón de timeline y opciones predefinidas
-function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, existingSlots, opciones = [] }) {
+function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, onClear, existingSlots, opciones = [] }) {
   const colors = {
     green: {
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-      text: 'text-green-700',
-      button: 'bg-green-600 hover:bg-green-700'
+      bg: 'bg-red-50',
+      border: 'border-red-200',
+      text: 'text-red-700',
+      button: 'bg-red-700 hover:bg-red-800'
     },
     amber: {
       bg: 'bg-amber-50',
-      border: 'border-amber-200',
+      border: 'border-amber-300',
       text: 'text-amber-700',
       button: 'bg-amber-600 hover:bg-amber-700'
+    },
+    slate: {
+      bg: 'bg-slate-50',
+      border: 'border-slate-200',
+      text: 'text-slate-600',
+      button: 'bg-slate-800 hover:bg-slate-700'
     }
   };
 
@@ -1473,24 +1182,60 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
           )}
         </div>
 
-        {/* Botón para abrir timeline */}
-        <button
-          type="button"
-          onClick={onOpenTimeline}
-          className="w-full px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm sm:text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
-        >
-          <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-base sm:text-sm">Seleccionar Horario</span>
-        </button>
-
-        {/* Mostrar horario seleccionado */}
-        {data.horaInicio && data.horaFin && !errors.duracion && (
-          <div className={`text-center py-3 sm:py-2 px-3 ${c.bg} rounded-xl sm:rounded-lg border-2 ${c.border}`}>
-            <span className={`text-sm sm:text-sm font-bold ${c.text}`}>
-              {data.horaInicio} - {data.horaFin} • Duración: {calcularDuracion(data.horaInicio, data.horaFin)}
-            </span>
+        {/* Botón timeline o display horario confirmado */}
+        {data.horaInicio && data.horaFin && !errors.duracion ? (
+          <div className="flex gap-2">
+            <div
+              onClick={onOpenTimeline}
+              className={`flex-1 flex items-center justify-between px-4 py-3 ${c.bg} rounded-xl border-2 ${c.border} cursor-pointer hover:opacity-80 transition-opacity`}
+            >
+              <span className={`text-sm font-bold ${c.text}`}>
+                {data.horaInicio} - {data.horaFin} • {calcularDuracion(data.horaInicio, data.horaFin)}
+              </span>
+              <span className={`text-xs font-semibold ${c.text} flex items-center gap-1`}>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Editar
+              </span>
+            </div>
+            {onClear && (
+              <button
+                type="button"
+                onClick={onClear}
+                title="Vaciar actividad"
+                className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onOpenTimeline}
+              className="flex-1 px-4 py-4 sm:py-3 bg-slate-800 active:bg-slate-700 text-white font-semibold text-sm sm:text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+            >
+              <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-base sm:text-sm">Seleccionar Horario</span>
+            </button>
+            {onClear && (
+              <button
+                type="button"
+                onClick={onClear}
+                title="Vaciar actividad"
+                className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         )}
 
@@ -1506,11 +1251,11 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
 
         {/* ✅ NUEVO: Error de solapamiento */}
         {errors.solapamiento && (
-          <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
-            <svg className="w-4 h-4 text-orange-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+            <svg className="w-4 h-4 text-slate-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
             </svg>
-            <span className="text-xs font-semibold text-orange-700">{errors.solapamiento}</span>
+            <span className="text-xs font-semibold text-slate-600">{errors.solapamiento}</span>
           </div>
         )}
 
@@ -1530,33 +1275,55 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
 }
 
 // Componente TiempoProgramadoCard (para tiempos programados manuales)
-function TiempoProgramadoCard({ title, icon, data, onOpenTimeline, existingSlots }) {
+function TiempoProgramadoCard({ title, data, onOpenTimeline, onClear, existingSlots }) {
   return (
-    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 sm:p-4">
+    <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4">
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-2xl">{icon}</span>
+        <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 7v5l3 3"/></svg>
         <div className="font-bold text-sm sm:text-base text-slate-900">{title}</div>
       </div>
       
-      {/* Botón para abrir timeline */}
-      <button
-        type="button"
-        onClick={onOpenTimeline}
-        className="w-full px-4 py-4 sm:py-3 bg-indigo-600 active:bg-indigo-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
-      >
-        <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span className="text-base sm:text-sm">Seleccionar Horario</span>
-      </button>
-
-      {/* Mostrar horario seleccionado */}
-      {data.horaInicio && data.horaFin && (
-        <div className="text-center py-3 sm:py-2 px-3 bg-blue-100 rounded-xl sm:rounded-lg border-2 border-blue-300 mt-3">
-          <span className="text-sm font-bold text-blue-700">
-            {data.horaInicio} - {data.horaFin} • Duración: {calcularDuracion(data.horaInicio, data.horaFin)}
-          </span>
+      {/* Botón timeline o display horario confirmado */}
+      {data.horaInicio && data.horaFin ? (
+        <div className="flex gap-2">
+          <div
+            onClick={onOpenTimeline}
+            className="flex-1 flex items-center justify-between px-4 py-3 bg-blue-50 rounded-xl border-2 border-blue-200 cursor-pointer hover:opacity-80 transition-opacity"
+          >
+            <span className="text-sm font-bold text-blue-700">
+              {data.horaInicio} - {data.horaFin} • {calcularDuracion(data.horaInicio, data.horaFin)}
+            </span>
+            <span className="text-xs font-semibold text-blue-600 flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+              Editar
+            </span>
+          </div>
+          {onClear && (
+            <button
+              type="button"
+              onClick={onClear}
+              title="Vaciar"
+              className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onOpenTimeline}
+          className="w-full px-4 py-4 sm:py-3 bg-slate-800 active:bg-slate-700 text-white font-semibold text-sm rounded-xl sm:rounded-lg transition-all shadow-md flex items-center justify-center gap-2"
+        >
+          <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-base sm:text-sm">Seleccionar Horario</span>
+        </button>
       )}
     </div>
   );

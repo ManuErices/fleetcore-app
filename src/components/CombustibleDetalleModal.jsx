@@ -17,7 +17,6 @@ export default function CombustibleDetalleModal({
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({ ...reporte });
   const [showSignModal, setShowSignModal] = useState(false);
-  const [adminName, setAdminName] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
 
   const handleSaveChanges = () => {
@@ -33,15 +32,13 @@ export default function CombustibleDetalleModal({
   };
 
   const handleSignReport = () => {
-    if (onSign && adminName && adminPassword) {
+    if (onSign && adminPassword) {
       const signatureData = {
-        adminName,
         timestamp: new Date().toISOString(),
         reportId: reporte.numeroReporte
       };
       onSign(signatureData, adminPassword);
       setShowSignModal(false);
-      setAdminName('');
       setAdminPassword('');
     }
   };
@@ -358,16 +355,7 @@ export default function CombustibleDetalleModal({
               Al firmar este reporte, usted valida que toda la información del suministro de combustible es correcta y ha sido revisada.
             </p>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Nombre del Administrador</label>
-                <input
-                  type="text"
-                  value={adminName}
-                  onChange={(e) => setAdminName(e.target.value)}
-                  className="w-full px-4 py-2 border-2 border-slate-300 rounded-lg focus:outline-none focus:border-green-500"
-                  placeholder="Ingrese su nombre completo"
-                />
-              </div>
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">PIN de Seguridad</label>
                 <input
@@ -386,7 +374,7 @@ export default function CombustibleDetalleModal({
             <div className="flex gap-3 mt-6">
               <button
                 onClick={handleSignReport}
-                disabled={!adminName || !adminPassword}
+                disabled={!adminPassword}
                 className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
               >
                 Confirmar Firma
@@ -394,8 +382,7 @@ export default function CombustibleDetalleModal({
               <button
                 onClick={() => {
                   setShowSignModal(false);
-                  setAdminName('');
-                  setAdminPassword('');
+                              setAdminPassword('');
                 }}
                 className="px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
               >
