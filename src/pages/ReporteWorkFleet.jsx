@@ -1264,7 +1264,7 @@ export default function ReporteWorkFleet() {
 
               <div className="p-5 space-y-5">
                 {/* KPIs */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Horas Totales</div>
                     <div className="text-2xl font-black text-slate-900">{totalHoras.toFixed(1)}</div>
@@ -1280,12 +1280,6 @@ export default function ReporteWorkFleet() {
                     <div className={`text-2xl font-black ${efColor}`}>{eficienciaValidacion}%</div>
                     <div className="text-xs text-slate-400 mt-0.5">reportes firmados</div>
                     <div className="text-xs text-slate-500 mt-1">{firmados}/{totalReportes} validados</div>
-                  </div>
-                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Combustible</div>
-                    <div className="text-2xl font-black text-amber-700">{totalCombustible.toFixed(0)}L</div>
-                    <div className="text-xs text-slate-400 mt-0.5">total cargado</div>
-                    <div className="text-xs text-slate-500 mt-1">{combustiblePorHora.toFixed(1)} L/hr</div>
                   </div>
                   <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Kilometraje</div>
@@ -1305,7 +1299,7 @@ export default function ReporteWorkFleet() {
                         { label: 'Efectivas', hrs: horasEfectivas, cnt: cntEfectivas, color: 'bg-red-500' },
                         { label: 'No Efectivas', hrs: horasNoEfectivas, cnt: cntNoEfectivas, color: 'bg-amber-500' },
                         { label: 'Mantenciones', hrs: horasMantenciones, cnt: cntMantenciones, color: 'bg-slate-500' },
-                        { label: 'Tiempo de Reservas', hrs: horasProgramadas, cnt: cntProgramadas, color: 'bg-blue-400' },
+                        { label: 'Programadas', hrs: horasProgramadas, cnt: cntProgramadas, color: 'bg-blue-400' },
                       ].map(({ label, hrs, cnt, color }) => {
                         const pct = totalDesglose > 0 ? (hrs / totalDesglose) * 100 : 0;
                         const prom = cnt > 0 ? (hrs / cnt) : 0;

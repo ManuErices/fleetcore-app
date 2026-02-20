@@ -50,6 +50,10 @@ export default function CombustiblePage({ onClose }) {
   // Estados para modales de creación rápida
   const [showModalEquipoSurtidor, setShowModalEquipoSurtidor] = useState(false);
   const [showModalEmpresa, setShowModalEmpresa] = useState(false);
+  const [searchOperador, setSearchOperador] = useState('');
+  const [searchMaquina, setSearchMaquina] = useState('');
+  const [operadorExterno, setOperadorExterno] = useState({ nombre: '', rut: '' });
+  const [maquinaExterna, setMaquinaExterna] = useState({ patente: '', tipo: '', modelo: '' });
   
   // Datos temporales para crear nuevos registros
   const [nuevoEquipoSurtidor, setNuevoEquipoSurtidor] = useState({
@@ -68,6 +72,11 @@ export default function CombustiblePage({ onClose }) {
   // Listas locales que se actualizan cuando agregamos nuevos items
   const [machinesLocal, setMachinesLocal] = useState([]);
   const [empresasLocal, setEmpresasLocal] = useState([]);
+  const esMPF = (empresaId) => {
+    if (!empresaId) return false;
+    const emp = empresasLocal.find(e => e.id === empresaId);
+    return emp?.nombre?.toLowerCase().includes('mpf') || false;
+  };
   
   // Datos del formulario - Página 1 (Control de Combustible)
   const [datosControl, setDatosControl] = useState({
@@ -380,7 +389,8 @@ export default function CombustiblePage({ onClose }) {
         dataToSave.datosEntrega = {
           ...datosEntrega,
           cantidadLitros: parseFloat(datosEntrega.cantidadLitros),
-          horometroOdometro: parseFloat(datosEntrega.horometroOdometro) || 0
+          horometroOdometro: parseFloat(datosEntrega.horometroOdometro) || 0,
+          ...(esMPF(datosEntrega.empresa) ? {} : { operadorExterno, maquinaExterna })
         };
         dataToSave.firmaReceptor = firmaReceptor;
         dataToSave.fechaFirma = new Date().toISOString();
@@ -984,7 +994,13 @@ export default function CombustiblePage({ onClose }) {
                   <div className="flex gap-2">
                     <select
                       value={datosEntrega.empresa}
-                      onChange={(e) => setDatosEntrega({...datosEntrega, empresa: e.target.value})}
+                      onChange={(e) => {
+                        setDatosEntrega({...datosEntrega, empresa: e.target.value, operadorId: '', machineId: ''});
+                        setOperadorExterno({ nombre: '', rut: '' });
+                        setMaquinaExterna({ patente: '', tipo: '', modelo: '' });
+                        setSearchOperador('');
+                        setSearchMaquina('');
+                      }}
                       className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     >
                       <option value="">Seleccione empresa</option>
@@ -1022,45 +1038,160 @@ export default function CombustiblePage({ onClose }) {
                   />
                 </div>
 
+                {/* ── OPERADOR ── */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Operador (Quien recibe) <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    required
-                    value={datosEntrega.operadorId}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, operadorId: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">Seleccione operador</option>
-                    {empleados.map(emp => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.nombre} - {emp.rut || ''}
-                      </option>
-                    ))}
-                  </select>
+                  {esMPF(datosEntrega.empresa) ? (
+                    <>
+                      <div className="relative mb-2">
+                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                        </svg>
+                        <input type="text" placeholder="Buscar operador..." value={searchOperador}
+                          onChange={e => setSearchOperador(e.target.value)}
+                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                      </div>
+                      {datosEntrega.operadorId && (() => {
+                        const sel = empleados.find(e => e.id === datosEntrega.operadorId);
+                        return sel ? (
+                          <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
+                            <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                              {sel.nombre?.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-slate-800 text-sm truncate">{sel.nombre}</div>
+                              <div className="text-xs text-slate-500">{sel.rut || 'Sin RUT'}</div>
+                            </div>
+                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, operadorId: ''}); setSearchOperador(''); }}
+                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                          </div>
+                        ) : null;
+                      })()}
+                      {!datosEntrega.operadorId && (
+                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                          {empleados
+                            .filter(emp => !searchOperador ||
+                              emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
+                              emp.rut?.includes(searchOperador))
+                            .map(emp => (
+                              <button key={emp.id} type="button"
+                                onClick={() => { setDatosEntrega({...datosEntrega, operadorId: emp.id}); setSearchOperador(''); }}
+                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
+                                <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">
+                                  {emp.nombre?.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-slate-800 text-xs truncate">{emp.nombre}</div>
+                                  <div className="text-[10px] text-slate-400 truncate">{emp.rut || 'Sin RUT'}</div>
+                                </div>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  ) : datosEntrega.empresa ? (
+                    <div className="space-y-2">
+                      <input type="text" placeholder="Nombre completo *"
+                        value={operadorExterno.nombre}
+                        onChange={e => setOperadorExterno({...operadorExterno, nombre: e.target.value})}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                      <input type="text" placeholder="RUT (ej: 12.345.678-9)"
+                        value={operadorExterno.rut}
+                        onChange={e => setOperadorExterno({...operadorExterno, rut: e.target.value})}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
+                      Primero selecciona una empresa
+                    </div>
+                  )}
                 </div>
 
+                {/* ── MÁQUINA ── */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Máquina <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    required
-                    value={datosEntrega.machineId}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, machineId: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">Seleccione máquina</option>
-                    {machines.filter(m => 
-                      !m.name?.toLowerCase().includes('combustible') && 
-                      !m.name?.toLowerCase().includes('mochila')
-                    ).map(m => (
-                      <option key={m.id} value={m.id}>
-                        {m.patente || m.code} - {m.name}
-                      </option>
-                    ))}
-                  </select>
+                  {esMPF(datosEntrega.empresa) ? (
+                    <>
+                      <div className="relative mb-2">
+                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                        </svg>
+                        <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
+                          onChange={e => setSearchMaquina(e.target.value)}
+                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                      </div>
+                      {datosEntrega.machineId && (() => {
+                        const sel = machines.find(m => m.id === datosEntrega.machineId);
+                        return sel ? (
+                          <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
+                            <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
+                              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-slate-800 text-sm truncate">{sel.patente || sel.code}</div>
+                              <div className="text-xs text-slate-500 truncate">{sel.name}</div>
+                            </div>
+                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, machineId: ''}); setSearchMaquina(''); }}
+                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                          </div>
+                        ) : null;
+                      })()}
+                      {!datosEntrega.machineId && (
+                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                          {machines
+                            .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
+                            .filter(m => !searchMaquina ||
+                              m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
+                              m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
+                              m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
+                            .map(m => (
+                              <button key={m.id} type="button"
+                                onClick={() => { setDatosEntrega({...datosEntrega, machineId: m.id}); setSearchMaquina(''); }}
+                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
+                                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                                  </svg>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-slate-800 text-xs truncate">{m.patente || m.code}</div>
+                                  <div className="text-[10px] text-slate-400 truncate">{m.name}</div>
+                                </div>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </>
+                  ) : datosEntrega.empresa ? (
+                    <div className="space-y-2">
+                      <input type="text" placeholder="Patente *"
+                        value={maquinaExterna.patente}
+                        onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
+                        value={maquinaExterna.tipo}
+                        onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                      <input type="text" placeholder="Modelo (ej: Caterpillar 320)"
+                        value={maquinaExterna.modelo}
+                        onChange={e => setMaquinaExterna({...maquinaExterna, modelo: e.target.value})}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                    </div>
+                  ) : (
+                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
+                      Primero selecciona una empresa
+                    </div>
+                  )}
                 </div>
 
                 <div>

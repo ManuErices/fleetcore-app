@@ -7,6 +7,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import CombustibleDetalleModal from "../components/CombustibleDetalleModal";
 import CombustibleModal from "../components/CombustibleModal";
+import { printThermalVoucher } from "../utils/voucherThermalGenerator";
 
 export default function ReporteCombustible() {
   const [reportes, setReportes] = useState([]);
@@ -19,11 +20,13 @@ export default function ReporteCombustible() {
   const [currentUser, setCurrentUser] = useState(null);
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
   const [reporteDetalle, setReporteDetalle] = useState(null);
+  const [empresas, setEmpresas] = useState([]);
   
   // Filtros
   const [filtros, setFiltros] = useState({
     fechaInicio: '',
     fechaFin: '',
+    tipo: '',
     proyecto: '',
     maquina: '',
     surtidor: ''
@@ -90,6 +93,15 @@ export default function ReporteCombustible() {
           ...doc.data()
         }));
         setEmpleados(empleadosData);
+
+        // Cargar empresas de combustible
+        const empresasRef = collection(db, 'empresas_combustible');
+        const empresasSnap = await getDocs(empresasRef);
+        const empresasData = empresasSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setEmpresas(empresasData);
       } catch (error) {
         console.error("Error cargando datos base:", error);
       }
@@ -159,6 +171,10 @@ export default function ReporteCombustible() {
       resultado = resultado.filter(r => r.fecha <= filtros.fechaFin);
     }
 
+    if (filtros.tipo) {
+      resultado = resultado.filter(r => r.tipo === filtros.tipo);
+    }
+
     if (filtros.proyecto) {
       resultado = resultado.filter(r => r.projectId === filtros.proyecto);
     }
@@ -199,8 +215,8 @@ export default function ReporteCombustible() {
         projectName: project?.name || r.projectId || '',
         machinePatente: machine?.patente || '',
         machineName: machine?.name || '',
-        repartidorNombre: repartidor?.nombre || '',
-        repartidorRut: repartidor?.rut || '',
+        repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
+        repartidorRut: repartidor?.rut || r.repartidorRut || '',
         operadorNombre: operador?.nombre || '',
         operadorRut: operador?.rut || '',
         cantidad: cantidad,
@@ -240,6 +256,49 @@ export default function ReporteCombustible() {
     } else {
       setReportesSeleccionados(reportesFiltrados.map(r => r.id));
     }
+  };
+
+  const handleReimprimirVoucher = (reporte) => {
+    const project = projects.find(p => p.id === reporte.projectId);
+    const machineId = reporte.datosEntrega?.machineId;
+    const operadorId = reporte.datosEntrega?.operadorId;
+    const empresaId = reporte.datosEntrega?.empresa;
+
+    const machineInfo = machines.find(m => m.id === machineId);
+    const operadorInfo = empleados.find(e => e.id === operadorId);
+    const empresaInfo = empresas.find(e => e.id === empresaId);
+    const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
+      nombre: reporte.repartidorNombre || '',
+      rut: reporte.repartidorRut || ''
+    };
+
+    printThermalVoucher({
+      reportData: {
+        fecha: reporte.fecha || reporte.fechaCreacion?.split('T')[0] || '',
+        cantidadLitros: reporte.datosEntrega?.cantidadLitros || reporte.cantidadLitros || 0,
+        numeroReporte: reporte.numeroReporte || ''
+      },
+      projectName: project?.nombre || project?.name || reporte.projectId || '',
+      machineInfo: {
+        patente: machineInfo?.patente || '',
+        code: machineInfo?.code || machineInfo?.patente || '',
+        type: machineInfo?.type || machineInfo?.nombre || '',
+        nombre: machineInfo?.name || machineInfo?.nombre || ''
+      },
+      operadorInfo: {
+        nombre: operadorInfo?.nombre || reporte.datosEntrega?.operadorExterno?.nombre || '',
+        rut: operadorInfo?.rut || reporte.datosEntrega?.operadorExterno?.rut || ''
+      },
+      empresaInfo: empresaInfo ? {
+        nombre: empresaInfo.nombre || '',
+        rut: empresaInfo.rut || ''
+      } : null,
+      repartidorInfo: {
+        nombre: repartidorInfo.nombre || '',
+        rut: repartidorInfo.rut || ''
+      },
+      numeroGuiaCorrelativo: reporte.numeroGuia || null
+    });
   };
 
   const todosSeleccionados = reportesFiltrados.length > 0 && reportesSeleccionados.length === reportesFiltrados.length;
@@ -316,7 +375,7 @@ export default function ReporteCombustible() {
       doc.text('CONTROL DE COMBUSTIBLE', margin + 45, 20);
       doc.setFontSize(10);
       doc.setFont(undefined, 'normal');
-      const tipoLabel = reporte.tipo === 'entrada' ? 'ENTRADA AL ESTANQUE' : 'ENTREGA A MÁQUINA';
+      const tipoLabel = reporte.tipo === 'entrada' ? 'ENTRADA AL ESTANQUE' : 'SALIDA A MÁQUINA';
       doc.text(tipoLabel, margin + 45, 27);
       doc.setFontSize(8);
       doc.text(`Fecha: ${reporte.fecha || reporte.fechaCreacion?.split('T')[0] || ''}`, margin + 45, 33);
@@ -329,7 +388,7 @@ export default function ReporteCombustible() {
       doc.setFontSize(8);
       doc.setFont(undefined, 'bold');
       doc.setTextColor(255, 255, 255);
-      doc.text(reporte.tipo === 'entrada' ? 'ENTRADA' : 'ENTREGA', pageWidth - margin - 31, 18);
+      doc.text(reporte.tipo === 'entrada' ? 'ENTRADA' : 'SALIDA', pageWidth - margin - 31, 18);
 
       yPos = 55;
 
@@ -453,7 +512,7 @@ export default function ReporteCombustible() {
         doc.setFontSize(8);
         doc.setFont(undefined, 'normal');
         doc.setTextColor(107, 114, 128);
-        doc.text('LITROS ENTREGADOS A MÁQUINA', pageWidth / 2, yPos + 25, { align: 'center' });
+        doc.text('LITROS SALIDA A MÁQUINA', pageWidth / 2, yPos + 25, { align: 'center' });
 
         yPos += 38;
         if (d.observaciones) {
@@ -571,9 +630,19 @@ export default function ReporteCombustible() {
                 </div>
                 <div>
                   <h1 className="text-3xl font-black text-white tracking-tight">Reportes de Combustible</h1>
-                  <p className="text-orange-100 text-sm mt-1">Control y gestión de entregas de combustible</p>
+                  <p className="text-orange-100 text-sm mt-1">Control y gestión de salidas de combustible</p>
                 </div>
               </div>
+              <button
+                onClick={() => setShowCombustibleModal(true)}
+                className="px-6 py-3 bg-white hover:bg-orange-50 text-orange-700 font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+                </svg>
+                Reporte Combustible
+              </button>
             </div>
           </div>
         </div>
@@ -582,7 +651,7 @@ export default function ReporteCombustible() {
       {/* Filtros */}
       <div className="max-w-7xl mx-auto mb-6">
         <div className="bg-white rounded-xl shadow-md p-6 border-2 border-orange-100">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Inicio</label>
               <input
@@ -600,6 +669,18 @@ export default function ReporteCombustible() {
                 onChange={(e) => setFiltros({...filtros, fechaFin: e.target.value})}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Tipo</label>
+              <select
+                value={filtros.tipo}
+                onChange={(e) => setFiltros({...filtros, tipo: e.target.value})}
+                className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+              >
+                <option value="">Todos</option>
+                <option value="entrega">Salida</option>
+                <option value="entrada">Entrada</option>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
@@ -715,6 +796,7 @@ export default function ReporteCombustible() {
                   <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Horómetro</th>
                   <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Litros</th>
                   <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firmado</th>
+                  <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Ver</th>
                   <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
                 </tr>
               </thead>
@@ -754,7 +836,7 @@ export default function ReporteCombustible() {
                             ? 'bg-green-100 text-green-700' 
                             : 'bg-blue-100 text-blue-700'
                         }`}>
-                          {reporte.tipo === 'entrada' ? '⬇️ ENTRADA' : '➡️ ENTREGA'}
+                          {reporte.tipo === 'entrada' ? '⬇️ ENTRADA' : '➡️ SALIDA'}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-sm font-semibold text-slate-900">
@@ -809,6 +891,21 @@ export default function ReporteCombustible() {
                               </svg>
                             </div>
                           </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {reporte.tipo === 'entrega' ? (
+                          <button
+                            onClick={() => handleReimprimirVoucher(reporte)}
+                            className="px-3 py-1 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto whitespace-nowrap"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                            </svg>
+                            Ver voucher
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-300">-</span>
                         )}
                       </td>
                       <td className="px-3 py-3 text-center">
@@ -893,17 +990,8 @@ export default function ReporteCombustible() {
 
               <div className="p-5 space-y-5">
                 {/* KPIs */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Total Litros</div>
-                    <div className="text-2xl font-black text-orange-700">{totalLitros.toFixed(0)} L</div>
-                    <div className="text-xs text-slate-400 mt-0.5">combustible total</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Promedio</div>
-                    <div className="text-2xl font-black text-slate-900">{(totalLitros / totalReportes).toFixed(0)} L</div>
-                    <div className="text-xs text-slate-400 mt-0.5">litros / reporte</div>
-                  </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  
                   <div className={`rounded-xl p-4 border ${efBg}`}>
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Validación</div>
                     <div className={`text-2xl font-black ${efColor}`}>{eficienciaValidacion}%</div>
@@ -917,10 +1005,10 @@ export default function ReporteCombustible() {
                     <div className="text-xs text-slate-500 mt-1">prom {promEntradas.toFixed(0)} L/entrada</div>
                   </div>
                   <div className="bg-red-50 rounded-xl p-4 border border-red-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Entregas</div>
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Salidas</div>
                     <div className="text-2xl font-black text-red-700">{litrosEntregas.toFixed(0)} L</div>
                     <div className="text-xs text-slate-400 mt-0.5">{cntEntregas} registro{cntEntregas !== 1 ? 's' : ''}</div>
-                    <div className="text-xs text-slate-500 mt-1">prom {promEntregas.toFixed(0)} L/entrega</div>
+                    <div className="text-xs text-slate-500 mt-1">prom {promEntregas.toFixed(0)} L/salida</div>
                   </div>
                 </div>
 
@@ -932,7 +1020,7 @@ export default function ReporteCombustible() {
                     <div className="space-y-2.5">
                       {[
                         { label: 'Entradas al estanque', litros: litrosEntradas, cnt: cntEntradas, color: 'bg-amber-500' },
-                        { label: 'Entregas a máquinas', litros: litrosEntregas, cnt: cntEntregas, color: 'bg-red-500' },
+                        { label: 'Salidas a máquinas', litros: litrosEntregas, cnt: cntEntregas, color: 'bg-red-500' },
                       ].map(({ label, litros, cnt, color }) => {
                         const pct = totalLitros > 0 ? (litros / totalLitros) * 100 : 0;
                         const prom = cnt > 0 ? litros / cnt : 0;
@@ -992,12 +1080,19 @@ export default function ReporteCombustible() {
 
       {reporteDetalle && (
         <CombustibleDetalleModal
-          reporte={reporteDetalle}
+          reporte={{
+            ...reporteDetalle,
+            ...reporteDetalle.datosEntrega,
+            empresa: reporteDetalle.datosEntrega?.empresaNombre
+              || empresas.find(e => e.id === reporteDetalle.datosEntrega?.empresa)?.nombre
+              || reporteDetalle.empresa
+              || '-'
+          }}
           onClose={() => setReporteDetalle(null)}
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
-          machineInfo={machines.find(m => m.id === reporteDetalle.machineId)}
-          surtidorInfo={empleados.find(e => e.id === reporteDetalle.surtidorId)}
-          operadorInfo={empleados.find(e => e.id === reporteDetalle.operadorId)}
+          machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.machineId))}
+          surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
+          operadorInfo={empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.operadorId))}
           userRole={userRole}
           onSave={async (editedData) => {
             try {

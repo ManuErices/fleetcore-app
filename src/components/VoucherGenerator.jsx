@@ -1,5 +1,7 @@
 import React from 'react';
 import { printThermalVoucher, getNextGuiaNumber } from '../utils/voucherThermalGenerator';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 /**
  * Componente para generar e imprimir voucher térmico de entrega de combustible
@@ -13,6 +15,7 @@ export default function VoucherGenerator({
   empresaInfo,
   repartidorInfo,
   equipoSurtidorInfo,
+  reporteId,
   onClose 
 }) {
   const [printing, setPrinting] = React.useState(false);
@@ -28,21 +31,9 @@ export default function VoucherGenerator({
     fetchNumeroGuia();
   }, []);
 
-  const handlePrintVoucher = () => {
+  const handlePrintVoucher = async () => {
     try {
       setPrinting(true);
-      
-      console.log('🖨️ Imprimiendo voucher térmico');
-      console.log('📋 Número de guía:', numeroGuia);
-      console.log('📋 Datos:', { 
-        reportData, 
-        projectName, 
-        machineInfo, 
-        operadorInfo, 
-        empresaInfo,
-        repartidorInfo,
-        equipoSurtidorInfo 
-      });
       
       // Imprimir voucher térmico con número correlativo
       printThermalVoucher({
@@ -56,11 +47,20 @@ export default function VoucherGenerator({
         numeroGuiaCorrelativo: numeroGuia
       });
 
-      // Mensaje de éxito
-      setTimeout(() => {
-        alert(`✅ Voucher N° ${numeroGuia.toString().padStart(3, '0')} enviado a impresión`);
-        setPrinting(false);
-      }, 500);
+      // Guardar numeroGuia en el reporte de Firebase
+      if (reporteId && numeroGuia) {
+        try {
+          await updateDoc(doc(db, 'reportes_combustible', reporteId), {
+            numeroGuia: numeroGuia
+          });
+          console.log('✅ numeroGuia guardado en reporte:', reporteId);
+        } catch (err) {
+          console.error('⚠️ No se pudo guardar numeroGuia:', err);
+        }
+      }
+
+      alert(`✅ Voucher N° ${numeroGuia.toString().padStart(3, '0')} enviado a impresión`);
+      setPrinting(false);
       
     } catch (error) {
       console.error('Error imprimiendo voucher:', error);

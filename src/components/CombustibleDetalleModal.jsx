@@ -111,13 +111,13 @@ export default function CombustibleDetalleModal({
                   <input
                     type="number"
                     step="0.1"
-                    value={editedData.horometroOdometro}
-                    onChange={(e) => updateField('horometroOdometro', e.target.value)}
+                    value={editedData.datosEntrega?.horometroOdometro ?? editedData.horometroOdometro ?? ''}
+                    onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, horometroOdometro: e.target.value })}
                     className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500"
                   />
                 </div>
               ) : (
-                <DataField label="Horómetro/Odómetro" value={reporte.horometroOdometro || '-'} />
+                <DataField label="Horómetro/Odómetro" value={reporte.datosEntrega?.horometroOdometro || reporte.horometroOdometro || '-'} />
               )}
             </div>
           </div>
@@ -138,8 +138,8 @@ export default function CombustibleDetalleModal({
                     <input
                       type="number"
                       step="0.01"
-                      value={editedData.cantidadLitros}
-                      onChange={(e) => updateField('cantidadLitros', e.target.value)}
+                      value={editedData.datosEntrega?.cantidadLitros ?? editedData.cantidadLitros ?? ''}
+                      onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, cantidadLitros: e.target.value })}
                       className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
                     />
                   </div>
@@ -147,8 +147,8 @@ export default function CombustibleDetalleModal({
                     <div className="text-xs font-semibold text-slate-500 mb-1">Empresa</div>
                     <input
                       type="text"
-                      value={editedData.empresa}
-                      onChange={(e) => updateField('empresa', e.target.value)}
+                      value={editedData.datosEntrega?.empresaNombre ?? editedData.datosEntrega?.empresa ?? editedData.empresa ?? ''}
+                      onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, empresaNombre: e.target.value })}
                       className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
                     />
                   </div>
@@ -158,11 +158,11 @@ export default function CombustibleDetalleModal({
                   <div className="bg-white rounded-lg p-4 border-2 border-green-300">
                     <div className="text-xs font-semibold text-green-700 mb-1">Cantidad Suministrada</div>
                     <div className="text-3xl font-black text-green-600 flex items-baseline gap-2">
-                      {reporte.cantidadLitros}
+                      {reporte.datosEntrega?.cantidadLitros ?? reporte.cantidadLitros}
                       <span className="text-lg text-green-500">Litros</span>
                     </div>
                   </div>
-                  <DataField label="Empresa Proveedora" value={reporte.empresa || '-'} />
+                  <DataField label="Empresa Proveedora" value={reporte.datosEntrega?.empresaNombre || reporte.empresaNombre || reporte.datosEntrega?.empresa || reporte.empresa || '-'} />
                 </>
               )}
             </div>
@@ -178,9 +178,9 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.surtidorNombre || '-'} />
-                {surtidorInfo?.rut && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo.rut}</p>
+                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'} />
+                {(surtidorInfo?.rut || reporte.repartidorRut) && (
+                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
                 )}
               </div>
               <div>

@@ -86,17 +86,10 @@ export function generateThermalVoucher({
   // Generar sección de firmas con imágenes si existen
   let firmasSectionHTML = '';
   
-  if (reportData.firmaRepartidor) {
-    // Si hay firma digital del repartidor, insertarla
-    firmasSectionHTML = `
-    <!-- FIRMAS CON IMAGEN -->
-    <div class="firma-section-con-imagen">
-      <div class="firma-box-imagen">
-        <img src="${reportData.firmaRepartidor}" alt="Firma Repartidor" class="firma-img">
-        <div class="firma-line-con-imagen"></div>
-        <div class="small firma-label">FIRMA</div>
-        <div class="small firma-rol">REPARTIDOR</div>
-      </div>
+  // Solo firma del receptor (sin firma repartidor)
+  firmasSectionHTML = `
+    <!-- FIRMA RECEPTOR -->
+    <div class="firma-section-single">
       <div class="firma-box">
         <div class="firma-line"></div>
         <div class="small firma-label">FIRMA</div>
@@ -104,24 +97,6 @@ export function generateThermalVoucher({
       </div>
     </div>
     `;
-  } else {
-    // Si no hay firma digital, mostrar solo líneas para firmar manualmente
-    firmasSectionHTML = `
-    <!-- FIRMAS SIN IMAGEN -->
-    <div class="firma-section">
-      <div class="firma-box">
-        <div class="firma-line"></div>
-        <div class="small firma-label">FIRMA</div>
-        <div class="small firma-rol">REPARTIDOR</div>
-      </div>
-      <div class="firma-box">
-        <div class="firma-line"></div>
-        <div class="small firma-label">FIRMA</div>
-        <div class="small firma-rol">RECEPTOR</div>
-      </div>
-    </div>
-    `;
-  }
 
   // Generar HTML del voucher
   const voucherHTML = `
@@ -188,46 +163,21 @@ export function generateThermalVoucher({
       text-align: right;
     }
     
-    .firma-section {
+    .firma-section-single {
       margin-top: 8mm;
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       text-align: center;
     }
     
-    .firma-section-con-imagen {
-      margin-top: 8mm;
-      display: flex;
-      justify-content: space-between;
-      text-align: center;
-    }
-    
-    .firma-box {
-      width: 45%;
-    }
-    
-    .firma-box-imagen {
-      width: 45%;
+    .firma-section-single .firma-box {
+      width: 70%;
     }
     
     .firma-line {
       border-top: 1px solid #000;
       margin-top: 15mm;
       margin-bottom: 2mm;
-    }
-    
-    .firma-line-con-imagen {
-      border-top: 1px solid #000;
-      margin-top: 2mm;
-      margin-bottom: 2mm;
-    }
-    
-    .firma-img {
-      width: 100%;
-      height: auto;
-      max-height: 15mm;
-      object-fit: contain;
-      margin-bottom: 1mm;
     }
     
     .small {
@@ -364,23 +314,6 @@ export function generateThermalVoucher({
     </div>
     
     <div class="line"></div>
-    
-    <!-- REPARTIDOR -->
-    <div class="section">
-      <div class="bold">REPARTIDOR</div>
-      <div class="row">
-        <span class="label">Nombre:</span>
-        <span class="small">${repartidorInfo?.nombre || 'N/A'}</span>
-      </div>
-      <div class="tipo-maquina-izquierda">
-        <div class="label">Tipo Equipo:</div>
-        <div>${equipoSurtidorInfo?.tipo || equipoSurtidorInfo?.type || 'N/A'}</div>
-      </div>
-      <div class="row">
-        <span class="label">Equipo:</span>
-        <span class="bold">${equipoSurtidorInfo?.nombre || equipoSurtidorInfo?.patente || 'N/A'}</span>
-      </div>
-    </div>
     
     <div class="line"></div>
     
@@ -546,9 +479,6 @@ Fecha Emision: ${fechaFormateada}
 Hora Emision: ${hora}
 ${line}
 
-REPARTIDOR
-Nombre: ${repartidorInfo?.nombre || 'N/A'}
-Equipo Surtidor: ${equipoSurtidorInfo?.nombre || equipoSurtidorInfo?.patente || 'N/A'}
 ${line}
 
 Producto: DIESEL
@@ -557,6 +487,8 @@ ${line}
 
 
 
-FIRMA SURTIDOR    FIRMA AUTORIZADA
+
+
+         FIRMA RECEPTOR
 `.trim();
 }

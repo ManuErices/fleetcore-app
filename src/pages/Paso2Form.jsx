@@ -589,12 +589,17 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       return;
     }
 
-    // Sin colación: guardar directamente
-    const save = (updateFn, ...args) => { updateFn(...args, 'horaInicio', s); updateFn(...args, 'horaFin', e); };
+    // Sin colación: guardar ambos campos en un único setFormData para evitar
+    // que el segundo setFormData sobreescriba al primero con el estado anterior.
+    const saveListItem = (lista, key) => {
+      const nueva = [...lista];
+      nueva[index] = { ...nueva[index], horaInicio: s, horaFin: e };
+      setFormData({ ...formData, [key]: nueva });
+    };
 
-    if      (type === 'actividadEfectiva') save(updateActividad, index);
-    else if (type === 'tiempoNoEfectivo')  save(updateTiempoNoEfectivo, index);
-    else if (type === 'mantencion')        save(updateMantencion, index);
+    if      (type === 'actividadEfectiva') saveListItem(formData.actividadesEfectivas, 'actividadesEfectivas');
+    else if (type === 'tiempoNoEfectivo')  saveListItem(formData.tiemposNoEfectivos,   'tiemposNoEfectivos');
+    else if (type === 'mantencion')        saveListItem(formData.mantenciones,          'mantenciones');
     else if (type === 'charlaSegurid')     { updateTiempoProgramado('charlaSegurid', 'horaInicio', s); updateTiempoProgramado('charlaSegurid', 'horaFin', e); }
     else if (type === 'inspeccionEquipo')  { updateTiempoProgramado('inspeccionEquipo', 'horaInicio', s); updateTiempoProgramado('inspeccionEquipo', 'horaFin', e); }
     else if (type === 'colacion')          { updateTiempoProgramado('colacion', 'horaInicio', s); updateTiempoProgramado('colacion', 'horaFin', e); }
@@ -1129,70 +1134,76 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
 // Componente ActivityCard actualizado con botón de timeline y opciones predefinidas
 function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, onClear, existingSlots, opciones = [] }) {
-  const colors = {
-    green: {
-      bg: 'bg-red-50',
-      border: 'border-red-200',
-      text: 'text-red-700',
-      button: 'bg-red-700 hover:bg-red-800'
-    },
-    amber: {
-      bg: 'bg-amber-50',
-      border: 'border-amber-300',
-      text: 'text-amber-700',
-      button: 'bg-amber-600 hover:bg-amber-700'
-    },
-    slate: {
-      bg: 'bg-slate-50',
-      border: 'border-slate-200',
-      text: 'text-slate-600',
-      button: 'bg-slate-800 hover:bg-slate-700'
-    }
+  // Calcula duración legible a partir de dos strings "HH:MM"
+  const duracion = (ini, fin) => {
+    if (!ini || !fin) return '';
+    const [h1, m1] = ini.split(':').map(Number);
+    const [h2, m2] = fin.split(':').map(Number);
+    const diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+    if (diff <= 0) return '';
+    return diff >= 60 ? `${Math.floor(diff/60)}h ${diff%60}m` : `${diff}m`;
   };
 
-  const c = colors[color];
+  // Detectar el campo correcto (actividad vs motivo vs tipo)
+  const campo = 'actividad' in data ? 'actividad' : 'motivo' in data ? 'motivo' : 'tipo';
+  const valorCampo = data[campo] || '';
+
+  const colors = {
+    green: { bg: 'bg-red-50',   border: 'border-red-200',   text: 'text-red-700',   button: 'bg-red-700 hover:bg-red-800' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-700', button: 'bg-amber-600 hover:bg-amber-700' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-600', button: 'bg-slate-800 hover:bg-slate-700' },
+  };
+  const c = colors[color] || colors.slate;
+  const tieneHorario = !!(data.horaInicio && data.horaFin);
 
   return (
     <div className={`${c.bg} border-2 ${c.border} rounded-xl p-3 sm:p-4`}>
       <div className="space-y-3">
-        {/* Actividad/Motivo */}
+
+        {/* Campo Actividad / Motivo */}
         <div>
           <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
             {labelActividad}
           </label>
           {opciones.length > 0 ? (
             <select
-              value={data.actividad || data.motivo || ''}
-              onChange={(e) => onUpdate(index, data.actividad !== undefined ? 'actividad' : 'motivo', e.target.value)}
+              value={valorCampo}
+              onChange={(e) => onUpdate(index, campo, e.target.value)}
               className="input-modern w-full text-sm"
             >
               <option value="">Seleccionar...</option>
-              {opciones.map((opcion, idx) => (
-                <option key={idx} value={opcion}>{opcion}</option>
-              ))}
+              {opciones.map((op, i) => <option key={i} value={op}>{op}</option>)}
             </select>
           ) : (
             <input
               type="text"
-              value={data.actividad || data.motivo || ''}
-              onChange={(e) => onUpdate(index, data.actividad !== undefined ? 'actividad' : 'motivo', e.target.value)}
+              value={valorCampo}
+              onChange={(e) => onUpdate(index, campo, e.target.value)}
               placeholder={placeholder}
               className="input-modern w-full text-sm"
             />
           )}
         </div>
 
-        {/* Botón timeline o display horario confirmado */}
-        {data.horaInicio && data.horaFin && !errors.duracion ? (
+        {/* Horario: bloque informativo si está confirmado, botón si no */}
+        {tieneHorario ? (
           <div className="flex gap-2">
             <div
               onClick={onOpenTimeline}
-              className={`flex-1 flex items-center justify-between px-4 py-3 ${c.bg} rounded-xl border-2 ${c.border} cursor-pointer hover:opacity-80 transition-opacity`}
+              className="flex-1 flex items-center justify-between px-4 py-3 bg-white rounded-xl border-2 border-slate-300 cursor-pointer hover:border-slate-500 transition-all shadow-sm"
             >
-              <span className={`text-sm font-bold ${c.text}`}>
-                {data.horaInicio} - {data.horaFin} • {calcularDuracion(data.horaInicio, data.horaFin)}
-              </span>
-              <span className={`text-xs font-semibold ${c.text} flex items-center gap-1`}>
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-bold text-slate-800">{data.horaInicio} – {data.horaFin}</span>
+                {duracion(data.horaInicio, data.horaFin) && (
+                  <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">
+                    {duracion(data.horaInicio, data.horaFin)}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-semibold text-slate-400 flex items-center gap-1 flex-shrink-0">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                 </svg>
@@ -1200,12 +1211,8 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
               </span>
             </div>
             {onClear && (
-              <button
-                type="button"
-                onClick={onClear}
-                title="Vaciar actividad"
-                className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all"
-              >
+              <button type="button" onClick={onClear} title="Vaciar"
+                className="px-3 py-3 bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-xl border-2 border-slate-200 hover:border-red-200 transition-all">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
