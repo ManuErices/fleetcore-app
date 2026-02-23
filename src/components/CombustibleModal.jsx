@@ -370,8 +370,6 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
           ...datosEntrega,
           cantidadLitros: parseFloat(datosEntrega.cantidadLitros),
           horometroOdometro: parseFloat(datosEntrega.horometroOdometro) || 0,
-          empresaNombre: empresasLocal.find(e => e.id === datosEntrega.empresa)?.nombre || '',
-          empresaRut: empresasLocal.find(e => e.id === datosEntrega.empresa)?.rut || '',
           // Si es empresa externa, guardar datos manuales
           ...(esMPF(datosEntrega.empresa) ? {} : {
             operadorExterno,
@@ -955,7 +953,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={loading || !datosEntrada.numeroGuia || !datosEntrada.cantidad || !firmaRepartidor}
+                  disabled={loading || !datosEntrada.numeroDocumento || !datosEntrada.cantidad || !firmaRepartidor}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   {loading ? 'Guardando...' : '✓ Guardar Entrada'}

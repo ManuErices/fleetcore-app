@@ -4,7 +4,7 @@ import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../components/ReporteDetalleModal";
 
 export default function ReporteWorkFleet() {
@@ -223,501 +223,402 @@ export default function ReporteWorkFleet() {
     const doc = new jsPDF('p', 'mm', 'a4');
     const reportesAGenerar = reportes.filter(r => reportesSeleccionados.includes(r.id));
 
+    // ── Paleta de colores ──────────────────────────────────────────
+    const C = {
+      morado:       [88,  80,  141],
+      moradoOscuro: [67,  56,  202],
+      moradoClaro:  [237, 233, 254],
+      moradoLine:   [139, 92,  246],
+      oscuro:       [15,  23,  42],
+      gris1:        [30,  41,  59],
+      gris2:        [71,  85,  105],
+      gris3:        [148, 163, 184],
+      gris4:        [226, 232, 240],
+      gris5:        [248, 250, 252],
+      blanco:       [255, 255, 255],
+      verde:        [16,  185, 129],
+      verdeClaro:   [209, 250, 229],
+      amber:        [217, 119, 6],
+      amberClaro:   [254, 243, 199],
+      rojo:         [220, 38,  38],
+      rojoClaro:    [254, 226, 226],
+      azul:         [59,  130, 246],
+      azulClaro:    [239, 246, 255],
+      rosa:         [236, 72,  153],
+      rosaClaro:    [253, 242, 248],
+    };
+
+    const fillRect = (x, y, w, h, r, fill, stroke, sw = 0.3) => {
+      if (fill)   { doc.setFillColor(...fill);   doc.roundedRect(x, y, w, h, r, r, 'F'); }
+      if (stroke) { doc.setDrawColor(...stroke); doc.setLineWidth(sw); doc.roundedRect(x, y, w, h, r, r, 'S'); }
+    };
+
+    const sectionTitle = (x, y, text, color) => {
+      doc.setFillColor(...color);
+      doc.rect(x, y, 2.5, 8, 'F');
+      doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...color);
+      doc.text(text, x + 5, y + 5.8);
+    };
+
     reportesAGenerar.forEach((reporte, index) => {
-      if (index > 0) {
-        doc.addPage();
-      }
+      if (index > 0) doc.addPage();
 
       const project = projects.find(p => p.id === reporte.projectId);
       const machine = machines.find(m => m.id === reporte.machineId);
-      
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      const contentWidth = pageWidth - (margin * 2);
-      let yPos = margin;
 
-      // ============ HEADER PROFESIONAL CON COLORES MPF ============
-      // Barra superior morada
-      doc.setFillColor(88, 80, 141); // Color morado MPF
-      doc.rect(0, 0, pageWidth, 45, 'F');
-      
-      // Logo MPF (esquina superior izquierda)
-      // NOTA: Para incluir el logo real, necesitas convertirlo a base64 y usar:
-      // doc.addImage(logoBase64, 'PNG', margin, 10, 35, 25);
-      // Por ahora usamos un placeholder blanco
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(margin, 10, 35, 25, 2, 2, 'F');
-      doc.setFontSize(7);
-      doc.setTextColor(88, 80, 141);
-      doc.setFont(undefined, 'bold');
-      doc.text('MPF', margin + 12, 18);
-      doc.setFontSize(5);
-      doc.text('INGENIERÍA', margin + 9, 23);
-      doc.text('CIVIL', margin + 13, 27);
-
-      // Información del reporte (centro-derecha)
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(20);
-      doc.setFont(undefined, 'bold');
-      doc.text(`REPORTE DE EQUIPO`, margin + 45, 20);
-      
-      doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
-      doc.text(`N° ${reporte.numeroReporte}`, margin + 45, 27);
-      
-      doc.setFontSize(8);
-      doc.text(`Fecha: ${reporte.fecha}`, margin + 45, 33);
-      doc.text(`Proyecto: ${project?.name || reporte.projectId}`, margin + 45, 38);
-
-      // Badge de estado firmado
-      if (reporte.firmado) {
-        doc.setFillColor(16, 185, 129); // Emerald
-        doc.roundedRect(pageWidth - margin - 35, 12, 33, 10, 2, 2, 'F');
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(255, 255, 255);
-        doc.text('✓ VALIDADO', pageWidth - margin - 32, 18);
-      }
-
-      yPos = 55;
-
-      // ============ INFORMACIÓN DEL EQUIPO Y OPERADOR ============
-      doc.setDrawColor(209, 213, 219); // Gray 300
-      doc.setLineWidth(0.5);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 8;
-
-      // Título de sección
-      doc.setFontSize(11);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141); // Morado MPF
-      doc.text('INFORMACIÓN DEL EQUIPO', margin, yPos);
-      yPos += 7;
-
-      // Grid de información
-      const colWidth = contentWidth / 2;
-      
-      // Columna izquierda - Equipo
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(107, 114, 128); // Gray 500
-      doc.text('EQUIPO', margin, yPos);
-      
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(55, 65, 81); // Gray 700
-      doc.setFontSize(9);
-      doc.text(`Patente: ${machine?.patente || 'N/A'}`, margin, yPos + 5);
-      doc.text(`Código: ${machine?.code || 'N/A'}`, margin, yPos + 10);
-      doc.text(`Tipo: ${machine?.type || 'N/A'}`, margin, yPos + 15);
-      doc.text(`Nombre: ${machine?.name || 'N/A'}`, margin, yPos + 20);
-
-      // Columna derecha - Operador
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(107, 114, 128);
-      doc.text('OPERADOR', margin + colWidth, yPos);
-      
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(55, 65, 81);
-      doc.setFontSize(9);
-      doc.text(`Nombre: ${reporte.operador}`, margin + colWidth, yPos + 5);
-      doc.text(`RUT: ${reporte.rut}`, margin + colWidth, yPos + 10);
-
-      yPos += 30;
-
-      // ============ MÉTRICAS OPERACIONALES ============
-      doc.setDrawColor(209, 213, 219);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 8;
-
-      doc.setFontSize(11);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141); // Morado MPF
-      doc.text('MÉTRICAS OPERACIONALES', margin, yPos);
-      yPos += 10;
+      const pW = doc.internal.pageSize.getWidth();   // 210
+      const pH = doc.internal.pageSize.getHeight();  // 297
+      const mg = 14;
+      const cW = pW - mg * 2;                        // 182
 
       const horasTrabajadas = ((parseFloat(reporte.horometroFinal) || 0) - (parseFloat(reporte.horometroInicial) || 0)).toFixed(2);
-      const kmRecorridos = ((parseFloat(reporte.kilometrajeFinal) || 0) - (parseFloat(reporte.kilometrajeInicial) || 0)).toFixed(2);
-      const mostrarKilometraje = machine?.type && (machine.type.toUpperCase().includes('CAMION') || machine.type.toUpperCase().includes('CAMIONETA'));
+      const kmRecorridos    = ((parseFloat(reporte.kilometrajeFinal) || 0) - (parseFloat(reporte.kilometrajeInicial) || 0)).toFixed(2);
+      const mostrarKm = machine?.type && (machine.type.toUpperCase().includes('CAMION') || machine.type.toUpperCase().includes('CAMIONETA'));
+      const firmado = !!(reporte.firmado);
 
-      // Cajas de métricas
-      const boxHeight = 35; // Aumentado de 28 a 35 para incluir Standby
-      const boxGap = 4;
-      const numBoxes = mostrarKilometraje ? 3 : 2;
-      const boxWidth = (contentWidth - (boxGap * (numBoxes - 1))) / numBoxes;
+      // ══════════════════════════════════════════════════════════════
+      // HEADER
+      // ══════════════════════════════════════════════════════════════
+      doc.setFillColor(...C.oscuro);
+      doc.rect(0, 0, pW, 38, 'F');
+      doc.setFillColor(...C.morado);
+      doc.rect(0, 0, 4, 38, 'F');
 
-      // Horómetro
-      doc.setFillColor(243, 244, 246); // Gray 100
-      doc.roundedRect(margin, yPos, boxWidth, boxHeight, 2, 2, 'F');
-      doc.setDrawColor(209, 213, 219);
-      doc.setLineWidth(0.3);
-      doc.roundedRect(margin, yPos, boxWidth, boxHeight, 2, 2, 'S');
+      // Logo
+      fillRect(mg + 2, 7, 24, 24, 2, C.morado, null);
+      doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+      doc.text('MPF', mg + 7.5, 16.5);
+      doc.setFontSize(5); doc.setFont(undefined, 'normal');
+      doc.text('INGENIERÍA', mg + 4.8, 21);
+      doc.text('CIVIL', mg + 8.5, 25);
 
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141); // Morado MPF
-      doc.text('HORÓMETRO', margin + 2, yPos + 5);
+      // Título
+      doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+      doc.text('REPORTE DE EQUIPO', mg + 32, 17);
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+      doc.text('Work Fleet · Control Operacional de Maquinaria', mg + 32, 24);
 
-      doc.setFontSize(7);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(75, 85, 99); // Gray 600
-      doc.text(`Inicial: ${reporte.horometroInicial || '0'} hrs`, margin + 2, yPos + 11);
-      doc.text(`Final: ${reporte.horometroFinal || '0'} hrs`, margin + 2, yPos + 16);
+      // Badge estado + N° reporte
+      const badgeX = pW - mg - 30;
+      if (firmado) {
+        fillRect(badgeX, 10, 28, 8, 2, C.verde, null);
+        doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+        doc.text('✓ VALIDADO', badgeX + 14, 15.2, { align: 'center' });
+      } else {
+        fillRect(badgeX, 10, 28, 8, 2, C.gris1, null);
+        doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+        doc.text('PENDIENTE', badgeX + 14, 15.2, { align: 'center' });
+      }
+      doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+      doc.text(`N° ${reporte.numeroReporte || '—'}`, badgeX + 14, 23, { align: 'center' });
 
-      // Trabajadas
-      doc.setFontSize(9);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141); // Morado MPF
-      doc.text(`${horasTrabajadas} hrs`, margin + 2, yPos + 24);
-      doc.setFontSize(6);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(107, 114, 128);
-      doc.text('TRABAJADAS', margin + 2, yPos + 27);
+      let y = 46;
 
-      // Standby (6 - trabajadas)
-      const horasStandby = (6 - parseFloat(horasTrabajadas)).toFixed(2);
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(217, 119, 6); // Amber 600
-      doc.text(`${horasStandby} hrs`, margin + 2, yPos + 32);
-      doc.setFontSize(5);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(107, 114, 128);
-      doc.text('STANDBY', margin + 2, yPos + 34);
+      // ══════════════════════════════════════════════════════════════
+      // FILA META: fecha · proyecto · estado
+      // ══════════════════════════════════════════════════════════════
+      fillRect(mg, y, cW, 14, 2.5, C.gris5, C.gris4);
 
-      let currentX = margin + boxWidth + boxGap;
+      const fecha = reporte.fecha || '—';
+      const fechaFmt = fecha !== '—'
+        ? new Date(fecha + 'T00:00:00').toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })
+        : '—';
 
-      // Kilometraje (si aplica)
-      if (mostrarKilometraje) {
-        doc.setFillColor(243, 244, 246);
-        doc.roundedRect(currentX, yPos, boxWidth, boxHeight, 2, 2, 'F');
-        doc.setDrawColor(209, 213, 219);
-        doc.roundedRect(currentX, yPos, boxWidth, boxHeight, 2, 2, 'S');
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris2);
+      doc.text('FECHA', mg + 5, y + 5.5);
+      doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.oscuro);
+      doc.text(fechaFmt, mg + 5, y + 10.5);
 
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(88, 80, 141);
-        doc.text('KILOMETRAJE', currentX + 2, yPos + 5);
+      doc.setDrawColor(...C.gris4); doc.setLineWidth(0.3);
+      doc.line(mg + 68, y + 2, mg + 68, y + 12);
 
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'normal');
-        doc.setTextColor(75, 85, 99);
-        doc.text(`Inicial: ${reporte.kilometrajeInicial || '0'} km`, currentX + 2, yPos + 11);
-        doc.text(`Final: ${reporte.kilometrajeFinal || '0'} km`, currentX + 2, yPos + 16);
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris2);
+      doc.text('PROYECTO', mg + 73, y + 5.5);
+      doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.oscuro);
+      doc.text(project?.name || reporte.projectId || '—', mg + 73, y + 10.5);
 
-        doc.setFontSize(10);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(88, 80, 141);
-        doc.text(`${kmRecorridos} km`, currentX + 2, yPos + 24);
-        doc.setFontSize(6);
-        doc.setFont(undefined, 'normal');
-        doc.setTextColor(107, 114, 128);
-        doc.text('RECORRIDOS', currentX + 2, yPos + 27);
+      doc.line(mg + 140, y + 2, mg + 140, y + 12);
 
-        currentX += boxWidth + boxGap;
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris2);
+      doc.text('ESTADO EQUIPO', mg + 145, y + 5.5);
+      const estadoLabel = (reporte.estadoMaquina || 'operativa').toLowerCase();
+      const estadoColor = estadoLabel.includes('detenida') ? C.rojo : estadoLabel.includes('manten') ? C.amber : C.verde;
+      const estadoBg = estadoLabel.includes('detenida') ? C.rojoClaro : estadoLabel.includes('manten') ? C.amberClaro : C.verdeClaro;
+      fillRect(mg + 145, y + 6.5, 28, 5, 1.5, estadoBg, null);
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...estadoColor);
+      doc.text((reporte.estadoMaquina || 'Operativa').toUpperCase(), mg + 147, y + 10.4);
+
+      y += 20;
+
+      // ══════════════════════════════════════════════════════════════
+      // EQUIPO + OPERADOR
+      // ══════════════════════════════════════════════════════════════
+      sectionTitle(mg, y, 'INFORMACIÓN DEL EQUIPO', C.morado);
+      y += 13;
+
+      const cardW = (cW - 4) / 2;
+      fillRect(mg, y, cardW, 32, 2, C.gris5, C.gris4);
+      fillRect(mg + cardW + 4, y, cardW, 32, 2, C.gris5, C.gris4);
+
+      // Tarjeta equipo
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text('EQUIPO / MÁQUINA', mg + 4, y + 5.5);
+      doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.oscuro);
+      doc.text(machine?.patente || machine?.code || '—', mg + 4, y + 12.5);
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+      doc.text(machine?.name || '—', mg + 4, y + 18.5);
+      // chip tipo
+      if (machine?.type) {
+        fillRect(mg + 4, y + 21, Math.min(doc.getTextWidth(machine.type) + 6, cardW - 8), 5.5, 1.5, C.moradoClaro, null);
+        doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.morado);
+        doc.text(machine.type.toUpperCase(), mg + 7, y + 25);
+      }
+      doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+      doc.text(`Código: ${machine?.code || '—'}`, mg + 4, y + 29.5);
+
+      // Tarjeta operador
+      const x2 = mg + cardW + 8;
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text('OPERADOR', x2, y + 5.5);
+      doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.oscuro);
+      doc.text(reporte.operador || '—', x2, y + 12.5);
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+      doc.text(`RUT: ${reporte.rut || '—'}`, x2, y + 18.5);
+
+      y += 38;
+
+      // ══════════════════════════════════════════════════════════════
+      // MÉTRICAS OPERACIONALES
+      // ══════════════════════════════════════════════════════════════
+      sectionTitle(mg, y, 'MÉTRICAS OPERACIONALES', C.morado);
+      y += 13;
+
+      const numBoxes = mostrarKm ? 3 : 2;
+      const boxGap = 3;
+      const boxW = (cW - boxGap * (numBoxes - 1)) / numBoxes;
+      const boxH = 36;
+
+      // ── Horómetro ──
+      fillRect(mg, y, boxW, boxH, 2.5, C.gris5, C.gris4);
+      doc.setFillColor(...C.morado); doc.rect(mg, y, 2.5, boxH, 'F');
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text('HORÓMETRO', mg + 5, y + 5.5);
+      doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.morado);
+      doc.text(`${horasTrabajadas}`, mg + 5, y + 18);
+      doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.morado);
+      doc.text('hrs trabajadas', mg + 5, y + 23.5);
+      doc.setDrawColor(...C.gris4); doc.setLineWidth(0.3);
+      doc.line(mg + 5, y + 27, mg + boxW - 3, y + 27);
+      doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+      doc.text(`Ini: ${reporte.horometroInicial || '0'} h`, mg + 5, y + 31.5);
+      doc.text(`Fin: ${reporte.horometroFinal || '0'} h`, mg + boxW / 2, y + 31.5);
+
+      let cx = mg + boxW + boxGap;
+
+      // ── Kilometraje (si aplica) ──
+      if (mostrarKm) {
+        fillRect(cx, y, boxW, boxH, 2.5, C.gris5, C.gris4);
+        doc.setFillColor(...C.azul); doc.rect(cx, y, 2.5, boxH, 'F');
+        doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+        doc.text('KILOMETRAJE', cx + 5, y + 5.5);
+        doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.azul);
+        doc.text(`${kmRecorridos}`, cx + 5, y + 18);
+        doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.azul);
+        doc.text('km recorridos', cx + 5, y + 23.5);
+        doc.setDrawColor(...C.gris4); doc.setLineWidth(0.3);
+        doc.line(cx + 5, y + 27, cx + boxW - 3, y + 27);
+        doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+        doc.text(`Ini: ${reporte.kilometrajeInicial || '0'} km`, cx + 5, y + 31.5);
+        doc.text(`Fin: ${reporte.kilometrajeFinal || '0'} km`, cx + boxW / 2, y + 31.5);
+        cx += boxW + boxGap;
       }
 
-      // Combustible
-      doc.setFillColor(243, 244, 246);
-      doc.roundedRect(currentX, yPos, boxWidth, boxHeight, 2, 2, 'F');
-      doc.setDrawColor(209, 213, 219);
-      doc.roundedRect(currentX, yPos, boxWidth, boxHeight, 2, 2, 'S');
+      // ── Combustible ──
+      fillRect(cx, y, boxW, boxH, 2.5, C.gris5, C.gris4);
+      doc.setFillColor(...C.amber); doc.rect(cx, y, 2.5, boxH, 'F');
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text('COMBUSTIBLE', cx + 5, y + 5.5);
+      doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.amber);
+      doc.text(`${reporte.cargaCombustible || '0'}`, cx + 5, y + 18);
+      doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.amber);
+      doc.text('litros cargados', cx + 5, y + 23.5);
 
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141);
-      doc.text('COMBUSTIBLE', currentX + 2, yPos + 5);
+      y += boxH + 10;
 
-      doc.setFontSize(16);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(88, 80, 141);
-      const combustible = reporte.cargaCombustible || '0';
-      doc.text(combustible, currentX + (boxWidth / 2) - (combustible.length * 2), yPos + 18);
-      
-      doc.setFontSize(6);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(107, 114, 128);
-      doc.text('LITROS', currentX + (boxWidth / 2) - 4, yPos + 24);
+      // ══════════════════════════════════════════════════════════════
+      // REGISTRO DE ACTIVIDADES
+      // ══════════════════════════════════════════════════════════════
+      const tieneActividades =
+        (reporte.actividadesEfectivas?.length > 0) ||
+        (reporte.tiemposNoEfectivos?.length > 0) ||
+        reporte.tiemposProgramados ||
+        (reporte.mantenciones?.length > 0);
 
-      yPos += boxHeight + 12;
+      if (tieneActividades) {
+        if (y > pH - 60) { doc.addPage(); y = mg; }
 
-      // ============ REGISTRO DE ACTIVIDADES ============
-      if ((reporte.actividadesEfectivas && reporte.actividadesEfectivas.length > 0) ||
-          (reporte.tiemposNoEfectivos && reporte.tiemposNoEfectivos.length > 0) ||
-          (reporte.tiemposProgramados) ||
-          (reporte.mantenciones && reporte.mantenciones.length > 0)) {
-        
-        doc.setDrawColor(209, 213, 219);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 8;
+        sectionTitle(mg, y, 'REGISTRO DE ACTIVIDADES', C.morado);
+        y += 13;
 
-        doc.setFontSize(11);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(88, 80, 141);
-        doc.text('REGISTRO DE ACTIVIDADES', margin, yPos);
-        yPos += 7;
-
-        // Consolidar y ordenar actividades
+        // Consolidar actividades
         const todasActividades = [];
 
-        if (reporte.actividadesEfectivas && Array.isArray(reporte.actividadesEfectivas) && reporte.actividadesEfectivas.length > 0) {
-          reporte.actividadesEfectivas.forEach(act => {
-            // Solo agregar si tiene los datos mínimos necesarios
-            if (act && act.horaInicio && act.horaFin) {
-              todasActividades.push({
-                tipo: 'Operativa',
-                titulo: act.actividad || 'Sin descripción',
-                inicio: act.horaInicio,
-                fin: act.horaFin,
-                duracion: calcularDuracionMinutos(act.horaInicio, act.horaFin),
-                color: [34, 197, 94],
-                bgColor: [240, 253, 244],
-                borderColor: [187, 247, 208]
-              });
-            }
+        reporte.actividadesEfectivas?.forEach(act => {
+          if (act?.horaInicio && act?.horaFin) todasActividades.push({
+            tipo: 'Efectiva', titulo: act.actividad || 'Sin descripción',
+            inicio: act.horaInicio, fin: act.horaFin,
+            duracion: calcularDuracionMinutos(act.horaInicio, act.horaFin),
+            color: C.verde, bg: C.verdeClaro,
           });
-        }
+        });
 
-        if (reporte.tiemposNoEfectivos && Array.isArray(reporte.tiemposNoEfectivos) && reporte.tiemposNoEfectivos.length > 0) {
-          reporte.tiemposNoEfectivos.forEach(t => {
-            // Solo agregar si tiene los datos mínimos necesarios
-            if (t && t.horaInicio && t.horaFin) {
-              todasActividades.push({
-                tipo: 'Detención',
-                titulo: t.motivo || 'Sin motivo especificado',
-                inicio: t.horaInicio,
-                fin: t.horaFin,
-                duracion: calcularDuracionMinutos(t.horaInicio, t.horaFin),
-                color: [234, 179, 8],
-                bgColor: [254, 252, 232],
-                borderColor: [253, 224, 71]
-              });
-            }
+        reporte.tiemposNoEfectivos?.forEach(t => {
+          if (t?.horaInicio && t?.horaFin) todasActividades.push({
+            tipo: 'No Efectiva', titulo: t.motivo || 'Sin motivo',
+            inicio: t.horaInicio, fin: t.horaFin,
+            duracion: calcularDuracionMinutos(t.horaInicio, t.horaFin),
+            color: C.amber, bg: C.amberClaro,
           });
-        }
+        });
 
-        if (reporte.tiemposProgramados) {
-          if (reporte.tiemposProgramados.charlaSegurid) {
-            todasActividades.push({
-              tipo: 'Programado',
-              titulo: 'Charla de Seguridad',
-              inicio: reporte.tiemposProgramados.charlaSegurid.horaInicio,
-              fin: reporte.tiemposProgramados.charlaSegurid.horaFin,
-              duracion: calcularDuracionMinutos(reporte.tiemposProgramados.charlaSegurid.horaInicio, reporte.tiemposProgramados.charlaSegurid.horaFin),
-              color: [59, 130, 246],
-              bgColor: [239, 246, 255],
-              borderColor: [191, 219, 254]
-            });
-          }
-          if (reporte.tiemposProgramados.inspeccionEquipo) {
-            todasActividades.push({
-              tipo: 'Programado',
-              titulo: 'Inspección de Equipo',
-              inicio: reporte.tiemposProgramados.inspeccionEquipo.horaInicio,
-              fin: reporte.tiemposProgramados.inspeccionEquipo.horaFin,
-              duracion: calcularDuracionMinutos(reporte.tiemposProgramados.inspeccionEquipo.horaInicio, reporte.tiemposProgramados.inspeccionEquipo.horaFin),
-              color: [88, 80, 141], // Morado MPF
-              bgColor: [237, 233, 254],
-              borderColor: [196, 181, 253]
-            });
-          }
-          if (reporte.tiemposProgramados.colacion) {
-            todasActividades.push({
-              tipo: 'Programado',
-              titulo: 'Colación',
-              inicio: reporte.tiemposProgramados.colacion.horaInicio,
-              fin: reporte.tiemposProgramados.colacion.horaFin,
-              duracion: calcularDuracionMinutos(reporte.tiemposProgramados.colacion.horaInicio, reporte.tiemposProgramados.colacion.horaFin),
-              color: [236, 72, 153],
-              bgColor: [253, 242, 248],
-              borderColor: [251, 207, 232]
-            });
-          }
-        }
-
-        if (reporte.mantenciones && Array.isArray(reporte.mantenciones) && reporte.mantenciones.length > 0) {
-          reporte.mantenciones.forEach(m => {
-            // Solo agregar si tiene los datos mínimos necesarios
-            if (m && m.horaInicio && m.horaFin) {
-              todasActividades.push({
-                tipo: 'Mantención',
-                titulo: m.descripcion || 'Mantención sin descripción',
-                inicio: m.horaInicio,
-                fin: m.horaFin,
-                duracion: calcularDuracionMinutos(m.horaInicio, m.horaFin),
-                color: [239, 68, 68],
-                bgColor: [254, 242, 242],
-                borderColor: [254, 202, 202]
-              });
-            }
+        const tp = reporte.tiemposProgramados;
+        const programados = [
+          { key: 'charlaSegurid',    label: 'Charla de Seguridad', color: C.azul,   bg: C.azulClaro  },
+          { key: 'inspeccionEquipo', label: 'Inspección de Equipo', color: C.morado, bg: C.moradoClaro},
+          { key: 'colacion',         label: 'Colación',             color: C.rosa,   bg: C.rosaClaro  },
+        ];
+        if (tp) programados.forEach(({ key, label, color, bg }) => {
+          const t = tp[key];
+          if (t?.horaInicio && t?.horaFin) todasActividades.push({
+            tipo: 'Programado', titulo: label,
+            inicio: t.horaInicio, fin: t.horaFin,
+            duracion: calcularDuracionMinutos(t.horaInicio, t.horaFin),
+            color, bg,
           });
-        }
+        });
 
-        // Ordenar cronológicamente
+        reporte.mantenciones?.forEach(m => {
+          if (m?.horaInicio && m?.horaFin) todasActividades.push({
+            tipo: 'Mantención', titulo: m.tipo || m.descripcion || 'Sin descripción',
+            inicio: m.horaInicio, fin: m.horaFin,
+            duracion: calcularDuracionMinutos(m.horaInicio, m.horaFin),
+            color: C.rojo, bg: C.rojoClaro,
+          });
+        });
+
         todasActividades.sort((a, b) => {
-          // Validar que ambos tengan inicio válido
           if (!a.inicio || !b.inicio) return 0;
-          
           const [hA, mA] = a.inicio.split(':').map(Number);
           const [hB, mB] = b.inicio.split(':').map(Number);
           return (hA * 60 + mA) - (hB * 60 + mB);
         });
 
-        // Tabla de actividades
-        const tableStartY = yPos;
-        const rowHeight = 8;
-        const colWidths = [25, 70, 20, 20, 15];
+        // Header tabla
+        const rH = 8.5;
+        const cols = [28, 76, 20, 20, 18]; // tipo, desc, ini, fin, dur
+        fillRect(mg, y, cW, rH, 0, C.oscuro, null);
+        doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+        let xp = mg + 3;
+        ['TIPO', 'DESCRIPCIÓN', 'INICIO', 'FIN', 'DURACIÓN'].forEach((h, i) => {
+          doc.text(h, xp, y + 5.8);
+          xp += cols[i];
+        });
+        y += rH;
 
-        // Header de tabla
-        doc.setFillColor(249, 250, 251); // Gray 50
-        doc.rect(margin, yPos, contentWidth, rowHeight, 'F');
-        doc.setDrawColor(209, 213, 219);
-        doc.rect(margin, yPos, contentWidth, rowHeight, 'S');
-
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(75, 85, 99);
-        
-        let xPos = margin + 2;
-        doc.text('TIPO', xPos, yPos + 5);
-        xPos += colWidths[0];
-        doc.text('DESCRIPCIÓN', xPos, yPos + 5);
-        xPos += colWidths[1];
-        doc.text('INICIO', xPos, yPos + 5);
-        xPos += colWidths[2];
-        doc.text('FIN', xPos, yPos + 5);
-        xPos += colWidths[3];
-        doc.text('DURACIÓN', xPos, yPos + 5);
-
-        yPos += rowHeight;
-
-        // Filas de actividades
         todasActividades.forEach((act, idx) => {
-          if (yPos > pageHeight - 40) {
-            doc.addPage();
-            yPos = margin;
-          }
+          if (y > pH - 28) { doc.addPage(); y = mg; }
 
-          // Fondo alternado
-          if (idx % 2 === 0) {
-            doc.setFillColor(255, 255, 255);
-          } else {
-            doc.setFillColor(249, 250, 251);
-          }
-          doc.rect(margin, yPos, contentWidth, rowHeight, 'F');
+          // Fondo alternado con tinte de color
+          fillRect(mg, y, cW, rH, 0, idx % 2 === 0 ? C.blanco : C.gris5, null);
 
-          // Indicador de color
-          doc.setFillColor(act.color[0], act.color[1], act.color[2]);
-          doc.rect(margin, yPos, 2, rowHeight, 'F');
+          // Acento izquierdo de color
+          doc.setFillColor(...act.color); doc.rect(mg, y, 2.5, rH, 'F');
 
-          doc.setFontSize(7);
-          doc.setFont(undefined, 'bold');
-          doc.setTextColor(act.color[0], act.color[1], act.color[2]);
-          
-          xPos = margin + 4;
-          doc.text(act.tipo, xPos, yPos + 5);
-          
-          doc.setFont(undefined, 'normal');
-          doc.setTextColor(55, 65, 81);
-          xPos += colWidths[0] - 2;
-          const titulo = act.titulo || 'Sin descripción';
-          const tituloTruncado = titulo.length > 35 ? titulo.substring(0, 35) + '...' : titulo;
-          doc.text(tituloTruncado, xPos, yPos + 5);
-          
-          xPos += colWidths[1];
-          doc.text(act.inicio || '--:--', xPos, yPos + 5);
-          
-          xPos += colWidths[2];
-          doc.text(act.fin || '--:--', xPos, yPos + 5);
-          
-          doc.setFont(undefined, 'bold');
-          xPos += colWidths[3];
-          const duracion = act.duracion || 0;
-          const horas = Math.floor(duracion / 60);
-          const mins = duracion % 60;
-          doc.text(`${horas}h ${mins}m`, xPos, yPos + 5);
+          // Chip tipo
+          xp = mg + 4;
+          const chipW = Math.min(doc.getTextWidth(act.tipo) * 1.3 + 4, cols[0] - 4);
+          fillRect(xp, y + 1.5, chipW, 5.5, 1.2, act.bg, null);
+          doc.setFontSize(6); doc.setFont(undefined, 'bold'); doc.setTextColor(...act.color);
+          doc.text(act.tipo, xp + 2, y + 5.8);
 
-          // Borde inferior
-          doc.setDrawColor(243, 244, 246);
-          doc.line(margin, yPos + rowHeight, pageWidth - margin, yPos + rowHeight);
+          xp += cols[0];
+          doc.setFontSize(7); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.oscuro);
+          const tit = (act.titulo || '').length > 38 ? act.titulo.substring(0, 38) + '…' : act.titulo;
+          doc.text(tit || '—', xp, y + 5.8);
 
-          yPos += rowHeight;
+          xp += cols[1];
+          doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris2);
+          doc.text(act.inicio || '—', xp, y + 5.8);
+
+          xp += cols[2];
+          doc.text(act.fin || '—', xp, y + 5.8);
+
+          xp += cols[3];
+          const dur = act.duracion || 0;
+          doc.setTextColor(...C.oscuro);
+          doc.text(`${Math.floor(dur/60)}h ${dur%60}m`, xp, y + 5.8);
+
+          // Separador
+          doc.setDrawColor(...C.gris4); doc.setLineWidth(0.2);
+          doc.line(mg, y + rH, mg + cW, y + rH);
+          y += rH;
         });
 
-        yPos += 5;
+        y += 8;
       }
 
-      // ============ OBSERVACIONES ============
+      // ══════════════════════════════════════════════════════════════
+      // OBSERVACIONES
+      // ══════════════════════════════════════════════════════════════
       if (reporte.observaciones) {
-        if (yPos > pageHeight - 40) {
-          doc.addPage();
-          yPos = margin;
-        }
-
-        doc.setDrawColor(209, 213, 219);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 8;
-
-        doc.setFontSize(11);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(88, 80, 141);
-        doc.text('OBSERVACIONES', margin, yPos);
-        yPos += 7;
-
-        doc.setFillColor(249, 250, 251);
-        doc.roundedRect(margin, yPos, contentWidth, 25, 2, 2, 'F');
-        doc.setDrawColor(209, 213, 219);
-        doc.roundedRect(margin, yPos, contentWidth, 25, 2, 2, 'S');
-
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'normal');
-        doc.setTextColor(75, 85, 99);
-        const splitObs = doc.splitTextToSize(reporte.observaciones, contentWidth - 6);
-        doc.text(splitObs, margin + 3, yPos + 5);
-
-        yPos += 30;
+        if (y > pH - 40) { doc.addPage(); y = mg; }
+        sectionTitle(mg, y, 'OBSERVACIONES', C.morado);
+        y += 13;
+        const obsLines = doc.splitTextToSize(reporte.observaciones, cW - 10);
+        const obsH = Math.max(16, obsLines.length * 5 + 8);
+        fillRect(mg, y, cW, obsH, 2, C.gris5, C.gris4);
+        doc.setFillColor(...C.morado); doc.rect(mg, y, 2.5, obsH, 'F');
+        doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.oscuro);
+        doc.text(obsLines, mg + 6, y + 6);
+        y += obsH + 8;
       }
 
-      // ============ FIRMA Y VALIDACIÓN ============
-      if (reporte.firmado && reporte.firmaAdmin) {
-        if (yPos > pageHeight - 40) {
-          doc.addPage();
-          yPos = margin;
-        }
-
-        doc.setFillColor(236, 253, 245); // Emerald 50
-        doc.roundedRect(margin, yPos, contentWidth, 35, 2, 2, 'F');
-        doc.setDrawColor(16, 185, 129); // Emerald 500
-        doc.setLineWidth(1);
-        doc.roundedRect(margin, yPos, contentWidth, 35, 2, 2, 'S');
-
-        // Ícono de validación
-        doc.setFillColor(16, 185, 129);
-        doc.circle(margin + 8, yPos + 10, 5, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(12);
-        doc.setFont(undefined, 'bold');
-        doc.text('✓', margin + 6, yPos + 12);
-
-        // Información de firma
-        doc.setFontSize(10);
-        doc.setFont(undefined, 'bold');
-        doc.setTextColor(16, 185, 129);
-        doc.text('REPORTE VALIDADO', margin + 18, yPos + 8);
-
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'normal');
-        doc.setTextColor(55, 65, 81);
-        doc.text(`Validado por: ${reporte.firmaAdmin.nombre}`, margin + 18, yPos + 15);
-        doc.text(`Fecha: ${new Date(reporte.firmaAdmin.timestamp).toLocaleString('es-CL')}`, margin + 18, yPos + 21);
-
-        doc.setFontSize(6);
-        doc.setTextColor(107, 114, 128);
-        doc.text('Este documento ha sido validado digitalmente y posee validez legal según normativa vigente.', margin + 18, yPos + 29);
+      // ══════════════════════════════════════════════════════════════
+      // VALIDACIÓN / FIRMA
+      // ══════════════════════════════════════════════════════════════
+      if (y > pH - 44) { doc.addPage(); y = mg; }
+      if (firmado && reporte.firmaAdmin) {
+        fillRect(mg, y, cW, 28, 3, C.verdeClaro, C.verde, 0.4);
+        doc.setFillColor(...C.verde); doc.roundedRect(mg, y, 3, 28, 1.5, 1.5, 'F');
+        doc.setFillColor(...C.verde); doc.circle(mg + 14, y + 14, 7, 'F');
+        doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+        doc.text('✓', mg + 11.5, y + 16.5);
+        doc.setFontSize(9.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.verde);
+        doc.text('DOCUMENTO VALIDADO', mg + 26, y + 10);
+        doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+        doc.text(`Validado por: ${reporte.firmaAdmin.nombre}`, mg + 26, y + 17);
+        doc.text(`Fecha: ${new Date(reporte.firmaAdmin.timestamp).toLocaleString('es-CL')}`, mg + 26, y + 23);
+        doc.setFontSize(6); doc.setTextColor(...C.gris3);
+        doc.text('Documento validado digitalmente con firma electrónica autorizada.', pW - mg - 5, y + 25, { align: 'right' });
+      } else {
+        fillRect(mg, y, cW, 20, 3, C.rojoClaro, C.rojo, 0.3);
+        doc.setFillColor(...C.rojo); doc.roundedRect(mg, y, 3, 20, 1.5, 1.5, 'F');
+        doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.rojo);
+        doc.text('PENDIENTE DE VALIDACIÓN', mg + 12, y + 11.5);
+        doc.setFontSize(7); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+        doc.text('Este documento aún no ha sido firmado por un administrador.', mg + 12, y + 17);
       }
 
-      // NO HAY FOOTER - eliminado como solicitaste
+      // ══════════════════════════════════════════════════════════════
+      // FOOTER
+      // ══════════════════════════════════════════════════════════════
+      doc.setFillColor(...C.oscuro);
+      doc.rect(0, pH - 12, pW, 12, 'F');
+      doc.setFillColor(...C.morado);
+      doc.rect(0, pH - 12, 4, 12, 'F');
+      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+      doc.text('MPF Ingeniería Civil · Work Fleet · Control Operacional de Maquinaria', mg, pH - 5.5);
+      doc.text(`Generado: ${new Date().toLocaleString('es-CL')} · Reporte ${index + 1} de ${reportesAGenerar.length}`, pW - mg, pH - 5.5, { align: 'right' });
     });
 
     doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -791,76 +692,184 @@ export default function ReporteWorkFleet() {
 
   // Descargar como PDF
   const descargarPDF = () => {
-    const doc = new jsPDF('landscape');
-    
-    doc.setFontSize(18);
-    doc.text('Reportes WorkFleet', 14, 15);
-    
-    doc.setFontSize(10);
-    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
-    doc.text(`Total de reportes: ${reportesFiltrados.length}`, 14, 27);
+    if (reportesFiltrados.length === 0) {
+      alert("No hay reportes para exportar");
+      return;
+    }
 
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pW = doc.internal.pageSize.getWidth();  // 297
+    const pH = doc.internal.pageSize.getHeight(); // 210
+    const mg = 14;
+
+    const C = {
+      morado:       [88,  80,  141],
+      moradoClaro:  [237, 233, 254],
+      oscuro:       [15,  23,  42],
+      gris2:        [71,  85,  105],
+      gris3:        [148, 163, 184],
+      gris4:        [226, 232, 240],
+      gris5:        [248, 250, 252],
+      blanco:       [255, 255, 255],
+      verde:        [16,  185, 129],
+      verdeClaro:   [209, 250, 229],
+      amber:        [217, 119, 6],
+      azul:         [59,  130, 246],
+      azulClaro:    [239, 246, 255],
+      rojo:         [220, 38,  38],
+    };
+
+    // ── KPIs desde reportesFiltrados (respeta todos los filtros activos) ──
+    let totalHoras = 0, totalKm = 0, totalCombustible = 0, firmados = 0;
+    reportesFiltrados.forEach(r => {
+      const h = (parseFloat(r.horometroFinal) || 0) - (parseFloat(r.horometroInicial) || 0);
+      const k = (parseFloat(r.kilometrajeFinal) || 0) - (parseFloat(r.kilometrajeInicial) || 0);
+      totalHoras       += h;
+      totalKm          += k;
+      totalCombustible += parseFloat(r.cargaCombustible) || 0;
+      if (r.firmado) firmados++;
+    });
+    const promHoras  = reportesFiltrados.length > 0 ? (totalHoras / reportesFiltrados.length).toFixed(1) : 0;
+    const pctFirm    = reportesFiltrados.length > 0 ? Math.round((firmados / reportesFiltrados.length) * 100) : 0;
+
+    // ── HEADER ────────────────────────────────────────────────────
+    doc.setFillColor(...C.oscuro);
+    doc.rect(0, 0, pW, 28, 'F');
+    doc.setFillColor(...C.morado);
+    doc.rect(0, 0, 4, 28, 'F');
+
+    // Logo
+    doc.setFillColor(...C.morado);
+    doc.roundedRect(mg + 2, 4, 20, 20, 2, 2, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('MPF', mg + 6, 12);
+    doc.setFontSize(4.5); doc.setFont(undefined, 'normal');
+    doc.text('INGENIERÍA', mg + 3.5, 17);
+    doc.text('CIVIL', mg + 7, 21);
+
+    // Título
+    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('REPORTE DE MAQUINARIA', mg + 27, 13);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+    doc.text('Resumen · Work Fleet · Control Operacional de Maquinaria · MPF Ingeniería Civil', mg + 27, 20);
+
+    // Filtros activos
+    const filtrosActivos = [];
+    if (filtros.fechaInicio) filtrosActivos.push(`Desde: ${filtros.fechaInicio}`);
+    if (filtros.fechaFin)    filtrosActivos.push(`Hasta: ${filtros.fechaFin}`);
+    if (filtros.proyecto)    filtrosActivos.push(`Proyecto: ${projects.find(p => p.id === filtros.proyecto)?.name || filtros.proyecto}`);
+    if (filtros.maquina)     filtrosActivos.push(`Máquina: ${machines.find(m => m.id === filtros.maquina)?.patente || filtros.maquina}`);
+    if (filtros.operador)    filtrosActivos.push(`Operador: ${filtros.operador}`);
+
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+    doc.text(
+      `Generado: ${new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })}`,
+      pW - mg, 11, { align: 'right' }
+    );
+    const filtroStr = filtrosActivos.length
+      ? `${reportesFiltrados.length} registros · Filtros: ${filtrosActivos.join('  |  ')}`
+      : `${reportesFiltrados.length} registros · Sin filtros aplicados`;
+    doc.text(doc.splitTextToSize(filtroStr, 185)[0], pW - mg, 18, { align: 'right' });
+
+    // ── KPI CARDS ─────────────────────────────────────────────────
+    const kpiY = 32;
+    const kpiH = 22;
+    const kpiW = (pW - mg * 2 - 9) / 4;
+
+    const drawKpi = (x, label, value, sub, accent, bg) => {
+      doc.setFillColor(...bg);     doc.roundedRect(x, kpiY, kpiW, kpiH, 2, 2, 'F');
+      doc.setFillColor(...accent); doc.rect(x, kpiY, 2.5, kpiH, 'F');
+      doc.setFontSize(6); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text(label.toUpperCase(), x + 5, kpiY + 6);
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...accent);
+      doc.text(String(value), x + 5, kpiY + 15);
+      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+      doc.text(sub, x + 5, kpiY + 20);
+    };
+
+    const kx = mg;
+    drawKpi(kx,              'Total Reportes',    `${reportesFiltrados.length}`,                   `${filtrosActivos.length ? 'con filtros aplicados' : 'sin filtros'}`, C.morado, C.moradoClaro);
+    drawKpi(kx+(kpiW+3),     'Horas Operadas',    `${totalHoras.toFixed(1)} h`,                    `Prom: ${promHoras} h/reporte`,                                       C.azul,   C.azulClaro);
+    drawKpi(kx+(kpiW+3)*2,   'Combustible Total', `${totalCombustible.toLocaleString('es-CL')} L`, `${reportesFiltrados.length} reportes`,                               C.amber,  [254,243,199]);
+    drawKpi(kx+(kpiW+3)*3,   'Tasa Validación',   `${pctFirm}%`,                                   `${firmados}/${reportesFiltrados.length} firmados`,
+      pctFirm >= 80 ? C.verde : pctFirm >= 50 ? C.amber : C.rojo,
+      pctFirm >= 80 ? C.verdeClaro : pctFirm >= 50 ? [254,243,199] : [254,226,226]
+    );
+
+    // ── TABLA ─────────────────────────────────────────────────────
     const tableData = reportesFiltrados.map(r => {
-      const horasTrabajadas = r.horometroFinal && r.horometroInicial 
-        ? (parseFloat(r.horometroFinal) - parseFloat(r.horometroInicial)).toFixed(2)
-        : '0';
-      
-      const kmRecorridos = r.kilometrajeFinal && r.kilometrajeInicial
-        ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(2)
-        : '0';
-
+      const horasTrabajadas = ((parseFloat(r.horometroFinal) || 0) - (parseFloat(r.horometroInicial) || 0)).toFixed(2);
+      const kmRecorridos    = ((parseFloat(r.kilometrajeFinal) || 0) - (parseFloat(r.kilometrajeInicial) || 0)).toFixed(2);
       return [
-        r.projectName || '',
-        r.fecha,
-        r.machinePatente || '',
-        r.numeroReporte,
-        r.operador,
-        r.rut,
-        r.horometroInicial || '0',
-        r.horometroFinal || '0',
-        horasTrabajadas,
-        r.kilometrajeInicial || '0',
-        r.kilometrajeFinal || '0',
-        kmRecorridos,
-        r.cargaCombustible || '0'
+        r.fecha ? new Date(r.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '—',
+        r.numeroReporte || '—',
+        r.projectName   || '—',
+        r.machinePatente || '—',
+        r.operador || '—',
+        r.rut      || '—',
+        `${r.horometroInicial || '0'} → ${r.horometroFinal || '0'}`,
+        `${horasTrabajadas} h`,
+        kmRecorridos !== '0.00' ? `${kmRecorridos} km` : '—',
+        `${r.cargaCombustible || '0'} L`,
+        r.firmado ? '✓' : '—',
       ];
     });
 
-    doc.autoTable({
-      head: [[
-        'Obra',
-        'Fecha',
-        'Patente',
-        'N° Rep.',
-        'Operador',
-        'RUT',
-        'H.Ini',
-        'H.Fin',
-        'H.Trab',
-        'Km.Ini',
-        'Km.Fin',
-        'Km.Rec',
-        'Comb.'
-      ]],
+    autoTable(doc, {
+      head: [['Fecha', 'N° Rep.', 'Proyecto', 'Máquina', 'Operador', 'RUT', 'Horómetro', 'H. Trab.', 'Km Rec.', 'Comb.', 'Valid.']],
       body: tableData,
-      startY: 35,
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [124, 58, 237], fontSize: 7 },
+      startY: kpiY + kpiH + 6,
+      margin: { left: mg, right: mg },
+      theme: 'plain',
+      styles: {
+        fontSize: 7.5,
+        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        textColor: [...C.oscuro],
+        lineColor: [...C.gris4],
+        lineWidth: 0.2,
+      },
+      headStyles: {
+        fillColor: [...C.oscuro],
+        textColor: [...C.gris3],
+        fontSize: 6.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+      },
+      alternateRowStyles: { fillColor: [...C.gris5] },
       columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 13 },
-        7: { cellWidth: 13 },
-        8: { cellWidth: 13 },
-        9: { cellWidth: 13 },
-        10: { cellWidth: 13 },
-        11: { cellWidth: 13 },
-        12: { cellWidth: 13 }
-      }
+        0:  { cellWidth: 22 },
+        1:  { cellWidth: 18 },
+        2:  { cellWidth: 'auto' },
+        3:  { cellWidth: 24 },
+        4:  { cellWidth: 32 },
+        5:  { cellWidth: 24 },
+        6:  { cellWidth: 30 },
+        7:  { cellWidth: 18, halign: 'right', fontStyle: 'bold', textColor: [...C.morado] },
+        8:  { cellWidth: 18, halign: 'right' },
+        9:  { cellWidth: 18, halign: 'right', fontStyle: 'bold', textColor: [...C.amber]  },
+        10: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+      },
+      didParseCell(data) {
+        if (data.section === 'body' && data.column.index === 10 && data.cell.raw === '✓') {
+          data.cell.styles.textColor = [...C.verde];
+          data.cell.styles.fontSize  = 9;
+        }
+      },
+      foot: [['', '', '', '', '', '', '', `${totalHoras.toFixed(1)} h`, `${totalKm.toFixed(1)} km`, `${totalCombustible.toLocaleString('es-CL')} L`, `${firmados}✓`]],
+      footStyles: {
+        fillColor: [...C.oscuro],
+        textColor: [...C.blanco],
+        fontStyle: 'bold',
+        fontSize: 7.5,
+      },
+      didDrawPage(data) {
+        const pHp = doc.internal.pageSize.getHeight();
+        doc.setFillColor(...C.oscuro); doc.rect(0, pHp - 10, pW, 10, 'F');
+        doc.setFillColor(...C.morado); doc.rect(0, pHp - 10, 4, 10, 'F');
+        doc.setFontSize(5.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+        doc.text('MPF Ingeniería Civil · Work Fleet · Control Operacional de Maquinaria', mg, pHp - 4);
+        doc.text(`Página ${data.pageNumber}`, pW - mg, pHp - 4, { align: 'right' });
+      },
     });
 
     doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);

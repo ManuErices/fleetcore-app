@@ -791,6 +791,41 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
   };
 
 
+  // ─── ACTIVIDADES POR TIPO DE MÁQUINA (Excel: Actividades_Efectivas_y_No_Efectivas) ────
+  const ACTIVIDADES_POR_TIPO = {
+    'EXCAVADORA':         ['Construcción de Plataforma', 'Construccion Camino', 'Fragmentación de Roca', 'Carguío de Camiones'],
+    'BULLDOZER':          ['Construcción de Plataforma', 'Construccion Camino', 'Fragmentación de Roca', 'Trabajos en Botadero'],
+    'MOTONIVELADORA':     ['Construcción de Plataforma', 'Construccion Camino', 'Reperfilado de Camino', 'Escarificado de Camino', 'Nivelación de Terreno'],
+    'RETROEXCAVADORA':    ['Construcción de Piscina', 'Construcción de Zanja', 'Construcción de Camino', 'Trabajos en Campamento', 'Movimiento de Carga con Horquilla'],
+    'CARGADOR FRONTAL':   ['Construcción de Plataforma', 'Construccion Camino', 'Trabajos en Campamento', 'Trabajos en Botadero', 'Carguio de Camiones'],
+    'CAMION ALJIBE':      ['Humectación de Camino', 'Abastecimiento de Estanques de Almacenamiento', 'Traslado a punto de Captación de Agua', 'Traslado a Proyecto'],
+    'CAMION COMBUSTIBLE': ['Abastecimiento de Combustible a Maquinaria', 'Abastecimiento de Combustible a Campamento', 'Traslado a Estación de Servicio', 'Traslado a Proyecto'],
+    'CAMIONETA':          ['Traslados en Proyecto', 'Abastecimiento de Combustible a Maquinaria', 'Abastecimiento de Combustible a Campamento', 'Traslados Fuera de Proyecto'],
+  };
+
+  const MOTIVOS_NO_EFECTIVOS = [
+    'Traslado de Equipo',
+    'Espera por Traslado de Equipo',
+    'Sin acceso a Faena',
+    'Factor Climatico y/o Ambiental',
+    'Equipo Sin Operador',
+    'Equipo Fuera de Servicio',
+  ];
+
+  // Normaliza el type de la máquina para matchear con las claves del mapa
+  const getMachineType = () => {
+    const raw = selectedMachine?.type || '';
+    const upper = raw.toUpperCase().trim();
+    const exacta = Object.keys(ACTIVIDADES_POR_TIPO).find(k => k === upper);
+    if (exacta) return exacta;
+    // Buscar match parcial por si el type tiene variantes (ej: "Excavadora Hidráulica")
+    const parcial = Object.keys(ACTIVIDADES_POR_TIPO).find(k => upper.includes(k) || k.includes(upper));
+    return parcial || null;
+  };
+
+  const tipoMaquina = getMachineType();
+  const opcionesActividad = tipoMaquina ? ACTIVIDADES_POR_TIPO[tipoMaquina] : [];
+
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -805,6 +840,15 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
             <div className="flex-1">
               <h2 className="text-xl sm:text-2xl font-bold">Paso 2: Registro de Actividades</h2>
               <p className="text-slate-300 text-sm">Máquina: {selectedMachine?.name || 'No seleccionada'}</p>
+              {tipoMaquina ? (
+                <span className="inline-block mt-1 px-2 py-0.5 bg-white/20 text-white text-xs font-bold rounded-full tracking-wide">
+                  📋 {tipoMaquina}
+                </span>
+              ) : selectedMachine?.type ? (
+                <span className="inline-block mt-1 px-2 py-0.5 bg-amber-500/30 text-amber-200 text-xs font-semibold rounded-full">
+                  ⚠️ Tipo no reconocido: "{selectedMachine.type}" — ingresa actividad manualmente
+                </span>
+              ) : null}
             </div>
             <button
               type="button"
@@ -862,7 +906,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   )}
                   onClear={() => clearActividad(index)}
                   existingSlots={existingSlots}
-                  opciones={['Trabajos en Plataforma', 'Trabajos en Camino', 'Trabajos en Campamento']}
+                  opciones={opcionesActividad}
                 />
               );
             })}
@@ -910,7 +954,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   )}
                   onClear={() => clearTiempoNoEfectivo(index)}
                   existingSlots={existingSlots}
-                  opciones={['Sin Postura', 'Factor climático', 'Traslado de Equipo']}
+                  opciones={MOTIVOS_NO_EFECTIVOS}
                 />
               );
             })}

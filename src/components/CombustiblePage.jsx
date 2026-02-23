@@ -43,7 +43,8 @@ export default function CombustiblePage({ onClose }) {
   
   // Estados para las firmas
   const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
-  const [firmaReceptor, setFirmaReceptor] = useState(null); // Para ENTREGA
+  const [firmaReceptor, setFirmaReceptor] = useState(null); // Para SALIDA
+  const [firmaReceptorTemp, setFirmaReceptorTemp] = useState(null); // Firma temporal hasta confirmar
   const [showModalFirmaRepartidor, setShowModalFirmaRepartidor] = useState(false);
   const [showModalFirmaReceptor, setShowModalFirmaReceptor] = useState(false);
   
@@ -475,91 +476,77 @@ export default function CombustiblePage({ onClose }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 py-4 px-2 sm:px-4">
-      <div className="bg-white rounded-2xl shadow-lg max-w-4xl w-full mx-auto overflow-hidden">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-black">Control de Combustible</h2>
-              <p className="text-orange-100 text-sm mt-1">
-                {paso === 1 && "Información del Control"}
-                {paso === 2 && "Selecciona el tipo de reporte"}
-                {paso === 3 && tipoReporte === 'entrada' && "Entrada de Combustible al Estanque"}
-                {paso === 3 && tipoReporte === 'entrega' && "Entrega de Combustible a Máquina"}
+    <div className="min-h-screen bg-slate-100 py-4 px-2 sm:px-4">
+      <div className="max-w-2xl w-full mx-auto space-y-4">
+
+        {/* ── HEADER estilo Paso2Form ── */}
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-4 sm:p-6 rounded-xl shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-slate-400 text-xs font-semibold uppercase tracking-wide">Paso {paso} de 3</p>
+              <h2 className="text-xl sm:text-2xl font-bold">
+                {paso === 1 && "Control de Combustible"}
+                {paso === 2 && "Tipo de Reporte"}
+                {paso === 3 && tipoReporte === 'entrada' && "Entrada de Combustible"}
+                {paso === 3 && tipoReporte === 'entrega' && "Entrega de Combustible"}
+              </h2>
+              <p className="text-slate-400 text-sm">
+                {paso === 1 && "Información general del control"}
+                {paso === 2 && "Selecciona el tipo de operación"}
+                {paso === 3 && tipoReporte === 'entrada' && "Recepción al estanque"}
+                {paso === 3 && tipoReporte === 'entrega' && "Despacho a máquina"}
               </p>
             </div>
-            <button
-              onClick={handleClose}
-              className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            {paso === 3 && (
+              <span className={`px-3 py-1 rounded-lg text-xs font-bold flex-shrink-0 ${tipoReporte === 'entrada' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-orange-500/30 text-orange-300'}`}>
+                {tipoReporte === 'entrada' ? '⬇ ENTRADA' : '⬆ SALIDA'}
+              </span>
+            )}
+            <button onClick={handleClose} className="w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors flex-shrink-0">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
         </div>
 
-        {/* Indicador de pasos */}
-        <div className="bg-orange-50 p-4 border-b border-orange-200">
-          <div className="flex items-center justify-center gap-4">
-            <div className={`flex items-center gap-2 ${paso >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                1
-              </div>
-              <span className="text-sm font-semibold">Control</span>
-            </div>
-            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-            <div className={`flex items-center gap-2 ${paso >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                2
-              </div>
-              <span className="text-sm font-semibold">Tipo</span>
-            </div>
-            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-            <div className={`flex items-center gap-2 ${paso >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
-                3
-              </div>
-              <span className="text-sm font-semibold">Detalles</span>
-            </div>
-          </div>
-        </div>
+        {/* ── PASO 1: Control de Combustible ── */}
+        {paso === 1 && (
+          <div className="space-y-4">
 
-        {/* Contenido */}
-        <div className="p-6">
-          {/* PASO 1: Control de Combustible */}
-          {paso === 1 && (
-            <div className="space-y-6">
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-orange-900 mb-1">📋 Control de Combustible</h3>
-                <p className="text-sm text-orange-700">Información general del control (Página 1 de 2)</p>
+            {/* Información Básica */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Información Básica</h3>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Código Obra <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    Proyecto <span className="text-red-500">*</span>
                   </label>
                   <select
                     required
                     value={datosControl.projectId}
                     onChange={(e) => setDatosControl({...datosControl, projectId: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800 font-medium"
                   >
-                    <option value="">Seleccione obra</option>
+                    <option value="">Seleccionar...</option>
                     {projects.map(p => (
                       <option key={p.id} value={p.id}>{p.name || p.id}</option>
                     ))}
                   </select>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                     Fecha <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -567,299 +554,235 @@ export default function CombustiblePage({ onClose }) {
                     required
                     value={datosControl.fecha}
                     onChange={(e) => setDatosControl({...datosControl, fecha: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800"
                     max={new Date().toISOString().split('T')[0]}
                   />
                 </div>
               </div>
+            </div>
 
-              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
-                <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                      Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
-                    </label>
-                    <div className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg bg-amber-50 font-semibold text-amber-900 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                      <div className="flex-1">
-                        {currentUserData ? (
-                          <div>
-                            <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
-                            {currentUserData.rut && (
-                              <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>
-                            )}
-                            {currentUserData.email && (
-                              <div className="text-xs text-amber-600">{currentUserData.email}</div>
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="text-red-600 font-bold">⚠No se encontró usuario en el sistema</div>
-                            <div className="text-xs text-slate-600 mt-1">
-                              Usuario: {currentUser?.email || 'Sin email'}
-                            </div>
-                            <div className="text-xs text-red-500 mt-1">
-                              Por favor contacta al administrador para crear tu perfil en la colección "users"
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      {currentUserData && (
-                        <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                    </div>
-                    {currentUserData ? (
-                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Autocompletado con tu usuario
-                      </p>
-                    ) : (
-                      <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        Tu usuario no existe en la colección "users"
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                      Equipo Surtidor (Camión/Mochila)
-                      {userRole !== 'administrador' 
-                    }
-                    </label>
-                    <div className="flex gap-2">
-                      <select
-                        value={datosControl.equipoSurtidorId}
-                        onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
-                        className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                      >
-                        <option value="">Seleccione equipo surtidor</option>
-                        {machinesLocal.filter(m => 
-                          m.name?.toLowerCase().includes('combustible') || 
-                          m.name?.toLowerCase().includes('camión') ||
-                          m.name?.toLowerCase().includes('mochila') ||
-                          m.categoria === 'surtidor_combustible'
-                        ).map(m => (
-                          <option key={m.id} value={m.id}>
-                            {m.patente || m.code} - {m.name}
-                          </option>
-                        ))}
-                      </select>
-                      {userRole === 'administrador' && (
-                        <button
-                          type="button"
-                          onClick={() => setShowModalEquipoSurtidor(true)}
-                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
-                          title="Agregar nuevo equipo surtidor"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">Opcional: Camión o equipo que entrega el combustible</p>
-                  </div>
-                </div>
+            {/* Repartidor */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Repartidor / Surtidor</h3>
               </div>
+              <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl">
+                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  {currentUserData ? (
+                    <>
+                      <div className="font-bold text-slate-900">{currentUserData.nombre || 'Sin nombre'}</div>
+                      <div className="text-xs text-slate-500">{currentUserData.rut && `RUT: ${currentUserData.rut}`} {currentUserData.email && `· ${currentUserData.email}`}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-bold text-red-600">⚠ Usuario no encontrado en el sistema</div>
+                      <div className="text-xs text-slate-500">{currentUser?.email || 'Sin email'} — Contacta al administrador</div>
+                    </>
+                  )}
+                </div>
+                {currentUserData && (
+                  <svg className="w-5 h-5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+              {currentUserData && (
+                <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  Autocompletado desde tu perfil
+                </p>
+              )}
+            </div>
 
-              <div className="flex gap-3 pt-4 border-t border-orange-200">
+            {/* Equipo Surtidor */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Equipo Surtidor</h3>
+                <span className="text-xs text-slate-400 font-normal">(Camión / Mochila)</span>
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={datosControl.equipoSurtidorId}
+                  onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
+                  className="flex-1 px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800"
+                >
+                  <option value="">Seleccionar...</option>
+                  {machinesLocal.filter(m =>
+                    m.name?.toLowerCase().includes('combustible') ||
+                    m.name?.toLowerCase().includes('surtidor') ||
+                    m.name?.toLowerCase().includes('camion') ||
+                    m.name?.toLowerCase().includes('camión') ||
+                    m.name?.toLowerCase().includes('mochila') ||
+                    m.categoria === 'surtidor_combustible'
+                  ).map(m => (
+                    <option key={m.id} value={m.id}>{m.patente} — {m.name}</option>
+                  ))}
+                </select>
+                {userRole === 'administrador' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowModalEquipoSurtidor(true)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-all"
+                    title="Agregar nuevo equipo surtidor"
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Botón siguiente */}
+            <button
+              onClick={() => {
+                if (!datosControl.projectId || !datosControl.repartidorId) {
+                  alert("Por favor completa el Proyecto y el Repartidor");
+                  return;
+                }
+                setPaso(2);
+              }}
+              className="w-full px-6 py-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-bold rounded-xl transition-all shadow-md text-base"
+            >
+              Siguiente →
+            </button>
+          </div>
+        )}
+
+        {/* ── PASO 2: Selección de tipo ── */}
+        {paso === 2 && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Tipo de Operación</h3>
+              </div>
+              <p className="text-sm text-slate-500 mb-4">¿Qué operación vas a registrar?</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={handleClose}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  onClick={() => { setTipoReporte('entrada'); setPaso(3); }}
+                  className="flex items-center gap-4 p-4 bg-white border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 rounded-xl transition-all text-left group"
                 >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => setPaso(2)}
-                  disabled={!datosControl.projectId || !datosControl.repartidorId}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
-                >
-                  Siguiente →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* PASO 2: Tipo de Reporte */}
-          {paso === 2 && (
-            <div className="space-y-6">
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-orange-900 mb-1">Tipo de Reporte</h3>
-                <p className="text-sm text-orange-700">Selecciona si es entrada o entrega de combustible</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* ENTRADA */}
-                <button
-                  onClick={() => {
-                    setTipoReporte('entrada');
-                    setPaso(3);
-                  }}
-                  className="group relative bg-gradient-to-br from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 border-3 border-green-300 hover:border-green-500 rounded-2xl p-8 transition-all hover:shadow-xl"
-                >
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                      </svg>
-                    </div>
-                    <div className="text-center">
-                      <h4 className="text-xl font-black text-green-900 mb-2">ENTRADA</h4>
-                      <p className="text-sm text-green-700">Recepción de combustible al estanque</p>
-                      <p className="text-xs text-green-600 mt-2">• N° Guía • Cantidad • Origen</p>
-                    </div>
+                  <div className="w-12 h-12 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center flex-shrink-0 transition-colors">
+                    <svg className="w-6 h-6 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900">Entrada</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Recepción al estanque</div>
                   </div>
                 </button>
-
-                {/* ENTREGA */}
                 <button
-                  onClick={() => {
-                    setTipoReporte('entrega');
-                    setPaso(3);
-                  }}
-                  className="group relative bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-3 border-blue-300 hover:border-blue-500 rounded-2xl p-8 transition-all hover:shadow-xl"
+                  type="button"
+                  onClick={() => { setTipoReporte('entrega'); setPaso(3); }}
+                  className="flex items-center gap-4 p-4 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left group"
                 >
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                      </svg>
-                    </div>
-                    <div className="text-center">
-                      <h4 className="text-xl font-black text-blue-900 mb-2">ENTREGA</h4>
-                      <p className="text-sm text-blue-700">Entrega de combustible a máquina</p>
-                      <p className="text-xs text-blue-600 mt-2">• Máquina • Operador • Litros</p>
-                    </div>
+                  <div className="w-12 h-12 rounded-xl bg-orange-100 group-hover:bg-orange-200 flex items-center justify-center flex-shrink-0 transition-colors">
+                    <svg className="w-6 h-6 text-orange-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-900">Salida</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Despacho a máquina</div>
                   </div>
                 </button>
               </div>
-
-              <div className="flex gap-3 pt-4 border-t border-orange-200">
-                <button
-                  onClick={() => setPaso(1)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  ← Atrás
-                </button>
-              </div>
             </div>
-          )}
+            <button
+              onClick={() => setPaso(1)}
+              className="w-full px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl border-2 border-slate-200 transition-all"
+            >
+              ← Atrás
+            </button>
+          </div>
+        )}
 
-          {/* PASO 3a: ENTRADA DE COMBUSTIBLE */}
-          {paso === 3 && tipoReporte === 'entrada' && (
-            <div className="space-y-6">
-              <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-green-900 mb-1">⬇️ Entrada de Combustible</h3>
-                <p className="text-sm text-green-700">Recepción de combustible al estanque (Página 2 de 2)</p>
+        {/* ── PASO 3a: ENTRADA ── */}
+        {paso === 3 && tipoReporte === 'entrada' && (
+          <div className="space-y-4">
+
+            {/* Tipo de Origen */}
+            <div className="bg-white rounded-xl shadow-sm border-2 border-emerald-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Datos de Entrada</h3>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Tipo de Origen */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                     Tipo de Origen <span className="text-red-500">*</span>
                   </label>
                   <select
                     required
                     value={datosEntrada.tipoOrigen}
                     onChange={(e) => setDatosEntrada({...datosEntrada, tipoOrigen: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800"
                   >
-                    <option value="">Seleccione tipo</option>
-                    <option value="estacion">⛽ Estación de Servicio (Guía)</option>
-                    <option value="estanque">🛢️ Estanque (Vale)</option>
+                    <option value="">Seleccionar...</option>
+                    <option value="estacion">⛽ Estación de Servicio</option>
+                    <option value="estanque">🛢️ Estanque</option>
                   </select>
                 </div>
-
-                {/* Origen - Agregar: Solo Admin */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Origen
-                    {userRole !== 'administrador'
-                  }
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Origen</label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrada.origen}
                       onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
-                      className="flex-1 px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                      className="flex-1 px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800"
                     >
-                      <option value="">Seleccione origen</option>
+                      <option value="">Seleccionar...</option>
                       {empresasLocal.map(emp => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
-                        </option>
+                        <option key={emp.id} value={emp.id}>{emp.nombre}{emp.rut ? ` — ${emp.rut}` : ''}</option>
                       ))}
                     </select>
                     {userRole === 'administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowModalEmpresa(true)}
-                        className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-sm transition-all"
-                        title="Agregar nuevo origen"
-                      >
-                        +
-                      </button>
+                      <button type="button" onClick={() => setShowModalEmpresa(true)}
+                        className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-all">+</button>
                     )}
                   </div>
                 </div>
-
-                {/* Número de Documento (Guía o Vale según tipo) */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    {datosEntrada.tipoOrigen === 'estacion' 
-                      ? 'N° de Guía' 
-                      : datosEntrada.tipoOrigen === 'estanque' 
-                      ? 'N° de Vale' 
-                      : 'N° de Documento'} <span className="text-red-500">*</span>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                    {datosEntrada.tipoOrigen === 'estacion' ? 'N° de Guía' : datosEntrada.tipoOrigen === 'estanque' ? 'N° de Vale' : 'N° de Documento'} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={datosEntrada.numeroDocumento}
                     onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
-                    placeholder={
-                      datosEntrada.tipoOrigen === 'estacion' 
-                        ? 'Ej: GD-12345' 
-                        : datosEntrada.tipoOrigen === 'estanque'
-                        ? 'Ej: VALE-001'
-                        : 'Número de documento'
-                    }
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder={datosEntrada.tipoOrigen === 'estacion' ? 'Ej: GD-12345' : datosEntrada.tipoOrigen === 'estanque' ? 'Ej: VALE-001' : 'Número de documento'}
                   />
                 </div>
-
-                {/* Fecha del Documento */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Fecha del Documento <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Fecha del Documento <span className="text-red-500">*</span></label>
                   <input
                     type="date"
                     required
                     value={datosEntrada.fechaDocumento}
                     onChange={(e) => setDatosEntrada({...datosEntrada, fechaDocumento: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
                   />
                 </div>
-
-                {/* Cantidad */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Cantidad (Litros) <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Cantidad (Litros) <span className="text-red-500">*</span></label>
                   <input
                     type="number"
                     required
@@ -867,130 +790,95 @@ export default function CombustiblePage({ onClose }) {
                     step="0.01"
                     value={datosEntrada.cantidad}
                     onChange={(e) => setDatosEntrada({...datosEntrada, cantidad: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
                     placeholder="Ej: 5000"
                   />
                 </div>
-
-                {/* Info visual del tipo de documento */}
-                <div className="md:col-span-2 bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <svg className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                {datosEntrada.tipoOrigen && (
+                  <div className="flex items-start gap-3 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <svg className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <div className="text-sm text-blue-800">
-                      {datosEntrada.tipoOrigen === 'estacion' ? (
-                        <>
-                          <p className="font-bold">⛽ Estación de Servicio</p>
-                          <p className="mt-1">Se requiere <strong>Guía de Despacho</strong> del proveedor</p>
-                        </>
-                      ) : datosEntrada.tipoOrigen === 'estanque' ? (
-                        <>
-                          <p className="font-bold">🛢️ Estanque</p>
-                          <p className="mt-1">Se requiere <strong>Vale interno</strong> de autorización</p>
-                        </>
-                      ) : (
-                        <p>Seleccione el tipo de origen para continuar</p>
-                      )}
-                    </div>
+                    <p className="text-sm text-slate-600">
+                      {datosEntrada.tipoOrigen === 'estacion'
+                        ? <><strong>Estación de Servicio:</strong> Se requiere Guía de Despacho del proveedor.</>
+                        : <><strong>Estanque:</strong> Se requiere Vale interno de autorización.</>}
+                    </p>
                   </div>
-                </div>
-
-                {/* Observaciones */}
+                )}
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Observaciones
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Observaciones</label>
                   <textarea
                     value={datosEntrada.observaciones}
                     onChange={(e) => setDatosEntrada({...datosEntrada, observaciones: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px]"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white min-h-[80px] resize-none"
                     placeholder="Notas adicionales..."
                   />
                 </div>
               </div>
-
-              {/* Firma del Repartidor */}
-              <div className="mt-6">
-                <label className="block text-sm font-bold text-slate-700 mb-3">
-                  Firma del Repartidor de Combustible <span className="text-red-500">*</span>
-                </label>
-                
-                {firmaRepartidor ? (
-                  <div className="relative">
-                    <div className="border-2 border-green-500 rounded-xl p-4 bg-green-50">
-                      <img 
-                        src={firmaRepartidor} 
-                        alt="Firma del repartidor" 
-                        className="max-h-32 mx-auto"
-                      />
-                      <div className="flex justify-center gap-2 mt-3">
-                        <span className="px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full">
-                          ✓ Firmado
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFirmaRepartidor(null);
-                            setShowModalFirmaRepartidor(true);
-                          }}
-                          className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all"
-                        >
-                          Firmar nuevamente
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowModalFirmaRepartidor(true)}
-                    className="w-full px-6 py-4 border-2 border-dashed border-green-300 rounded-xl bg-green-50 hover:bg-green-100 transition-all group"
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <svg className="w-12 h-12 text-green-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                      <span className="text-green-800 font-bold">Click para firmar</span>
-                      <span className="text-green-600 text-xs">Se abrirá una ventana para capturar tu firma</span>
-                    </div>
-                  </button>
-                )}
-              </div>
-
-              <div className="flex gap-3 pt-4 border-t border-green-200">
-                <button
-                  onClick={() => setPaso(2)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  ← Atrás
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading || !datosEntrada.numeroGuia || !datosEntrada.cantidad || !firmaRepartidor}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Guardando...' : '✓ Guardar Entrada'}
-                </button>
-              </div>
             </div>
-          )}
 
-          {/* PASO 3b: ENTREGA DE COMBUSTIBLE */}
-          {paso === 3 && tipoReporte === 'entrega' && (
-            <div className="space-y-6">
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-blue-900 mb-1">➡️ Entrega de Combustible</h3>
-                <p className="text-sm text-blue-700">Entrega de combustible a máquina (Página 2 de 2)</p>
+            {/* Firma Repartidor */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Firma del Repartidor <span className="text-red-500">*</span></h3>
               </div>
+              {firmaRepartidor ? (
+                <div className="border-2 border-emerald-400 bg-emerald-50 rounded-xl p-4">
+                  <img src={firmaRepartidor} alt="Firma" className="max-h-28 mx-auto" />
+                  <div className="flex justify-center gap-2 mt-3">
+                    <span className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-full">✓ Firmado</span>
+                    <button type="button" onClick={() => { setFirmaRepartidor(null); setShowModalFirmaRepartidor(true); }}
+                      className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all">
+                      Firmar nuevamente
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setShowModalFirmaRepartidor(true)}
+                  className="w-full px-6 py-5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-semibold rounded-xl transition-all shadow-md flex items-center justify-center gap-3">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  Firmar documento
+                </button>
+              )}
+            </div>
 
+            {/* Botones */}
+            <div className="flex gap-3">
+              <button onClick={() => setPaso(2)} className="flex-1 px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl border-2 border-slate-200 transition-all">← Atrás</button>
+              <button
+                onClick={handleSubmit}
+                disabled={loading || !datosEntrada.numeroDocumento || !datosEntrada.cantidad || !firmaRepartidor}
+                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed"
+              >
+                {loading ? 'Guardando...' : '✓ Guardar Entrada'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── PASO 3b: ENTREGA ── */}
+        {paso === 3 && tipoReporte === 'entrega' && (
+          <div className="space-y-4">
+
+            {/* Empresa */}
+            <div className="bg-white rounded-xl shadow-sm border-2 border-orange-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Datos de Entrega</h3>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Empresa
-                    {userRole !== 'administrador'
-                  }
-                  </label>
+
+                {/* Empresa */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Empresa</label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrega.empresa}
@@ -1001,167 +889,117 @@ export default function CombustiblePage({ onClose }) {
                         setSearchOperador('');
                         setSearchMaquina('');
                       }}
-                      className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="flex-1 px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-slate-800"
                     >
-                      <option value="">Seleccione empresa</option>
+                      <option value="">Seleccionar...</option>
                       {empresasLocal.map(emp => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
-                        </option>
+                        <option key={emp.id} value={emp.id}>{emp.nombre}{emp.rut ? ` — ${emp.rut}` : ''}</option>
                       ))}
                     </select>
                     {userRole === 'administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowModalEmpresa(true)}
-                        className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
-                        title="Agregar nueva empresa"
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                      </button>
+                      <button type="button" onClick={() => setShowModalEmpresa(true)}
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-all">+</button>
                     )}
                   </div>
                 </div>
 
+                {/* Operador */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Fecha
-                  </label>
-                  <input
-                    type="date"
-                    value={datosEntrega.fecha}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, fecha: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    max={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-
-                {/* ── OPERADOR ── */}
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Operador (Quien recibe) <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Operador <span className="text-red-500">*</span></label>
                   {esMPF(datosEntrega.empresa) ? (
                     <>
                       <div className="relative mb-2">
-                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
-                        </svg>
-                        <input type="text" placeholder="Buscar operador..." value={searchOperador}
+                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+                        <input type="text" placeholder="Buscar operador..."
+                          value={searchOperador}
                           onChange={e => setSearchOperador(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 text-sm bg-white" />
                       </div>
                       {datosEntrega.operadorId && (() => {
                         const sel = empleados.find(e => e.id === datosEntrega.operadorId);
                         return sel ? (
                           <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
-                            <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                              {sel.nombre?.charAt(0).toUpperCase()}
-                            </div>
+                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">{sel.nombre?.charAt(0).toUpperCase()}</div>
                             <div className="flex-1 min-w-0">
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.nombre}</div>
                               <div className="text-xs text-slate-500">{sel.rut || 'Sin RUT'}</div>
                             </div>
                             <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, operadorId: ''}); setSearchOperador(''); }}
-                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
+                              className="text-slate-400 hover:text-red-500">
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                             </button>
                           </div>
                         ) : null;
                       })()}
                       {!datosEntrega.operadorId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {empleados
-                            .filter(emp => !searchOperador ||
-                              emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
-                              emp.rut?.includes(searchOperador))
-                            .map(emp => (
-                              <button key={emp.id} type="button"
-                                onClick={() => { setDatosEntrega({...datosEntrega, operadorId: emp.id}); setSearchOperador(''); }}
-                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
-                                <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">
-                                  {emp.nombre?.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-slate-800 text-xs truncate">{emp.nombre}</div>
-                                  <div className="text-[10px] text-slate-400 truncate">{emp.rut || 'Sin RUT'}</div>
-                                </div>
-                              </button>
-                            ))}
+                        <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                          {empleados.filter(emp => !searchOperador || emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) || emp.rut?.includes(searchOperador)).map(emp => (
+                            <button key={emp.id} type="button"
+                              onClick={() => { setDatosEntrega({...datosEntrega, operadorId: emp.id}); setSearchOperador(''); }}
+                              className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-slate-400 hover:bg-slate-50 rounded-xl transition-all text-left">
+                              <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">{emp.nombre?.charAt(0).toUpperCase()}</div>
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-800 text-xs truncate">{emp.nombre}</div>
+                                <div className="text-[10px] text-slate-400">{emp.rut || 'Sin RUT'}</div>
+                              </div>
+                            </button>
+                          ))}
                         </div>
                       )}
                     </>
                   ) : datosEntrega.empresa ? (
                     <div className="space-y-2">
-                      <input type="text" placeholder="Nombre completo *"
-                        value={operadorExterno.nombre}
+                      <input type="text" placeholder="Nombre completo *" value={operadorExterno.nombre}
                         onChange={e => setOperadorExterno({...operadorExterno, nombre: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
-                      <input type="text" placeholder="RUT (ej: 12.345.678-9)"
-                        value={operadorExterno.rut}
+                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-sm" />
+                      <input type="text" placeholder="RUT (ej: 12.345.678-9)" value={operadorExterno.rut}
                         onChange={e => setOperadorExterno({...operadorExterno, rut: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-sm" />
                     </div>
                   ) : (
-                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
-                      Primero selecciona una empresa
-                    </div>
+                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">Primero selecciona una empresa</div>
                   )}
                 </div>
 
-                {/* ── MÁQUINA ── */}
+                {/* Máquina */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Máquina <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Máquina <span className="text-red-500">*</span></label>
                   {esMPF(datosEntrega.empresa) ? (
                     <>
                       <div className="relative mb-2">
-                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
-                        </svg>
+                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
                         <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
                           onChange={e => setSearchMaquina(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 text-sm bg-white" />
                       </div>
                       {datosEntrega.machineId && (() => {
                         const sel = machines.find(m => m.id === datosEntrega.machineId);
                         return sel ? (
                           <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
-                            <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
-                              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
-                              </svg>
+                            <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
+                              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/></svg>
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.patente || sel.code}</div>
                               <div className="text-xs text-slate-500 truncate">{sel.name}</div>
                             </div>
                             <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, machineId: ''}); setSearchMaquina(''); }}
-                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
+                              className="text-slate-400 hover:text-red-500">
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
                             </button>
                           </div>
                         ) : null;
                       })()}
                       {!datosEntrega.machineId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {machines
-                            .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
-                            .filter(m => !searchMaquina ||
-                              m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                              m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                              m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
+                        <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                          {machines.filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
+                            .filter(m => !searchMaquina || m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) || m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) || m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
                             .map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosEntrega({...datosEntrega, machineId: m.id}); setSearchMaquina(''); }}
-                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
-                                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
-                                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
-                                  </svg>
+                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-slate-400 hover:bg-slate-50 rounded-xl transition-all text-left">
+                                <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/></svg>
                                 </div>
                                 <div className="min-w-0">
                                   <div className="font-bold text-slate-800 text-xs truncate">{m.patente || m.code}</div>
@@ -1174,230 +1012,153 @@ export default function CombustiblePage({ onClose }) {
                     </>
                   ) : datosEntrega.empresa ? (
                     <div className="space-y-2">
-                      <input type="text" placeholder="Patente *"
-                        value={maquinaExterna.patente}
+                      <input type="text" placeholder="Patente *" value={maquinaExterna.patente}
                         onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
-                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
-                        value={maquinaExterna.tipo}
+                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-sm" />
+                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *" value={maquinaExterna.tipo}
                         onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
-                      <input type="text" placeholder="Modelo (ej: Caterpillar 320)"
-                        value={maquinaExterna.modelo}
+                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-sm" />
+                      <input type="text" placeholder="Modelo (ej: Caterpillar 320)" value={maquinaExterna.modelo}
                         onChange={e => setMaquinaExterna({...maquinaExterna, modelo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white text-sm" />
                     </div>
                   ) : (
-                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
-                      Primero selecciona una empresa
-                    </div>
+                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 text-center">Primero selecciona una empresa</div>
                   )}
                 </div>
 
+                {/* Horómetro y Litros */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Horómetro / Odómetro
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Horómetro / Odómetro</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.1"
+                    type="number" min="0" step="0.1"
                     value={datosEntrega.horometroOdometro}
                     onChange={(e) => setDatosEntrega({...datosEntrega, horometroOdometro: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
                     placeholder="Ej: 1234.5"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Cantidad (Litros) <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Cantidad (Litros) <span className="text-red-500">*</span></label>
                   <input
-                    type="number"
-                    required
-                    min="0"
-                    step="0.01"
+                    type="number" required min="0" step="0.01"
                     value={datosEntrega.cantidadLitros}
                     onChange={(e) => setDatosEntrega({...datosEntrega, cantidadLitros: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
                     placeholder="Ej: 150.50"
                   />
                 </div>
-
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Observaciones
-                  </label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Observaciones</label>
                   <textarea
                     value={datosEntrega.observaciones}
                     onChange={(e) => setDatosEntrega({...datosEntrega, observaciones: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px]"
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white min-h-[80px] resize-none"
                     placeholder="Notas adicionales..."
                   />
                 </div>
               </div>
-
-              {/* Firma del Receptor */}
-              <div className="mt-6">
-                <label className="block text-sm font-bold text-slate-700 mb-3">
-                  Firma del Receptor de Combustible <span className="text-red-500">*</span>
-                </label>
-                
-                {firmaReceptor ? (
-                  <div className="relative">
-                    <div className="border-2 border-blue-500 rounded-xl p-4 bg-blue-50">
-                      <img 
-                        src={firmaReceptor} 
-                        alt="Firma del receptor" 
-                        className="max-h-32 mx-auto"
-                      />
-                      <div className="flex justify-center gap-2 mt-3">
-                        <span className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full">
-                          ✓ Firmado
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFirmaReceptor(null);
-                            setShowModalFirmaReceptor(true);
-                          }}
-                          className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all"
-                        >
-                          Firmar nuevamente
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowModalFirmaReceptor(true)}
-                    className="w-full px-6 py-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 hover:bg-blue-100 transition-all group"
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <svg className="w-12 h-12 text-blue-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                      <span className="text-blue-800 font-bold">Click para firmar</span>
-                      <span className="text-blue-600 text-xs">Se abrirá una ventana para capturar tu firma</span>
-                    </div>
-                  </button>
-                )}
-              </div>
-
-              <div className="flex gap-3 pt-4 border-t border-blue-200">
-                <button
-                  onClick={() => setPaso(2)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  ← Atrás
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Guardando...' : '✓ Guardar Entrega'}
-                </button>
-              </div>
             </div>
-          )}
-        </div>
+
+            {/* Firma Receptor */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                <h3 className="text-base font-bold text-slate-900">Firma del Receptor <span className="text-red-500">*</span></h3>
+              </div>
+              {firmaReceptor ? (
+                <div className="border-2 border-slate-400 bg-slate-50 rounded-xl p-4">
+                  <img src={firmaReceptor} alt="Firma" className="max-h-28 mx-auto" />
+                  <div className="flex justify-center gap-2 mt-3">
+                    <span className="px-3 py-1 bg-slate-700 text-white text-xs font-bold rounded-full">✓ Firmado</span>
+                    <button type="button" onClick={() => { setFirmaReceptor(null); setShowModalFirmaReceptor(true); }}
+                      className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all">
+                      Firmar nuevamente
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setShowModalFirmaReceptor(true)}
+                  className="w-full px-6 py-5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white font-semibold rounded-xl transition-all shadow-md flex items-center justify-center gap-3">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  Firmar documento
+                </button>
+              )}
+            </div>
+
+            {/* Botones */}
+            <div className="flex gap-3">
+              <button onClick={() => setPaso(2)} className="flex-1 px-6 py-3 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-xl border-2 border-slate-200 transition-all">← Atrás</button>
+              <button
+                onClick={handleSubmit}
+                disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
+                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed"
+              >
+                {loading ? 'Guardando...' : '✓ Guardar Entrega'}
+              </button>
+            </div>
+          </div>
+        )}
+
       </div>
+
+      {/* ── MODALES ── */}
 
       {/* Modal: Nuevo Equipo Surtidor */}
       {showModalEquipoSurtidor && (
         <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
-            <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white p-6">
-              <h3 className="text-xl font-black">🚛 Nuevo Equipo Surtidor</h3>
-              <p className="text-amber-100 text-sm mt-1">Camión o equipo que entrega combustible</p>
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 rounded-t-2xl">
+              <h3 className="text-xl font-bold">Nuevo Equipo Surtidor</h3>
+              <p className="text-slate-400 text-sm mt-1">Camión o equipo que entrega combustible</p>
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Patente <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoEquipoSurtidor.patente}
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Patente <span className="text-red-500">*</span></label>
+                  <input type="text" value={nuevoEquipoSurtidor.patente}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase()})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    placeholder="Ej: AABB01"
-                  />
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder="Ej: AABB01" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Nombre <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoEquipoSurtidor.nombre}
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre <span className="text-red-500">*</span></label>
+                  <input type="text" value={nuevoEquipoSurtidor.nombre}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, nombre: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    placeholder="Ej: Camión Combustible"
-                  />
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder="Ej: Camión Combustible" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Tipo
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoEquipoSurtidor.tipo}
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Tipo</label>
+                  <input type="text" value={nuevoEquipoSurtidor.tipo}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, tipo: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    placeholder="Ej: Camión, Mochila"
-                  />
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder="Ej: Camión, Mochila" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Marca
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoEquipoSurtidor.marca}
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Marca</label>
+                  <input type="text" value={nuevoEquipoSurtidor.marca}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, marca: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    placeholder="Ej: Mercedes Benz"
-                  />
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder="Ej: Mercedes Benz" />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Modelo
-                  </label>
-                  <input
-                    type="text"
-                    value={nuevoEquipoSurtidor.modelo}
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Modelo</label>
+                  <input type="text" value={nuevoEquipoSurtidor.modelo}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, modelo: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                    placeholder="Ej: Actros 2644"
-                  />
+                    className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                    placeholder="Ej: Actros 2644" />
                 </div>
               </div>
-              <div className="flex gap-3 pt-4 border-t border-amber-200">
-                <button
-                  onClick={() => {
-                    setShowModalEquipoSurtidor(false);
-                    setNuevoEquipoSurtidor({
-                      patente: '',
-                      nombre: '',
-                      tipo: '',
-                      marca: '',
-                      modelo: ''
-                    });
-                  }}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleCrearEquipoSurtidor}
-                  disabled={loadingEquipo || !nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
-                >
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => { setShowModalEquipoSurtidor(false); setNuevoEquipoSurtidor({ patente:'', nombre:'', tipo:'', marca:'', modelo:'' }); }}
+                  className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">Cancelar</button>
+                <button onClick={handleCrearEquipoSurtidor} disabled={loadingEquipo || !nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed">
                   {loadingEquipo ? 'Creando...' : '✓ Crear Equipo'}
                 </button>
               </div>
@@ -1410,53 +1171,30 @@ export default function CombustiblePage({ onClose }) {
       {showModalEmpresa && (
         <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
-              <h3 className="text-xl font-black">🏢 Nueva Empresa</h3>
-              <p className="text-blue-100 text-sm mt-1">Empresa que recibe el combustible</p>
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 rounded-t-2xl">
+              <h3 className="text-xl font-bold">Nueva Empresa</h3>
+              <p className="text-slate-400 text-sm mt-1">Empresa que recibe el combustible</p>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">
-                  Nombre de la Empresa <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={nuevaEmpresa.nombre}
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre de la Empresa <span className="text-red-500">*</span></label>
+                <input type="text" value={nuevaEmpresa.nombre}
                   onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, nombre: e.target.value})}
-                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                  placeholder="Ej: Constructora ABC Ltda."
-                />
+                  className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                  placeholder="Ej: Constructora ABC Ltda." />
               </div>
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">
-                  RUT
-                </label>
-                <input
-                  type="text"
-                  value={nuevaEmpresa.rut}
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">RUT</label>
+                <input type="text" value={nuevaEmpresa.rut}
                   onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, rut: e.target.value})}
-                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                  placeholder="Ej: 76.123.456-7"
-                />
+                  className="w-full px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 bg-white"
+                  placeholder="Ej: 76.123.456-7" />
               </div>
-              <div className="flex gap-3 pt-4 border-t border-blue-200">
-                <button
-                  onClick={() => {
-                    setShowModalEmpresa(false);
-                    setNuevaEmpresa({
-                      nombre: '',
-                      rut: ''
-                    });
-                  }}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleCrearEmpresa}
-                  disabled={loading || !nuevaEmpresa.nombre}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
-                >
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => { setShowModalEmpresa(false); setNuevaEmpresa({ nombre:'', rut:'' }); }}
+                  className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">Cancelar</button>
+                <button onClick={handleCrearEmpresa} disabled={loading || !nuevaEmpresa.nombre}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed">
                   {loading ? 'Creando...' : '✓ Crear Empresa'}
                 </button>
               </div>
@@ -1467,47 +1205,29 @@ export default function CombustiblePage({ onClose }) {
 
       {/* Modal: Firma del Repartidor */}
       {showModalFirmaRepartidor && (
-        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
-            <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-6">
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full my-auto">
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 rounded-t-2xl sticky top-0 z-10">
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="text-xl font-black">✍️ Firma del Repartidor</h3>
-                  <p className="text-green-100 text-sm mt-1">Dibuja tu firma en el recuadro</p>
+                  <h3 className="text-xl font-bold">Firma del Repartidor</h3>
+                  <p className="text-slate-400 text-sm mt-1">Dibuja tu firma y presiona Confirmar</p>
                 </div>
-                <button
-                  onClick={() => setShowModalFirmaRepartidor(false)}
-                  className="p-2 hover:bg-white/20 rounded-lg transition-all"
-                >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                <button onClick={() => setShowModalFirmaRepartidor(false)} className="p-2 hover:bg-white/10 rounded-lg transition-all">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
-                label=""
-                color="green"
-                onSave={(signatureData) => {
-                  setFirmaRepartidor(signatureData);
-                  setShowModalFirmaRepartidor(false);
-                }}
-              />
-              {showVoucherModal && lastReportData && (
-              <VoucherGenerator
-                reportData={lastReportData.reportData}
-                projectName={lastReportData.projectName}
-                machineInfo={lastReportData.machineInfo}
-                operadorInfo={lastReportData.operadorInfo}
-                empresaInfo={lastReportData.empresaInfo}
-                onClose={() => {
-                  setShowVoucherModal(false);
-                  setLastReportData(null);
-                  onClose();
-                }}
-            />
-          )}
+              <SignaturePad label="" color="green" onSave={(signatureData) => { setFirmaRepartidor(signatureData); }} />
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => setShowModalFirmaRepartidor(false)}
+                  className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">Cancelar</button>
+                <button onClick={() => { if (firmaRepartidor) setShowModalFirmaRepartidor(false); }} disabled={!firmaRepartidor}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed">
+                  ✓ Confirmar firma
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1515,33 +1235,30 @@ export default function CombustiblePage({ onClose }) {
 
       {/* Modal: Firma del Receptor */}
       {showModalFirmaReceptor && (
-        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full my-auto">
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 rounded-t-2xl sticky top-0 z-10">
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="text-xl font-black">✍️ Firma del Receptor</h3>
-                  <p className="text-blue-100 text-sm mt-1">Dibuja tu firma en el recuadro</p>
+                  <h3 className="text-xl font-bold">Firma del Receptor</h3>
+                  <p className="text-slate-400 text-sm mt-1">Dibuja tu firma y presiona Confirmar</p>
                 </div>
-                <button
-                  onClick={() => setShowModalFirmaReceptor(false)}
-                  className="p-2 hover:bg-white/20 rounded-lg transition-all"
-                >
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                <button onClick={() => { setFirmaReceptorTemp(null); setShowModalFirmaReceptor(false); }} className="p-2 hover:bg-white/10 rounded-lg transition-all">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
-                label=""
-                color="blue"
-                onSave={(signatureData) => {
-                  setFirmaReceptor(signatureData);
-                  setShowModalFirmaReceptor(false);
-                }}
-              />
+              <SignaturePad label="" color="blue" onSave={(signatureData) => { setFirmaReceptorTemp(signatureData); }} />
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => { setFirmaReceptorTemp(null); setShowModalFirmaReceptor(false); }}
+                  className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">Cancelar</button>
+                <button onClick={() => { if (firmaReceptorTemp) { setFirmaReceptor(firmaReceptorTemp); setFirmaReceptorTemp(null); setShowModalFirmaReceptor(false); } }}
+                  disabled={!firmaReceptorTemp}
+                  className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white font-bold rounded-xl transition-all shadow-md disabled:cursor-not-allowed">
+                  ✓ Confirmar firma
+                </button>
+              </div>
             </div>
           </div>
         </div>

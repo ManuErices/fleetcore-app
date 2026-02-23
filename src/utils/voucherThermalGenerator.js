@@ -83,15 +83,17 @@ export function generateThermalVoucher({
   const fechaFormateada = formatDate(reportData.fecha || '');
   const cantidadFormateada = formatCantidad(reportData.cantidadLitros);
 
-  // Generar sección de firmas con imágenes si existen
-  let firmasSectionHTML = '';
-  
-  // Solo firma del receptor (sin firma repartidor)
-  firmasSectionHTML = `
+  // Generar sección de firmas
+  const firmaReceptorImg = reportData.firmaReceptor || null;
+  const firmaLineaHTML = firmaReceptorImg
+    ? `<img src="${firmaReceptorImg}" class="firma-img" alt="Firma receptor" />`
+    : `<div class="firma-line"></div>`;
+
+  const firmasSectionHTML = `
     <!-- FIRMA RECEPTOR -->
     <div class="firma-section-single">
       <div class="firma-box">
-        <div class="firma-line"></div>
+        ${firmaLineaHTML}
         <div class="small firma-label">FIRMA</div>
         <div class="small firma-rol">RECEPTOR</div>
       </div>
@@ -172,12 +174,26 @@ export function generateThermalVoucher({
     
     .firma-section-single .firma-box {
       width: 70%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
     
     .firma-line {
       border-top: 1px solid #000;
+      width: 100%;
       margin-top: 15mm;
       margin-bottom: 2mm;
+    }
+    
+    .firma-img {
+      display: block;
+      width: auto;
+      max-width: 100%;
+      height: auto;
+      max-height: 15mm;
+      object-fit: contain;
+      margin: 0 auto 1mm auto;
     }
     
     .small {

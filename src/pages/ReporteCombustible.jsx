@@ -342,7 +342,7 @@ export default function ReporteCombustible() {
     }
 
     const doc = new jsPDF('p', 'mm', 'a4');
-    const reportesAGenerar = reportes.filter(r => reportesSeleccionados.includes(r.id));
+    const reportesAGenerar = reportesFiltrados.filter(r => reportesSeleccionados.includes(r.id));
 
     reportesAGenerar.forEach((reporte, index) => {
       if (index > 0) doc.addPage();
@@ -569,45 +569,190 @@ export default function ReporteCombustible() {
       return;
     }
 
-    const doc = new jsPDF('landscape');
-    
-    // Header
-    doc.setFillColor(249, 115, 22); // Orange-500
-    doc.rect(0, 0, 297, 25, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
-    doc.text('REPORTES DE COMBUSTIBLE', 148.5, 15, { align: 'center' });
-    
-    // Tabla
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pW = doc.internal.pageSize.getWidth();  // 297
+    const pH = doc.internal.pageSize.getHeight(); // 210
+    const mg = 14;
+
+    const C = {
+      naranja:      [234, 88,  12],
+      naranjaClaro: [255, 237, 213],
+      oscuro:       [15,  23,  42],
+      gris2:        [71,  85,  105],
+      gris3:        [148, 163, 184],
+      gris4:        [226, 232, 240],
+      gris5:        [248, 250, 252],
+      blanco:       [255, 255, 255],
+      verde:        [16,  185, 129],
+      verdeClaro:   [209, 250, 229],
+      amber:        [217, 119, 6],
+      rojo:         [220, 38,  38],
+    };
+
+    // ── KPIs desde reportesFiltrados (respeta todos los filtros activos) ──
+    let totalLitros = 0, litrosEntradas = 0, litrosEntregas = 0;
+    let cntEntregas = 0, firmados = 0;
+    reportesFiltrados.forEach(r => {
+      const l = parseFloat(r.cantidad) || 0;
+      totalLitros += l;
+      if (r.tipo === 'entrada') { litrosEntradas += l; }
+      else                      { litrosEntregas += l; cntEntregas++; }
+      if (r.firmaRepartidor || r.firmaReceptor || r.firmado) firmados++;
+    });
+    const balance    = litrosEntradas - litrosEntregas;
+    const promSalida = cntEntregas > 0 ? (litrosEntregas / cntEntregas).toFixed(0) : 0;
+    const pctFirm    = reportesFiltrados.length > 0
+      ? Math.round((firmados / reportesFiltrados.length) * 100) : 0;
+
+    // ── HEADER ────────────────────────────────────────────────────
+    doc.setFillColor(...C.oscuro);
+    doc.rect(0, 0, pW, 28, 'F');
+    doc.setFillColor(...C.naranja);
+    doc.rect(0, 0, 4, 28, 'F');
+
+    // Logo
+    doc.setFillColor(...C.naranja);
+    doc.roundedRect(mg + 2, 4, 20, 20, 2, 2, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('MPF', mg + 6, 12);
+    doc.setFontSize(4.5); doc.setFont(undefined, 'normal');
+    doc.text('INGENIERÍA', mg + 3.5, 17);
+    doc.text('CIVIL', mg + 7, 21);
+
+    // Título
+    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('REPORTE DE COMBUSTIBLE', mg + 27, 13);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+    doc.text('Resumen · Control de Combustible · MPF Ingeniería Civil', mg + 27, 20);
+
+    // Filtros activos — construir string descriptivo
+    const filtrosActivos = [];
+    if (filtros.fechaInicio) filtrosActivos.push(`Desde: ${filtros.fechaInicio}`);
+    if (filtros.fechaFin)    filtrosActivos.push(`Hasta: ${filtros.fechaFin}`);
+    if (filtros.tipo)        filtrosActivos.push(`Tipo: ${filtros.tipo === 'entrada' ? 'Entrada' : 'Salida'}`);
+    if (filtros.proyecto)    filtrosActivos.push(`Proyecto: ${projects.find(p => p.id === filtros.proyecto)?.name || filtros.proyecto}`);
+    if (filtros.maquina)     filtrosActivos.push(`Máquina: ${machines.find(m => m.id === filtros.maquina)?.patente || filtros.maquina}`);
+    if (filtros.surtidor)    filtrosActivos.push(`Surtidor: ${filtros.surtidor}`);
+
+    // Fecha generación + info filtros (derecha del header)
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+    doc.text(
+      `Generado: ${new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' })}`,
+      pW - mg, 11, { align: 'right' }
+    );
+    const filtroStr = filtrosActivos.length
+      ? `${reportesFiltrados.length} registros · Filtros: ${filtrosActivos.join('  |  ')}`
+      : `${reportesFiltrados.length} registros · Sin filtros aplicados`;
+    doc.text(doc.splitTextToSize(filtroStr, 180)[0], pW - mg, 18, { align: 'right' });
+
+    // ── KPI CARDS ─────────────────────────────────────────────────
+    const kpiY = 32;
+    const kpiH = 22;
+    const kpiW = (pW - mg * 2 - 9) / 4;
+
+    const drawKpi = (x, label, value, sub, accent, bg) => {
+      doc.setFillColor(...bg);     doc.roundedRect(x, kpiY, kpiW, kpiH, 2, 2, 'F');
+      doc.setFillColor(...accent); doc.rect(x, kpiY, 2.5, kpiH, 'F');
+      doc.setFontSize(6); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
+      doc.text(label.toUpperCase(), x + 5, kpiY + 6);
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...accent);
+      doc.text(String(value), x + 5, kpiY + 15);
+      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
+      doc.text(sub, x + 5, kpiY + 20);
+    };
+
+    const kx = mg;
+    drawKpi(
+      kx, 'Total Combustible',
+      `${totalLitros.toLocaleString('es-CL')} L`, `${reportesFiltrados.length} reportes`,
+      C.naranja, C.naranjaClaro
+    );
+    drawKpi(
+      kx + (kpiW + 3), 'Balance Stock',
+      `${balance >= 0 ? '+' : ''}${balance.toLocaleString('es-CL')} L`, balance >= 0 ? 'Superávit' : 'Déficit',
+      balance >= 0 ? C.verde : C.rojo, balance >= 0 ? C.verdeClaro : [254, 226, 226]
+    );
+    drawKpi(
+      kx + (kpiW + 3) * 2, 'Prom. por Salida',
+      `${promSalida} L`, `${cntEntregas} despachos`,
+      C.amber, [254, 243, 199]
+    );
+    drawKpi(
+      kx + (kpiW + 3) * 3, 'Tasa Validación',
+      `${pctFirm}%`, `${firmados}/${reportesFiltrados.length} firmados`,
+      pctFirm >= 80 ? C.verde : pctFirm >= 50 ? C.amber : C.rojo,
+      pctFirm >= 80 ? C.verdeClaro : pctFirm >= 50 ? [254, 243, 199] : [254, 226, 226]
+    );
+
+    // ── TABLA ─────────────────────────────────────────────────────
     const tableData = reportesFiltrados.map(r => [
-      r.fecha,
-      r.numeroReporte,
-      r.projectName,
-      r.machinePatente,
-      r.surtidorNombre,
-      r.operadorNombre,
-      r.horometroOdometro,
-      r.cantidadLitros
+      r.fecha ? new Date(r.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '—',
+      r.numeroReporte || '—',
+      r.tipo === 'entrada' ? 'ENTRADA' : 'SALIDA',
+      r.projectName || '—',
+      r.machinePatente || (r.tipo === 'entrada' ? 'N/A' : '—'),
+      r.repartidorNombre || '—',
+      r.operadorNombre   || (r.tipo === 'entrada' ? 'N/A' : '—'),
+      `${(parseFloat(r.cantidad) || 0).toLocaleString('es-CL')} L`,
+      (r.firmaRepartidor || r.firmaReceptor || r.firmado) ? '✓' : '—',
     ]);
 
     autoTable(doc, {
-      head: [['Fecha', 'N° Reporte', 'Obra', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
+      head: [['Fecha', 'N° Reporte', 'Tipo', 'Proyecto', 'Máquina', 'Surtidor', 'Operador', 'Litros', 'Valid.']],
       body: tableData,
-      startY: 30,
-      theme: 'grid',
+      startY: kpiY + kpiH + 6,
+      margin: { left: mg, right: mg },
+      theme: 'plain',
+      styles: {
+        fontSize: 7.5,
+        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+        textColor: [...C.oscuro],
+        lineColor: [...C.gris4],
+        lineWidth: 0.2,
+      },
       headStyles: {
-        fillColor: [249, 115, 22],
-        textColor: 255,
-        fontSize: 9,
-        fontStyle: 'bold'
+        fillColor: [...C.oscuro],
+        textColor: [...C.gris3],
+        fontSize: 6.5,
+        fontStyle: 'bold',
+        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
       },
-      bodyStyles: {
-        fontSize: 8
+      alternateRowStyles: { fillColor: [...C.gris5] },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 18, fontStyle: 'bold' },
+        3: { cellWidth: 'auto' },
+        4: { cellWidth: 28 },
+        5: { cellWidth: 32 },
+        6: { cellWidth: 32 },
+        7: { cellWidth: 22, halign: 'right', fontStyle: 'bold', textColor: [...C.naranja] },
+        8: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
       },
-      alternateRowStyles: {
-        fillColor: [255, 247, 237]
-      }
+      didParseCell(data) {
+        if (data.section === 'body' && data.column.index === 2) {
+          data.cell.styles.textColor = data.cell.raw === 'ENTRADA' ? [...C.amber] : [...C.naranja];
+        }
+        if (data.section === 'body' && data.column.index === 8 && data.cell.raw === '✓') {
+          data.cell.styles.textColor = [...C.verde];
+          data.cell.styles.fontSize  = 9;
+        }
+      },
+      foot: [['', '', '', '', '', '', 'TOTAL', `${totalLitros.toLocaleString('es-CL')} L`, `${firmados}✓`]],
+      footStyles: {
+        fillColor: [...C.oscuro],
+        textColor: [...C.blanco],
+        fontStyle: 'bold',
+        fontSize: 7.5,
+      },
+      didDrawPage(data) {
+        const pHp = doc.internal.pageSize.getHeight();
+        doc.setFillColor(...C.oscuro); doc.rect(0, pHp - 10, pW, 10, 'F');
+        doc.setFillColor(...C.naranja); doc.rect(0, pHp - 10, 4, 10, 'F');
+        doc.setFontSize(5.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+        doc.text('MPF Ingeniería Civil · Sistema de Control de Combustible', mg, pHp - 4);
+        doc.text(`Página ${data.pageNumber}`, pW - mg, pHp - 4, { align: 'right' });
+      },
     });
 
     doc.save(`Reportes_Combustible_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -648,10 +793,12 @@ export default function ReporteCombustible() {
         </div>
       </div>
 
-      {/* Filtros */}
-      <div className="max-w-7xl mx-auto mb-6">
+      {/* Switch Tipo + Filtros */}
+      <div className="max-w-7xl mx-auto mb-6 space-y-4">
+
+        {/* Filtros */}
         <div className="bg-white rounded-xl shadow-md p-6 border-2 border-orange-100">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Inicio</label>
               <input
@@ -669,18 +816,6 @@ export default function ReporteCombustible() {
                 onChange={(e) => setFiltros({...filtros, fechaFin: e.target.value})}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Tipo</label>
-              <select
-                value={filtros.tipo}
-                onChange={(e) => setFiltros({...filtros, tipo: e.target.value})}
-                className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-              >
-                <option value="">Todos</option>
-                <option value="entrega">Salida</option>
-                <option value="entrada">Entrada</option>
-              </select>
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
@@ -706,20 +841,6 @@ export default function ReporteCombustible() {
                 {machines.map(m => (
                   <option key={m.id} value={m.id}>{m.patente || m.code}</option>
                 ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Surtidor</label>
-              <select
-                value={filtros.surtidor}
-                onChange={(e) => setFiltros({...filtros, surtidor: e.target.value})}
-                className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-              >
-                <option value="">Todos</option>
-                {surtidores.map(sId => {
-                  const surt = empleados.find(e => e.id === sId);
-                  return <option key={sId} value={sId}>{surt?.nombre || sId}</option>;
-                })}
               </select>
             </div>
           </div>
@@ -761,7 +882,31 @@ export default function ReporteCombustible() {
               PDF
             </button>
             <div className="flex-1"></div>
-            <div className="text-sm text-slate-600 flex items-center gap-2">
+            {/* Switch Entrada / Salida */}
+            <div className="flex items-center gap-3">
+              <span className={`text-sm font-bold transition-colors ${filtros.tipo === 'entrada' ? 'text-blue-600' : 'text-slate-400'}`}>
+                Entrada
+              </span>
+              <button
+                onClick={() => setFiltros({...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega'})}
+                className={`relative w-16 h-8 rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
+                  filtros.tipo === 'entrega'
+                    ? 'bg-gradient-to-r from-orange-500 to-amber-500'
+                    : filtros.tipo === 'entrada'
+                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                    : 'bg-slate-300'
+                }`}
+                title={filtros.tipo === 'entrega' ? 'Ver Entradas' : 'Ver Salidas'}
+              >
+                <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${
+                  filtros.tipo === 'entrega' ? 'left-9' : 'left-1'
+                }`} />
+              </button>
+              <span className={`text-sm font-bold transition-colors ${filtros.tipo === 'entrega' ? 'text-orange-600' : 'text-slate-400'}`}>
+                Salida
+              </span>
+            </div>
+            <div className="text-sm text-slate-600 flex items-center gap-2 ml-4">
               <span className="font-semibold">Total registros:</span>
               <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full font-bold">
                 {reportesFiltrados.length}
@@ -946,132 +1091,287 @@ export default function ReporteCombustible() {
 
       {/* Panel de Análisis en Tiempo Real */}
       {reportesFiltrados.length > 0 && (() => {
+        // ── Cálculos base ──────────────────────────────────────────────
         const totalReportes = reportesFiltrados.length;
         const firmados = reportesFiltrados.filter(r => r.firmado).length;
-
+        const noFirmados = totalReportes - firmados;
         let totalLitros = 0, litrosEntradas = 0, litrosEntregas = 0;
         let cntEntradas = 0, cntEntregas = 0;
         const porMaquina = {};
+        const porOperador = {};
+        const porFecha = {};
+        const porProyecto = {};
 
         reportesFiltrados.forEach(r => {
           const litros = parseFloat(r.cantidad) || 0;
           totalLitros += litros;
+          const fecha = r.fecha ? r.fecha.slice(0, 10) : 'Sin fecha';
+          if (!porFecha[fecha]) porFecha[fecha] = { entradas: 0, salidas: 0 };
           if (r.tipo === 'entrada') {
             litrosEntradas += litros;
             cntEntradas++;
+            porFecha[fecha].entradas += litros;
           } else {
             litrosEntregas += litros;
             cntEntregas++;
-            const key = r.machinePatente || r.machineName || r.machineId || 'Sin patente';
-            if (!porMaquina[key]) porMaquina[key] = { litros: 0, reportes: 0 };
-            porMaquina[key].litros += litros;
-            porMaquina[key].reportes += 1;
+            porFecha[fecha].salidas += litros;
+            const mk = r.machinePatente || r.machineName || 'Sin patente';
+            if (!porMaquina[mk]) porMaquina[mk] = { litros: 0, cnt: 0 };
+            porMaquina[mk].litros += litros;
+            porMaquina[mk].cnt += 1;
+            const op = r.operadorNombre || 'Sin operador';
+            if (!porOperador[op]) porOperador[op] = { litros: 0, cnt: 0 };
+            porOperador[op].litros += litros;
+            porOperador[op].cnt += 1;
           }
+          const proy = r.projectName || 'Sin proyecto';
+          if (!porProyecto[proy]) porProyecto[proy] = 0;
+          porProyecto[proy] += litros;
         });
 
-        const eficienciaValidacion = Math.round((firmados / totalReportes) * 100);
-        const promEntradas = cntEntradas > 0 ? litrosEntradas / cntEntradas : 0;
-        const promEntregas = cntEntregas > 0 ? litrosEntregas / cntEntregas : 0;
-        const topMaquinas = Object.entries(porMaquina).sort((a, b) => b[1].litros - a[1].litros).slice(0, 3);
-        const efColor = eficienciaValidacion >= 80 ? 'text-emerald-600' : eficienciaValidacion >= 50 ? 'text-amber-600' : 'text-red-500';
-        const efBg = eficienciaValidacion >= 80 ? 'bg-emerald-50 border-emerald-200' : eficienciaValidacion >= 50 ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
+        const pctFirmados = Math.round((firmados / totalReportes) * 100);
+        const pctEntradas = totalLitros > 0 ? Math.round((litrosEntradas / totalLitros) * 100) : 0;
+        const pctSalidas = totalLitros > 0 ? Math.round((litrosEntregas / totalLitros) * 100) : 0;
+        const promSalida = cntEntregas > 0 ? litrosEntregas / cntEntregas : 0;
+        const promEntrada = cntEntradas > 0 ? litrosEntradas / cntEntradas : 0;
+        const balanceStock = litrosEntradas - litrosEntregas;
+        const topMaquinas = Object.entries(porMaquina).sort((a,b)=>b[1].litros-a[1].litros).slice(0,5);
+        const topOperadores = Object.entries(porOperador).sort((a,b)=>b[1].litros-a[1].litros).slice(0,4);
+        const fechasOrdenadas = Object.keys(porFecha).sort().slice(-7);
+        const maxBarLitros = Math.max(...fechasOrdenadas.map(f => porFecha[f].entradas + porFecha[f].salidas), 1);
+        const statusColor = pctFirmados >= 80 ? '#10b981' : pctFirmados >= 50 ? '#f59e0b' : '#ef4444';
+        const balancePositivo = balanceStock >= 0;
+
+        // Donut SVG helper
+        const Donut = ({ pct, color, bg = '#e2e8f0', size = 80, stroke = 10, label, sublabel }) => {
+          const r = (size - stroke) / 2;
+          const circ = 2 * Math.PI * r;
+          const dash = (pct / 100) * circ;
+          return (
+            <div className="flex flex-col items-center gap-1">
+              <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
+                <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={bg} strokeWidth={stroke}/>
+                <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+                  strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+                  style={{transition:'stroke-dasharray 0.6s ease'}}/>
+                <text x={size/2} y={size/2+1} textAnchor="middle" dominantBaseline="middle"
+                  style={{transform:'rotate(90deg)',transformOrigin:`${size/2}px ${size/2}px`,
+                  fontSize:'13px',fontWeight:'800',fill:'#1e293b'}}>
+                  {pct}%
+                </text>
+              </svg>
+              {label && <span className="text-xs font-bold text-slate-700 text-center leading-tight">{label}</span>}
+              {sublabel && <span className="text-xs text-slate-400 text-center">{sublabel}</span>}
+            </div>
+          );
+        };
 
         return (
           <div className="max-w-7xl mx-auto mb-6 mt-6">
-            <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
-              {/* Header */}
-              <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style={{background: 'linear-gradient(135deg, #EA580C 0%, #9A3412 100%)'}}>
-                <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span className="text-sm font-bold text-white">Análisis en tiempo real</span>
-                <span className="ml-auto text-xs text-white/50">{totalReportes} reporte{totalReportes !== 1 ? 's' : ''}</span>
-              </div>
-
-              <div className="p-5 space-y-5">
-                {/* KPIs */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  
-                  <div className={`rounded-xl p-4 border ${efBg}`}>
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Validación</div>
-                    <div className={`text-2xl font-black ${efColor}`}>{eficienciaValidacion}%</div>
-                    <div className="text-xs text-slate-400 mt-0.5">reportes firmados</div>
-                    <div className="text-xs text-slate-500 mt-1">{firmados}/{totalReportes} validados</div>
+            {/* ── Header ── */}
+            <div className="rounded-2xl overflow-hidden shadow-xl border border-orange-100">
+              <div className="px-6 py-4 flex items-center justify-between"
+                style={{background:'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)'}}>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{background:'linear-gradient(135deg,#ea580c,#f97316)'}}>
+                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
                   </div>
-                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Entradas</div>
-                    <div className="text-2xl font-black text-amber-700">{litrosEntradas.toFixed(0)} L</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{cntEntradas} registro{cntEntradas !== 1 ? 's' : ''}</div>
-                    <div className="text-xs text-slate-500 mt-1">prom {promEntradas.toFixed(0)} L/entrada</div>
-                  </div>
-                  <div className="bg-red-50 rounded-xl p-4 border border-red-200">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Salidas</div>
-                    <div className="text-2xl font-black text-red-700">{litrosEntregas.toFixed(0)} L</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{cntEntregas} registro{cntEntregas !== 1 ? 's' : ''}</div>
-                    <div className="text-xs text-slate-500 mt-1">prom {promEntregas.toFixed(0)} L/salida</div>
+                  <div>
+                    <h2 className="text-white font-black text-base tracking-tight">Análisis en Tiempo Real</h2>
+                    <p className="text-slate-400 text-xs">{totalReportes} reportes en vista actual</p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
+                  <span className="text-xs text-slate-400 font-medium">Live</span>
+                </div>
+              </div>
 
-                {/* Desglose + Top máquinas */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Desglose entradas vs entregas */}
-                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Desglose por Tipo</div>
-                    <div className="space-y-2.5">
-                      {[
-                        { label: 'Entradas al estanque', litros: litrosEntradas, cnt: cntEntradas, color: 'bg-amber-500' },
-                        { label: 'Salidas a máquinas', litros: litrosEntregas, cnt: cntEntregas, color: 'bg-red-500' },
-                      ].map(({ label, litros, cnt, color }) => {
-                        const pct = totalLitros > 0 ? (litros / totalLitros) * 100 : 0;
-                        const prom = cnt > 0 ? litros / cnt : 0;
-                        return (
-                          <div key={label}>
-                            <div className="flex justify-between text-xs mb-1">
-                              <div className="flex items-center gap-1.5">
-                                <div className={`w-2 h-2 rounded-full ${color}`}></div>
-                                <span className="text-slate-700">{label}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="font-bold text-slate-800">{litros.toFixed(0)} L</span>
-                                <span className="text-slate-400 ml-1">({pct.toFixed(0)}%)</span>
-                                {cnt > 0 && <span className="text-slate-400 ml-1">· prom {prom.toFixed(0)} L</span>}
-                              </div>
-                            </div>
-                            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                              <div className={`h-full ${color} rounded-full`} style={{width: `${pct}%`}}></div>
-                            </div>
-                          </div>
-                        );
-                      })}
+              <div className="bg-slate-50 p-5 space-y-5">
+
+                {/* ── Fila 1: KPIs grandes ── */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Total litros */}
+                  <div className="rounded-2xl p-5 text-white relative overflow-hidden col-span-2 lg:col-span-1"
+                    style={{background:'linear-gradient(135deg,#ea580c 0%,#c2410c 100%)'}}>
+                    <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full opacity-20"
+                      style={{background:'rgba(255,255,255,0.3)'}}/>
+                    <div className="text-xs font-bold uppercase tracking-widest text-orange-200 mb-2">Total Combustible</div>
+                    <div className="text-4xl font-black tracking-tight">{totalLitros.toLocaleString('es-CL')}</div>
+                    <div className="text-orange-200 text-sm font-semibold mt-0.5">litros gestionados</div>
+                    <div className="mt-3 pt-3 border-t border-orange-400/40 flex justify-between text-xs text-orange-200">
+                      <span>{totalReportes} reportes</span>
+                      <span>≈ {(totalLitros/totalReportes).toFixed(0)} L/rep</span>
                     </div>
                   </div>
 
-                  {/* Top máquinas por litros */}
-                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Top Máquinas por Litros</div>
+                  {/* Balance stock */}
+                  <div className={`rounded-2xl p-5 relative overflow-hidden ${balancePositivo ? 'bg-emerald-900' : 'bg-red-900'}`}>
+                    <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-10 bg-white"/>
+                    <div className={`text-xs font-bold uppercase tracking-widest mb-2 ${balancePositivo ? 'text-emerald-300' : 'text-red-300'}`}>Balance Stock</div>
+                    <div className={`text-3xl font-black ${balancePositivo ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {balancePositivo ? '+' : ''}{balanceStock.toLocaleString('es-CL')}
+                    </div>
+                    <div className={`text-sm font-semibold mt-0.5 ${balancePositivo ? 'text-emerald-200' : 'text-red-200'}`}>litros disponibles</div>
+                    <div className={`mt-3 pt-3 border-t ${balancePositivo ? 'border-emerald-700' : 'border-red-700'} text-xs ${balancePositivo ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {balancePositivo ? '✓ Superávit de combustible' : '⚠ Déficit de combustible'}
+                    </div>
+                  </div>
+
+                  {/* Prom salida */}
+                  <div className="rounded-2xl p-5 bg-white border border-slate-200 shadow-sm">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Prom. por Salida</div>
+                    <div className="text-3xl font-black text-slate-800">{promSalida.toFixed(0)}</div>
+                    <div className="text-slate-500 text-sm font-semibold mt-0.5">litros / despacho</div>
+                    <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-400">
+                      Prom. entrada: {promEntrada.toFixed(0)} L
+                    </div>
+                  </div>
+
+                  {/* Tasa validación */}
+                  <div className="rounded-2xl p-5 bg-white border border-slate-200 shadow-sm flex flex-col items-center justify-center">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Tasa Validación</div>
+                    <Donut pct={pctFirmados} color={statusColor} size={76} stroke={9}/>
+                    <div className="mt-2 text-xs text-slate-400">{firmados}/{totalReportes} firmados</div>
+                  </div>
+                </div>
+
+                {/* ── Fila 2: Distribución + Gráfico barras ── */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+                  {/* Donut distribución entradas/salidas */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Distribución por Tipo</div>
+                    <div className="flex items-center justify-around">
+                      <Donut pct={pctEntradas} color="#f59e0b" size={90} stroke={11} label="Entradas" sublabel={`${litrosEntradas.toLocaleString('es-CL')} L`}/>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="text-2xl font-black text-slate-300">vs</div>
+                        <div className="text-xs text-slate-400">{cntEntradas}e · {cntEntregas}s</div>
+                      </div>
+                      <Donut pct={pctSalidas} color="#ea580c" size={90} stroke={11} label="Salidas" sublabel={`${litrosEntregas.toLocaleString('es-CL')} L`}/>
+                    </div>
+                    {/* Mini barra stacked */}
+                    <div className="mt-4 h-2 rounded-full overflow-hidden flex">
+                      <div className="bg-amber-400 transition-all" style={{width:`${pctEntradas}%`}}/>
+                      <div className="bg-orange-500 transition-all" style={{width:`${pctSalidas}%`}}/>
+                    </div>
+                    <div className="flex justify-between mt-1 text-xs text-slate-400">
+                      <span>⬇ Entradas {pctEntradas}%</span>
+                      <span>Salidas {pctSalidas}% ➡</span>
+                    </div>
+                  </div>
+
+                  {/* Gráfico de barras por fecha (últimos 7 días con datos) */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm lg:col-span-2">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Actividad por Fecha</div>
+                    {fechasOrdenadas.length > 0 ? (
+                      <div className="flex items-end gap-1.5 h-28">
+                        {fechasOrdenadas.map(fecha => {
+                          const d = porFecha[fecha];
+                          const total = d.entradas + d.salidas;
+                          const hTotal = maxBarLitros > 0 ? (total / maxBarLitros) * 100 : 0;
+                          const hEntradas = total > 0 ? (d.entradas / total) * hTotal : 0;
+                          const hSalidas = total > 0 ? (d.salidas / total) * hTotal : 0;
+                          const label = fecha.slice(5); // MM-DD
+                          return (
+                            <div key={fecha} className="flex-1 flex flex-col items-center gap-0.5" title={`${fecha}: ${total.toFixed(0)} L`}>
+                              <div className="w-full flex flex-col justify-end rounded-t-lg overflow-hidden" style={{height:'96px'}}>
+                                <div className="w-full bg-orange-500 rounded-t-sm transition-all" style={{height:`${hSalidas}%`}}/>
+                                <div className="w-full bg-amber-400 transition-all" style={{height:`${hEntradas}%`}}/>
+                              </div>
+                              <span className="text-slate-400 text-center leading-none" style={{fontSize:'9px'}}>{label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="h-28 flex items-center justify-center text-slate-300 text-sm">Sin datos de fechas</div>
+                    )}
+                    <div className="flex gap-4 mt-3 text-xs text-slate-500">
+                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-amber-400 inline-block"/>Entradas</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-orange-500 inline-block"/>Salidas</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Fila 3: Top máquinas + Top operadores ── */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+                  {/* Top máquinas */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Top Máquinas por Consumo</div>
                     {topMaquinas.length > 0 ? (
                       <div className="space-y-3">
-                        {topMaquinas.map(([patente, data], i) => {
+                        {topMaquinas.map(([nombre, data], i) => {
                           const pct = litrosEntregas > 0 ? (data.litros / litrosEntregas) * 100 : 0;
-                          const colors = ['bg-slate-800', 'bg-slate-600', 'bg-slate-400'];
+                          const gradients = [
+                            'from-orange-500 to-red-500',
+                            'from-amber-500 to-orange-400',
+                            'from-yellow-400 to-amber-400',
+                            'from-slate-400 to-slate-500',
+                            'from-slate-300 to-slate-400',
+                          ];
                           return (
-                            <div key={patente}>
-                              <div className="flex justify-between text-xs mb-1">
-                                <span className="font-semibold text-slate-700">{patente}</span>
-                                <span className="text-slate-500">{data.litros.toFixed(0)} L · {data.reportes} rep.</span>
+                            <div key={nombre} className="flex items-center gap-3">
+                              <div className={`w-6 h-6 rounded-lg bg-gradient-to-br ${gradients[i]} flex items-center justify-center flex-shrink-0`}>
+                                <span className="text-white text-xs font-black">{i+1}</span>
                               </div>
-                              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                <div className={`h-full ${colors[i]} rounded-full`} style={{width: `${pct}%`}}></div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-sm font-bold text-slate-700 truncate">{nombre}</span>
+                                  <span className="text-xs font-bold text-slate-500 ml-2 flex-shrink-0">{data.litros.toLocaleString('es-CL')} L</span>
+                                </div>
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className={`h-full bg-gradient-to-r ${gradients[i]} rounded-full transition-all`} style={{width:`${pct}%`}}/>
+                                </div>
+                              </div>
+                              <span className="text-xs text-slate-400 flex-shrink-0 w-8 text-right">{pct.toFixed(0)}%</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-300 text-center py-6">Sin datos de máquinas</div>
+                    )}
+                  </div>
+
+                  {/* Top operadores */}
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                    <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Top Operadores por Recepción</div>
+                    {topOperadores.length > 0 ? (
+                      <div className="space-y-3">
+                        {topOperadores.map(([nombre, data], i) => {
+                          const pct = litrosEntregas > 0 ? (data.litros / litrosEntregas) * 100 : 0;
+                          const avatarColors = ['#ea580c','#f59e0b','#10b981','#6366f1'];
+                          const initials = nombre.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+                          return (
+                            <div key={nombre} className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
+                                style={{background:avatarColors[i] || '#94a3b8'}}>
+                                {initials}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-sm font-bold text-slate-700 truncate">{nombre}</span>
+                                  <span className="text-xs text-slate-500 ml-2 flex-shrink-0">{data.litros.toLocaleString('es-CL')} L · {data.cnt} desp.</span>
+                                </div>
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full transition-all" style={{width:`${pct}%`,background:avatarColors[i]}}/>
+                                </div>
                               </div>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="text-sm text-slate-400 text-center py-4">Sin entregas registradas</div>
+                      <div className="text-sm text-slate-300 text-center py-6">Sin datos de operadores</div>
                     )}
                   </div>
                 </div>
+
               </div>
             </div>
           </div>

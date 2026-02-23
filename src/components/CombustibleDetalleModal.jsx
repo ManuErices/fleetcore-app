@@ -111,13 +111,13 @@ export default function CombustibleDetalleModal({
                   <input
                     type="number"
                     step="0.1"
-                    value={editedData.datosEntrega?.horometroOdometro ?? editedData.horometroOdometro ?? ''}
-                    onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, horometroOdometro: e.target.value })}
+                    value={editedData.horometroOdometro}
+                    onChange={(e) => updateField('horometroOdometro', e.target.value)}
                     className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500"
                   />
                 </div>
               ) : (
-                <DataField label="Horómetro/Odómetro" value={reporte.datosEntrega?.horometroOdometro || reporte.horometroOdometro || '-'} />
+                <DataField label="Horómetro/Odómetro" value={reporte.horometroOdometro || '-'} />
               )}
             </div>
           </div>
@@ -138,8 +138,8 @@ export default function CombustibleDetalleModal({
                     <input
                       type="number"
                       step="0.01"
-                      value={editedData.datosEntrega?.cantidadLitros ?? editedData.cantidadLitros ?? ''}
-                      onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, cantidadLitros: e.target.value })}
+                      value={editedData.cantidadLitros}
+                      onChange={(e) => updateField('cantidadLitros', e.target.value)}
                       className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
                     />
                   </div>
@@ -147,8 +147,8 @@ export default function CombustibleDetalleModal({
                     <div className="text-xs font-semibold text-slate-500 mb-1">Empresa</div>
                     <input
                       type="text"
-                      value={editedData.datosEntrega?.empresaNombre ?? editedData.datosEntrega?.empresa ?? editedData.empresa ?? ''}
-                      onChange={(e) => updateField('datosEntrega', { ...editedData.datosEntrega, empresaNombre: e.target.value })}
+                      value={editedData.empresa}
+                      onChange={(e) => updateField('empresa', e.target.value)}
                       className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
                     />
                   </div>
@@ -158,11 +158,11 @@ export default function CombustibleDetalleModal({
                   <div className="bg-white rounded-lg p-4 border-2 border-green-300">
                     <div className="text-xs font-semibold text-green-700 mb-1">Cantidad Suministrada</div>
                     <div className="text-3xl font-black text-green-600 flex items-baseline gap-2">
-                      {reporte.datosEntrega?.cantidadLitros ?? reporte.cantidadLitros}
+                      {reporte.cantidadLitros}
                       <span className="text-lg text-green-500">Litros</span>
                     </div>
                   </div>
-                  <DataField label="Empresa Proveedora" value={reporte.datosEntrega?.empresaNombre || reporte.empresaNombre || reporte.datosEntrega?.empresa || reporte.empresa || '-'} />
+                  <DataField label="Empresa Proveedora" value={reporte.empresa || '-'} />
                 </>
               )}
             </div>
@@ -178,9 +178,9 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'} />
-                {(surtidorInfo?.rut || reporte.repartidorRut) && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
+                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.surtidorNombre || '-'} />
+                {surtidorInfo?.rut && (
+                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo.rut}</p>
                 )}
               </div>
               <div>
@@ -191,6 +191,33 @@ export default function CombustibleDetalleModal({
               </div>
             </div>
           </div>
+
+          {/* Firma del Receptor */}
+          {reporte.firmaReceptor && (
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border-2 border-blue-200">
+              <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Firma del Receptor
+              </h3>
+              <div className="flex flex-col items-center gap-2">
+                <div className="bg-white border-2 border-blue-200 rounded-lg p-3 w-full max-w-xs">
+                  <img
+                    src={reporte.firmaReceptor}
+                    alt="Firma del receptor"
+                    className="w-full h-auto max-h-32 object-contain mx-auto"
+                  />
+                </div>
+                <div className="w-full max-w-xs border-t-2 border-blue-300 pt-2 text-center">
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">FIRMA RECEPTOR</p>
+                  {reporte.operadorNombre && (
+                    <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.operadorNombre}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Observaciones */}
           {(reporte.observaciones || isEditing) && (

@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 
 export default function SignaturePad({ onSave, label = "Firma", color = "blue" }) {
   const canvasRef = useRef(null);
+  const dprRef = useRef(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isEmpty, setIsEmpty] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
@@ -15,6 +16,7 @@ export default function SignaturePad({ onSave, label = "Firma", color = "blue" }
     // Configurar canvas con resolución alta para móviles
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    dprRef.current = dpr;
     
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
@@ -75,13 +77,19 @@ export default function SignaturePad({ onSave, label = "Firma", color = "blue" }
   const clearSignature = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
+    const dpr = dprRef.current;
+    // Resetear transform, limpiar todo el canvas físico, restaurar transform
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#1e293b';
     setIsEmpty(true);
     setIsSaved(false);
-    onSave(null); // Limpiar la firma guardada
+    onSave(null);
   };
 
   const colorClasses = {
@@ -98,12 +106,14 @@ export default function SignaturePad({ onSave, label = "Firma", color = "blue" }
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
           </svg>
           <h3 className={`text-lg font-black text-${color}-900`}>{label}</h3>
+          {!isEmpty && !isSaved && (
+            <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">
+              ✏️ Dibujando...
+            </span>
+          )}
           {isSaved && (
-            <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-              </svg>
-              Guardada
+            <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">
+              ✏️ Pendiente confirmar
             </span>
           )}
         </div>
@@ -142,7 +152,8 @@ export default function SignaturePad({ onSave, label = "Firma", color = "blue" }
           <p className="font-semibold mb-1">Instrucciones:</p>
           <ul className="list-disc list-inside space-y-1">
             <li>Firma con el mouse (desktop) o con el dedo (móvil)</li>
-            <li>Tu firma se guarda automáticamente al terminar cada trazo</li>
+            <li>Puedes seguir dibujando hasta quedar conforme</li>
+            <li>Presiona <strong>"Confirmar firma"</strong> cuando estés listo</li>
             <li>Usa "Limpiar" si necesitas corregir la firma</li>
           </ul>
         </div>
