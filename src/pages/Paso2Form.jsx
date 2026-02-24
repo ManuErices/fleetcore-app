@@ -747,16 +747,37 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     e.preventDefault();
     const errores = [];
 
-    // Validar actividades efectivas que existan (campos completos)
+    // ── Verificar que al menos UNA actividad/tarea de cualquier tipo esté completa ──
+    const actividadCompleta = formData.actividadesEfectivas.some(
+      a => a.actividad && a.horaInicio && a.horaFin
+    );
+    const tiempoNoEfectivoCompleto = formData.tiemposNoEfectivos.some(
+      t => t.motivo && t.horaInicio && t.horaFin
+    );
+    const mantencionCompleta = formData.tieneMantenciones && formData.mantenciones.some(
+      m => m.tipo && m.horaInicio && m.horaFin
+    );
+
+    if (!actividadCompleta && !tiempoNoEfectivoCompleto && !mantencionCompleta) {
+      errores.push('❌ Debe registrar al menos una actividad, tiempo no efectivo o mantención completa (con tipo/motivo y horario)');
+    }
+
+    // Validar filas de actividades efectivas que estén PARCIALMENTE llenas
     formData.actividadesEfectivas.forEach((act, idx) => {
-      if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
-      if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
+      const tieneAlgo = act.actividad || act.horaInicio || act.horaFin;
+      if (tieneAlgo) {
+        if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
+        if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
+      }
     });
 
-    // Validar tiempos no efectivos que existan
+    // Validar tiempos no efectivos que estén PARCIALMENTE llenos
     formData.tiemposNoEfectivos.forEach((t, idx) => {
-      if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
-      if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
+      const tieneAlgo = t.motivo || t.horaInicio || t.horaFin;
+      if (tieneAlgo) {
+        if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
+        if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
+      }
     });
 
     // Tiempos programados: si tiene un lado, debe tener ambos

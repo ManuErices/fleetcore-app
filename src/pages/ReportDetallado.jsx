@@ -101,17 +101,12 @@ export default function ReportDetallado() {
       }
     }
 
-    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
-    const horInicial = parseFloat(formData.horometroInicial) || 0;
-    const horFinal = parseFloat(formData.horometroFinal) || 0;
-    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
-    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
-    
-    const horometroEnCero = (horInicial === 0 && horFinal === 0);
-    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
-    
-    if (horometroEnCero && kilometrajeEnCero) {
-      errors.ambosEnCero = 'Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)';
+    // Validar que al menos uno de los FINALES tenga valor distinto de 0
+    const horFinalRT = parseFloat(formData.horometroFinal) || 0;
+    const kmFinalRT = parseFloat(formData.kilometrajeFinal) || 0;
+
+    if (horFinalRT === 0 && kmFinalRT === 0) {
+      errors.ambosEnCero = 'Debe ingresar Horómetro Final O Kilometraje Final';
     }
 
     setValidationErrors(errors);
@@ -420,17 +415,12 @@ export default function ReportDetallado() {
       }
     }
     
-    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
-    const horInicial = parseFloat(formData.horometroInicial) || 0;
-    const horFinal = parseFloat(formData.horometroFinal) || 0;
-    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
-    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
-    
-    const horometroEnCero = (horInicial === 0 && horFinal === 0);
-    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
-    
-    if (horometroEnCero && kilometrajeEnCero) {
-      errors.push('❌ Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)');
+    // Validar que al menos uno de los FINALES tenga valor distinto de 0
+    const horFinalVal = parseFloat(formData.horometroFinal) || 0;
+    const kmFinalVal = parseFloat(formData.kilometrajeFinal) || 0;
+
+    if (horFinalVal === 0 && kmFinalVal === 0) {
+      errors.push('❌ Debe ingresar Horómetro Final O Kilometraje Final (al menos uno es obligatorio)');
     }
     
     return errors;
@@ -763,7 +753,7 @@ export default function ReportDetallado() {
                     step="0.1"
                   />
                   <InputField
-                    label="Horómetro Final"
+                    label="Horómetro Final *"
                     type="number"
                     value={formData.horometroFinal}
                     onChange={(e) => setFormData({ ...formData, horometroFinal: e.target.value })}
@@ -792,7 +782,7 @@ export default function ReportDetallado() {
                     step="0.1"
                   />
                   <InputField
-                    label="Kilometraje Final"
+                    label="Kilometraje Final *"
                     type="number"
                     value={formData.kilometrajeFinal}
                     onChange={(e) => setFormData({ ...formData, kilometrajeFinal: e.target.value })}
