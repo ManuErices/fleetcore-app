@@ -249,19 +249,50 @@ export function generateThermalVoucher({
     .firma-rol {
       font-weight: normal;
     }
+    /* ── Botón sticky en móvil ── */
+    .print-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 10px 16px;
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      background: white;
+      border-top: 1px solid #ddd;
+      display: flex;
+      gap: 10px;
+      z-index: 999;
+    }
+    .print-bar button {
+      flex: 1;
+      padding: 14px 0;
+      font-size: 15px;
+      cursor: pointer;
+      border: none;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+    .btn-print {
+      background: #16a34a;
+      color: white;
+    }
+    .btn-close {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    /* espacio para que el contenido no quede bajo el botón */
+    .voucher-content {
+      padding-bottom: 80px;
+    }
     @media print {
-      body {
-        width: 58mm;
-      }
-      
-      .no-print {
-        display: none;
-      }
+      body { width: 58mm; padding-bottom: 0; }
+      .print-bar { display: none; }
+      .voucher-content { padding-bottom: 0; }
     }
   </style>
 </head>
 <body>
-  <div class="voucher">
+  <div class="voucher-content"><div class="voucher">
     <!-- LOGO -->
     <div class="center">
       <img src="${MPF_LOGO_BASE64}" alt="MPF Logo" class="logo">
@@ -317,30 +348,6 @@ export function generateThermalVoucher({
     
     <div class="line"></div>
     
-    <!-- REPARTIDOR / EQUIPO SURTIDOR -->
-    <div class="section">
-      <div class="bold">REPARTIDOR</div>
-      <div class="row">
-        <span class="label">Nombre:</span>
-        <span>${formatNombreCorto(repartidorInfo?.nombre)}</span>
-      </div>
-      <div class="row">
-        <span class="label">Run:</span>
-        <span>${formatRun(repartidorInfo?.rut)}</span>
-      </div>
-      ${equipoSurtidorInfo ? `
-      <div class="row">
-        <span class="label">Equipo:</span>
-        <span>${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
-      </div>
-      <div class="row">
-        <span class="label">Desc:</span>
-        <span>${equipoSurtidorInfo.name || equipoSurtidorInfo.nombre || ''}</span>
-      </div>` : ''}
-    </div>
-    
-    <div class="line"></div>
-    
     <!-- FECHA Y HORA -->
     <div class="section">
       <div class="row">
@@ -375,12 +382,12 @@ export function generateThermalVoucher({
     
     ${firmasSectionHTML}
     
-    <!-- BOTÓN PARA IMPRIMIR (solo visible en pantalla) -->
-    <div class="no-print" style="margin-top: 10mm; text-align: center;">
-      <button onclick="window.print()" style="padding: 10px 20px; font-size: 14px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">
-        🖨️ IMPRIMIR VOUCHER
-      </button>
-    </div>
+  </div></div><!-- fin voucher-content -->
+  
+  <!-- BARRA STICKY DE ACCIONES -->
+  <div class="print-bar">
+    <button class="btn-close" onclick="window.close()">✕ Cerrar</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Imprimir</button>
   </div>
 </body>
 </html>
