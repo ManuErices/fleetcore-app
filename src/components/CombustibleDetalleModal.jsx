@@ -6,10 +6,11 @@ export default function CombustibleDetalleModal({
   projectName, 
   machineInfo,
   surtidorInfo,
+  equipoSurtidorInfo,
   operadorInfo,
-  userRole = 'operador', // 'administrador' o 'operador'
-  onSave, // función callback para guardar cambios
-  onSign // función callback para firmar el reporte
+  userRole = 'operador',
+  onSave,
+  onSign
 }) {
   if (!reporte) return null;
 
@@ -178,9 +179,12 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.surtidorNombre || '-'} />
-                {surtidorInfo?.rut && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo.rut}</p>
+                <DataField
+                  label="Repartidor / Surtidor"
+                  value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'}
+                />
+                {(surtidorInfo?.rut || reporte.repartidorRut) && (
+                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
                 )}
               </div>
               <div>
@@ -189,6 +193,21 @@ export default function CombustibleDetalleModal({
                   <p className="text-xs text-slate-500 mt-1">RUT: {operadorInfo.rut}</p>
                 )}
               </div>
+              {(equipoSurtidorInfo || reporte.equipoSurtidorId) && (
+                <div className="md:col-span-2">
+                  <DataField
+                    label="Equipo Surtidor (Camión / Mochila)"
+                    value={
+                      equipoSurtidorInfo
+                        ? `${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || ''} — ${equipoSurtidorInfo.name || equipoSurtidorInfo.nombre || ''}`.trim().replace(/^— |— $/, '')
+                        : reporte.equipoSurtidorId
+                    }
+                  />
+                  {equipoSurtidorInfo?.tipo && (
+                    <p className="text-xs text-slate-500 mt-1">Tipo: {equipoSurtidorInfo.tipo}</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

@@ -5,9 +5,10 @@ export default function ReporteDetalleModal({
   onClose, 
   projectName, 
   machineInfo, 
-  userRole = 'operador', // 'administrador' o 'operador'
-  onSave, // función callback para guardar cambios
-  onSign // función callback para firmar el reporte
+  userRole = 'operador',
+  currentUserName = '',
+  onSave,
+  onSign
 }) {
   if (!reporte) return null;
 
@@ -172,6 +173,7 @@ export default function ReporteDetalleModal({
   const handleSignReport = () => {
     if (onSign && adminPassword) {
       const signatureData = {
+        adminName: currentUserName,
         timestamp: new Date().toISOString(),
         reportId: reporte.numeroReporte
       };

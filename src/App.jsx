@@ -18,6 +18,7 @@ import AppSelector from "./pages/AppSelector.jsx";
 import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
 import Pasajes from "./pages/Pasajes.jsx";
 import ReporteCombustible from "./pages/ReporteCombustible.jsx";
+import CostosFijos from "./pages/CostosFijos.jsx";
 import CombustibleModal from "./components/CombustibleModal";
 import CombustiblePage from "./components/CombustiblePage";
 import { auth, googleProvider, db } from "./lib/firebase";
@@ -138,6 +139,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
   const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
   const [showReporteWorkFleetMenu, setShowReporteWorkFleetMenu] = useState(false); // ✅ NUEVO ESTADO
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
 
@@ -641,6 +643,60 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                 </>
               )}
             </div>
+
+            {/* Menú Administración */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (userRole !== 'mandante') {
+                    setShowAdminMenu(!showAdminMenu);
+                    setShowCostsMenu(false);
+                    setShowProductionMenu(false);
+                    setShowReporteWorkFleetMenu(false);
+                  }
+                }}
+                disabled={userRole === 'mandante'}
+                className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${
+                  userRole === 'mandante'
+                    ? 'text-slate-400 cursor-not-allowed opacity-60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                Administración
+                <svg className={`w-4 h-4 transition-transform ${showAdminMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showAdminMenu && userRole !== 'mandante' && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowAdminMenu(false)} />
+                  <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
+                    <div className="px-4 py-2 border-b border-slate-100">
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Administración</p>
+                    </div>
+                    <div className="p-2 space-y-1">
+                      <NavLink
+                        to="/costos-fijos"
+                        onClick={() => setShowAdminMenu(false)}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
+                            isActive
+                              ? "bg-gradient-to-r from-slate-800 to-slate-900 text-white"
+                              : "text-slate-900 hover:bg-slate-50"
+                          }`
+                        }
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Costos Fijos
+                      </NavLink>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </nav>
         </div>
 
@@ -728,6 +784,20 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                     <MobileNavLink to="/consolidado" label="Consolidado Total" onClick={() => setShowMobileMenu(false)} />
                   </div>
 
+
+                  {/* Separador */}
+                  <div className="h-px bg-slate-200 my-4" />
+
+                  {/* Sección Administración */}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
+                      <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Administración</span>
+                    </div>
+                    <MobileNavLink to="/costos-fijos" label="Costos Fijos" onClick={() => setShowMobileMenu(false)} />
+                  </div>
                   {/* Separador */}
                   <div className="h-px bg-slate-200 my-4" />
 
@@ -751,8 +821,9 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
       {/* Main content - Responsive padding */}
       <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         <Routes>
-          {/* Ruta accesible para todos incluyendo mandantes */}
+          {/* Rutas accesibles para todos incluyendo mandantes */}
           <Route path="/reporte-workfleet" element={<ReporteWorkFleet />} />
+          <Route path="/reporte-combustible" element={<ReporteCombustible />} />
           
           {/* Rutas protegidas - solo para admin y operador */}
           {userRole !== 'mandante' ? (
@@ -767,11 +838,11 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
               <Route path="/machines" element={<Machines />} />
               <Route path="/rendiciones" element={<Rendiciones />} />
               <Route path="/pasajes" element={<Pasajes />} />
-              <Route path="/reporte-combustible" element={<ReporteCombustible />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
               <Route path="/fuel-price" element={<FuelPriceManager />} />
               <Route path="/subcontratos" element={<Subcontratos />} />
               <Route path="/reporte-detallado" element={<ReportDetallado />} />
+              <Route path="/costos-fijos" element={<CostosFijos />} />
             </>
           ) : (
             // Redirigir mandantes a reporte-workfleet

@@ -20,6 +20,7 @@ export default function ReporteCombustible() {
   const [currentUser, setCurrentUser] = useState(null);
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
   const [reporteDetalle, setReporteDetalle] = useState(null);
+  const [voucherPreviewReporte, setVoucherPreviewReporte] = useState(null);
   const [empresas, setEmpresas] = useState([]);
   
   // Filtros
@@ -163,6 +164,11 @@ export default function ReporteCombustible() {
   const reportesFiltrados = useMemo(() => {
     let resultado = [...reportes];
 
+    // Mandante solo ve reportes firmados por administrador
+    if (userRole === 'mandante') {
+      resultado = resultado.filter(r => r.firmado === true);
+    }
+
     if (filtros.fechaInicio) {
       resultado = resultado.filter(r => r.fecha >= filtros.fechaInicio);
     }
@@ -223,7 +229,7 @@ export default function ReporteCombustible() {
         tipo: r.tipo || 'entrada'
       };
     });
-  }, [filtros, reportes, projects, machines, empleados]);
+  }, [filtros, reportes, projects, machines, empleados, userRole]);
 
   const handleEliminar = async (id) => {
     if (!window.confirm("¿Estás seguro de eliminar este reporte?")) return;
@@ -267,6 +273,7 @@ export default function ReporteCombustible() {
     const machineInfo = machines.find(m => m.id === machineId);
     const operadorInfo = empleados.find(e => e.id === operadorId);
     const empresaInfo = empresas.find(e => e.id === empresaId);
+    const equipoSurtidorInfo = machines.find(m => m.id === reporte.equipoSurtidorId) || null;
     const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
       nombre: reporte.repartidorNombre || '',
       rut: reporte.repartidorRut || ''
@@ -276,7 +283,9 @@ export default function ReporteCombustible() {
       reportData: {
         fecha: reporte.fecha || reporte.fechaCreacion?.split('T')[0] || '',
         cantidadLitros: reporte.datosEntrega?.cantidadLitros || reporte.cantidadLitros || 0,
-        numeroReporte: reporte.numeroReporte || ''
+        numeroReporte: reporte.numeroReporte || '',
+        firmaReceptor: reporte.firmaReceptor || reporte.datosEntrega?.firmaReceptor || null,
+        firmaRepartidor: reporte.firmaRepartidor || reporte.datosEntrega?.firmaRepartidor || null
       },
       projectName: project?.nombre || project?.name || reporte.projectId || '',
       machineInfo: {
@@ -297,6 +306,11 @@ export default function ReporteCombustible() {
         nombre: repartidorInfo.nombre || '',
         rut: repartidorInfo.rut || ''
       },
+      equipoSurtidorInfo: equipoSurtidorInfo ? {
+        patente: equipoSurtidorInfo.patente || equipoSurtidorInfo.code || '',
+        name: equipoSurtidorInfo.name || equipoSurtidorInfo.nombre || '',
+        tipo: equipoSurtidorInfo.tipo || ''
+      } : null,
       numeroGuiaCorrelativo: reporte.numeroGuia || null
     });
   };
@@ -569,190 +583,45 @@ export default function ReporteCombustible() {
       return;
     }
 
-    const doc = new jsPDF('landscape', 'mm', 'a4');
-    const pW = doc.internal.pageSize.getWidth();  // 297
-    const pH = doc.internal.pageSize.getHeight(); // 210
-    const mg = 14;
-
-    const C = {
-      naranja:      [234, 88,  12],
-      naranjaClaro: [255, 237, 213],
-      oscuro:       [15,  23,  42],
-      gris2:        [71,  85,  105],
-      gris3:        [148, 163, 184],
-      gris4:        [226, 232, 240],
-      gris5:        [248, 250, 252],
-      blanco:       [255, 255, 255],
-      verde:        [16,  185, 129],
-      verdeClaro:   [209, 250, 229],
-      amber:        [217, 119, 6],
-      rojo:         [220, 38,  38],
-    };
-
-    // ── KPIs desde reportesFiltrados (respeta todos los filtros activos) ──
-    let totalLitros = 0, litrosEntradas = 0, litrosEntregas = 0;
-    let cntEntregas = 0, firmados = 0;
-    reportesFiltrados.forEach(r => {
-      const l = parseFloat(r.cantidad) || 0;
-      totalLitros += l;
-      if (r.tipo === 'entrada') { litrosEntradas += l; }
-      else                      { litrosEntregas += l; cntEntregas++; }
-      if (r.firmaRepartidor || r.firmaReceptor || r.firmado) firmados++;
-    });
-    const balance    = litrosEntradas - litrosEntregas;
-    const promSalida = cntEntregas > 0 ? (litrosEntregas / cntEntregas).toFixed(0) : 0;
-    const pctFirm    = reportesFiltrados.length > 0
-      ? Math.round((firmados / reportesFiltrados.length) * 100) : 0;
-
-    // ── HEADER ────────────────────────────────────────────────────
-    doc.setFillColor(...C.oscuro);
-    doc.rect(0, 0, pW, 28, 'F');
-    doc.setFillColor(...C.naranja);
-    doc.rect(0, 0, 4, 28, 'F');
-
-    // Logo
-    doc.setFillColor(...C.naranja);
-    doc.roundedRect(mg + 2, 4, 20, 20, 2, 2, 'F');
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
-    doc.text('MPF', mg + 6, 12);
-    doc.setFontSize(4.5); doc.setFont(undefined, 'normal');
-    doc.text('INGENIERÍA', mg + 3.5, 17);
-    doc.text('CIVIL', mg + 7, 21);
-
-    // Título
-    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
-    doc.text('REPORTE DE COMBUSTIBLE', mg + 27, 13);
-    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
-    doc.text('Resumen · Control de Combustible · MPF Ingeniería Civil', mg + 27, 20);
-
-    // Filtros activos — construir string descriptivo
-    const filtrosActivos = [];
-    if (filtros.fechaInicio) filtrosActivos.push(`Desde: ${filtros.fechaInicio}`);
-    if (filtros.fechaFin)    filtrosActivos.push(`Hasta: ${filtros.fechaFin}`);
-    if (filtros.tipo)        filtrosActivos.push(`Tipo: ${filtros.tipo === 'entrada' ? 'Entrada' : 'Salida'}`);
-    if (filtros.proyecto)    filtrosActivos.push(`Proyecto: ${projects.find(p => p.id === filtros.proyecto)?.name || filtros.proyecto}`);
-    if (filtros.maquina)     filtrosActivos.push(`Máquina: ${machines.find(m => m.id === filtros.maquina)?.patente || filtros.maquina}`);
-    if (filtros.surtidor)    filtrosActivos.push(`Surtidor: ${filtros.surtidor}`);
-
-    // Fecha generación + info filtros (derecha del header)
-    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
-    doc.text(
-      `Generado: ${new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'long', year:'numeric' })}`,
-      pW - mg, 11, { align: 'right' }
-    );
-    const filtroStr = filtrosActivos.length
-      ? `${reportesFiltrados.length} registros · Filtros: ${filtrosActivos.join('  |  ')}`
-      : `${reportesFiltrados.length} registros · Sin filtros aplicados`;
-    doc.text(doc.splitTextToSize(filtroStr, 180)[0], pW - mg, 18, { align: 'right' });
-
-    // ── KPI CARDS ─────────────────────────────────────────────────
-    const kpiY = 32;
-    const kpiH = 22;
-    const kpiW = (pW - mg * 2 - 9) / 4;
-
-    const drawKpi = (x, label, value, sub, accent, bg) => {
-      doc.setFillColor(...bg);     doc.roundedRect(x, kpiY, kpiW, kpiH, 2, 2, 'F');
-      doc.setFillColor(...accent); doc.rect(x, kpiY, 2.5, kpiH, 'F');
-      doc.setFontSize(6); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.gris3);
-      doc.text(label.toUpperCase(), x + 5, kpiY + 6);
-      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...accent);
-      doc.text(String(value), x + 5, kpiY + 15);
-      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris2);
-      doc.text(sub, x + 5, kpiY + 20);
-    };
-
-    const kx = mg;
-    drawKpi(
-      kx, 'Total Combustible',
-      `${totalLitros.toLocaleString('es-CL')} L`, `${reportesFiltrados.length} reportes`,
-      C.naranja, C.naranjaClaro
-    );
-    drawKpi(
-      kx + (kpiW + 3), 'Balance Stock',
-      `${balance >= 0 ? '+' : ''}${balance.toLocaleString('es-CL')} L`, balance >= 0 ? 'Superávit' : 'Déficit',
-      balance >= 0 ? C.verde : C.rojo, balance >= 0 ? C.verdeClaro : [254, 226, 226]
-    );
-    drawKpi(
-      kx + (kpiW + 3) * 2, 'Prom. por Salida',
-      `${promSalida} L`, `${cntEntregas} despachos`,
-      C.amber, [254, 243, 199]
-    );
-    drawKpi(
-      kx + (kpiW + 3) * 3, 'Tasa Validación',
-      `${pctFirm}%`, `${firmados}/${reportesFiltrados.length} firmados`,
-      pctFirm >= 80 ? C.verde : pctFirm >= 50 ? C.amber : C.rojo,
-      pctFirm >= 80 ? C.verdeClaro : pctFirm >= 50 ? [254, 243, 199] : [254, 226, 226]
-    );
-
-    // ── TABLA ─────────────────────────────────────────────────────
+    const doc = new jsPDF('landscape');
+    
+    // Header
+    doc.setFillColor(249, 115, 22); // Orange-500
+    doc.rect(0, 0, 297, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text('REPORTES DE COMBUSTIBLE', 148.5, 15, { align: 'center' });
+    
+    // Tabla
     const tableData = reportesFiltrados.map(r => [
-      r.fecha ? new Date(r.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '—',
-      r.numeroReporte || '—',
-      r.tipo === 'entrada' ? 'ENTRADA' : 'SALIDA',
-      r.projectName || '—',
-      r.machinePatente || (r.tipo === 'entrada' ? 'N/A' : '—'),
-      r.repartidorNombre || '—',
-      r.operadorNombre   || (r.tipo === 'entrada' ? 'N/A' : '—'),
-      `${(parseFloat(r.cantidad) || 0).toLocaleString('es-CL')} L`,
-      (r.firmaRepartidor || r.firmaReceptor || r.firmado) ? '✓' : '—',
+      r.fecha,
+      r.numeroReporte,
+      r.projectName,
+      r.machinePatente,
+      r.surtidorNombre,
+      r.operadorNombre,
+      r.horometroOdometro,
+      r.cantidadLitros
     ]);
 
     autoTable(doc, {
-      head: [['Fecha', 'N° Reporte', 'Tipo', 'Proyecto', 'Máquina', 'Surtidor', 'Operador', 'Litros', 'Valid.']],
+      head: [['Fecha', 'N° Reporte', 'Obra', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
       body: tableData,
-      startY: kpiY + kpiH + 6,
-      margin: { left: mg, right: mg },
-      theme: 'plain',
-      styles: {
-        fontSize: 7.5,
-        cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
-        textColor: [...C.oscuro],
-        lineColor: [...C.gris4],
-        lineWidth: 0.2,
-      },
+      startY: 30,
+      theme: 'grid',
       headStyles: {
-        fillColor: [...C.oscuro],
-        textColor: [...C.gris3],
-        fontSize: 6.5,
-        fontStyle: 'bold',
-        cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+        fillColor: [249, 115, 22],
+        textColor: 255,
+        fontSize: 9,
+        fontStyle: 'bold'
       },
-      alternateRowStyles: { fillColor: [...C.gris5] },
-      columnStyles: {
-        0: { cellWidth: 22 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 18, fontStyle: 'bold' },
-        3: { cellWidth: 'auto' },
-        4: { cellWidth: 28 },
-        5: { cellWidth: 32 },
-        6: { cellWidth: 32 },
-        7: { cellWidth: 22, halign: 'right', fontStyle: 'bold', textColor: [...C.naranja] },
-        8: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+      bodyStyles: {
+        fontSize: 8
       },
-      didParseCell(data) {
-        if (data.section === 'body' && data.column.index === 2) {
-          data.cell.styles.textColor = data.cell.raw === 'ENTRADA' ? [...C.amber] : [...C.naranja];
-        }
-        if (data.section === 'body' && data.column.index === 8 && data.cell.raw === '✓') {
-          data.cell.styles.textColor = [...C.verde];
-          data.cell.styles.fontSize  = 9;
-        }
-      },
-      foot: [['', '', '', '', '', '', 'TOTAL', `${totalLitros.toLocaleString('es-CL')} L`, `${firmados}✓`]],
-      footStyles: {
-        fillColor: [...C.oscuro],
-        textColor: [...C.blanco],
-        fontStyle: 'bold',
-        fontSize: 7.5,
-      },
-      didDrawPage(data) {
-        const pHp = doc.internal.pageSize.getHeight();
-        doc.setFillColor(...C.oscuro); doc.rect(0, pHp - 10, pW, 10, 'F');
-        doc.setFillColor(...C.naranja); doc.rect(0, pHp - 10, 4, 10, 'F');
-        doc.setFontSize(5.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
-        doc.text('MPF Ingeniería Civil · Sistema de Control de Combustible', mg, pHp - 4);
-        doc.text(`Página ${data.pageNumber}`, pW - mg, pHp - 4, { align: 'right' });
-      },
+      alternateRowStyles: {
+        fillColor: [255, 247, 237]
+      }
     });
 
     doc.save(`Reportes_Combustible_${new Date().toISOString().split('T')[0]}.pdf`);
@@ -778,6 +647,7 @@ export default function ReporteCombustible() {
                   <p className="text-orange-100 text-sm mt-1">Control y gestión de salidas de combustible</p>
                 </div>
               </div>
+              {userRole !== 'mandante' && (
               <button
                 onClick={() => setShowCombustibleModal(true)}
                 className="px-6 py-3 bg-white hover:bg-orange-50 text-orange-700 font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
@@ -788,6 +658,7 @@ export default function ReporteCombustible() {
                 </svg>
                 Reporte Combustible
               </button>
+              )}
             </div>
           </div>
         </div>
@@ -919,6 +790,25 @@ export default function ReporteCombustible() {
       {/* Tabla */}
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-orange-100">
+          {/* Banner mandante */}
+          {userRole === 'mandante' && (
+            <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-b-2 border-orange-200 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-orange-900 mb-1">Vista de Mandante</h3>
+                  <p className="text-xs text-orange-700">
+                    Como mandante, solo visualiza reportes de combustible que han sido <strong>validados y firmados</strong> por un administrador.
+                    Puede seleccionar reportes y descargar PDFs detallados de los mismos.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gradient-to-r from-orange-600 via-orange-700 to-amber-700 text-white">
@@ -960,7 +850,12 @@ export default function ReporteCombustible() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         <p className="font-semibold">No se encontraron reportes</p>
-                        <p className="text-sm">Ajusta los filtros o crea un nuevo reporte</p>
+                        <p className="text-sm">
+                          {userRole === 'mandante'
+                            ? 'No hay reportes firmados disponibles. Los reportes deben ser validados por un administrador para aparecer aquí.'
+                            : 'Ajusta los filtros o crea un nuevo reporte'
+                          }
+                        </p>
                       </div>
                     </td>
                   </tr>
@@ -1041,7 +936,7 @@ export default function ReporteCombustible() {
                       <td className="px-3 py-3 text-center">
                         {reporte.tipo === 'entrega' ? (
                           <button
-                            onClick={() => handleReimprimirVoucher(reporte)}
+                            onClick={() => setVoucherPreviewReporte(reporte)}
                             className="px-3 py-1 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto whitespace-nowrap"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1391,19 +1286,24 @@ export default function ReporteCombustible() {
           onClose={() => setReporteDetalle(null)}
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
           machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.machineId))}
-          surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
+          surtidorInfo={
+            empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))
+            || { nombre: reporteDetalle.repartidorNombre || '-', rut: reporteDetalle.repartidorRut || '' }
+          }
+          equipoSurtidorInfo={machines.find(m => m.id === reporteDetalle.equipoSurtidorId)}
           operadorInfo={empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.operadorId))}
           userRole={userRole}
+          currentUserName={currentUser?.displayName || currentUser?.email || ""}
           onSave={async (editedData) => {
             try {
               // Guardar los cambios en Firebase
-              const reporteRef = doc(db, 'control_combustible', reporteDetalle.id);
+              const reporteRef = doc(db, 'reportes_combustible', reporteDetalle.id);
               await updateDoc(reporteRef, editedData);
               console.log('Reporte actualizado:', editedData);
               
               // Recargar reportes
-              const reportesRef = collection(db, 'control_combustible');
-              const q = query(reportesRef, orderBy('fecha', 'desc'));
+              const reportesRef = collection(db, 'reportes_combustible');
+              const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
               const reportesSnap = await getDocs(q);
               const reportesData = reportesSnap.docs.map(doc => ({
                 id: doc.id,
@@ -1425,13 +1325,11 @@ export default function ReporteCombustible() {
           }}
           onSign={async (signatureData, pin) => {
             try {
-              // Validar el PIN del administrador contra Firebase
               if (!currentUser) {
                 alert("Error: No hay usuario autenticado");
                 return;
               }
 
-              // Obtener el documento del usuario actual
               const userRef = doc(db, 'users', currentUser.uid);
               const userDoc = await getDoc(userRef);
               
@@ -1443,59 +1341,198 @@ export default function ReporteCombustible() {
               const userData = userDoc.data();
               const storedPin = userData.pin;
 
-              // Validar el PIN
               if (!storedPin) {
-                alert("Error: El usuario no tiene un PIN configurado. Por favor contacte al administrador del sistema.");
+                alert("Error: El usuario no tiene un PIN configurado.");
                 return;
               }
 
-              if (storedPin !== pin) {
+              if (String(storedPin) !== String(pin)) {
                 alert("PIN incorrecto. Por favor verifique e intente nuevamente.");
                 return;
               }
 
-              // PIN correcto, proceder con la firma
-              const reporteRef = doc(db, 'control_combustible', reporteDetalle.id);
+              // PIN correcto — firma
+              const nombreAdmin = userData.nombre || currentUser.email || 'Administrador';
+              const timestampFirma = new Date().toISOString();
+
+              const reporteRef = doc(db, 'reportes_combustible', reporteDetalle.id);
               await updateDoc(reporteRef, {
                 firmado: true,
                 firmaAdmin: {
-                  nombre: signatureData.adminName,
-                  timestamp: signatureData.timestamp,
+                  nombre: nombreAdmin,
+                  timestamp: timestampFirma,
                   userId: currentUser.uid
                 }
               });
-              
-              console.log('Reporte firmado exitosamente');
-              
+
               // Recargar reportes
-              const reportesRef = collection(db, 'control_combustible');
-              const q = query(reportesRef, orderBy('fecha', 'desc'));
+              const reportesRef = collection(db, 'reportes_combustible');
+              const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
               const reportesSnap = await getDocs(q);
-              const reportesData = reportesSnap.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
-              setReportes(reportesData);
-              
-              // Actualizar el reporte en detalle
+              setReportes(reportesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
               setReporteDetalle({
                 ...reporteDetalle,
                 firmado: true,
-                firmaAdmin: {
-                  nombre: signatureData.adminName,
-                  timestamp: signatureData.timestamp,
-                  userId: currentUser.uid
-                }
+                firmaAdmin: { nombre: nombreAdmin, timestamp: timestampFirma, userId: currentUser.uid }
               });
-              
+
               alert("✓ Reporte firmado y validado exitosamente");
             } catch (error) {
               console.error("Error firmando reporte:", error);
-              alert("Error al firmar el reporte. Por favor intente nuevamente.");
+              alert(`Error al firmar: ${error.message || error}`);
             }
           }}
         />
       )}
+
+      {/* ── MODAL: Previsualización de Voucher con Firma ── */}
+      {voucherPreviewReporte && (() => {
+        const r = voucherPreviewReporte;
+        const project = projects.find(p => p.id === r.projectId);
+        const machine = machines.find(m => m.id === r.datosEntrega?.machineId);
+        const operador = empleados.find(e => e.id === r.datosEntrega?.operadorId);
+        const empresa = empresas.find(e => e.id === r.datosEntrega?.empresa);
+        const repartidor = empleados.find(e => e.id === r.repartidorId) || { nombre: r.repartidorNombre, rut: r.repartidorRut };
+        const equipoSurtidor = machines.find(m => m.id === r.equipoSurtidorId);
+        const firmaReceptor = r.firmaReceptor || r.datosEntrega?.firmaReceptor;
+        const firmaRepartidor = r.firmaRepartidor || r.datosEntrega?.firmaRepartidor;
+
+        return (
+          <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full my-auto">
+
+              {/* Header */}
+              <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-5 rounded-t-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold">Voucher de Entrega</h3>
+                    <p className="text-slate-400 text-sm mt-0.5">{r.numeroReporte}</p>
+                  </div>
+                  <button
+                    onClick={() => setVoucherPreviewReporte(null)}
+                    className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-4">
+
+                {/* Datos resumen */}
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 font-semibold mb-1">FECHA</p>
+                    <p className="font-bold text-slate-800">{r.fecha || r.fechaCreacion?.split('T')[0] || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 font-semibold mb-1">PROYECTO</p>
+                    <p className="font-bold text-slate-800">{project?.name || project?.nombre || r.projectId || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 font-semibold mb-1">MÁQUINA</p>
+                    <p className="font-bold text-slate-800">{machine?.patente || machine?.code || r.datosEntrega?.maquinaExterna?.patente || '—'}</p>
+                    {(machine?.name || r.datosEntrega?.maquinaExterna?.tipo) && (
+                      <p className="text-xs text-slate-500">{machine?.name || r.datosEntrega?.maquinaExterna?.tipo}</p>
+                    )}
+                  </div>
+                  <div className="bg-orange-50 rounded-xl p-3 border border-orange-200">
+                    <p className="text-xs text-orange-600 font-semibold mb-1">LITROS</p>
+                    <p className="font-bold text-orange-700 text-lg">{r.datosEntrega?.cantidadLitros ?? r.cantidadLitros ?? '—'} L</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 font-semibold mb-1">OPERADOR</p>
+                    <p className="font-bold text-slate-800">{operador?.nombre || r.datosEntrega?.operadorExterno?.nombre || '—'}</p>
+                    {(operador?.rut || r.datosEntrega?.operadorExterno?.rut) && (
+                      <p className="text-xs text-slate-500">{operador?.rut || r.datosEntrega?.operadorExterno?.rut}</p>
+                    )}
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 font-semibold mb-1">REPARTIDOR</p>
+                    <p className="font-bold text-slate-800">{repartidor?.nombre || '—'}</p>
+                    {repartidor?.rut && <p className="text-xs text-slate-500">{repartidor.rut}</p>}
+                  </div>
+                  {(equipoSurtidor || r.equipoSurtidorId) && (
+                    <div className="col-span-2 bg-slate-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-500 font-semibold mb-1">EQUIPO SURTIDOR</p>
+                      <p className="font-bold text-slate-800">
+                        {equipoSurtidor
+                          ? `${equipoSurtidor.patente || equipoSurtidor.code || ''} — ${equipoSurtidor.name || equipoSurtidor.nombre || ''}`.replace(/^ — | — $/, '').trim()
+                          : r.equipoSurtidorId}
+                      </p>
+                      {equipoSurtidor?.tipo && <p className="text-xs text-slate-500">{equipoSurtidor.tipo}</p>}
+                    </div>
+                  )}
+                </div>
+
+                {/* Firmas */}
+                <div className="border-t border-slate-200 pt-4 space-y-4">
+                  <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                    Firmas del documento
+                  </h4>
+
+                  {/* Firma Receptor */}
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Firma del Receptor</p>
+                    {firmaReceptor ? (
+                      <div className="border-2 border-slate-200 rounded-xl p-3 bg-slate-50">
+                        <img src={firmaReceptor} alt="Firma del receptor" className="max-h-28 mx-auto" />
+                        <p className="text-center text-xs text-slate-500 mt-2">
+                          {operador?.nombre || r.datosEntrega?.operadorExterno?.nombre || 'Receptor'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center bg-slate-50">
+                        <svg className="w-8 h-8 text-slate-300 mx-auto mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                        <p className="text-xs text-slate-400 font-medium">Sin firma del receptor</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Firma Repartidor */}
+                  {firmaRepartidor && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">Firma del Repartidor</p>
+                      <div className="border-2 border-slate-200 rounded-xl p-3 bg-slate-50">
+                        <img src={firmaRepartidor} alt="Firma del repartidor" className="max-h-28 mx-auto" />
+                        <p className="text-center text-xs text-slate-500 mt-2">{repartidor?.nombre || 'Repartidor'}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Botones */}
+                <div className="flex gap-3 pt-2 border-t border-slate-200">
+                  <button
+                    onClick={() => setVoucherPreviewReporte(null)}
+                    className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-sm"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    onClick={() => handleReimprimirVoucher(r)}
+                    className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Reimprimir
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 }

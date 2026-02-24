@@ -317,6 +317,30 @@ export function generateThermalVoucher({
     
     <div class="line"></div>
     
+    <!-- REPARTIDOR / EQUIPO SURTIDOR -->
+    <div class="section">
+      <div class="bold">REPARTIDOR</div>
+      <div class="row">
+        <span class="label">Nombre:</span>
+        <span>${formatNombreCorto(repartidorInfo?.nombre)}</span>
+      </div>
+      <div class="row">
+        <span class="label">Run:</span>
+        <span>${formatRun(repartidorInfo?.rut)}</span>
+      </div>
+      ${equipoSurtidorInfo ? `
+      <div class="row">
+        <span class="label">Equipo:</span>
+        <span>${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
+      </div>
+      <div class="row">
+        <span class="label">Desc:</span>
+        <span>${equipoSurtidorInfo.name || equipoSurtidorInfo.nombre || ''}</span>
+      </div>` : ''}
+    </div>
+    
+    <div class="line"></div>
+    
     <!-- FECHA Y HORA -->
     <div class="section">
       <div class="row">

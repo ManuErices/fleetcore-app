@@ -397,7 +397,7 @@ export default function CombustiblePage({ onClose }) {
         dataToSave.fechaFirma = new Date().toISOString();
       }
 
-      await addDoc(collection(db, 'reportes_combustible'), dataToSave);
+      const reporteDocRef = await addDoc(collection(db, 'reportes_combustible'), dataToSave);
 
       console.log('✅ Reporte guardado en Firebase');
       console.log('📝 Tipo de reporte:', tipoReporte);
@@ -423,6 +423,7 @@ export default function CombustiblePage({ onClose }) {
       });
       
       setLastReportData({
+        reporteId: reporteDocRef.id,
         reportData: {
           ...dataToSave,
           numeroReporte,
@@ -1274,6 +1275,7 @@ export default function CombustiblePage({ onClose }) {
           empresaInfo={lastReportData.empresaInfo}
           repartidorInfo={lastReportData.repartidorInfo}
           equipoSurtidorInfo={lastReportData.equipoSurtidorInfo}
+          reporteId={lastReportData.reporteId}
           onClose={() => {
             setShowVoucherModal(false);
             setLastReportData(null);
