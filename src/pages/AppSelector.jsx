@@ -82,7 +82,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
       {/* Background decorativo */}
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
@@ -91,8 +91,8 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
       {/* Container */}
       <div className="relative w-full max-w-6xl">
         {/* Header con usuario */}
-        <div className="text-center mb-8 animate-fadeInUp">
-          <div className="inline-flex items-center gap-3 px-6 py-3 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-6">
+        <div className="text-center mb-5 sm:mb-8 animate-fadeInUp">
+          <div className="inline-flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4 sm:mb-6">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg">
               <span className="text-white text-sm font-bold">
                 {user?.email?.[0]?.toUpperCase() || "U"}
@@ -113,16 +113,16 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             </button>
           </div>
 
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight">
+          <h1 className="text-2xl sm:text-4xl lg:text-6xl font-black text-white mb-2 sm:mb-4 tracking-tight">
             Selecciona tu aplicación
           </h1>
-          <p className="text-lg sm:text-xl text-blue-200 font-medium">
+          <p className="text-sm sm:text-lg text-blue-200 font-medium">
             Elige la herramienta que necesitas para tu trabajo
           </p>
         </div>
 
         {/* Cards de aplicaciones */}
-        <div className="grid md:grid-cols-2 gap-6 lg:gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
           {/* FleetCore Card */}
           <div 
             onClick={handleSelectFleetCore}
@@ -132,9 +132,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <div className={`absolute inset-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-3xl blur-xl transition-opacity ${canAccessFleetCore ? 'opacity-50 group-hover:opacity-75' : 'opacity-20'}`} />
             
             {/* Card content */}
-            <div className={`relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 transition-all ${
+            <div className={`relative bg-white rounded-3xl p-5 sm:p-8 lg:p-10 shadow-2xl border-2 transition-all ${
               canAccessFleetCore 
-                ? 'border-blue-200 hover:border-blue-400 group-hover:scale-105 group-hover:-translate-y-2' 
+                ? 'border-blue-200 hover:border-blue-400 sm:group-hover:scale-105 sm:group-hover:-translate-y-2 active:scale-98' 
                 : 'border-slate-300 opacity-60'
             }`}>
               
@@ -156,16 +156,16 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               )}
               
               {/* Icon */}
-              <div className="mx-auto mb-6 flex items-center justify-center">
+              <div className="mx-auto mb-4 sm:mb-6 flex items-center justify-center">
                 <img
                   src="/logo-movil2.svg"
                   alt="FleetCore"
-                  className="h-28 sm:h-32 w-auto object-contain"
+                  className="h-20 sm:h-28 lg:h-32 w-auto object-contain"
                 />
               </div>
 
               {/* Features */}
-              <ul className="space-y-3 mb-8">
+              <ul className="space-y-2 sm:space-y-3 mb-5 sm:mb-8">
                 <Feature icon="📊" text="Dashboard y reportes" />
                 <Feature icon="🚜" text="Gestión de equipos" />
                 <Feature icon="📅" text="Calendario y logs" />
@@ -175,7 +175,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               </ul>
 
               {/* Button */}
-              <button className="w-full py-4 bg-gradient-to-r from-blue-900 to-blue-700 hover:from-blue-800 hover:to-blue-600 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 group-hover:scale-105">
+              <button className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-blue-900 to-blue-700 hover:from-blue-800 hover:to-blue-600 active:from-blue-950 active:to-blue-800 text-white font-bold rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
                 <span>Abrir FleetCore</span>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -203,9 +203,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <div className={`absolute inset-0 bg-gradient-to-br from-purple-500 to-purple-700 rounded-3xl blur-xl transition-opacity ${canAccessWorkFleet ? 'opacity-50 group-hover:opacity-75' : 'opacity-20'}`} />
             
             {/* Card content */}
-            <div className={`relative bg-white rounded-3xl p-8 sm:p-10 shadow-2xl border-2 transition-all ${
+            <div className={`relative bg-white rounded-3xl p-5 sm:p-8 lg:p-10 shadow-2xl border-2 transition-all ${
               canAccessWorkFleet 
-                ? 'border-purple-200 hover:border-purple-400 group-hover:scale-105 group-hover:-translate-y-2' 
+                ? 'border-purple-200 hover:border-purple-400 sm:group-hover:scale-105 sm:group-hover:-translate-y-2 active:scale-98' 
                 : 'border-slate-300 opacity-60'
             }`}>
               
@@ -227,16 +227,16 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               )}
               
               {/* Icon */}
-              <div className="mx-auto mb-6 flex items-center justify-center">
+              <div className="mx-auto mb-4 sm:mb-6 flex items-center justify-center">
                 <img
                   src="/wf-logo-movil.svg"
                   alt="WorkFleet"
-                  className="h-28 sm:h-32 w-auto object-contain"
+                  className="h-20 sm:h-28 lg:h-32 w-auto object-contain"
                 />
               </div>
 
               {/* Features */}
-              <ul className="space-y-3 mb-8">
+              <ul className="space-y-2 sm:space-y-3 mb-5 sm:mb-8">
                 <Feature icon="📱" text="Optimizado para móvil" />
                 <Feature icon="📝" text="Reporte detallado diario" />
                 <Feature icon="📷" text="Escaneo QR de equipos" />
@@ -246,7 +246,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               </ul>
 
               {/* Button */}
-              <button className="w-full py-4 bg-gradient-to-r from-purple-900 to-purple-700 hover:from-purple-800 hover:to-purple-600 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 group-hover:scale-105">
+              <button className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-purple-900 to-purple-700 hover:from-purple-800 hover:to-purple-600 active:from-purple-950 active:to-purple-800 text-white font-bold rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
                 <span>Abrir WorkFleet</span>
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
@@ -277,9 +277,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
 function Feature({ icon, text }) {
   return (
-    <li className="flex items-center gap-3 text-slate-700">
-      <span className="text-2xl">{icon}</span>
-      <span className="font-medium">{text}</span>
+    <li className="flex items-center gap-2 sm:gap-3 text-slate-700">
+      <span className="text-xl sm:text-2xl">{icon}</span>
+      <span className="font-medium text-sm sm:text-base">{text}</span>
     </li>
   );
 }

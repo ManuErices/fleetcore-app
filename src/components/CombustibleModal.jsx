@@ -461,13 +461,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[95vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6 sticky top-0 z-10">
+        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4 sm:p-6 sticky top-0 z-10">
+          <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-3"></div>
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-black">Control de Combustible</h2>
+              <h2 className="text-lg sm:text-2xl font-black">Control de Combustible</h2>
               <p className="text-orange-100 text-sm mt-1">
                 {paso === 1 && "Información del Control"}
                 {paso === 2 && "Selecciona el tipo de reporte"}
@@ -487,37 +488,37 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         </div>
 
         {/* Indicador de pasos */}
-        <div className="bg-orange-50 p-4 border-b border-orange-200">
-          <div className="flex items-center justify-center gap-4">
+        <div className="bg-orange-50 px-3 py-3 sm:p-4 border-b border-orange-200">
+          <div className="flex items-center justify-center gap-2 sm:gap-4">
             <div className={`flex items-center gap-2 ${paso >= 1 ? 'text-orange-600' : 'text-slate-400'}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
                 1
               </div>
-              <span className="text-sm font-semibold">Control</span>
+              <span className="text-xs sm:text-sm font-semibold hidden xs:inline sm:inline">Control</span>
             </div>
-            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 sm:w-6 sm:h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
             <div className={`flex items-center gap-2 ${paso >= 2 ? 'text-orange-600' : 'text-slate-400'}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
                 2
               </div>
-              <span className="text-sm font-semibold">Tipo</span>
+              <span className="text-xs sm:text-sm font-semibold hidden xs:inline sm:inline">Tipo</span>
             </div>
-            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 sm:w-6 sm:h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
             <div className={`flex items-center gap-2 ${paso >= 3 ? 'text-orange-600' : 'text-slate-400'}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 3 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
                 3
               </div>
-              <span className="text-sm font-semibold">Detalles</span>
+              <span className="text-xs sm:text-sm font-semibold hidden xs:inline sm:inline">Detalles</span>
             </div>
           </div>
         </div>
 
         {/* Contenido */}
-        <div className="p-6">
+        <div className="p-3 sm:p-6">
           {/* PASO 1: Control de Combustible */}
           {paso === 1 && (
             <div className="space-y-6">
@@ -526,7 +527,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <p className="text-sm text-orange-700">Información general del control (Página 1 de 2)</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Código Obra <span className="text-red-500">*</span>
@@ -535,7 +536,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     required
                     value={datosControl.projectId}
                     onChange={(e) => setDatosControl({...datosControl, projectId: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500 text-base sm:text-sm"
                   >
                     <option value="">Seleccione obra</option>
                     {projects.map(p => (
@@ -553,7 +554,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     required
                     value={datosControl.fecha}
                     onChange={(e) => setDatosControl({...datosControl, fecha: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500 text-base sm:text-sm"
                     max={new Date().toISOString().split('T')[0]}
                   />
                 </div>
@@ -562,7 +563,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
                 <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                       Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
@@ -627,7 +628,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       <select
                         value={datosControl.equipoSurtidorId}
                         onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
-                        className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                        className="flex-1 px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                       >
                         <option value="">Seleccione equipo surtidor</option>
                         {machinesLocal.filter(m => 
@@ -663,14 +664,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => setPaso(2)}
                   disabled={!datosControl.projectId || !datosControl.repartidorId}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl active:scale-95 transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   Siguiente →
                 </button>
@@ -686,23 +687,23 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <p className="text-sm text-orange-700">Selecciona si es entrada o entrega de combustible</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-6">
                 {/* ENTRADA */}
                 <button
                   onClick={() => {
                     setTipoReporte('entrada');
                     setPaso(3);
                   }}
-                  className="group relative bg-gradient-to-br from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 border-3 border-green-300 hover:border-green-500 rounded-2xl p-8 transition-all hover:shadow-xl"
+                  className="group relative bg-gradient-to-br from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 border-3 border-green-300 hover:border-green-500 rounded-2xl p-5 sm:p-8 transition-all hover:shadow-xl"
                 >
                   <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-7 h-7 sm:w-10 sm:h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                       </svg>
                     </div>
                     <div className="text-center">
-                      <h4 className="text-xl font-black text-green-900 mb-2">ENTRADA</h4>
+                      <h4 className="text-base sm:text-xl font-black text-green-900 mb-1">ENTRADA</h4>
                       <p className="text-sm text-green-700">Recepción de combustible al estanque</p>
                       <p className="text-xs text-green-600 mt-2">• N° Guía • Cantidad • Origen</p>
                     </div>
@@ -715,16 +716,16 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     setTipoReporte('entrega');
                     setPaso(3);
                   }}
-                  className="group relative bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-3 border-blue-300 hover:border-blue-500 rounded-2xl p-8 transition-all hover:shadow-xl"
+                  className="group relative bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-3 border-blue-300 hover:border-blue-500 rounded-2xl p-5 sm:p-8 transition-all hover:shadow-xl"
                 >
                   <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <svg className="w-7 h-7 sm:w-10 sm:h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                       </svg>
                     </div>
                     <div className="text-center">
-                      <h4 className="text-xl font-black text-blue-900 mb-2">ENTREGA</h4>
+                      <h4 className="text-base sm:text-xl font-black text-blue-900 mb-1">ENTREGA</h4>
                       <p className="text-sm text-blue-700">Entrega de combustible a máquina</p>
                       <p className="text-xs text-blue-600 mt-2">• Máquina • Operador • Litros</p>
                     </div>
@@ -735,7 +736,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               <div className="flex gap-3 pt-4 border-t border-orange-200">
                 <button
                   onClick={() => setPaso(1)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   ← Atrás
                 </button>
@@ -751,7 +752,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <p className="text-sm text-green-700">Recepción de combustible al estanque (Página 2 de 2)</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {/* Tipo de Origen */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -761,7 +762,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     required
                     value={datosEntrada.tipoOrigen}
                     onChange={(e) => setDatosEntrada({...datosEntrada, tipoOrigen: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                   >
                     <option value="">Seleccione tipo</option>
                     <option value="estacion">⛽ Estación de Servicio (Guía)</option>
@@ -780,7 +781,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <select
                       value={datosEntrada.origen}
                       onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
-                      className="flex-1 px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                      className="flex-1 px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     >
                       <option value="">Seleccione origen</option>
                       {empresasLocal.map(emp => (
@@ -816,7 +817,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     required
                     value={datosEntrada.numeroDocumento}
                     onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     placeholder={
                       datosEntrada.tipoOrigen === 'estacion' 
                         ? 'Ej: GD-12345' 
@@ -837,7 +838,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     required
                     value={datosEntrada.fechaDocumento}
                     onChange={(e) => setDatosEntrada({...datosEntrada, fechaDocumento: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                   />
                 </div>
 
@@ -853,7 +854,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     step="0.01"
                     value={datosEntrada.cantidad}
                     onChange={(e) => setDatosEntrada({...datosEntrada, cantidad: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     placeholder="Ej: 5000"
                   />
                 </div>
@@ -890,7 +891,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <textarea
                     value={datosEntrada.observaciones}
                     onChange={(e) => setDatosEntrada({...datosEntrada, observaciones: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px]"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px] text-base sm:text-sm"
                     placeholder="Notas adicionales..."
                   />
                 </div>
@@ -931,10 +932,10 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <button
                     type="button"
                     onClick={() => setShowModalFirmaRepartidor(true)}
-                    className="w-full px-6 py-4 border-2 border-dashed border-green-300 rounded-xl bg-green-50 hover:bg-green-100 transition-all group"
+                    className="w-full px-4 sm:px-6 py-3 sm:py-4 border-2 border-dashed border-green-300 rounded-xl bg-green-50 hover:bg-green-100 active:bg-green-200 transition-all group"
                   >
                     <div className="flex flex-col items-center gap-2">
-                      <svg className="w-12 h-12 text-green-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-8 h-8 sm:w-12 sm:h-12 text-green-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                       </svg>
                       <span className="text-green-800 font-bold">Click para firmar</span>
@@ -947,14 +948,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               <div className="flex gap-3 pt-4 border-t border-green-200">
                 <button
                   onClick={() => setPaso(2)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   ← Atrás
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={loading || !datosEntrada.numeroDocumento || !datosEntrada.cantidad || !firmaRepartidor}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl active:scale-95 transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   {loading ? 'Guardando...' : '✓ Guardar Entrada'}
                 </button>
@@ -970,7 +971,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <p className="text-sm text-blue-700">Entrega de combustible a máquina (Página 2 de 2)</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Empresa
@@ -987,7 +988,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         setSearchOperador('');
                         setSearchMaquina('');
                       }}
-                      className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                      className="flex-1 px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     >
                       <option value="">Seleccione empresa</option>
                       {empresasLocal.map(emp => (
@@ -1019,7 +1020,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="date"
                     value={datosEntrega.fecha}
                     onChange={(e) => setDatosEntrega({...datosEntrega, fecha: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     max={new Date().toISOString().split('T')[0]}
                   />
                 </div>
@@ -1038,7 +1039,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         </svg>
                         <input type="text" placeholder="Buscar operador..." value={searchOperador}
                           onChange={e => setSearchOperador(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"/>
                       </div>
                       {datosEntrega.operadorId && (() => {
                         const sel = empleados.find(e => e.id === datosEntrega.operadorId);
@@ -1059,7 +1060,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         ) : null;
                       })()}
                       {!datosEntrega.operadorId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                        <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 max-h-52 sm:max-h-44 overflow-y-auto pr-1">
                           {empleados
                             .filter(emp => !searchOperador ||
                               emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
@@ -1112,7 +1113,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         </svg>
                         <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
                           onChange={e => setSearchMaquina(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"/>
                       </div>
                       {datosEntrega.machineId && (() => {
                         const sel = machines.find(m => m.id === datosEntrega.machineId);
@@ -1135,7 +1136,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         ) : null;
                       })()}
                       {!datosEntrega.machineId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                        <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 max-h-52 sm:max-h-44 overflow-y-auto pr-1">
                           {machines
                             .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
                             .filter(m => !searchMaquina ||
@@ -1192,7 +1193,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     step="0.1"
                     value={datosEntrega.horometroOdometro}
                     onChange={(e) => setDatosEntrega({...datosEntrega, horometroOdometro: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     placeholder="Ej: 1234.5"
                   />
                 </div>
@@ -1208,7 +1209,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     step="0.01"
                     value={datosEntrega.cantidadLitros}
                     onChange={(e) => setDatosEntrega({...datosEntrega, cantidadLitros: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     placeholder="Ej: 150.50"
                   />
                 </div>
@@ -1220,7 +1221,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <textarea
                     value={datosEntrega.observaciones}
                     onChange={(e) => setDatosEntrega({...datosEntrega, observaciones: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px]"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px] text-base sm:text-sm"
                     placeholder="Notas adicionales..."
                   />
                 </div>
@@ -1261,10 +1262,10 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <button
                     type="button"
                     onClick={() => setShowModalFirmaReceptor(true)}
-                    className="w-full px-6 py-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 hover:bg-blue-100 transition-all group"
+                    className="w-full px-4 sm:px-6 py-3 sm:py-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 hover:bg-blue-100 active:bg-blue-200 transition-all group"
                   >
                     <div className="flex flex-col items-center gap-2">
-                      <svg className="w-12 h-12 text-blue-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-8 h-8 sm:w-12 sm:h-12 text-blue-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                       </svg>
                       <span className="text-blue-800 font-bold">Click para firmar</span>
@@ -1277,14 +1278,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               <div className="flex gap-3 pt-4 border-t border-blue-200">
                 <button
                   onClick={() => setPaso(2)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   ← Atrás
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl active:scale-95 transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   {loading ? 'Guardando...' : '✓ Guardar Entrega'}
                 </button>
@@ -1296,14 +1297,15 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       {/* Modal: Nuevo Equipo Surtidor */}
       {showModalEquipoSurtidor && (
-        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
-            <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white p-6">
-              <h3 className="text-xl font-black">🚛 Nuevo Equipo Surtidor</h3>
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-gradient-to-r from-amber-600 to-orange-600 text-white p-4 sm:p-6 sticky top-0 z-10">
+            <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-2"></div>
+              <h3 className="text-base sm:text-xl font-black">🚛 Nuevo Equipo Surtidor</h3>
               <p className="text-amber-100 text-sm mt-1">Camión o equipo que entrega combustible</p>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 sm:p-6 space-y-3 sm:space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Patente <span className="text-red-500">*</span>
@@ -1312,7 +1314,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="text"
                     value={nuevoEquipoSurtidor.patente}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase()})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: AABB01"
                   />
                 </div>
@@ -1324,7 +1326,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="text"
                     value={nuevoEquipoSurtidor.nombre}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, nombre: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Camión Combustible"
                   />
                 </div>
@@ -1336,7 +1338,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="text"
                     value={nuevoEquipoSurtidor.tipo}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, tipo: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Camión, Mochila"
                   />
                 </div>
@@ -1348,7 +1350,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="text"
                     value={nuevoEquipoSurtidor.marca}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, marca: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Mercedes Benz"
                   />
                 </div>
@@ -1360,7 +1362,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="text"
                     value={nuevoEquipoSurtidor.modelo}
                     onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, modelo: e.target.value})}
-                    className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Actros 2644"
                   />
                 </div>
@@ -1377,7 +1379,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       modelo: ''
                     });
                   }}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   Cancelar
                 </button>
@@ -1396,13 +1398,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       {/* Modal: Nueva Empresa */}
       {showModalEmpresa && (
-        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
-              <h3 className="text-xl font-black">🏢 Nueva Empresa</h3>
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 sm:p-6 sticky top-0 z-10">
+            <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-2"></div>
+              <h3 className="text-base sm:text-xl font-black">🏢 Nueva Empresa</h3>
               <p className="text-blue-100 text-sm mt-1">Empresa que recibe el combustible</p>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-3 sm:space-y-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">
                   Nombre de la Empresa <span className="text-red-500">*</span>
@@ -1411,7 +1414,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   type="text"
                   value={nuevaEmpresa.nombre}
                   onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, nombre: e.target.value})}
-                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                   placeholder="Ej: Constructora ABC Ltda."
                 />
               </div>
@@ -1423,7 +1426,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   type="text"
                   value={nuevaEmpresa.rut}
                   onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, rut: e.target.value})}
-                  className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                   placeholder="Ej: 76.123.456-7"
                 />
               </div>
@@ -1436,7 +1439,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       rut: ''
                     });
                   }}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  className="flex-1 px-4 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
                 >
                   Cancelar
                 </button>
@@ -1455,8 +1458,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       {/* Modal: Firma del Repartidor */}
       {showModalFirmaRepartidor && (
-        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-6">
               <div className="flex justify-between items-start">
                 <div>
@@ -1473,7 +1476,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 </button>
               </div>
             </div>
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               <SignaturePad 
                 label=""
                 color="green"
@@ -1503,8 +1506,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       {/* Modal: Firma del Receptor */}
       {showModalFirmaReceptor && (
-        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
+        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
               <div className="flex justify-between items-start">
                 <div>
@@ -1521,7 +1524,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 </button>
               </div>
             </div>
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               <SignaturePad 
                 label=""
                 color="blue"

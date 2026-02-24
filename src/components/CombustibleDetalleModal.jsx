@@ -6,11 +6,10 @@ export default function CombustibleDetalleModal({
   projectName, 
   machineInfo,
   surtidorInfo,
-  equipoSurtidorInfo,
   operadorInfo,
-  userRole = 'operador',
-  onSave,
-  onSign
+  userRole = 'operador', // 'administrador' o 'operador'
+  onSave, // función callback para guardar cambios
+  onSign // función callback para firmar el reporte
 }) {
   if (!reporte) return null;
 
@@ -52,16 +51,18 @@ export default function CombustibleDetalleModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4 sm:p-6 flex flex-col">
+          <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-3"></div>
+          <div className="flex items-start sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-black flex items-center gap-2">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <h2 className="text-base sm:text-2xl font-black flex items-center gap-2">
+              <svg className="w-5 h-5 sm:w-8 sm:h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              Detalle de Reporte de Combustible
+              <span className="truncate">Detalle de Combustible</span><span className="hidden sm:inline"> de Reporte</span>
             </h2>
             <p className="text-orange-100 text-sm mt-1">
               N° {reporte.numeroReporte} - {reporte.fecha}
@@ -76,11 +77,12 @@ export default function CombustibleDetalleModal({
             </svg>
           </button>
         </div>
+          </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
           {/* Información General del Reporte */}
-          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-6 mb-6 border-2 border-orange-200">
+          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-orange-200">
             <h3 className="text-lg font-black text-orange-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
@@ -158,7 +160,7 @@ export default function CombustibleDetalleModal({
                 <>
                   <div className="bg-white rounded-lg p-4 border-2 border-green-300">
                     <div className="text-xs font-semibold text-green-700 mb-1">Cantidad Suministrada</div>
-                    <div className="text-3xl font-black text-green-600 flex items-baseline gap-2">
+                    <div className="text-2xl sm:text-3xl font-black text-green-600 flex items-baseline gap-2">
                       {reporte.cantidadLitros}
                       <span className="text-lg text-green-500">Litros</span>
                     </div>
@@ -179,12 +181,9 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <DataField
-                  label="Repartidor / Surtidor"
-                  value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'}
-                />
-                {(surtidorInfo?.rut || reporte.repartidorRut) && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
+                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.surtidorNombre || '-'} />
+                {surtidorInfo?.rut && (
+                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo.rut}</p>
                 )}
               </div>
               <div>
@@ -193,21 +192,6 @@ export default function CombustibleDetalleModal({
                   <p className="text-xs text-slate-500 mt-1">RUT: {operadorInfo.rut}</p>
                 )}
               </div>
-              {(equipoSurtidorInfo || reporte.equipoSurtidorId) && (
-                <div className="md:col-span-2">
-                  <DataField
-                    label="Equipo Surtidor (Camión / Mochila)"
-                    value={
-                      equipoSurtidorInfo
-                        ? `${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || ''} — ${equipoSurtidorInfo.name || equipoSurtidorInfo.nombre || ''}`.trim().replace(/^— |— $/, '')
-                        : reporte.equipoSurtidorId
-                    }
-                  />
-                  {equipoSurtidorInfo?.tipo && (
-                    <p className="text-xs text-slate-500 mt-1">Tipo: {equipoSurtidorInfo.tipo}</p>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
@@ -277,7 +261,7 @@ export default function CombustibleDetalleModal({
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-xl font-black text-emerald-900">Reporte Firmado y Validado</h3>
+                    <h3 className="text-base sm:text-xl font-black text-emerald-900">Reporte Firmado y Validado</h3>
                     <p className="text-sm text-emerald-700">Este documento ha sido revisado y aprobado</p>
                   </div>
                 </div>
@@ -342,13 +326,13 @@ export default function CombustibleDetalleModal({
                 <>
                   <button
                     onClick={handleSaveChanges}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Guardar Cambios
                   </button>
                   <button
                     onClick={handleCancelEdit}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Cancelar
                   </button>
@@ -357,19 +341,19 @@ export default function CombustibleDetalleModal({
                 <>
                   <button
                     onClick={() => setIsEditing(true)}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Editar Reporte
                   </button>
                   <button
                     onClick={() => setShowSignModal(true)}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Firmar y Validar
                   </button>
                   <button
                     onClick={onClose}
-                    className="px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                    className="px-3 sm:px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
                     Cerrar
                   </button>
@@ -389,9 +373,9 @@ export default function CombustibleDetalleModal({
 
       {/* Modal de Firma */}
       {showSignModal && (
-        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-            <h3 className="text-2xl font-black text-slate-900 mb-4 flex items-center gap-2">
+            <h3 className="text-lg sm:text-2xl font-black text-slate-900 mb-4 flex items-center gap-2">
               <svg className="w-6 h-6 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
@@ -421,7 +405,7 @@ export default function CombustibleDetalleModal({
               <button
                 onClick={handleSignReport}
                 disabled={!adminPassword}
-                className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+                className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-300 disabled:to-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
               >
                 Confirmar Firma
               </button>
@@ -430,7 +414,7 @@ export default function CombustibleDetalleModal({
                   setShowSignModal(false);
                               setAdminPassword('');
                 }}
-                className="px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                className="px-3 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
               >
                 Cancelar
               </button>
