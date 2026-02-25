@@ -352,8 +352,13 @@ export default function CombustiblePage({ onClose }) {
         return;
       }
     } else if (tipoReporte === 'entrega') {
-      if (!datosEntrega.machineId || !datosEntrega.cantidadLitros) {
-        alert("Por favor completa los campos obligatorios de la entrega");
+      if (!datosEntrega.empresa) {
+        alert("Por favor selecciona una empresa");
+        return;
+      }
+      const maquinaOk = esMPF(datosEntrega.empresa) ? !!datosEntrega.machineId : !!maquinaExterna.patente;
+      if (!maquinaOk || !datosEntrega.cantidadLitros) {
+        alert("Por favor completa los campos obligatorios de la entrega (Máquina y Cantidad)");
         return;
       }
       if (!firmaReceptor) {
@@ -1179,7 +1184,7 @@ export default function CombustiblePage({ onClose }) {
                         value={maquinaExterna.patente}
                         onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
                         className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
-                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
+                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…)"
                         value={maquinaExterna.tipo}
                         onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
                         className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
@@ -1296,7 +1301,7 @@ export default function CombustiblePage({ onClose }) {
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
+                  disabled={loading || !datosEntrega.empresa || (esMPF(datosEntrega.empresa) ? !datosEntrega.machineId : !maquinaExterna.patente) || !datosEntrega.cantidadLitros || !firmaReceptor}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   {loading ? 'Guardando...' : '✓ Guardar Entrega'}
