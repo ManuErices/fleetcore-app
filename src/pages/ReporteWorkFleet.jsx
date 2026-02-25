@@ -4,9 +4,8 @@ import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../components/ReporteDetalleModal";
-import SignaturePad from "../components/SignaturePad";
 
 export default function ReporteWorkFleet() {
   const [reportes, setReportes] = useState([]);
@@ -18,8 +17,6 @@ export default function ReporteWorkFleet() {
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
   const [currentUser, setCurrentUser] = useState(null); // Usuario actual
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]); // Reportes seleccionados para descarga masiva
-  const [firmaMandanteModal, setFirmaMandanteModal] = useState(null); // { reporte } cuando está abierto
-  const [firmaMandanteTemp, setFirmaMandanteTemp] = useState(null); // base64 temporal del pad
   
   // Filtros
   const [filtros, setFiltros] = useState({
@@ -171,9 +168,12 @@ export default function ReporteWorkFleet() {
       return {
         ...r,
         projectName: project?.name || r.projectId || '',
+        projectCode: project?.codigo || '',
         machinePatente: machine?.patente || '',
         machineCode: machine?.code || '',
-        machineName: machine?.name || ''
+        machineName: machine?.name || '',
+        machineMarca: machine?.marca || machine?.modelo?.split(' ')[0] || '',
+        machineType: machine?.type || '',
       };
     });
   }, [filtros, reportes, projects, machines, userRole]);
@@ -695,79 +695,173 @@ export default function ReporteWorkFleet() {
 
   // Descargar como PDF
   const descargarPDF = () => {
-    const doc = new jsPDF('landscape');
-    
-    doc.setFontSize(18);
-    doc.text('Reportes WorkFleet', 14, 15);
-    
-    doc.setFontSize(10);
-    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
-    doc.text(`Total de reportes: ${reportesFiltrados.length}`, 14, 27);
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    const pW = doc.internal.pageSize.getWidth();   // 297
+    const pH = doc.internal.pageSize.getHeight();  // 210
 
-    const tableData = reportesFiltrados.map(r => {
-      const horasTrabajadas = r.horometroFinal && r.horometroInicial 
+    // ── Paleta ────────────────────────────────────────────────────
+    const C = {
+      oscuro:       [15,  23,  42],
+      morado:       [88,  80,  141],
+      moradoOscuro: [67,  56,  202],
+      moradoClaro:  [237, 233, 254],
+      gris1:        [30,  41,  59],
+      gris2:        [71,  85,  105],
+      gris3:        [148, 163, 184],
+      gris4:        [226, 232, 240],
+      gris5:        [248, 250, 252],
+      blanco:       [255, 255, 255],
+      verde:        [16,  185, 129],
+      amber:        [217, 119, 6],
+    };
+
+    const fechaHoy = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const horaHoy  = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+
+    // ── HEADER ────────────────────────────────────────────────────
+    // Fondo oscuro
+    doc.setFillColor(...C.oscuro);
+    doc.rect(0, 0, pW, 36, 'F');
+    // Barra morada izquierda
+    doc.setFillColor(...C.morado);
+    doc.rect(0, 0, 4, 36, 'F');
+
+    // Logo / nombre empresa
+    doc.setFillColor(...C.morado);
+    doc.roundedRect(8, 7, 22, 22, 2, 2, 'F');
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('MPF', 11.5, 17);
+    doc.setFontSize(4.5); doc.setFont(undefined, 'normal');
+    doc.text('INGENIERÍA', 9.8, 22);
+    doc.text('CIVIL', 13, 26);
+
+    // Título
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text('RESUMEN DE REPORTES', 36, 16);
+    doc.setFontSize(7); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
+    doc.text('WorkFleet · Control Operacional de Maquinaria', 36, 23);
+
+    // Línea separadora
+    doc.setDrawColor(...C.morado);
+    doc.setLineWidth(0.4);
+    doc.line(36, 26, 180, 26);
+
+    // Fecha generación (derecha)
+    doc.setFontSize(7); doc.setTextColor(...C.gris3);
+    doc.text(`Generado: ${fechaHoy} ${horaHoy}`, pW - 14, 15, { align: 'right' });
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
+    doc.text(`${reportesFiltrados.length} reportes`, pW - 14, 24, { align: 'right' });
+
+    // ── CHIPS DE FILTROS ACTIVOS ──────────────────────────────────
+    let chipX = 8;
+    const chipY = 40;
+    const addChip = (label, value) => {
+      if (!value || value === 'Todos' || value === '') return;
+      const text = `${label}: ${value}`;
+      const w = doc.getTextWidth(text) + 6;
+      doc.setFillColor(...C.moradoClaro);
+      doc.roundedRect(chipX, chipY - 4, w, 6, 1, 1, 'F');
+      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.moradoOscuro);
+      doc.text(text, chipX + 3, chipY);
+      chipX += w + 3;
+    };
+    if (filtros.fechaInicio) addChip('Desde', filtros.fechaInicio);
+    if (filtros.fechaFin)    addChip('Hasta', filtros.fechaFin);
+    const proyNombre = projects.find(p => p.id === filtros.proyecto)?.name;
+    if (proyNombre) addChip('Proyecto', proyNombre);
+
+    // ── TABLA ─────────────────────────────────────────────────────
+    const tableData = reportesFiltrados.map((r, i) => {
+      const hTrab = r.horometroFinal && r.horometroInicial
         ? (parseFloat(r.horometroFinal) - parseFloat(r.horometroInicial)).toFixed(2)
-        : '0';
-      
-      const kmRecorridos = r.kilometrajeFinal && r.kilometrajeInicial
-        ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(2)
-        : '0';
+        : '—';
+      const kmRec = r.kilometrajeFinal && r.kilometrajeInicial
+        ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(0)
+        : '—';
 
       return [
-        r.projectName || '',
-        r.fecha,
-        r.machinePatente || '',
-        r.numeroReporte,
-        r.operador,
-        r.rut,
-        r.horometroInicial || '0',
-        r.horometroFinal || '0',
-        horasTrabajadas,
-        r.kilometrajeInicial || '0',
-        r.kilometrajeFinal || '0',
-        kmRecorridos,
-        r.cargaCombustible || '0'
+        i + 1,
+        r.numeroReporte || '—',
+        r.fecha || '—',
+        r.projectName || '—',
+        r.projectCode || '—',
+        r.machineName || '—',
+        r.machineMarca || '—',
+        r.machineType || '—',
+        r.machinePatente || '—',
+        r.operador || '—',
+        `${r.horometroInicial || '0'} → ${r.horometroFinal || '0'}`,
+        hTrab,
+        kmRec,
+        r.cargaCombustible || '0',
+        r.estadoMaquina === 'operativa' ? '✓' : r.estadoMaquina || '—',
       ];
     });
 
-    doc.autoTable({
+    autoTable(doc, {
+      startY: 50,
       head: [[
-        'Obra',
-        'Fecha',
-        'Patente',
-        'N° Rep.',
-        'Operador',
-        'RUT',
-        'H.Ini',
-        'H.Fin',
-        'H.Trab',
-        'Km.Ini',
-        'Km.Fin',
-        'Km.Rec',
-        'Comb.'
+        '#', 'N° Reporte', 'Fecha', 'Obra', 'Cód. Obra',
+        'Máquina', 'Marca', 'Modelo/Tipo', 'Patente',
+        'Operador', 'Horómetro', 'H.Trab', 'Km.Rec', 'Comb.(L)', 'Estado'
       ]],
       body: tableData,
-      startY: 35,
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [124, 58, 237], fontSize: 7 },
+      styles: {
+        fontSize: 6.2,
+        cellPadding: { top: 2.5, right: 2, bottom: 2.5, left: 2 },
+        textColor: C.gris1,
+        lineColor: C.gris4,
+        lineWidth: 0.2,
+        font: 'helvetica',
+      },
+      headStyles: {
+        fillColor: C.oscuro,
+        textColor: C.blanco,
+        fontSize: 6,
+        fontStyle: 'bold',
+        cellPadding: { top: 3, right: 2, bottom: 3, left: 2 },
+        halign: 'center',
+      },
+      alternateRowStyles: {
+        fillColor: C.gris5,
+      },
       columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 13 },
-        7: { cellWidth: 13 },
-        8: { cellWidth: 13 },
-        9: { cellWidth: 13 },
-        10: { cellWidth: 13 },
-        11: { cellWidth: 13 },
-        12: { cellWidth: 13 }
-      }
+        0:  { cellWidth: 6,  halign: 'center', textColor: C.gris3 },
+        1:  { cellWidth: 22, fontStyle: 'bold', textColor: C.moradoOscuro },
+        2:  { cellWidth: 18, halign: 'center' },
+        3:  { cellWidth: 22 },
+        4:  { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+        5:  { cellWidth: 28 },
+        6:  { cellWidth: 18 },
+        7:  { cellWidth: 20 },
+        8:  { cellWidth: 16, halign: 'center', fontStyle: 'bold', textColor: C.morado },
+        9:  { cellWidth: 26 },
+        10: { cellWidth: 24, halign: 'center' },
+        11: { cellWidth: 13, halign: 'center', fontStyle: 'bold', textColor: C.verde },
+        12: { cellWidth: 13, halign: 'center' },
+        13: { cellWidth: 14, halign: 'center', textColor: C.amber, fontStyle: 'bold' },
+        14: { cellWidth: 14, halign: 'center' },
+      },
+      didDrawPage: (data) => {
+        // Footer en cada página
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFontSize(6); doc.setTextColor(...C.gris3); doc.setFont(undefined, 'normal');
+        doc.text(
+          `WorkFleet · Resumen de Reportes · ${fechaHoy}`,
+          14, pH - 6
+        );
+        doc.text(
+          `Página ${data.pageNumber} de ${pageCount}`,
+          pW - 14, pH - 6, { align: 'right' }
+        );
+        // Línea footer
+        doc.setDrawColor(...C.gris4);
+        doc.setLineWidth(0.3);
+        doc.line(8, pH - 9, pW - 8, pH - 9);
+      },
     });
 
-    doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`WorkFleet_Resumen_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   if (loading) {
@@ -993,9 +1087,6 @@ export default function ReporteWorkFleet() {
                 <th className="px-2 py-4 text-center text-xs font-bold uppercase tracking-wider" colSpan="3">Kilometraje</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Comb.</th>
                 <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firmado</th>
-                {userRole === 'mandante' && (
-                  <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firma Mandante</th>
-                )}
                 </tr>
               </thead>
               <thead className="bg-indigo-700">
@@ -1008,7 +1099,7 @@ export default function ReporteWorkFleet() {
                   <th className="px-1 py-2 text-xs font-semibold text-white">Ini</th>
                   <th className="px-1 py-2 text-xs font-semibold text-white">Fin</th>
                   <th className="px-1 py-2 text-xs font-semibold text-white">Rec.</th>
-                  <th colSpan={userRole === 'mandante' ? "3" : "2"}></th>
+                  <th colSpan="2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-indigo-100">
@@ -1088,30 +1179,6 @@ export default function ReporteWorkFleet() {
                           </div>
                         )}
                       </td>
-                      {userRole === 'mandante' && (
-                        <td className="px-3 py-3 text-center">
-                          {reporte.firmaMandante ? (
-                            <div className="flex flex-col items-center gap-1">
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-md">
-                                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                </svg>
-                              </div>
-                              <span className="text-xs text-violet-600 font-semibold">Firmado</span>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => { setFirmaMandanteTemp(null); setFirmaMandanteModal(reporte); }}
-                              className="px-3 py-1.5 bg-violet-100 hover:bg-violet-200 text-violet-700 font-semibold rounded-lg text-xs transition-colors flex items-center gap-1 mx-auto"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                              Firmar
-                            </button>
-                          )}
-                        </td>
-                      )}
                     </tr>
                   );
                 })
@@ -1296,7 +1363,6 @@ export default function ReporteWorkFleet() {
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
           machineInfo={machines.find(m => m.id === reporteDetalle.machineId)}
           userRole={userRole}
-          currentUserName={currentUser?.displayName || currentUser?.email || ""}
           onSave={async (editedData) => {
             try {
               // Aquí implementarás la lógica para guardar los cambios en Firebase
@@ -1326,11 +1392,13 @@ export default function ReporteWorkFleet() {
           }}
           onSign={async (signatureData, pin) => {
             try {
+              // Validar el PIN del administrador contra Firebase
               if (!currentUser) {
                 alert("Error: No hay usuario autenticado");
                 return;
               }
 
+              // Obtener el documento del usuario actual
               const userRef = doc(db, 'users', currentUser.uid);
               const userDoc = await getDoc(userRef);
               
@@ -1342,46 +1410,55 @@ export default function ReporteWorkFleet() {
               const userData = userDoc.data();
               const storedPin = userData.pin;
 
+              // Validar el PIN
               if (!storedPin) {
-                alert("Error: El usuario no tiene un PIN configurado.");
+                alert("Error: El usuario no tiene un PIN configurado. Por favor contacte al administrador del sistema.");
                 return;
               }
 
-              if (String(storedPin) !== String(pin)) {
+              if (storedPin !== pin) {
                 alert("PIN incorrecto. Por favor verifique e intente nuevamente.");
                 return;
               }
 
-              // PIN correcto — firma
-              const nombreAdmin = userData.nombre || currentUser.email || 'Administrador';
-              const timestampFirma = new Date().toISOString();
-
+              // PIN correcto, proceder con la firma
               const reporteRef = doc(db, 'reportes_detallados', reporteDetalle.id);
               await updateDoc(reporteRef, {
                 firmado: true,
                 firmaAdmin: {
-                  nombre: nombreAdmin,
-                  timestamp: timestampFirma,
+                  nombre: signatureData.adminName,
+                  timestamp: signatureData.timestamp,
                   userId: currentUser.uid
                 }
               });
+              
+              console.log('Reporte firmado exitosamente');
               
               // Recargar reportes
               const reportesRef = collection(db, 'reportes_detallados');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
               const querySnapshot = await getDocs(q);
-              setReportes(querySnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-
+              const reportesData = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setReportes(reportesData);
+              
+              // Actualizar el reporte en detalle
               setReporteDetalle({
                 ...reporteDetalle,
                 firmado: true,
-                firmaAdmin: { nombre: nombreAdmin, timestamp: timestampFirma, userId: currentUser.uid }
+                firmaAdmin: {
+                  nombre: signatureData.adminName,
+                  timestamp: signatureData.timestamp,
+                  userId: currentUser.uid
+                }
               });
-
+              
               alert("✓ Reporte firmado y validado exitosamente");
             } catch (error) {
               console.error("Error firmando reporte:", error);
-              alert(`Error al firmar: ${error.message || error}`);
+              alert("Error al firmar el reporte. Por favor intente nuevamente.");
             }
           }}
         />
@@ -1462,108 +1539,6 @@ export default function ReporteWorkFleet() {
           </div>
         </div>
       )}
-
-      {/* ── MODAL: Firma Mandante ── */}
-      {firmaMandanteModal && (
-        <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full my-auto">
-
-            {/* Header */}
-            <div className="bg-gradient-to-r from-violet-700 to-purple-800 text-white p-5 rounded-t-2xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                    Firma de Conformidad — Mandante
-                  </h3>
-                  <p className="text-violet-200 text-sm mt-0.5">{firmaMandanteModal.numeroReporte}</p>
-                </div>
-                <button
-                  onClick={() => { setFirmaMandanteModal(null); setFirmaMandanteTemp(null); }}
-                  className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-4">
-              {/* Info del reporte */}
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-xs text-slate-500 font-semibold mb-1">FECHA</p>
-                  <p className="font-bold text-slate-800">{firmaMandanteModal.fecha || "—"}</p>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-xs text-slate-500 font-semibold mb-1">OBRA</p>
-                  <p className="font-bold text-slate-800 truncate">{firmaMandanteModal.projectName || "—"}</p>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-xs text-slate-500 font-semibold mb-1">OPERADOR</p>
-                  <p className="font-bold text-slate-800 truncate">{firmaMandanteModal.operador || "—"}</p>
-                </div>
-              </div>
-
-              {/* SignaturePad */}
-              <div>
-                <p className="text-sm font-semibold text-slate-700 mb-2">Dibuja tu firma de conformidad:</p>
-                <SignaturePad
-                  label=""
-                  color="violet"
-                  onSave={(data) => setFirmaMandanteTemp(data)}
-                />
-              </div>
-
-              {/* Botones */}
-              <div className="flex gap-3 pt-2 border-t border-slate-200">
-                <button
-                  onClick={() => { setFirmaMandanteModal(null); setFirmaMandanteTemp(null); }}
-                  className="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  disabled={!firmaMandanteTemp}
-                  onClick={async () => {
-                    try {
-                      const reporteRef = doc(db, "reportes_detallados", firmaMandanteModal.id);
-                      const firmaMandanteData = {
-                        firma: firmaMandanteTemp,
-                        nombre: currentUser?.displayName || currentUser?.email || "Mandante",
-                        userId: currentUser?.uid || "",
-                        timestamp: new Date().toISOString()
-                      };
-                      await updateDoc(reporteRef, { firmaMandante: firmaMandanteData });
-                      setReportes(prev => prev.map(r =>
-                        r.id === firmaMandanteModal.id
-                          ? { ...r, firmaMandante: firmaMandanteData }
-                          : r
-                      ));
-                      setFirmaMandanteModal(null);
-                      setFirmaMandanteTemp(null);
-                      alert("✓ Firma de conformidad registrada exitosamente");
-                    } catch (error) {
-                      console.error("Error guardando firma mandante:", error);
-                      alert("Error al guardar la firma. Por favor intente nuevamente.");
-                    }
-                  }}
-                  className="flex-1 px-4 py-3 bg-violet-700 hover:bg-violet-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                  Confirmar Firma
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

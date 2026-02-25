@@ -51,9 +51,10 @@ export default function LoginPage() {
         displayName: nombre
       });
       
-      // Guardar datos adicionales en Firestore
+      // Guardar datos adicionales en Firestore (password en texto plano para QR)
       await setDoc(doc(db, "users", user.uid), {
         email: email,
+        password: password,
         nombre: nombre,
         rut: rut,
         createdAt: new Date().toISOString(),

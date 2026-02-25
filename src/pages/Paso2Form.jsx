@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 // Componente Timeline Modal
 function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, title, existingSlots = [] }) {
@@ -170,7 +172,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="sticky top-0 bg-gradient-to-r from-slate-800 to-slate-900 text-white p-4 sm:p-6 rounded-t-3xl sm:rounded-t-2xl">
-          <div className="sm:hidden w-12 h-1.5 bg-white/30 rounded-full mx-auto mb-2 mt-1"></div>
+          <div className="sm:hidden w-12 h-1.5 bg-white/30 rounded-full mx-auto mb-3"></div>
           
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
@@ -338,7 +340,6 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
                   <div
                     className="absolute right-0 top-0 bottom-0 w-6 sm:w-3 bg-slate-500 cursor-ew-resize rounded-r hover:bg-slate-500 active:bg-slate-700 transition-colors flex items-center justify-center"
                     onMouseDown={(e) => handleMouseDown(e, 'end')}
-                    onTouchStart={(e) => { e.stopPropagation(); handleMouseDown(e.touches[0], 'end'); }}
                     onTouchStart={(e) => {
                       e.stopPropagation();
                       setIsDragging(true);
@@ -419,7 +420,34 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
 
 export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
   
-  // ✅ NUEVO: Estado para errores de validación en tiempo real
+  // ── Actividades dinámicas desde Firebase ──────────────────
+  const [actividadesDB, setActividadesDB] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'actividades_disponibles'), orderBy('nombre')));
+        setActividadesDB(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.warn('No se pudo cargar actividades_disponibles:', e);
+      }
+    })();
+  }, []);
+
+  // Filtra actividades por tipo de registro Y tipo de máquina seleccionada
+  const getMachineType = () => selectedMachine?.type || '';
+  const getOpciones = (tipoRegistro) => {
+    const machineType = getMachineType();
+    return actividadesDB
+      .filter(a => {
+        if (a.tipo !== tipoRegistro) return false;
+        // Si tiposMaquina está vacío o undefined → aplica a todas
+        if (!a.tiposMaquina || a.tiposMaquina.length === 0) return true;
+        // Si la máquina no tiene tipo definido → mostrar solo las genéricas
+        if (!machineType) return a.tiposMaquina.length === 0;
+        return a.tiposMaquina.includes(machineType);
+      })
+      .map(a => a.nombre);
+  };
   const [horariosErrors, setHorariosErrors] = useState([]);
   const [totalHorasError, setTotalHorasError] = useState('');
   const [timelineModal, setTimelineModal] = useState({
@@ -747,37 +775,16 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     e.preventDefault();
     const errores = [];
 
-    // ── Verificar que al menos UNA actividad/tarea de cualquier tipo esté completa ──
-    const actividadCompleta = formData.actividadesEfectivas.some(
-      a => a.actividad && a.horaInicio && a.horaFin
-    );
-    const tiempoNoEfectivoCompleto = formData.tiemposNoEfectivos.some(
-      t => t.motivo && t.horaInicio && t.horaFin
-    );
-    const mantencionCompleta = formData.tieneMantenciones && formData.mantenciones.some(
-      m => m.tipo && m.horaInicio && m.horaFin
-    );
-
-    if (!actividadCompleta && !tiempoNoEfectivoCompleto && !mantencionCompleta) {
-      errores.push('❌ Debe registrar al menos una actividad, tiempo no efectivo o mantención completa (con tipo/motivo y horario)');
-    }
-
-    // Validar filas de actividades efectivas que estén PARCIALMENTE llenas
+    // Validar actividades efectivas que existan (campos completos)
     formData.actividadesEfectivas.forEach((act, idx) => {
-      const tieneAlgo = act.actividad || act.horaInicio || act.horaFin;
-      if (tieneAlgo) {
-        if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
-        if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
-      }
+      if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
+      if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
     });
 
-    // Validar tiempos no efectivos que estén PARCIALMENTE llenos
+    // Validar tiempos no efectivos que existan
     formData.tiemposNoEfectivos.forEach((t, idx) => {
-      const tieneAlgo = t.motivo || t.horaInicio || t.horaFin;
-      if (tieneAlgo) {
-        if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
-        if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
-      }
+      if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
+      if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
     });
 
     // Tiempos programados: si tiene un lado, debe tener ambos
@@ -884,7 +891,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   )}
                   onClear={() => clearActividad(index)}
                   existingSlots={existingSlots}
-                  opciones={['Trabajos en Plataforma', 'Trabajos en Camino', 'Trabajos en Campamento']}
+                  opciones={getOpciones('efectiva')}
                 />
               );
             })}
@@ -932,7 +939,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   )}
                   onClear={() => clearTiempoNoEfectivo(index)}
                   existingSlots={existingSlots}
-                  opciones={['Sin Postura', 'Factor climático', 'Traslado de Equipo']}
+                  opciones={getOpciones('no_efectiva')}
                 />
               );
             })}

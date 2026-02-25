@@ -5,10 +5,9 @@ export default function ReporteDetalleModal({
   onClose, 
   projectName, 
   machineInfo, 
-  userRole = 'operador',
-  currentUserName = '',
-  onSave,
-  onSign
+  userRole = 'operador', // 'administrador' o 'operador'
+  onSave, // función callback para guardar cambios
+  onSign // función callback para firmar el reporte
 }) {
   if (!reporte) return null;
 
@@ -173,7 +172,6 @@ export default function ReporteDetalleModal({
   const handleSignReport = () => {
     if (onSign && adminPassword) {
       const signatureData = {
-        adminName: currentUserName,
         timestamp: new Date().toISOString(),
         reportId: reporte.numeroReporte
       };
@@ -313,6 +311,7 @@ export default function ReporteDetalleModal({
                 <DataField label="Patente" value={machineInfo?.patente || '-'} />
                 <DataField label="Código" value={machineInfo?.code || '-'} />
                 <DataField label="Nombre" value={machineInfo?.name || '-'} />
+                <DataField label="Tipo" value={machineInfo?.type || '-'} />
               </div>
             </div>
           </div>

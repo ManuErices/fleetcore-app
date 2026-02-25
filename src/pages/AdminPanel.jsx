@@ -15,7 +15,7 @@ const getQRUrl = (text, size = 300) =>
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────
 const ROLES = ['administrador', 'operador', 'mandante'];
-const TIPOS_MAQUINA = ['Excavadora', 'Bulldozer', 'Motoniveladora', 'Retroexcavadora', 'Cargador Frontal', 'Grúa', 'Camión', 'Compactadora', 'Otro'];
+const TIPOS_MAQUINA = ['Excavadora', 'Bulldozer', 'Motoniveladora', 'Retroexcavadora', 'Cargador Frontal', 'Grúa', 'Camión', 'Camión de Combustible', 'Otro'];
 
 const TAB_DEFS = [
   { id: 'operadores',  label: 'Operadores',  color: 'blue',   icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -502,12 +502,19 @@ function MaquinasSection() {
 // ─────────────────────────────────────────────────────────────
 // SECCIÓN: ACTIVIDADES
 // ─────────────────────────────────────────────────────────────
+const TIPO_STYLES = {
+  efectiva:    'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  no_efectiva: 'bg-amber-100 text-amber-700 border border-amber-200',
+  mantencion:  'bg-slate-100 text-slate-600 border border-slate-200',
+};
+const TIPO_LABELS = { efectiva: 'Efectiva', no_efectiva: 'No Efectiva', mantencion: 'Mantención' };
+
 function ActividadesSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombre: '', tipo: 'efectiva', descripcion: '' });
+  const [form, setForm] = useState({ nombre: '', tipo: 'efectiva', descripcion: '', tiposMaquina: [] });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -516,24 +523,49 @@ function ActividadesSection() {
     try {
       const snap = await getDocs(query(collection(db, 'actividades_disponibles'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+    } catch (e) { console.error(e); setData([]); }
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombre: '', tipo: 'efectiva', descripcion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ nombre: row.nombre || '', tipo: row.tipo || 'efectiva', descripcion: row.descripcion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ nombre: '', tipo: 'efectiva', descripcion: '', tiposMaquina: [] }); setEditId(null); setModal(true); };
+  const openEdit = (row) => {
+    setForm({
+      nombre: row.nombre || '',
+      tipo: row.tipo || 'efectiva',
+      descripcion: row.descripcion || '',
+      tiposMaquina: row.tiposMaquina || [],
+    });
+    setEditId(row.id);
+    setModal(true);
+  };
+
+  const toggleTipo = (tipo) => {
+    setForm(f => ({
+      ...f,
+      tiposMaquina: f.tiposMaquina.includes(tipo)
+        ? f.tiposMaquina.filter(t => t !== tipo)
+        : [...f.tiposMaquina, tipo],
+    }));
+  };
 
   const save = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
-      const p = { nombre: form.nombre.trim(), tipo: form.tipo, descripcion: form.descripcion.trim(), updatedAt: serverTimestamp() };
+      const p = {
+        nombre: form.nombre.trim(),
+        tipo: form.tipo,
+        descripcion: form.descripcion.trim(),
+        tiposMaquina: form.tiposMaquina,  // [] = aplica a todos los tipos
+        updatedAt: serverTimestamp(),
+      };
       if (editId) await updateDoc(doc(db, 'actividades_disponibles', editId), p);
       else await addDoc(collection(db, 'actividades_disponibles'), { ...p, createdAt: serverTimestamp() });
-      setModal(false); load();
-    } catch (e) { alert('Error: ' + e.message); }
+      setModal(false);
+      load();
+    } catch (e) { alert('Error al guardar: ' + e.message); }
     setSaving(false);
   };
 
@@ -541,13 +573,6 @@ function ActividadesSection() {
     try { await deleteDoc(doc(db, 'actividades_disponibles', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
-
-  const TIPO_STYLES = {
-    efectiva:    'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    no_efectiva: 'bg-amber-100 text-amber-700 border border-amber-200',
-    mantencion:  'bg-slate-100 text-slate-600 border border-slate-200',
-  };
-  const TIPO_LABELS = { efectiva: 'Efectiva', no_efectiva: 'No Efectiva', mantencion: 'Mantención' };
 
   return (
     <>
@@ -557,23 +582,68 @@ function ActividadesSection() {
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay actividades registradas"
           columns={[
             { key: 'nombre', label: 'Nombre' },
-            { key: 'tipo', label: 'Tipo', render: r => <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${TIPO_STYLES[r.tipo] || TIPO_STYLES.efectiva}`}>{TIPO_LABELS[r.tipo] || r.tipo}</span> },
-            { key: 'descripcion', label: 'Descripción' },
+            { key: 'tipo', label: 'Tipo', render: r => (
+              <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${TIPO_STYLES[r.tipo] || TIPO_STYLES.efectiva}`}>
+                {TIPO_LABELS[r.tipo] || r.tipo}
+              </span>
+            )},
+            { key: 'tiposMaquina', label: 'Máquinas', render: r => (
+              r.tiposMaquina?.length
+                ? <div className="flex flex-wrap gap-1">
+                    {r.tiposMaquina.map(t => (
+                      <span key={t} className="inline-flex px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-100">{t}</span>
+                    ))}
+                  </div>
+                : <span className="text-xs text-slate-400 italic">Todas</span>
+            )},
           ]}
         />
       </SectionCard>
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Actividad' : 'Nueva Actividad'} color="green">
         <div className="space-y-4">
-          <Field label="Nombre" required><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Trabajos en Plataforma" /></Field>
-          <Field label="Tipo" required>
+          <Field label="Nombre" required>
+            <input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Trabajos en Plataforma" />
+          </Field>
+
+          <Field label="Tipo de Registro" required>
             <select className={selectCls} value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}>
               <option value="efectiva">Actividad Efectiva</option>
               <option value="no_efectiva">Tiempo No Efectivo</option>
               <option value="mantencion">Mantención</option>
             </select>
           </Field>
-          <Field label="Descripción"><input className={inputCls} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Descripción opcional..." /></Field>
+
+          <Field label="Aplica a tipos de máquina">
+            <p className="text-xs text-slate-400 mb-2">Sin selección = aplica a <strong>todas</strong> las máquinas</p>
+            <div className="grid grid-cols-2 gap-2">
+              {TIPOS_MAQUINA.map(tipo => {
+                const selected = form.tiposMaquina.includes(tipo);
+                return (
+                  <button
+                    key={tipo}
+                    type="button"
+                    onClick={() => toggleTipo(tipo)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border-2 transition-all text-left ${
+                      selected
+                        ? 'bg-purple-600 border-purple-600 text-white shadow-md shadow-purple-100'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-purple-300'
+                    }`}
+                  >
+                    <span className={`w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0 border-2 ${selected ? 'bg-white border-white' : 'border-slate-300'}`}>
+                      {selected && <svg className="w-2.5 h-2.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </span>
+                    {tipo}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          <Field label="Descripción">
+            <input className={inputCls} value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Descripción opcional..." />
+          </Field>
+
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="green" />
         </div>
       </Modal>
@@ -736,14 +806,14 @@ function ProyectosSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombre: '', codigo: '', mandante: '', ubicacion: '' });
+  const [form, setForm] = useState({ name: '', codigo: '', mandante: '', ubicacion: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'projects'), orderBy('nombre')));
+      const snap = await getDocs(query(collection(db, 'projects'), orderBy('name')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -751,14 +821,14 @@ function ProyectosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombre: '', codigo: '', mandante: '', ubicacion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ nombre: row.nombre || '', codigo: row.codigo || '', mandante: row.mandante || '', ubicacion: row.ubicacion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', ubicacion: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', ubicacion: row.ubicacion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
+    if (!form.name.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
-      const p = { nombre: form.nombre.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), ubicacion: form.ubicacion.trim(), updatedAt: serverTimestamp() };
+      const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), ubicacion: form.ubicacion.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'projects', editId), p);
       else await addDoc(collection(db, 'projects'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -778,7 +848,7 @@ function ProyectosSection() {
       >
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay proyectos registrados"
           columns={[
-            { key: 'nombre', label: 'Nombre' },
+            { key: 'name', label: 'Nombre' },
             { key: 'codigo', label: 'Código' },
             { key: 'mandante', label: 'Mandante' },
             { key: 'ubicacion', label: 'Ubicación' },
@@ -788,7 +858,7 @@ function ProyectosSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Proyecto' : 'Nuevo Proyecto'} color="indigo">
         <div className="space-y-4">
-          <Field label="Nombre" required><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Proyecto Ruta 5 Norte" /></Field>
+          <Field label="Nombre" required><input className={inputCls} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ej: Proyecto Ruta 5 Norte" /></Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Código"><input className={inputCls} value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} placeholder="PRY-001" /></Field>
             <Field label="Mandante"><input className={inputCls} value={form.mandante} onChange={e => setForm({ ...form, mandante: e.target.value })} placeholder="Ej: MOP" /></Field>
@@ -797,7 +867,7 @@ function ProyectosSection() {
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="indigo" />
         </div>
       </Modal>
-      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.nombre}"?`} />
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
     </>
   );
 }
@@ -825,13 +895,33 @@ function UsuariosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openEdit = (row) => { setForm({ role: row.role || 'operador', nombre: row.nombre || '', rut: row.rut || '' }); setEditId(row.id); setModal(true); };
-  const openQR = (row) => setQr({ title: row.nombre || row.email || row.id, qrText: row.email || row.id });
+  const openEdit = (row) => {
+    setForm({ role: row.role || 'operador', nombre: row.nombre || '', rut: row.rut || '', password: row.password || '' });
+    setEditId(row.id);
+    setModal(true);
+  };
+
+  const openQR = (row) => {
+    const email = row.email || row.id;
+    const password = row.password || '';
+    if (!password) {
+      alert('Este usuario no tiene contraseña guardada. Agrégala editando el usuario primero.');
+      return;
+    }
+    setQr({ title: row.nombre || email, qrText: JSON.stringify({ email, password }) });
+  };
 
   const save = async () => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', editId), { role: form.role, nombre: form.nombre.trim(), rut: form.rut.trim(), updatedAt: serverTimestamp() });
+      const updates = {
+        role: form.role,
+        nombre: form.nombre.trim(),
+        rut: form.rut.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (form.password.trim()) updates.password = form.password.trim();
+      await updateDoc(doc(db, 'users', editId), updates);
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
@@ -852,7 +942,7 @@ function UsuariosSection() {
       >
         <div className="mb-4 flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
           <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          <p className="text-xs text-blue-600">Usuarios creados al iniciar sesión con Google. El <strong>QR</strong> contiene el email para identificación rápida.</p>
+          <p className="text-xs text-blue-600">El <strong>QR</strong> contiene email y contraseña en formato JSON para login directo. Solo disponible para cuentas creadas con email/password (no Google).</p>
         </div>
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={null} extraAction={QRBtn} emptyText="No hay usuarios registrados"
           columns={[
@@ -867,6 +957,10 @@ function UsuariosSection() {
         <div className="space-y-4">
           <Field label="Nombre Completo"><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Nombre del usuario" /></Field>
           <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 12.345.678-9" /></Field>
+          <Field label="Contraseña para QR">
+            <input className={inputCls} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Contraseña del usuario (para generar QR)" />
+            <p className="text-[11px] text-slate-400 mt-1">Se guarda en Firestore para poder generar el QR de acceso. Déjalo vacío si no deseas modificarla.</p>
+          </Field>
           <Field label="Rol" required>
             <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
               {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
@@ -897,16 +991,13 @@ export default function AdminPanel() {
   const active = TAB_DEFS.find(t => t.id === activeTab);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/30">
-      {/* Fondo decorativo */}
-      <div className="fixed inset-0 bg-grid opacity-20 pointer-events-none" />
-      <div className="fixed top-0 right-0 w-[600px] h-[600px] bg-gradient-radial from-purple-100/60 via-transparent to-transparent blur-3xl pointer-events-none" />
+    <div className="min-h-screen bg-slate-50">
 
-      {/* Header */}
-      <div className="relative bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 shadow-2xl shadow-purple-200">
+      {/* Header negro con tabs integrados — igual que imagen 1 */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 shadow-xl">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -914,30 +1005,31 @@ export default function AdminPanel() {
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-white">Administración</h1>
-              <p className="text-xs text-purple-200 mt-0.5">Gestión de datos del sistema WorkFleet</p>
+              <p className="text-xs text-slate-400 mt-0.5">Gestión de datos del sistema WorkFleet</p>
             </div>
           </div>
         </div>
 
-        {/* Tabs dentro del header */}
+        {/* Tabs dentro del header negro */}
         <div className="max-w-5xl mx-auto px-2 sm:px-6">
-          <div className="flex gap-1 overflow-x-auto pb-0 scrollbar-none">
+          <div className="flex gap-1 overflow-x-auto scrollbar-none">
             {TAB_DEFS.map(tab => {
               const isActive = activeTab === tab.id;
+              const grad = GRADIENTS[tab.color];
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-3 sm:px-4 py-3 text-xs sm:text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 border-b-2 ${
+                  className={`flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-bold whitespace-nowrap transition-all flex-shrink-0 rounded-t-xl ${
                     isActive
-                      ? 'text-white border-white'
-                      : 'text-purple-200 border-transparent hover:text-white hover:border-white/40'
+                      ? `bg-gradient-to-r ${grad} text-white shadow-lg`
+                      : 'text-slate-400 hover:text-white hover:bg-white/10'
                   }`}
                 >
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
                   </svg>
-                  <span className="hidden xs:inline">{tab.label}</span>
+                  <span>{tab.label}</span>
                 </button>
               );
             })}
@@ -946,7 +1038,7 @@ export default function AdminPanel() {
       </div>
 
       {/* Contenido */}
-      <div className="relative max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
+      <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
         {activeTab === 'operadores'  && <OperadoresSection />}
         {activeTab === 'maquinas'    && <MaquinasSection />}
         {activeTab === 'actividades' && <ActividadesSection />}
