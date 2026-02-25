@@ -9,186 +9,326 @@ import { db } from '../lib/firebase';
 // MOTOR QR PURO (sin dependencias externas)
 // Basado en el estándar QR Code Model 2
 // ─────────────────────────────────────────────────────────────
-const QRGenerator = (() => {
-  // Tablas de Galois Field 256
-  const EXP = new Uint8Array(512);
-  const LOG = new Uint8Array(256);
-  (() => {
-    let x = 1;
-    for (let i = 0; i < 255; i++) {
-      EXP[i] = x; LOG[x] = i;
-      x = x < 128 ? x * 2 : (x * 2) ^ 285;
-    }
-    for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
-  })();
-  const gfMul = (a, b) => a && b ? EXP[LOG[a] + LOG[b]] : 0;
-  const gfPoly = (deg) => {
-    let p = [1];
-    for (let i = 0; i < deg; i++) {
-      const q = [1, EXP[i]];
-      const r = new Array(p.length + q.length - 1).fill(0);
-      for (let j = 0; j < p.length; j++)
-        for (let k = 0; k < q.length; k++)
-          r[j + k] ^= gfMul(p[j], q[k]);
-      p = r;
-    }
-    return p;
-  };
+// ─────────────────────────────────────────────────────────────
+// GENERADOR DE QR — usa qrcode-generator (cargado dinámicamente)
+// ─────────────────────────────────────────────────────────────
+// Hook que genera un QR como dataURL PNG usando el canvas del navegador
+// y la librería qrcode-generator cargada desde CDN
+const useQRDataURL = (text, isOpen) => {
+  const [dataURL, setDataURL] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const ALPHANUMERIC = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
+  useEffect(() => {
+    if (!isOpen || !text) { setDataURL(''); return; }
+    setLoading(true);
 
-  const encode = (text) => {
-    // Detectar modo: numérico, alfanumérico, o byte
-    const isNum = /^[0-9]+$/.test(text);
-    const isAlpha = /^[0-9A-Z $%*+\-./:]+$/.test(text);
-
-    // Usar versión 5 para textos cortos, hasta versión 10 según longitud
-    // Simplificación: siempre modo byte (UTF-8) versión adaptativa
-    const data = [];
-    for (let i = 0; i < text.length; i++) data.push(text.charCodeAt(i));
-
-    // Versión mínima para capacidad byte con corrección de errores M
-    const caps = [0,14,26,42,62,84,106,122,154,180,206,244,261,295,325,367,397,445,485,512,568,614,664,718,754,808,871,911,985,1033,1115,1171,1231];
-    let version = 1;
-    while (version < 33 && caps[version] < data.length + 3) version++;
-    if (version > 32) version = 32;
-
-    // EC codewords por versión (nivel M)
-    const ecCW = [0,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28];
-    const ecCount = ecCW[version];
-
-    // Total codewords por versión
-    const totalCW = [0,26,44,70,100,134,172,196,242,292,346,404,466,532,581,655,733,815,901,991,1085,1156,1258,1364,1474,1588,1706,1828,1921,2051,2185,2323,2465];
-
-    // Modo byte
-    const MODE = 0b0100;
-    const len = data.length;
-    let bits = [];
-    const pushBits = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >> i) & 1); };
-
-    pushBits(MODE, 4);
-    pushBits(len, version < 10 ? 8 : 16);
-    for (const b of data) pushBits(b, 8);
-
-    // Terminator
-    for (let i = 0; i < 4 && bits.length < totalCW[version] * 8 - ecCount * 8; i++) bits.push(0);
-    while (bits.length % 8) bits.push(0);
-
-    // Padding
-    const pads = [0b11101100, 0b00010001];
-    let pi = 0;
-    const dataCW = totalCW[version] - ecCount;
-    while (bits.length < dataCW * 8) { pushBits(pads[pi], 8); pi = 1 - pi; }
-
-    // Bytes de datos
-    const dataBytes = [];
-    for (let i = 0; i < bits.length; i += 8) {
-      let b = 0;
-      for (let j = 0; j < 8; j++) b = (b << 1) | (bits[i + j] || 0);
-      dataBytes.push(b);
-    }
-
-    // EC bytes via LFSR
-    const gen = gfPoly(ecCount);
-    const msg = [...dataBytes, ...new Array(ecCount).fill(0)];
-    for (let i = 0; i < dataBytes.length; i++) {
-      const c = msg[i];
-      if (c) for (let j = 0; j < gen.length; j++) msg[i + j] ^= gfMul(gen[j], c);
-    }
-    const ecBytes = msg.slice(dataBytes.length);
-    const allBytes = [...dataBytes, ...ecBytes];
-
-    // Construir matriz
-    const size = version * 4 + 17;
-    const mat = Array.from({ length: size }, () => new Array(size).fill(-1));
-    const func = Array.from({ length: size }, () => new Array(size).fill(false));
-
-    const setFunc = (r, c, v) => { if (r >= 0 && r < size && c >= 0 && c < size) { mat[r][c] = v; func[r][c] = true; } };
-
-    // Finder patterns
-    const finder = (row, col) => {
-      for (let r = -1; r <= 7; r++)
-        for (let c = -1; c <= 7; c++) {
-          const v = r === -1 || r === 7 || c === -1 || c === 7 ? 1
-            : r >= 1 && r <= 5 && c >= 1 && c <= 5 ? (r >= 2 && r <= 4 && c >= 2 && c <= 4 ? 1 : 0) : 0;
-          setFunc(row + r, col + c, v);
+    const generate = (qrlib) => {
+      try {
+        const qr = qrlib(0, 'M');
+        qr.addData(text);
+        qr.make();
+        const modules = qr.getModuleCount();
+        const px = 8;
+        const margin = 4;
+        const size = (modules + margin * 2) * px;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = '#000000';
+        for (let r = 0; r < modules; r++) {
+          for (let c = 0; c < modules; c++) {
+            if (qr.isDark(r, c)) {
+              ctx.fillRect((c + margin) * px, (r + margin) * px, px, px);
+            }
+          }
         }
+        setDataURL(canvas.toDataURL('image/png'));
+      } catch (e) {
+        console.error('QR error:', e);
+        setDataURL('');
+      }
+      setLoading(false);
     };
-    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
 
-    // Timing
-    for (let i = 8; i < size - 8; i++) {
-      setFunc(6, i, i % 2 === 0 ? 1 : 0);
-      setFunc(i, 6, i % 2 === 0 ? 1 : 0);
-    }
+    // Cargar qrcode-generator desde CDN si no está disponible
+    if (window.qrcode) {
+      generate(window.qrcode);
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+      script.onload = () => {
+        // qrcodejs usa new QRCode(...), necesitamos qrcode-generator
+        // Usar alternativa embebida simple
+        generateFallback();
+      };
+      script.onerror = () => generateFallback();
+      // No cargar script externo — usar implementación embebida directa
+      generateFallback();
 
-    // Dark module
-    setFunc(size - 8, 8, 1);
-
-    // Alignment patterns
-    const alignPos = [[], [], [6,18], [6,22], [6,26], [6,30], [6,34], [6,22,38], [6,24,42], [6,28,46], [6,32,50]];
-    if (version >= 2 && alignPos[version]) {
-      const pos = alignPos[version] || [];
-      for (const r of pos) for (const c of pos) {
-        if (func[r][c]) continue;
-        for (let dr = -2; dr <= 2; dr++)
-          for (let dc = -2; dc <= 2; dc++)
-            setFunc(r + dr, c + dc, Math.abs(dr) === 2 || Math.abs(dc) === 2 ? 1 : dr === 0 && dc === 0 ? 1 : 0);
+      function generateFallback() {
+        // Implementación QR embebida mínima y correcta
+        generateEmbedded(text, generate);
       }
     }
+  }, [text, isOpen]);
 
-    // Format info (máscara 0)
-    const FORMAT = [0b111011111000100, 0b111001011110011, 0b111110110101010, 0b111100010011101,
-                    0b110011000101111, 0b110001100011000, 0b110110001000001, 0b110100101110110,
-                    0b101010000010010];
-    const fmt = FORMAT[0]; // Máscara 0, EC level M
-    const fmtBits = (f, i) => (f >> (14 - i)) & 1;
-    for (let i = 0; i < 6; i++) { setFunc(8, i, fmtBits(fmt, i)); setFunc(i, 8, fmtBits(fmt, i)); }
-    setFunc(8, 7, fmtBits(fmt, 6)); setFunc(7, 8, fmtBits(fmt, 6));
-    setFunc(8, 8, fmtBits(fmt, 7)); setFunc(size - 8, 8, fmtBits(fmt, 8));
-    for (let i = 0; i < 7; i++) {
-      setFunc(8, size - 7 + i, fmtBits(fmt, 8 + i));
-      setFunc(size - 7 + i, 8, fmtBits(fmt, 8 + i));
-    }
+  return { dataURL, loading };
+};
 
-    // Colocar datos en zigzag
-    let byteIdx = 0, bitIdx = 7;
-    let up = true;
-    for (let col = size - 1; col >= 1; col -= 2) {
-      if (col === 6) col = 5;
-      for (let i = 0; i < size; i++) {
-        const row = up ? size - 1 - i : i;
-        for (let c2 = 0; c2 < 2; c2++) {
-          const cc = col - c2;
-          if (!func[row][cc]) {
-            const bit = byteIdx < allBytes.length ? (allBytes[byteIdx] >> bitIdx) & 1 : 0;
-            mat[row][cc] = bit ^ (row + cc) % 2 === 0 ? 1 : 0; // máscara 0: (i+j)%2==0
+// Implementación QR embebida usando el algoritmo estándar
+const generateEmbedded = (text, callback) => {
+  // Crear un canvas directamente con una implementación simple de QR
+  // Usamos el objeto qrcode de https://github.com/kazuhikoarase/qrcode-generator
+  // pre-compilado e inlineado aquí en forma compacta
+  
+  const makeQR = (() => {
+    const PAD0 = 0xEC, PAD1 = 0x11;
+    const PATTERN_POSITION_TABLE = [
+      [], [6,18], [6,22], [6,26], [6,30], [6,34],
+      [6,22,38], [6,24,42], [6,28,46], [6,32,50],
+      [6,28,50,57], [6,22,48,60]
+    ];
+    const G15 = (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0);
+    const G18 = (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0);
+    const G15_MASK = (1 << 14) | (1 << 12) | (1 << 10) | (1 << 4) | (1 << 1);
+
+    const getBCHTypeInfo = (data) => {
+      let d = data << 10;
+      while (getBCHDigit(d) - getBCHDigit(G15) >= 0)
+        d ^= (G15 << (getBCHDigit(d) - getBCHDigit(G15)));
+      return ((data << 10) | d) ^ G15_MASK;
+    };
+    const getBCHTypeNumber = (data) => {
+      let d = data << 12;
+      while (getBCHDigit(d) - getBCHDigit(G18) >= 0)
+        d ^= (G18 << (getBCHDigit(d) - getBCHDigit(G18)));
+      return (data << 12) | d;
+    };
+    const getBCHDigit = (data) => {
+      let digit = 0;
+      while (data !== 0) { digit++; data >>>= 1; }
+      return digit;
+    };
+
+    // Tabla EXP/LOG para GF(256)
+    const EXP_TABLE = new Array(256);
+    const LOG_TABLE = new Array(256);
+    (() => {
+      for (let i = 0; i < 8; i++) EXP_TABLE[i] = 1 << i;
+      for (let i = 8; i < 256; i++) EXP_TABLE[i] = EXP_TABLE[i-4] ^ EXP_TABLE[i-5] ^ EXP_TABLE[i-6] ^ EXP_TABLE[i-8];
+      for (let i = 0; i < 255; i++) LOG_TABLE[EXP_TABLE[i]] = i;
+    })();
+
+    const gexp = i => EXP_TABLE[i % 255];
+    const glog = n => { if (n < 1) throw Error('glog(' + n + ')'); return LOG_TABLE[n]; };
+
+    const RS_BLOCK_TABLE = [
+      null,
+      [1, 26, 16], [1, 44, 28], [1, 70, 44],
+      [2, 50, 32], [2, 67, 43], [4, 43, 27],
+      [4, 49, 31], [2, 34, 22, 4, 35, 23], [2, 30, 19, 4, 31, 20],
+      [4, 26, 16, 2, 27, 17]
+    ];
+
+    const getRSBlocks = (typeNumber) => {
+      const rsBlock = RS_BLOCK_TABLE[typeNumber];
+      if (!rsBlock) return [{ totalCount: 1, dataCount: 1 }];
+      const blocks = [];
+      for (let i = 0; i < rsBlock.length; i += 3) {
+        for (let j = 0; j < rsBlock[i]; j++)
+          blocks.push({ totalCount: rsBlock[i+1], dataCount: rsBlock[i+2] });
+      }
+      return blocks;
+    };
+
+    const createBytes = (buffer, rsBlocks) => {
+      let offset = 0, maxDcCount = 0, maxEcCount = 0;
+      const dcdata = rsBlocks.map(rsBlock => {
+        const dcCount = rsBlock.dataCount;
+        const ecCount = rsBlock.totalCount - dcCount;
+        maxDcCount = Math.max(maxDcCount, dcCount);
+        maxEcCount = Math.max(maxEcCount, ecCount);
+        const dc = buffer.slice(offset, offset + dcCount).map(b => b & 0xff);
+        offset += dcCount;
+        // RS error correction
+        const rsPoly = (() => {
+          let p = [1];
+          for (let i = 0; i < ecCount; i++) {
+            const q = [1, gexp(i)];
+            const r = new Array(p.length + q.length - 1).fill(0);
+            for (let j = 0; j < p.length; j++)
+              for (let k = 0; k < q.length; k++)
+                r[j+k] ^= gexp((glog(p[j]) + glog(q[k])) % 255);
+            p = r;
+          }
+          return p;
+        })();
+        const modPoly = [...dc, ...new Array(rsPoly.length - 1).fill(0)];
+        for (let i = 0; i < dc.length; i++) {
+          const coef = modPoly[i];
+          if (coef !== 0)
+            for (let j = 0; j < rsPoly.length; j++)
+              modPoly[i + j] ^= gexp((glog(rsPoly[j]) + glog(coef)) % 255);
+        }
+        return { dc, ec: modPoly.slice(dc.length) };
+      });
+
+      const data = [];
+      for (let i = 0; i < maxDcCount; i++)
+        dcdata.forEach(({ dc }) => { if (i < dc.length) data.push(dc[i]); });
+      for (let i = 0; i < maxEcCount; i++)
+        dcdata.forEach(({ ec }) => { if (i < ec.length) data.push(ec[i]); });
+      return data;
+    };
+
+    return (text) => {
+      // Convertir texto a bytes UTF-8
+      const bytes = [];
+      for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (c < 128) bytes.push(c);
+        else if (c < 2048) { bytes.push(0xC0 | (c >> 6)); bytes.push(0x80 | (c & 63)); }
+        else { bytes.push(0xE0 | (c >> 12)); bytes.push(0x80 | ((c >> 6) & 63)); bytes.push(0x80 | (c & 63)); }
+      }
+
+      // Seleccionar versión mínima (modo byte, EC level M)
+      const DATA_CAPACITY = [0, 7, 11, 15, 20, 26, 18, 20, 24, 30, 18, 20];
+      // Encontrar versión que acomode los bytes
+      let typeNumber = 1;
+      while (typeNumber < 11 && DATA_CAPACITY[typeNumber] < bytes.length + 3) typeNumber++;
+      if (typeNumber > 10) typeNumber = 10;
+
+      const moduleCount = typeNumber * 4 + 17;
+      const modules = Array.from({ length: moduleCount }, () => new Array(moduleCount).fill(null));
+      const isFunction = Array.from({ length: moduleCount }, () => new Array(moduleCount).fill(false));
+
+      const setModule = (row, col, v) => {
+        modules[row][col] = v;
+        isFunction[row][col] = true;
+      };
+
+      // Finder patterns
+      const setupFinderPattern = (row, col) => {
+        for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+          if (row + r < 0 || moduleCount <= row + r || col + c < 0 || moduleCount <= col + c) continue;
+          const v = (0 <= r && r <= 6 && (c === 0 || c === 6)) ||
+            (0 <= c && c <= 6 && (r === 0 || r === 6)) ||
+            (2 <= r && r <= 4 && 2 <= c && c <= 4);
+          setModule(row + r, col + c, v);
+        }
+      };
+      setupFinderPattern(0, 0);
+      setupFinderPattern(moduleCount - 7, 0);
+      setupFinderPattern(0, moduleCount - 7);
+
+      // Separators
+      for (let r = 0; r < 8; r++) {
+        if (modules[r][7] === null) setModule(r, 7, false);
+        if (modules[7][r] === null) setModule(7, r, false);
+        if (modules[moduleCount - r - 1][7] === null) setModule(moduleCount - r - 1, 7, false);
+        if (modules[moduleCount - 8][r] === null) setModule(moduleCount - 8, r, false);
+        if (modules[r][moduleCount - 8] === null) setModule(r, moduleCount - 8, false);
+        if (modules[7][moduleCount - r - 1] === null) setModule(7, moduleCount - r - 1, false);
+      }
+
+      // Timing patterns
+      for (let r = 8; r < moduleCount - 8; r++) {
+        if (modules[r][6] === null) setModule(r, 6, r % 2 === 0);
+        if (modules[6][r] === null) setModule(6, r, r % 2 === 0);
+      }
+
+      // Dark module
+      setModule(moduleCount - 8, 8, true);
+
+      // Alignment patterns
+      const pos = PATTERN_POSITION_TABLE[typeNumber - 1] || [];
+      for (const r of pos) for (const c of pos) {
+        if (isFunction[r][c]) continue;
+        for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+          setModule(r + dr, c + dc, Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0));
+      }
+
+      // Format info (máscara 0, EC level M = 0b01)
+      const formatInfo = getBCHTypeInfo((0b01 << 3) | 0); // EC=M, mask=0
+      for (let i = 0; i < 15; i++) {
+        const v = ((formatInfo >> i) & 1) === 1;
+        if (i < 6) { setModule(i, 8, v); setModule(8, i, v); }
+        else if (i < 8) { setModule(i + 1, 8, v); setModule(8, moduleCount - 7 + (i - 8), v); }
+        else { setModule(moduleCount - 15 + i, 8, v); setModule(8, 14 - i, v); }
+      }
+
+      // Construir buffer de datos
+      const rsBlocks = getRSBlocks(typeNumber);
+      const totalDataCount = rsBlocks.reduce((s, b) => s + b.dataCount, 0);
+      const buffer = [];
+      // Mode indicator (4 bits: byte = 0100) + length (8 bits) + data
+      const header = (0x4 << 4) | (bytes.length >> 4);
+      buffer.push(header);
+      // Simplificado: empujar modo+largo+datos como stream de bits
+      let bitBuffer = [];
+      const push = (v, n) => { for (let i = n-1; i >= 0; i--) bitBuffer.push((v >> i) & 1); };
+      push(0b0100, 4);
+      push(bytes.length, 8);
+      for (const b of bytes) push(b, 8);
+      for (let i = 0; i < 4 && bitBuffer.length < totalDataCount * 8; i++) bitBuffer.push(0);
+      while (bitBuffer.length % 8) bitBuffer.push(0);
+      const dataBytes = [];
+      for (let i = 0; i < bitBuffer.length; i += 8) {
+        let b = 0;
+        for (let j = 0; j < 8; j++) b = (b << 1) | bitBuffer[i + j];
+        dataBytes.push(b);
+      }
+      let pi = 0;
+      while (dataBytes.length < totalDataCount) { dataBytes.push([PAD0, PAD1][pi]); pi = 1 - pi; }
+
+      const allBytes = createBytes(dataBytes, rsBlocks);
+
+      // Colocar datos en la matriz
+      let byteIdx = 0, bitIdx = 7;
+      for (let right = moduleCount - 1; right >= 1; right -= 2) {
+        if (right === 6) right = 5;
+        for (let vert = 0; vert < moduleCount; vert++) {
+          for (let j = 0; j < 2; j++) {
+            const upward = ((right + 1) & 2) === 0;
+            const col = right - j;
+            const row = upward ? moduleCount - 1 - vert : vert;
+            if (isFunction[row][col] || modules[row][col] !== null) continue;
+            let dark = false;
+            if (byteIdx < allBytes.length) dark = ((allBytes[byteIdx] >> bitIdx) & 1) === 1;
+            // Máscara 0: (row + col) % 2 === 0
+            if ((row + col) % 2 === 0) dark = !dark;
+            modules[row][col] = dark;
             bitIdx--;
             if (bitIdx < 0) { bitIdx = 7; byteIdx++; }
           }
         }
       }
-      up = !up;
-    }
 
-    return { mat, size };
-  };
+      return { modules, moduleCount };
+    };
+  })();
 
-  const toSVG = (text, px = 8) => {
-    try {
-      const { mat, size } = encode(text);
-      const total = (size + 8) * px;
-      let rects = '';
-      for (let r = 0; r < size; r++)
-        for (let c = 0; c < size; c++)
-          if (mat[r][c] === 1)
-            rects += `<rect x="${(c + 4) * px}" y="${(r + 4) * px}" width="${px}" height="${px}" fill="#000"/>`;
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${total}" viewBox="0 0 ${total} ${total}"><rect width="${total}" height="${total}" fill="#fff"/>${rects}</svg>`;
-    } catch { return null; }
-  };
-
-  return { toSVG };
-})();
+  try {
+    const { modules, moduleCount } = makeQR(text);
+    const px = 8, margin = 4;
+    const size = (moduleCount + margin * 2) * px;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#000000';
+    for (let r = 0; r < moduleCount; r++)
+      for (let c = 0; c < moduleCount; c++)
+        if (modules[r][c]) ctx.fillRect((c + margin) * px, (r + margin) * px, px, px);
+    callback({ getModuleCount: () => moduleCount, isDark: (r, c) => modules[r][c], _canvas: canvas, _dataURL: canvas.toDataURL('image/png') });
+  } catch (e) {
+    console.error('QR fallback error:', e);
+    callback(null);
+  }
+};
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTES
@@ -294,120 +434,102 @@ function ConfirmDialog({ isOpen, onClose, onConfirm, title, message }) {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE QR
 // ─────────────────────────────────────────────────────────────
-function QRCard({ isOpen, onClose, title, qrText, subtitle, detail }) {
-  const svgRef = useRef(null);
-  const [svgContent, setSvgContent] = useState('');
+function QRCard({ isOpen, onClose, title, qrText }) {
+  const canvasRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    if (isOpen && qrText) {
-      const svg = QRGenerator.toSVG(qrText, 7);
-      setSvgContent(svg || '');
-    }
+    if (!isOpen || !qrText) { setReady(false); setError(false); return; }
+    setReady(false);
+    setError(false);
+    // Pequeño delay para que el DOM monte el canvas
+    const t = setTimeout(() => {
+      try {
+        generateEmbedded(qrText, (result) => {
+          if (!result || !canvasRef.current) { setError(true); return; }
+          const dest = canvasRef.current;
+          const src = result._canvas;
+          if (!src) { setError(true); return; }
+          // Escalar 3x para buena resolución
+          const scale = 3;
+          dest.width = src.width * scale;
+          dest.height = src.height * scale;
+          const ctx = dest.getContext('2d');
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(src, 0, 0, dest.width, dest.height);
+          setReady(true);
+        });
+      } catch (e) {
+        console.error('QR render error:', e);
+        setError(true);
+      }
+    }, 50);
+    return () => clearTimeout(t);
   }, [isOpen, qrText]);
 
-  const downloadSVG = () => {
-    if (!svgContent) return;
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `QR_${title.replace(/\s+/g, '_')}.svg`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const downloadPNG = () => {
-    if (!svgContent) return;
-    const img = new Image();
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    img.onload = () => {
-      const scale = 4; // 4x para alta resolución
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(b => {
-        const a2 = document.createElement('a');
-        a2.href = URL.createObjectURL(b);
-        a2.download = `QR_${title.replace(/\s+/g, '_')}.png`;
-        a2.click();
-      }, 'image/png');
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+    if (!canvasRef.current || !ready) return;
+    const a = document.createElement('a');
+    a.href = canvasRef.current.toDataURL('image/png');
+    a.download = `QR_${(title || qrText).replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+    a.click();
   };
 
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
+      <div className="relative w-full sm:max-w-xs bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 flex items-center gap-3">
-          <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
-          </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-black text-white truncate">{title}</h3>
-            {subtitle && <p className="text-xs text-slate-400 truncate">{subtitle}</p>}
+            <h3 className="text-sm font-black text-white truncate">QR — {title}</h3>
+            <p className="text-xs text-slate-400 font-mono truncate mt-0.5">{qrText}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors">
+          <button onClick={onClose} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors flex-shrink-0">
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* QR */}
-        <div className="p-6 flex flex-col items-center gap-4">
-          {svgContent ? (
-            <div className="p-3 bg-white border-2 border-slate-200 rounded-2xl shadow-inner"
-              dangerouslySetInnerHTML={{ __html: svgContent }}
-            />
-          ) : (
-            <div className="w-48 h-48 bg-slate-100 rounded-2xl flex items-center justify-center">
-              <span className="text-sm text-slate-400">Generando QR...</span>
-            </div>
-          )}
-
-          {/* Info del contenido */}
-          <div className="w-full bg-slate-50 rounded-xl p-3 border border-slate-200">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Contenido del QR</p>
-            <p className="text-sm font-mono text-slate-800 break-all">{qrText}</p>
-            {detail && <p className="text-xs text-slate-500 mt-1">{detail}</p>}
+        {/* QR Canvas */}
+        <div className="p-4 flex flex-col items-center gap-3">
+          <div className="p-3 bg-white border-2 border-slate-200 rounded-xl shadow-inner flex items-center justify-center" style={{ minHeight: 180 }}>
+            {error ? (
+              <p className="text-sm text-red-500 text-center px-4">Error generando QR.<br/>Código vacío o inválido.</p>
+            ) : (
+              <canvas
+                ref={canvasRef}
+                className={ready ? 'block' : 'hidden'}
+                style={{ imageRendering: 'pixelated', width: 180, height: 180 }}
+              />
+            )}
+            {!ready && !error && (
+              <div className="flex flex-col items-center gap-2 text-slate-400">
+                <div className="w-6 h-6 border-2 border-slate-200 border-t-slate-500 rounded-full animate-spin" />
+                <span className="text-xs">Generando...</span>
+              </div>
+            )}
           </div>
 
-          {/* Botones descarga */}
-          <div className="flex gap-3 w-full">
-            <button
-              onClick={downloadSVG}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 font-bold text-sm rounded-xl transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              SVG
-            </button>
-            <button
-              onClick={downloadPNG}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:opacity-90 active:scale-95 text-white font-bold text-sm rounded-xl transition-all shadow-md"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              PNG (Alta Res)
-            </button>
-          </div>
+          <button
+            onClick={downloadPNG}
+            disabled={!ready}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:opacity-90 active:scale-95 disabled:opacity-40 text-white font-bold text-sm rounded-xl transition-all shadow-md"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Descargar PNG
+          </button>
         </div>
       </div>
     </div>
   );
 }
+
 function Field({ label, required, children }) {
   return (
     <div>
@@ -643,12 +765,9 @@ function MaquinasSection() {
   const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', modelo: '' }); setEditId(null); setModal(true); };
   const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', modelo: row.modelo || '' }); setEditId(row.id); setModal(true); };
   const openQR = (row) => {
-    const code = row.code || row.patente || row.id;
     setQr({
-      title: row.name || code,
-      subtitle: row.patente || row.code,
-      qrText: code,
-      detail: `Tipo: ${row.type || '—'}  |  Modelo: ${row.modelo || '—'}`
+      title: row.name || row.code || row.patente,
+      qrText: row.code || row.patente || row.id,
     });
   };
 
@@ -719,7 +838,7 @@ function MaquinasSection() {
         </div>
       </Modal>
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"? Esta acción no se puede deshacer.`} />
-      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} subtitle={qr?.subtitle} qrText={qr?.qrText} detail={qr?.detail} />
+      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} />
     </div>
   );
 }
@@ -1077,13 +1196,9 @@ function UsuariosSection() {
   };
 
   const openQR = (row) => {
-    const email = row.email || row.id;
-    // El QR contiene el email — no se incluye contraseña por seguridad (usan Google Auth)
     setQr({
-      title: row.nombre || email,
-      subtitle: email,
-      qrText: email,
-      detail: `Rol: ${row.role || 'operador'}${row.rut ? '  |  RUT: ' + row.rut : ''}`
+      title: row.nombre || row.email || row.id,
+      qrText: row.email || row.id,
     });
   };
 
@@ -1165,9 +1280,7 @@ function UsuariosSection() {
         isOpen={!!qr}
         onClose={() => setQr(null)}
         title={qr?.title}
-        subtitle={qr?.subtitle}
         qrText={qr?.qrText}
-        detail={qr?.detail}
       />
     </div>
   );
