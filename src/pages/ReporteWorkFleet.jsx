@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
@@ -17,6 +17,7 @@ export default function ReporteWorkFleet() {
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
   const [currentUser, setCurrentUser] = useState(null); // Usuario actual
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]); // Reportes seleccionados para descarga masiva
+  const [showImport, setShowImport] = useState(false); // Modal de importación masiva
   
   // Filtros
   const [filtros, setFiltros] = useState({
@@ -168,12 +169,9 @@ export default function ReporteWorkFleet() {
       return {
         ...r,
         projectName: project?.name || r.projectId || '',
-        projectCode: project?.codigo || '',
         machinePatente: machine?.patente || '',
         machineCode: machine?.code || '',
-        machineName: machine?.name || '',
-        machineMarca: machine?.marca || machine?.modelo?.split(' ')[0] || '',
-        machineType: machine?.type || '',
+        machineName: machine?.name || ''
       };
     });
   }, [filtros, reportes, projects, machines, userRole]);
@@ -695,175 +693,79 @@ export default function ReporteWorkFleet() {
 
   // Descargar como PDF
   const descargarPDF = () => {
-    const doc = new jsPDF('landscape', 'mm', 'a4');
-    const pW = doc.internal.pageSize.getWidth();   // 297
-    const pH = doc.internal.pageSize.getHeight();  // 210
+    const doc = new jsPDF('landscape');
+    
+    doc.setFontSize(18);
+    doc.text('Reportes WorkFleet', 14, 15);
+    
+    doc.setFontSize(10);
+    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 22);
+    doc.text(`Total de reportes: ${reportesFiltrados.length}`, 14, 27);
 
-    // ── Paleta ────────────────────────────────────────────────────
-    const C = {
-      oscuro:       [15,  23,  42],
-      morado:       [88,  80,  141],
-      moradoOscuro: [67,  56,  202],
-      moradoClaro:  [237, 233, 254],
-      gris1:        [30,  41,  59],
-      gris2:        [71,  85,  105],
-      gris3:        [148, 163, 184],
-      gris4:        [226, 232, 240],
-      gris5:        [248, 250, 252],
-      blanco:       [255, 255, 255],
-      verde:        [16,  185, 129],
-      amber:        [217, 119, 6],
-    };
-
-    const fechaHoy = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const horaHoy  = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
-
-    // ── HEADER ────────────────────────────────────────────────────
-    // Fondo oscuro
-    doc.setFillColor(...C.oscuro);
-    doc.rect(0, 0, pW, 36, 'F');
-    // Barra morada izquierda
-    doc.setFillColor(...C.morado);
-    doc.rect(0, 0, 4, 36, 'F');
-
-    // Logo / nombre empresa
-    doc.setFillColor(...C.morado);
-    doc.roundedRect(8, 7, 22, 22, 2, 2, 'F');
-    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
-    doc.text('MPF', 11.5, 17);
-    doc.setFontSize(4.5); doc.setFont(undefined, 'normal');
-    doc.text('INGENIERÍA', 9.8, 22);
-    doc.text('CIVIL', 13, 26);
-
-    // Título
-    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
-    doc.text('RESUMEN DE REPORTES', 36, 16);
-    doc.setFontSize(7); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.gris3);
-    doc.text('WorkFleet · Control Operacional de Maquinaria', 36, 23);
-
-    // Línea separadora
-    doc.setDrawColor(...C.morado);
-    doc.setLineWidth(0.4);
-    doc.line(36, 26, 180, 26);
-
-    // Fecha generación (derecha)
-    doc.setFontSize(7); doc.setTextColor(...C.gris3);
-    doc.text(`Generado: ${fechaHoy} ${horaHoy}`, pW - 14, 15, { align: 'right' });
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...C.blanco);
-    doc.text(`${reportesFiltrados.length} reportes`, pW - 14, 24, { align: 'right' });
-
-    // ── CHIPS DE FILTROS ACTIVOS ──────────────────────────────────
-    let chipX = 8;
-    const chipY = 40;
-    const addChip = (label, value) => {
-      if (!value || value === 'Todos' || value === '') return;
-      const text = `${label}: ${value}`;
-      const w = doc.getTextWidth(text) + 6;
-      doc.setFillColor(...C.moradoClaro);
-      doc.roundedRect(chipX, chipY - 4, w, 6, 1, 1, 'F');
-      doc.setFontSize(6); doc.setFont(undefined, 'normal'); doc.setTextColor(...C.moradoOscuro);
-      doc.text(text, chipX + 3, chipY);
-      chipX += w + 3;
-    };
-    if (filtros.fechaInicio) addChip('Desde', filtros.fechaInicio);
-    if (filtros.fechaFin)    addChip('Hasta', filtros.fechaFin);
-    const proyNombre = projects.find(p => p.id === filtros.proyecto)?.name;
-    if (proyNombre) addChip('Proyecto', proyNombre);
-
-    // ── TABLA ─────────────────────────────────────────────────────
-    const tableData = reportesFiltrados.map((r, i) => {
-      const hTrab = r.horometroFinal && r.horometroInicial
+    const tableData = reportesFiltrados.map(r => {
+      const horasTrabajadas = r.horometroFinal && r.horometroInicial 
         ? (parseFloat(r.horometroFinal) - parseFloat(r.horometroInicial)).toFixed(2)
-        : '—';
-      const kmRec = r.kilometrajeFinal && r.kilometrajeInicial
-        ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(0)
-        : '—';
+        : '0';
+      
+      const kmRecorridos = r.kilometrajeFinal && r.kilometrajeInicial
+        ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(2)
+        : '0';
 
       return [
-        i + 1,
-        r.numeroReporte || '—',
-        r.fecha || '—',
-        r.projectName || '—',
-        r.projectCode || '—',
-        r.machineName || '—',
-        r.machineMarca || '—',
-        r.machineType || '—',
-        r.machinePatente || '—',
-        r.operador || '—',
-        `${r.horometroInicial || '0'}`,
-        `${r.horometroFinal || '0'}`,
-        hTrab,
-        kmRec,
-        r.cargaCombustible || '0',
-        r.estadoMaquina === 'operativa' ? '✓' : r.estadoMaquina || '—',
+        r.projectName || '',
+        r.fecha,
+        r.machinePatente || '',
+        r.numeroReporte,
+        r.operador,
+        r.rut,
+        r.horometroInicial || '0',
+        r.horometroFinal || '0',
+        horasTrabajadas,
+        r.kilometrajeInicial || '0',
+        r.kilometrajeFinal || '0',
+        kmRecorridos,
+        r.cargaCombustible || '0'
       ];
     });
 
-    autoTable(doc, {
-      startY: 50,
+    doc.autoTable({
       head: [[
-        '#', 'N° Reporte', 'Fecha', 'Obra', 'Cód. Obra',
-        'Máquina', 'Marca', 'Modelo/Tipo', 'Patente',
-        'Operador', 'Horóm. Ini', 'Horóm. Fin', 'H.Trab', 'Km.Rec', 'Comb.(L)', 'Estado'
+        'Obra',
+        'Fecha',
+        'Patente',
+        'N° Rep.',
+        'Operador',
+        'RUT',
+        'H.Ini',
+        'H.Fin',
+        'H.Trab',
+        'Km.Ini',
+        'Km.Fin',
+        'Km.Rec',
+        'Comb.'
       ]],
       body: tableData,
-      styles: {
-        fontSize: 6.2,
-        cellPadding: { top: 2.5, right: 2, bottom: 2.5, left: 2 },
-        textColor: C.gris1,
-        lineColor: C.gris4,
-        lineWidth: 0.2,
-        font: 'helvetica',
-      },
-      headStyles: {
-        fillColor: C.oscuro,
-        textColor: C.blanco,
-        fontSize: 6,
-        fontStyle: 'bold',
-        cellPadding: { top: 3, right: 2, bottom: 3, left: 2 },
-        halign: 'center',
-      },
-      alternateRowStyles: {
-        fillColor: C.gris5,
-      },
+      startY: 35,
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [124, 58, 237], fontSize: 7 },
       columnStyles: {
-        0:  { cellWidth: 6,  halign: 'center', textColor: C.gris3 },
-        1:  { cellWidth: 22, fontStyle: 'bold', textColor: C.moradoOscuro },
-        2:  { cellWidth: 18, halign: 'center' },
-        3:  { cellWidth: 22 },
-        4:  { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-        5:  { cellWidth: 28 },
-        6:  { cellWidth: 18 },
-        7:  { cellWidth: 20 },
-        8:  { cellWidth: 16, halign: 'center', fontStyle: 'bold', textColor: C.morado },
-        9:  { cellWidth: 26 },
-        10: { cellWidth: 14, halign: 'center' },
-        11: { cellWidth: 14, halign: 'center' },
-        12: { cellWidth: 13, halign: 'center', fontStyle: 'bold', textColor: C.verde },
-        13: { cellWidth: 13, halign: 'center' },
-        14: { cellWidth: 14, halign: 'center', textColor: C.amber, fontStyle: 'bold' },
-        15: { cellWidth: 14, halign: 'center' },
-      },
-      didDrawPage: (data) => {
-        // Footer en cada página
-        const pageCount = doc.internal.getNumberOfPages();
-        doc.setFontSize(6); doc.setTextColor(...C.gris3); doc.setFont(undefined, 'normal');
-        doc.text(
-          `WorkFleet · Resumen de Reportes · ${fechaHoy}`,
-          14, pH - 6
-        );
-        doc.text(
-          `Página ${data.pageNumber} de ${pageCount}`,
-          pW - 14, pH - 6, { align: 'right' }
-        );
-        // Línea footer
-        doc.setDrawColor(...C.gris4);
-        doc.setLineWidth(0.3);
-        doc.line(8, pH - 9, pW - 8, pH - 9);
-      },
+        0: { cellWidth: 25 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 22 },
+        6: { cellWidth: 13 },
+        7: { cellWidth: 13 },
+        8: { cellWidth: 13 },
+        9: { cellWidth: 13 },
+        10: { cellWidth: 13 },
+        11: { cellWidth: 13 },
+        12: { cellWidth: 13 }
+      }
     });
 
-    doc.save(`WorkFleet_Resumen_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   if (loading) {
@@ -993,6 +895,15 @@ export default function ReporteWorkFleet() {
       <div className="max-w-7xl mx-auto mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border-2 border-indigo-100">
           <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-semibold text-sm transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Importar Excel
+            </button>
             <button
               onClick={() => setShowPreview(true)}
               disabled={reportesFiltrados.length === 0}
@@ -1466,6 +1377,16 @@ export default function ReporteWorkFleet() {
         />
       )}
 
+      {/* Modal de Importación Masiva */}
+      {showImport && (
+        <ImportarExcelModal
+          onClose={() => setShowImport(false)}
+          machines={machines}
+          projects={projects}
+          onImportado={() => { setShowImport(false); /* recargar reportes */ window.location.reload(); }}
+        />
+      )}
+
       {/* Modal de Previsualización */}
       {showPreview && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1541,6 +1462,250 @@ export default function ReporteWorkFleet() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// COMPONENTE: ImportarExcelModal
+// ─────────────────────────────────────────────────────────────
+function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
+  const [filas, setFilas] = React.useState([]);
+  const [seleccionadas, setSeleccionadas] = React.useState(new Set());
+  const [importando, setImportando] = React.useState(false);
+  const [resultado, setResultado] = React.useState(null);
+  const [paso, setPaso] = React.useState('upload');
+
+  const parsearExcel = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
+        const headers = rows[0];
+        const dataRows = rows.slice(1).filter(r => r.some(c => c));
+
+        const get = (row, name) => {
+          const idx = headers.findIndex(h => h?.toString().toLowerCase().includes(name.toLowerCase()));
+          return idx >= 0 ? (row[idx]?.toString().trim() || '') : '';
+        };
+
+        const parsed = dataRows.map((row, i) => {
+          let fecha = get(row, 'fecha');
+          if (fecha.includes('/')) {
+            const parts = fecha.split('/');
+            if (parts[0].length <= 2) fecha = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+          }
+          const patente = get(row, 'patente').toUpperCase();
+          const machine = machines.find(m => (m.patente||'').toUpperCase() === patente || (m.code||'').toUpperCase() === patente);
+          const proyNombre = get(row, 'proyecto').toUpperCase();
+          const project = projects.find(p => (p.name||'').toUpperCase() === proyNombre || (p.codigo||'').toUpperCase() === proyNombre);
+          const actividad = get(row, 'actividades realizadas') || get(row, 'actividad realizad') || '';
+
+          return {
+            _row: i + 2,
+            _machineMatch: !!machine,
+            _projectMatch: !!project,
+            folioExterno:       get(row, 'folio'),
+            fecha,
+            projectId:          project?.id || '',
+            projectName:        project?.name || get(row, 'proyecto'),
+            machineId:          machine?.id || '',
+            machinePatente:     patente || machine?.patente || '',
+            machineName:        machine?.name || get(row, 'modelo'),
+            machineType:        get(row, 'tipo maquina'),
+            machineMarca:       get(row, 'marca'),
+            operador:           get(row, 'empleado'),
+            horometroInicial:   get(row, 'horometro inicial').replace(/[^0-9.]/g,''),
+            horometroFinal:     get(row, 'horometro final').replace(/[^0-9.]/g,''),
+            kilometrajeInicial: get(row, 'kilometraje inicial').replace(/[^0-9.]/g,''),
+            kilometrajeFinal:   get(row, 'kilometraje final').replace(/[^0-9.]/g,''),
+            cargaCombustible:   get(row, 'litros').replace(/[^0-9.]/g,'') || '0',
+            actividadesEfectivas: [{ actividad, horaInicio: '', horaFin: '' }],
+            tiemposNoEfectivos:   [{ motivo: '', horaInicio: '', horaFin: '' }],
+            tiemposProgramados:   { charlaSegurid: { horaInicio: '', horaFin: '' }, inspeccionEquipo: { horaInicio: '', horaFin: '' }, colacion: { horaInicio: '', horaFin: '' } },
+            mantenciones:       [],
+            tieneMantenciones:  false,
+            observaciones:      get(row, 'obs'),
+            estadoMaquina:      'operativa',
+            firmado:            false,
+            importadoDeExcel:   true,
+          };
+        });
+
+        setFilas(parsed);
+        setSeleccionadas(new Set(parsed.map((_, i) => i)));
+        setPaso('preview');
+      } catch (err) { alert('Error al leer el archivo: ' + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const toggleFila = (i) => { const s = new Set(seleccionadas); s.has(i) ? s.delete(i) : s.add(i); setSeleccionadas(s); };
+  const toggleTodas = () => setSeleccionadas(seleccionadas.size === filas.length ? new Set() : new Set(filas.map((_, i) => i)));
+
+  const importar = async () => {
+    setImportando(true);
+    const ok = [], errores = [];
+    for (const fila of filas.filter((_, i) => seleccionadas.has(i))) {
+      try {
+        const patente = fila.machinePatente || 'XX';
+        const countSnap = await getDocs(collection(db, 'reportes'));
+        const num = (countSnap.size + 1).toString().padStart(3, '0');
+        const numeroReporte = `${patente}-${num}`;
+        await addDoc(collection(db, 'reportes'), {
+          numeroReporte, folioExterno: fila.folioExterno, fecha: fila.fecha,
+          projectId: fila.projectId, projectName: fila.projectName,
+          machineId: fila.machineId, machinePatente: fila.machinePatente,
+          machineName: fila.machineName, machineType: fila.machineType, machineMarca: fila.machineMarca,
+          operador: fila.operador, rut: '',
+          horometroInicial: fila.horometroInicial, horometroFinal: fila.horometroFinal,
+          kilometrajeInicial: fila.kilometrajeInicial, kilometrajeFinal: fila.kilometrajeFinal,
+          cargaCombustible: fila.cargaCombustible,
+          actividadesEfectivas: fila.actividadesEfectivas,
+          tiemposNoEfectivos: fila.tiemposNoEfectivos,
+          tiemposProgramados: fila.tiemposProgramados,
+          mantenciones: [], tieneMantenciones: false,
+          observaciones: fila.observaciones, estadoMaquina: 'operativa',
+          firmado: false, importadoDeExcel: true,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        });
+        ok.push(numeroReporte);
+      } catch (err) { errores.push(`Fila ${fila._row}: ${err.message}`); }
+    }
+    setResultado({ ok, errores });
+    setImportando(false);
+    setPaso('done');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-5 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-black">Importación Masiva desde Excel</h2>
+              <p className="text-amber-100 text-xs">
+                {paso === 'upload' && 'Sube el archivo Excel con los reportes'}
+                {paso === 'preview' && `${filas.length} filas detectadas — selecciona las que quieres importar`}
+                {paso === 'done' && 'Importación completada'}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-all">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {/* Contenido */}
+        <div className="flex-1 overflow-auto p-5">
+
+          {paso === 'upload' && (
+            <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-amber-300 rounded-2xl cursor-pointer hover:bg-amber-50 transition-all bg-amber-50/50">
+              <svg className="w-10 h-10 text-amber-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="text-sm font-bold text-amber-700">Haz clic para seleccionar el archivo Excel</span>
+              <span className="text-xs text-amber-500 mt-1">.xlsx o .xls</span>
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => e.target.files[0] && parsearExcel(e.target.files[0])} />
+            </label>
+          )}
+
+          {paso === 'preview' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-4 text-xs text-slate-500 bg-slate-50 rounded-xl p-3 flex-wrap">
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"/>Máquina/Proyecto encontrado en sistema</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"/>No encontrado (se importa sin vincular)</span>
+                <span className="ml-auto font-semibold text-slate-700">{seleccionadas.size} de {filas.length} seleccionadas</span>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-800 text-white">
+                      <th className="px-3 py-2.5 text-center"><input type="checkbox" checked={seleccionadas.size === filas.length} onChange={toggleTodas} className="w-3.5 h-3.5 rounded"/></th>
+                      {['Folio','Fecha','Proyecto','Patente','Tipo','Marca','Operador','H.Ini','H.Fin','Km.Ini','Km.Fin','Actividad'].map(h => (
+                        <th key={h} className="px-3 py-2.5 text-left font-bold tracking-wide whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map((f, i) => (
+                      <tr key={i} onClick={() => toggleFila(i)} className={`border-t border-slate-100 cursor-pointer transition-colors ${seleccionadas.has(i) ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-slate-50 opacity-40'}`}>
+                        <td className="px-3 py-2 text-center"><input type="checkbox" checked={seleccionadas.has(i)} onChange={() => toggleFila(i)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded"/></td>
+                        <td className="px-3 py-2 font-mono font-bold text-slate-600">{f.folioExterno||'—'}</td>
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{f.fecha}</td>
+                        <td className="px-3 py-2"><span className={`font-semibold text-xs ${f._projectMatch?'text-emerald-700':'text-amber-600'}`}>{f.projectName||'—'}</span></td>
+                        <td className="px-3 py-2"><span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${f._machineMatch?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>{f.machinePatente||'—'}</span></td>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{f.machineType}</td>
+                        <td className="px-3 py-2 text-slate-500">{f.machineMarca}</td>
+                        <td className="px-3 py-2 text-slate-700 max-w-[100px] truncate">{f.operador}</td>
+                        <td className="px-3 py-2 text-center">{f.horometroInicial||'—'}</td>
+                        <td className="px-3 py-2 text-center">{f.horometroFinal||'—'}</td>
+                        <td className="px-3 py-2 text-center">{f.kilometrajeInicial||'—'}</td>
+                        <td className="px-3 py-2 text-center">{f.kilometrajeFinal||'—'}</td>
+                        <td className="px-3 py-2 max-w-[150px] truncate text-slate-600">{f.actividadesEfectivas[0]?.actividad||'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-slate-400 italic">* Los reportes se importan en estado borrador. Completa los horarios editando cada uno.</p>
+            </div>
+          )}
+
+          {paso === 'done' && resultado && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <div>
+                  <p className="font-black text-emerald-800">{resultado.ok.length} reportes importados correctamente</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">Ahora puedes abrirlos para completar los horarios de actividades y firmar.</p>
+                </div>
+              </div>
+              {resultado.errores.length > 0 && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
+                  <p className="font-bold text-red-700 mb-2">{resultado.errores.length} errores:</p>
+                  {resultado.errores.map((e, i) => <p key={i} className="text-xs text-red-600">• {e}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-100 p-4 flex justify-end gap-3 flex-shrink-0 bg-slate-50">
+          <button onClick={onClose} className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-sm transition-all">
+            {paso === 'done' ? 'Cerrar' : 'Cancelar'}
+          </button>
+          {paso === 'preview' && (
+            <button onClick={importar} disabled={importando || seleccionadas.size === 0}
+              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center gap-2"
+            >
+              {importando
+                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Importando...</>
+                : <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>Importar {seleccionadas.size} reportes</>
+              }
+            </button>
+          )}
+          {paso === 'done' && resultado?.ok.length > 0 && (
+            <button onClick={onImportado} className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-xl text-sm shadow-md">
+              Ver reportes →
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
