@@ -790,7 +790,8 @@ export default function ReporteWorkFleet() {
         r.machineType || '—',
         r.machinePatente || '—',
         r.operador || '—',
-        `${r.horometroInicial || '0'} → ${r.horometroFinal || '0'}`,
+        `${r.horometroInicial || '0'}`,
+        `${r.horometroFinal || '0'}`,
         hTrab,
         kmRec,
         r.cargaCombustible || '0',
@@ -803,7 +804,7 @@ export default function ReporteWorkFleet() {
       head: [[
         '#', 'N° Reporte', 'Fecha', 'Obra', 'Cód. Obra',
         'Máquina', 'Marca', 'Modelo/Tipo', 'Patente',
-        'Operador', 'Horómetro', 'H.Trab', 'Km.Rec', 'Comb.(L)', 'Estado'
+        'Operador', 'Horóm. Ini', 'Horóm. Fin', 'H.Trab', 'Km.Rec', 'Comb.(L)', 'Estado'
       ]],
       body: tableData,
       styles: {
@@ -836,11 +837,12 @@ export default function ReporteWorkFleet() {
         7:  { cellWidth: 20 },
         8:  { cellWidth: 16, halign: 'center', fontStyle: 'bold', textColor: C.morado },
         9:  { cellWidth: 26 },
-        10: { cellWidth: 24, halign: 'center' },
-        11: { cellWidth: 13, halign: 'center', fontStyle: 'bold', textColor: C.verde },
-        12: { cellWidth: 13, halign: 'center' },
-        13: { cellWidth: 14, halign: 'center', textColor: C.amber, fontStyle: 'bold' },
-        14: { cellWidth: 14, halign: 'center' },
+        10: { cellWidth: 14, halign: 'center' },
+        11: { cellWidth: 14, halign: 'center' },
+        12: { cellWidth: 13, halign: 'center', fontStyle: 'bold', textColor: C.verde },
+        13: { cellWidth: 13, halign: 'center' },
+        14: { cellWidth: 14, halign: 'center', textColor: C.amber, fontStyle: 'bold' },
+        15: { cellWidth: 14, halign: 'center' },
       },
       didDrawPage: (data) => {
         // Footer en cada página
