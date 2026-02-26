@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
@@ -419,9 +419,10 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
 }
 
 export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
-  
-  // ── Actividades dinámicas desde Firebase ──────────────────
+
+  // ── Actividades dinámicas desde Firebase ──────────────────────
   const [actividadesDB, setActividadesDB] = useState([]);
+  const [actividadesLoading, setActividadesLoading] = useState(true);
   useEffect(() => {
     (async () => {
       try {
@@ -429,25 +430,24 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         setActividadesDB(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (e) {
         console.warn('No se pudo cargar actividades_disponibles:', e);
+      } finally {
+        setActividadesLoading(false);
       }
     })();
   }, []);
 
-  // Filtra actividades por tipo de registro Y tipo de máquina seleccionada
-  const getMachineType = () => selectedMachine?.type || '';
   const getOpciones = (tipoRegistro) => {
-    const machineType = getMachineType();
-    return actividadesDB
-      .filter(a => {
-        if (a.tipo !== tipoRegistro) return false;
-        // Si tiposMaquina está vacío o undefined → aplica a todas
-        if (!a.tiposMaquina || a.tiposMaquina.length === 0) return true;
-        // Si la máquina no tiene tipo definido → mostrar solo las genéricas
-        if (!machineType) return a.tiposMaquina.length === 0;
-        return a.tiposMaquina.includes(machineType);
-      })
-      .map(a => a.nombre);
+    const machineType = selectedMachine?.type || '';
+    const delTipo = actividadesDB.filter(a => a.tipo === tipoRegistro);
+    const especificas = delTipo.filter(a =>
+      a.tiposMaquina && a.tiposMaquina.length > 0 && machineType && a.tiposMaquina.includes(machineType)
+    );
+    const genericas = delTipo.filter(a => !a.tiposMaquina || a.tiposMaquina.length === 0);
+    const combinadas = [...especificas, ...genericas.filter(g => !especificas.find(e => e.id === g.id))];
+    return (combinadas.length > 0 ? combinadas : delTipo).map(a => a.nombre);
   };
+
+  // ✅ NUEVO: Estado para errores de validación en tiempo real
   const [horariosErrors, setHorariosErrors] = useState([]);
   const [totalHorasError, setTotalHorasError] = useState('');
   const [timelineModal, setTimelineModal] = useState({
@@ -775,16 +775,25 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     e.preventDefault();
     const errores = [];
 
-    // Validar actividades efectivas que existan (campos completos)
+    // Al menos una actividad efectiva completa
+    const actCompletas = formData.actividadesEfectivas.filter(a => a.actividad && a.horaInicio && a.horaFin);
+    if (actCompletas.length === 0)
+      errores.push('Debes registrar al menos una Actividad Efectiva completa (actividad + horario).');
     formData.actividadesEfectivas.forEach((act, idx) => {
-      if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta seleccionar la actividad`);
-      if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
+      const tieneAlgo = act.actividad || act.horaInicio || act.horaFin;
+      if (tieneAlgo) {
+        if (!act.actividad) errores.push(`Actividad Efectiva ${idx+1}: falta la actividad`);
+        if (!act.horaInicio || !act.horaFin) errores.push(`Actividad Efectiva ${idx+1}: falta el horario`);
+      }
     });
 
-    // Validar tiempos no efectivos que existan
+    // Tiempos no efectivos son opcionales — solo validar si tienen algo escrito
     formData.tiemposNoEfectivos.forEach((t, idx) => {
-      if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
-      if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
+      const tieneAlgo = t.motivo || t.horaInicio || t.horaFin;
+      if (tieneAlgo) {
+        if (!t.motivo) errores.push(`Tiempo No Efectivo ${idx+1}: falta el motivo`);
+        if (!t.horaInicio || !t.horaFin) errores.push(`Tiempo No Efectivo ${idx+1}: falta el horario`);
+      }
     });
 
     // Tiempos programados: si tiene un lado, debe tener ambos
@@ -892,6 +901,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   onClear={() => clearActividad(index)}
                   existingSlots={existingSlots}
                   opciones={getOpciones('efectiva')}
+                  opcionesLoading={actividadesLoading}
                 />
               );
             })}
@@ -940,6 +950,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
                   onClear={() => clearTiempoNoEfectivo(index)}
                   existingSlots={existingSlots}
                   opciones={getOpciones('no_efectiva')}
+                  opcionesLoading={actividadesLoading}
                 />
               );
             })}
@@ -1162,7 +1173,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 }
 
 // Componente ActivityCard actualizado con botón de timeline y opciones predefinidas
-function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, onClear, existingSlots, opciones = [] }) {
+function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, color, labelActividad, placeholder, onOpenTimeline, onClear, existingSlots, opciones = [], opcionesLoading = false }) {
   // Calcula duración legible a partir de dos strings "HH:MM"
   const duracion = (ini, fin) => {
     if (!ini || !fin) return '';
@@ -1194,13 +1205,18 @@ function ActivityCard({ index, data, onUpdate, onRemove, errors, canRemove, colo
           <label className="block text-[10px] sm:text-xs font-bold text-slate-700 mb-1">
             {labelActividad}
           </label>
-          {opciones.length > 0 ? (
+          {opcionesLoading ? (
+            <div className="input-modern w-full text-sm flex items-center gap-2 text-slate-400">
+              <div className="w-3 h-3 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin flex-shrink-0" />
+              Cargando opciones...
+            </div>
+          ) : opciones.length > 0 ? (
             <select
               value={valorCampo}
               onChange={(e) => onUpdate(index, campo, e.target.value)}
               className="input-modern w-full text-sm"
             >
-              <option value="">Seleccionar...</option>
+              <option value="">Seleccionar {labelActividad.toLowerCase()}...</option>
               {opciones.map((op, i) => <option key={i} value={op}>{op}</option>)}
             </select>
           ) : (
