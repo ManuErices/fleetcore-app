@@ -165,13 +165,15 @@ export default function ReporteWorkFleet() {
     return resultado.map(r => {
       const project = projects.find(p => p.id === r.projectId);
       const machine = machines.find(m => m.id === r.machineId);
-      
+
       return {
         ...r,
-        projectName: project?.name || r.projectId || '',
-        machinePatente: machine?.patente || '',
-        machineCode: machine?.code || '',
-        machineName: machine?.name || ''
+        projectName:    project?.name    || r.projectName    || r.projectId || '',
+        machinePatente: machine?.patente || r.machinePatente || '',
+        machineCode:    machine?.code    || r.machineCode    || '',
+        machineName:    machine?.name    || r.machineName    || '',
+        machineType:    machine?.type    || r.machineType    || '',
+        machineMarca:   machine?.marca   || r.machineMarca   || '',
       };
     });
   }, [filtros, reportes, projects, machines, userRole]);
@@ -1274,7 +1276,13 @@ export default function ReporteWorkFleet() {
           reporte={reporteDetalle}
           onClose={() => setReporteDetalle(null)}
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
-          machineInfo={machines.find(m => m.id === reporteDetalle.machineId)}
+          machineInfo={machines.find(m => m.id === reporteDetalle.machineId) || {
+            patente: reporteDetalle.machinePatente || '',
+            code:    reporteDetalle.machineCode    || '',
+            name:    reporteDetalle.machineName    || '',
+            type:    reporteDetalle.machineType    || '',
+            marca:   reporteDetalle.machineMarca   || '',
+          }}
           userRole={userRole}
           onSave={async (editedData) => {
             try {
@@ -1383,6 +1391,7 @@ export default function ReporteWorkFleet() {
           onClose={() => setShowImport(false)}
           machines={machines}
           projects={projects}
+          empleados={empleados}
           onImportado={() => { setShowImport(false); /* recargar reportes */ window.location.reload(); }}
         />
       )}
@@ -1470,7 +1479,7 @@ export default function ReporteWorkFleet() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE: ImportarExcelModal
 // ─────────────────────────────────────────────────────────────
-function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
+function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImportado }) {
   const [filas, setFilas] = React.useState([]);
   const [seleccionadas, setSeleccionadas] = React.useState(new Set());
   const [importando, setImportando] = React.useState(false);
@@ -1503,7 +1512,13 @@ function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
           const machine = machines.find(m => (m.patente||'').toUpperCase() === patente || (m.code||'').toUpperCase() === patente);
           const proyNombre = get(row, 'proyecto').toUpperCase();
           const project = projects.find(p => (p.name||'').toUpperCase() === proyNombre || (p.codigo||'').toUpperCase() === proyNombre);
-          const actividad = get(row, 'actividades realizadas') || get(row, 'actividad realizad') || '';
+
+          // Buscar empleado en Firebase por nombre (case-insensitive)
+          const nombreExcel = get(row, 'empleado').toLowerCase().trim();
+          const empleadoMatch = empleados.find(e => {
+            const nombreDB = (e.nombre || e.name || e.displayName || '').toLowerCase().trim();
+            return nombreDB === nombreExcel;
+          });
 
           return {
             _row: i + 2,
@@ -1513,18 +1528,28 @@ function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
             fecha,
             projectId:          project?.id || '',
             projectName:        project?.name || get(row, 'proyecto'),
-            machineId:          machine?.id || '',
-            machinePatente:     patente || machine?.patente || '',
-            machineName:        machine?.name || get(row, 'modelo'),
-            machineType:        get(row, 'tipo maquina'),
-            machineMarca:       get(row, 'marca'),
+            machineId:          machine?.id        || '',
+            machinePatente:     machine?.patente   || patente || '',
+            machineCode:        machine?.code      || '',
+            machineName:        machine?.name      || get(row, 'modelo'),
+            machineType:        machine?.type      || get(row, 'tipo maquina'),
+            machineMarca:       machine?.marca     || get(row, 'marca'),
             operador:           get(row, 'empleado'),
+            rut: (() => {
+              const r = empleadoMatch?.rut || '';
+              if (!r) return '';
+              // Formatear con puntos si no los tiene: 12345678-9 → 12.345.678-9
+              const [num, dv] = r.replace(/\./g, '').split('-');
+              if (!num) return r;
+              return num.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dv ? '-' + dv : '');
+            })(),
+            _empleadoMatch:     !!empleadoMatch,
             horometroInicial:   get(row, 'horometro inicial').replace(/[^0-9.]/g,''),
             horometroFinal:     get(row, 'horometro final').replace(/[^0-9.]/g,''),
             kilometrajeInicial: get(row, 'kilometraje inicial').replace(/[^0-9.]/g,''),
             kilometrajeFinal:   get(row, 'kilometraje final').replace(/[^0-9.]/g,''),
             cargaCombustible:   get(row, 'litros').replace(/[^0-9.]/g,'') || '0',
-            actividadesEfectivas: [{ actividad, horaInicio: '', horaFin: '' }],
+            actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
             tiemposNoEfectivos:   [{ motivo: '', horaInicio: '', horaFin: '' }],
             tiemposProgramados:   { charlaSegurid: { horaInicio: '', horaFin: '' }, inspeccionEquipo: { horaInicio: '', horaFin: '' }, colacion: { horaInicio: '', horaFin: '' } },
             mantenciones:       [],
@@ -1553,15 +1578,15 @@ function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
     for (const fila of filas.filter((_, i) => seleccionadas.has(i))) {
       try {
         const patente = fila.machinePatente || 'XX';
-        const countSnap = await getDocs(collection(db, 'reportes'));
+        const countSnap = await getDocs(collection(db, 'reportes_detallados'));
         const num = (countSnap.size + 1).toString().padStart(3, '0');
         const numeroReporte = `${patente}-${num}`;
-        await addDoc(collection(db, 'reportes'), {
+        await addDoc(collection(db, 'reportes_detallados'), {
           numeroReporte, folioExterno: fila.folioExterno, fecha: fila.fecha,
           projectId: fila.projectId, projectName: fila.projectName,
-          machineId: fila.machineId, machinePatente: fila.machinePatente,
+          machineId: fila.machineId, machinePatente: fila.machinePatente, machineCode: fila.machineCode,
           machineName: fila.machineName, machineType: fila.machineType, machineMarca: fila.machineMarca,
-          operador: fila.operador, rut: '',
+          operador: fila.operador, rut: fila.rut || '',
           horometroInicial: fila.horometroInicial, horometroFinal: fila.horometroFinal,
           kilometrajeInicial: fila.kilometrajeInicial, kilometrajeFinal: fila.kilometrajeFinal,
           cargaCombustible: fila.cargaCombustible,
@@ -1633,7 +1658,7 @@ function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
                   <thead>
                     <tr className="bg-slate-800 text-white">
                       <th className="px-3 py-2.5 text-center"><input type="checkbox" checked={seleccionadas.size === filas.length} onChange={toggleTodas} className="w-3.5 h-3.5 rounded"/></th>
-                      {['Folio','Fecha','Proyecto','Patente','Tipo','Marca','Operador','H.Ini','H.Fin','Km.Ini','Km.Fin','Actividad'].map(h => (
+                      {['Folio','Fecha','Proyecto','Patente','Tipo','Marca','Operador','H.Ini','H.Fin','Km.Ini','Km.Fin'].map(h => (
                         <th key={h} className="px-3 py-2.5 text-left font-bold tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1648,12 +1673,18 @@ function ImportarExcelModal({ onClose, machines, projects, onImportado }) {
                         <td className="px-3 py-2"><span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${f._machineMatch?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>{f.machinePatente||'—'}</span></td>
                         <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{f.machineType}</td>
                         <td className="px-3 py-2 text-slate-500">{f.machineMarca}</td>
-                        <td className="px-3 py-2 text-slate-700 max-w-[100px] truncate">{f.operador}</td>
+                        <td className="px-3 py-2 max-w-[120px]">
+                          <div className="truncate text-slate-700 text-xs">{f.operador}</div>
+                          {f.rut
+                            ? <div className="text-[10px] text-emerald-600 font-bold">{f.rut}</div>
+                            : <div className="text-[10px] text-amber-500">sin RUT</div>
+                          }
+                        </td>
                         <td className="px-3 py-2 text-center">{f.horometroInicial||'—'}</td>
                         <td className="px-3 py-2 text-center">{f.horometroFinal||'—'}</td>
                         <td className="px-3 py-2 text-center">{f.kilometrajeInicial||'—'}</td>
                         <td className="px-3 py-2 text-center">{f.kilometrajeFinal||'—'}</td>
-                        <td className="px-3 py-2 max-w-[150px] truncate text-slate-600">{f.actividadesEfectivas[0]?.actividad||'—'}</td>
+
                       </tr>
                     ))}
                   </tbody>
