@@ -417,7 +417,7 @@ function MaquinasSection() {
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [qr, setQr] = useState(null);
-  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', modelo: '' });
+  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -432,15 +432,15 @@ function MaquinasSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', modelo: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', modelo: row.modelo || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '' }); setEditId(row.id); setModal(true); };
   const openQR = (row) => setQr({ title: row.name || row.code, qrText: row.code || row.patente || row.id });
 
   const save = async () => {
     if (!form.name.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
-      const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, modelo: form.modelo.trim(), updatedAt: serverTimestamp() };
+      const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'machines', editId), p);
       else await addDoc(collection(db, 'machines'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -470,7 +470,9 @@ function MaquinasSection() {
           columns={[
             { key: 'name', label: 'Nombre' },
             { key: 'code', label: 'Código', render: r => <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg text-xs">{r.code || r.patente || '—'}</span> },
+            { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-slate-700">{r.patente || '—'}</span> },
             { key: 'type', label: 'Tipo' },
+            { key: 'marca', label: 'Marca' },
             { key: 'modelo', label: 'Modelo' },
           ]}
         />
@@ -489,6 +491,7 @@ function MaquinasSection() {
               {TIPOS_MAQUINA.map(t => <option key={t}>{t}</option>)}
             </select>
           </Field>
+          <Field label="Marca"><input className={inputCls} value={form.marca} onChange={e => setForm({ ...form, marca: e.target.value })} placeholder="Ej: Caterpillar, Komatsu" /></Field>
           <Field label="Modelo"><input className={inputCls} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej: Caterpillar 320D" /></Field>
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="purple" />
         </div>
