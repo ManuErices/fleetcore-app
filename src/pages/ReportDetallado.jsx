@@ -9,7 +9,7 @@ function isoToday() {
   return new Date().toISOString().split('T')[0];
 }
 
-export default function ReportDetallado() {
+export default function ReportDetallado({ onClose } = {}) {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
@@ -101,12 +101,17 @@ export default function ReportDetallado() {
       }
     }
 
-    // Validar que al menos uno de los FINALES tenga valor distinto de 0
-    const horFinalRT = parseFloat(formData.horometroFinal) || 0;
-    const kmFinalRT = parseFloat(formData.kilometrajeFinal) || 0;
-
-    if (horFinalRT === 0 && kmFinalRT === 0) {
-      errors.ambosEnCero = 'Debe ingresar Horómetro Final O Kilometraje Final';
+    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
+    const horInicial = parseFloat(formData.horometroInicial) || 0;
+    const horFinal = parseFloat(formData.horometroFinal) || 0;
+    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
+    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
+    
+    const horometroEnCero = (horInicial === 0 && horFinal === 0);
+    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
+    
+    if (horometroEnCero && kilometrajeEnCero) {
+      errors.ambosEnCero = 'Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)';
     }
 
     setValidationErrors(errors);
@@ -415,12 +420,17 @@ export default function ReportDetallado() {
       }
     }
     
-    // Validar que al menos uno de los FINALES tenga valor distinto de 0
-    const horFinalVal = parseFloat(formData.horometroFinal) || 0;
-    const kmFinalVal = parseFloat(formData.kilometrajeFinal) || 0;
-
-    if (horFinalVal === 0 && kmFinalVal === 0) {
-      errors.push('❌ Debe ingresar Horómetro Final O Kilometraje Final (al menos uno es obligatorio)');
+    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
+    const horInicial = parseFloat(formData.horometroInicial) || 0;
+    const horFinal = parseFloat(formData.horometroFinal) || 0;
+    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
+    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
+    
+    const horometroEnCero = (horInicial === 0 && horFinal === 0);
+    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
+    
+    if (horometroEnCero && kilometrajeEnCero) {
+      errors.push('❌ Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)');
     }
     
     return errors;
@@ -461,6 +471,7 @@ export default function ReportDetallado() {
       });
       
       alert("✅ Reporte guardado exitosamente");
+      if (onClose) { onClose(); return; }
       
       const user = auth.currentUser;
       let userNombre = '';
@@ -573,12 +584,12 @@ export default function ReportDetallado() {
   };
 
   return (
-    <div className="px-0 sm:px-4 lg:px-8 py-0 sm:py-4 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
       {currentStep === 1 ? (
         <form onSubmit={handleNextStep}>
           
           {/* Header */}
-          <div className="sticky top-0 z-10 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg sm:rounded-2xl -mx-0 sm:-mx-4 lg:-mx-8 mb-4 sm:mb-6 p-4 sm:p-6">
+          <div className="sticky top-0 z-10 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg rounded-xl sm:rounded-2xl -mx-4 sm:-mx-6 lg:-mx-8 mb-6 p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs sm:text-sm opacity-90">Paso 1 de 2</div>
@@ -602,7 +613,7 @@ export default function ReportDetallado() {
           </div>
 
           {/* Contenido del formulario */}
-          <div className="space-y-3 sm:space-y-5 px-3 sm:px-0 pb-4 sm:pb-0">
+          <div className="space-y-4 sm:space-y-6">
             
             {/* Info Básica */}
             <Section 
@@ -652,7 +663,7 @@ export default function ReportDetallado() {
                 <button
                   type="button"
                   onClick={() => setShowQRScanner(true)}
-                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 active:from-purple-800 active:to-indigo-800 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-98 text-base sm:text-lg"
+                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl text-base sm:text-lg"
                 >
                   <div className="flex items-center justify-center gap-3">
                     <svg className="w-7 h-7 sm:w-8 sm:h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -666,7 +677,7 @@ export default function ReportDetallado() {
                 
                 {/* Máquina seleccionada */}
                 {selectedMachine && (
-                  <div className="p-3 sm:p-5 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-300 shadow-md">
+                  <div className="p-4 sm:p-5 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-300 shadow-md">
                     <div className="flex items-center gap-3 mb-3">
                       <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg">
                         <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -743,7 +754,7 @@ export default function ReportDetallado() {
               <div className="space-y-3 sm:space-y-4">
                 
                 {/* Horómetro */}
-                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <InputField
                     label="Horómetro Inicial"
                     type="number"
@@ -753,7 +764,7 @@ export default function ReportDetallado() {
                     step="0.1"
                   />
                   <InputField
-                    label="Horómetro Final *"
+                    label="Horómetro Final"
                     type="number"
                     value={formData.horometroFinal}
                     onChange={(e) => setFormData({ ...formData, horometroFinal: e.target.value })}
@@ -763,7 +774,7 @@ export default function ReportDetallado() {
                 </div>
                 {/* ✅ Mensaje de error en tiempo real - Horómetro */}
                 {validationErrors.horometro && (
-                  <div className="flex items-center gap-2 p-2.5 bg-red-50 border-2 border-red-200 rounded-lg">
+                  <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
                     </svg>
@@ -772,7 +783,7 @@ export default function ReportDetallado() {
                 )}
                 
                 {/* Kilometraje */}
-                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <InputField
                     label="Kilometraje Inicial"
                     type="number"
@@ -782,7 +793,7 @@ export default function ReportDetallado() {
                     step="0.1"
                   />
                   <InputField
-                    label="Kilometraje Final *"
+                    label="Kilometraje Final"
                     type="number"
                     value={formData.kilometrajeFinal}
                     onChange={(e) => setFormData({ ...formData, kilometrajeFinal: e.target.value })}
@@ -792,7 +803,7 @@ export default function ReportDetallado() {
                 </div>
                 {/* ✅ Mensaje de error en tiempo real - Kilometraje */}
                 {validationErrors.kilometraje && (
-                  <div className="flex items-center gap-2 p-2.5 bg-red-50 border-2 border-red-200 rounded-lg">
+                  <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
                     </svg>
@@ -818,7 +829,7 @@ export default function ReportDetallado() {
                 </div>
                 {/* ✅ Mensaje de error en tiempo real - Combustible */}
                 {validationErrors.cargaCombustible && (
-                  <div className="flex items-center gap-2 p-2.5 bg-red-50 border-2 border-red-200 rounded-lg">
+                  <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
                     </svg>
@@ -856,8 +867,8 @@ export default function ReportDetallado() {
                   <textarea
                     value={formData.observaciones}
                     onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
-                    className="input-modern w-full text-base"
-                    rows="3"
+                    className="input-modern w-full text-sm sm:text-base"
+                    rows="4"
                     placeholder="Observaciones generales..."
                   />
                 </div>
@@ -865,14 +876,12 @@ export default function ReportDetallado() {
             </Section>
 
             {/* Botón Siguiente */}
-            <div className="sticky bottom-0 -mx-3 sm:mx-0 px-3 sm:px-0 pb-3 sm:pb-0 pt-2 sm:pt-0 bg-white sm:bg-transparent">
-              <button
-                type="submit"
-                className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black rounded-xl sm:rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all text-base sm:text-lg"
-              >
-                Continuar al Paso 2 →
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black rounded-xl shadow-lg hover:shadow-xl transition-all text-base sm:text-lg"
+            >
+              Continuar al Paso 2 →
+            </button>
           </div>
         </form>
       ) : (
@@ -909,7 +918,7 @@ function Section({ title, icon, children }) {
         <div className="flex-shrink-0">{icon}</div>
         <h3 className="text-xs sm:text-sm font-black text-slate-900">{title}</h3>
       </div>
-      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4">
         {children}
       </div>
     </div>
@@ -920,7 +929,7 @@ function InputField({ label, ...props }) {
   return (
     <div>
       <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">{label}</label>
-      <input {...props} className="input-modern w-full text-base sm:text-sm min-h-[44px]" />
+      <input {...props} className="input-modern w-full text-sm sm:text-base" />
     </div>
   );
 }
@@ -1024,10 +1033,9 @@ function QRScannerModal({ onScan, onClose, error }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="max-w-md w-full bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto">
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-3 sm:p-4 flex items-center justify-between sticky top-0 z-10">
-          <div className="sm:hidden absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/40 rounded-full"></div>
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-3 sm:p-4">
+      <div className="max-w-md w-full bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden">
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-3 sm:p-4 flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
             <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
@@ -1092,7 +1100,7 @@ function QRScannerModal({ onScan, onClose, error }) {
                 onChange={(e) => setManualInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleManualSubmit()}
                 placeholder="Ej: EX-01, RE-02..."
-                className="input-modern flex-1 text-base"
+                className="input-modern flex-1 text-sm sm:text-base"
               />
               <button
                 onClick={handleManualSubmit}

@@ -19,8 +19,9 @@ export default function ReporteCombustible() {
   const [userRole, setUserRole] = useState('operador');
   const [currentUser, setCurrentUser] = useState(null);
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
+  const [paginaActual, setPaginaActual] = useState(1);
+  const ITEMS_POR_PAGINA = 10;
   const [reporteDetalle, setReporteDetalle] = useState(null);
-  const [showImportCombustible, setShowImportCombustible] = useState(false);
   const [empresas, setEmpresas] = useState([]);
   
   // Filtros
@@ -214,8 +215,8 @@ export default function ReporteCombustible() {
       return {
         ...r,
         projectName: project?.name || r.projectId || '',
-        machinePatente: machine?.patente || r.machinePatente || '',
-        machineName:   machine?.name    || r.machineName    || '',
+        machinePatente: machine?.patente || '',
+        machineName: machine?.name || '',
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
         operadorNombre: operador?.nombre || '',
@@ -660,7 +661,7 @@ export default function ReporteCombustible() {
               <input
                 type="date"
                 value={filtros.fechaInicio}
-                onChange={(e) => setFiltros({...filtros, fechaInicio: e.target.value})}
+                onChange={(e) => { setFiltros({...filtros, fechaInicio: e.target.value}); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -669,7 +670,7 @@ export default function ReporteCombustible() {
               <input
                 type="date"
                 value={filtros.fechaFin}
-                onChange={(e) => setFiltros({...filtros, fechaFin: e.target.value})}
+                onChange={(e) => { setFiltros({...filtros, fechaFin: e.target.value}); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -677,7 +678,7 @@ export default function ReporteCombustible() {
               <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
               <select
                 value={filtros.proyecto}
-                onChange={(e) => setFiltros({...filtros, proyecto: e.target.value})}
+                onChange={(e) => { setFiltros({...filtros, proyecto: e.target.value}); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               >
                 <option value="">Todos</option>
@@ -690,7 +691,7 @@ export default function ReporteCombustible() {
               <label className="block text-sm font-bold text-slate-700 mb-2">Máquina</label>
               <select
                 value={filtros.maquina}
-                onChange={(e) => setFiltros({...filtros, maquina: e.target.value})}
+                onChange={(e) => { setFiltros({...filtros, maquina: e.target.value}); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               >
                 <option value="">Todas</option>
@@ -707,15 +708,6 @@ export default function ReporteCombustible() {
       <div className="max-w-7xl mx-auto mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border-2 border-orange-100">
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => setShowImportCombustible(true)}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 text-white font-semibold text-sm transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              Importar Excel
-            </button>
             <button
               onClick={descargarPDFDetallado}
               disabled={reportesSeleccionados.length === 0}
@@ -753,7 +745,7 @@ export default function ReporteCombustible() {
                 Entrada
               </span>
               <button
-                onClick={() => setFiltros({...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega'})}
+                onClick={() => { setFiltros({...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega'}); setPaginaActual(1); }}
                 className={`relative w-16 h-8 rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
                   filtros.tipo === 'entrega'
                     ? 'bg-gradient-to-r from-orange-500 to-amber-500'
@@ -830,7 +822,7 @@ export default function ReporteCombustible() {
                     </td>
                   </tr>
                 ) : (
-                  reportesFiltrados.map((reporte, index) => (
+                  reportesFiltrados.slice((paginaActual - 1) * ITEMS_POR_PAGINA, paginaActual * ITEMS_POR_PAGINA).map((reporte, index) => (
                     <tr key={reporte.id} className={`hover:bg-orange-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-orange-50/30'}`}>
                       <td className="px-3 py-3 text-center">
                         <input
@@ -937,6 +929,40 @@ export default function ReporteCombustible() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginador */}
+          {reportesFiltrados.length > ITEMS_POR_PAGINA && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-orange-100 bg-white rounded-b-xl">
+              <span className="text-xs text-slate-500">
+                Mostrando {Math.min((paginaActual - 1) * ITEMS_POR_PAGINA + 1, reportesFiltrados.length)}–{Math.min(paginaActual * ITEMS_POR_PAGINA, reportesFiltrados.length)} de {reportesFiltrados.length} reportes
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
+                  disabled={paginaActual === 1}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all"
+                >← Anterior</button>
+                {Array.from({ length: Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) || Math.abs(p - paginaActual) <= 1)
+                  .reduce((acc, p, i, arr) => {
+                    if (i > 0 && arr[i-1] !== p - 1) acc.push('...');
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) => p === '...'
+                    ? <span key={i} className="px-2 text-slate-400 text-xs">…</span>
+                    : <button key={p} onClick={() => setPaginaActual(p)}
+                        className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-orange-600 text-white shadow' : 'bg-orange-50 hover:bg-orange-100 text-orange-700'}`}
+                      >{p}</button>
+                  )}
+                <button
+                  onClick={() => setPaginaActual(p => Math.min(Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA), p + 1))}
+                  disabled={paginaActual === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all"
+                >Siguiente →</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1361,279 +1387,6 @@ export default function ReporteCombustible() {
           }}
         />
       )}
-
-      {showImportCombustible && (
-        <ImportarCombustibleModal
-          onClose={() => setShowImportCombustible(false)}
-          machines={machines}
-          projects={projects}
-          empleados={empleados}
-          onImportado={() => { setShowImportCombustible(false); window.location.reload(); }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// COMPONENTE: ImportarCombustibleModal
-// ─────────────────────────────────────────────────────────────
-function ImportarCombustibleModal({ onClose, machines, projects, empleados = [], onImportado }) {
-  const [filas, setFilas] = React.useState([]);
-  const [seleccionadas, setSeleccionadas] = React.useState(new Set());
-  const [importando, setImportando] = React.useState(false);
-  const [resultado, setResultado] = React.useState(null);
-  const [paso, setPaso] = React.useState('upload');
-
-  const parsearExcel = (file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', cellDates: true });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
-        const headers = rows[0];
-        const dataRows = rows.slice(1).filter(r => r.some(c => c));
-
-        const get = (row, name) => {
-          const idx = headers.findIndex(h => h?.toString().toLowerCase().includes(name.toLowerCase()));
-          return idx >= 0 ? (row[idx]?.toString().trim() || '') : '';
-        };
-
-        const parsed = dataRows.map((row, i) => {
-          let fecha = get(row, 'fecha');
-          if (fecha && fecha.includes('/')) {
-            const parts = fecha.split('/');
-            if (parts[0].length <= 2) fecha = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
-          }
-
-          const patente = get(row, 'patente').toUpperCase();
-          const machine = machines.find(m =>
-            (m.patente||'').toUpperCase() === patente || (m.code||'').toUpperCase() === patente
-          );
-
-          const proyNombre = get(row, 'proyecto').toUpperCase();
-          const project = projects.find(p =>
-            (p.name||'').toUpperCase() === proyNombre || (p.codigo||'').toUpperCase() === proyNombre
-          );
-
-          // Litros: primero Litros Máquina, si no Litros Estanque
-          const litrosMaquina = get(row, 'litros m') || get(row, 'litros máq');
-          const litrosEstanque = get(row, 'litros est');
-          const litros = litrosMaquina || litrosEstanque || '';
-          const tipoEntrega = litrosMaquina ? 'entrega' : 'entrada';
-
-          const horometro = get(row, 'horometro').replace(/[^0-9.]/g,'');
-          const kilometraje = get(row, 'kilometraje').replace(/[^0-9.]/g,'');
-
-          return {
-            _row: i + 2,
-            _machineMatch: !!machine,
-            _projectMatch: !!project,
-            tipo:           tipoEntrega,
-            folioExterno:   get(row, 'folio'),
-            fecha,
-            origen:         get(row, 'origen'),
-            projectId:      project?.id || '',
-            projectName:    project?.name || get(row, 'proyecto'),
-            machineId:      machine?.id || '',
-            machinePatente: machine?.patente || patente,
-            machineCode:    machine?.code || get(row, 'codigo'),
-            machineName:    machine?.name || get(row, 'modelo'),
-            machineType:    machine?.type || get(row, 'tipo maquina'),
-            machineMarca:   machine?.marca || get(row, 'marca'),
-            litros:         litros.replace(/[^0-9.]/g,''),
-            horometroOdometro: horometro || kilometraje,
-            numeralInicial: get(row, 'numeral ini').replace(/[^0-9.]/g,''),
-            numeralFinal:   get(row, 'numeral fin').replace(/[^0-9.]/g,''),
-            comentarios:    get(row, 'comentario'),
-            importadoDeExcel: true,
-          };
-        });
-
-        setFilas(parsed);
-        setSeleccionadas(new Set(parsed.map((_, i) => i)));
-        setPaso('preview');
-      } catch (err) { alert('Error al leer el archivo: ' + err.message); }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const toggleFila = (i) => { const s = new Set(seleccionadas); s.has(i) ? s.delete(i) : s.add(i); setSeleccionadas(s); };
-  const toggleTodas = () => setSeleccionadas(seleccionadas.size === filas.length ? new Set() : new Set(filas.map((_, i) => i)));
-
-  const importar = async () => {
-    setImportando(true);
-    const ok = [], errores = [];
-
-    for (const fila of filas.filter((_, i) => seleccionadas.has(i))) {
-      try {
-        const fecha = fila.fecha ? new Date(fila.fecha) : new Date();
-        const ymd = `${fecha.getFullYear()}${(fecha.getMonth()+1).toString().padStart(2,'0')}${fecha.getDate().toString().padStart(2,'0')}`;
-        const numeroReporte = `COMB-${fila.tipo.toUpperCase()}-${ymd}-${Math.floor(Math.random()*1000).toString().padStart(3,'0')}`;
-
-        const doc = {
-          tipo: fila.tipo,
-          numeroReporte,
-          folioExterno:   fila.folioExterno,
-          fecha:          fila.fecha,
-          projectId:      fila.projectId,
-          projectName:    fila.projectName,
-          machineId:      fila.machineId,
-          machinePatente: fila.machinePatente,
-          machineCode:    fila.machineCode,
-          machineName:    fila.machineName,
-          machineType:    fila.machineType,
-          machineMarca:   fila.machineMarca,
-          importadoDeExcel: true,
-          fechaCreacion:  new Date().toISOString(),
-          datosEntrega: {
-            cantidadLitros:   parseFloat(fila.litros) || 0,
-            horometroOdometro: parseFloat(fila.horometroOdometro) || 0,
-            numeralInicial:   parseFloat(fila.numeralInicial) || 0,
-            numeralFinal:     parseFloat(fila.numeralFinal) || 0,
-            observaciones:    fila.comentarios,
-          },
-        };
-
-        await addDoc(collection(db, 'reportes_combustible'), doc);
-        ok.push(numeroReporte);
-      } catch (err) { errores.push(`Fila ${fila._row}: ${err.message}`); }
-    }
-
-    setResultado({ ok, errores });
-    setImportando(false);
-    setPaso('done');
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
-
-        {/* Header */}
-        <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white p-5 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-black">Importación Masiva — Cargas Diesel</h2>
-              <p className="text-orange-100 text-xs">
-                {paso === 'upload' && 'Sube el Excel de cargas diesel'}
-                {paso === 'preview' && `${filas.length} registros detectados — selecciona los que quieres importar`}
-                {paso === 'done' && 'Importación completada'}
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-all">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        {/* Contenido */}
-        <div className="flex-1 overflow-auto p-5">
-
-          {paso === 'upload' && (
-            <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-amber-300 rounded-2xl cursor-pointer hover:bg-amber-50 transition-all bg-amber-50/50">
-              <svg className="w-10 h-10 text-amber-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="text-sm font-bold text-amber-700">Haz clic para seleccionar el Excel de Cargas Diesel</span>
-              <span className="text-xs text-amber-500 mt-1">.xlsx o .xls</span>
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => e.target.files[0] && parsearExcel(e.target.files[0])} />
-            </label>
-          )}
-
-          {paso === 'preview' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-4 text-xs text-slate-500 bg-slate-50 rounded-xl p-3 flex-wrap">
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"/>Máquina/Proyecto encontrado en sistema</span>
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"/>No encontrado (se importa sin vincular)</span>
-                <span className="ml-auto font-semibold text-slate-700">{seleccionadas.size} de {filas.length} seleccionados</span>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-slate-800 text-white">
-                      <th className="px-3 py-2.5 text-center"><input type="checkbox" checked={seleccionadas.size === filas.length} onChange={toggleTodas} className="w-3.5 h-3.5 rounded"/></th>
-                      {['Tipo','Fecha','Proyecto','Patente','Tipo Máq.','Marca','Modelo','Horóm./Km','Litros','Comentarios'].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left font-bold tracking-wide whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filas.map((f, i) => (
-                      <tr key={i} onClick={() => toggleFila(i)} className={`border-t border-slate-100 cursor-pointer transition-colors ${seleccionadas.has(i) ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-slate-50 opacity-40'}`}>
-                        <td className="px-3 py-2 text-center"><input type="checkbox" checked={seleccionadas.has(i)} onChange={() => toggleFila(i)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded"/></td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${f.tipo === 'entrega' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {f.tipo.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{f.fecha}</td>
-                        <td className="px-3 py-2"><span className={`font-semibold ${f._projectMatch ? 'text-emerald-700' : 'text-amber-600'}`}>{f.projectName||'—'}</span></td>
-                        <td className="px-3 py-2"><span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${f._machineMatch ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{f.machinePatente||'—'}</span></td>
-                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{f.machineType}</td>
-                        <td className="px-3 py-2 text-slate-500">{f.machineMarca}</td>
-                        <td className="px-3 py-2 text-slate-600">{f.machineName}</td>
-                        <td className="px-3 py-2 text-center text-slate-600">{f.horometroOdometro||'—'}</td>
-                        <td className="px-3 py-2 text-center font-bold text-orange-600">{f.litros ? `${f.litros} L` : '—'}</td>
-                        <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate">{f.comentarios||'—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-slate-400 italic">* Los registros se importan en estado sin firma. Podrás completarlos desde la vista de reportes.</p>
-            </div>
-          )}
-
-          {paso === 'done' && resultado && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
-                </div>
-                <div>
-                  <p className="font-black text-emerald-800">{resultado.ok.length} registros importados correctamente</p>
-                  <p className="text-xs text-emerald-600 mt-0.5">Guardados en reportes_combustible como entregas/entradas sin firma.</p>
-                </div>
-              </div>
-              {resultado.errores.length > 0 && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
-                  <p className="font-bold text-red-700 mb-2">{resultado.errores.length} errores:</p>
-                  {resultado.errores.map((e, i) => <p key={i} className="text-xs text-red-600">• {e}</p>)}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-slate-100 p-4 flex justify-end gap-3 flex-shrink-0 bg-slate-50">
-          <button onClick={onClose} className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-sm transition-all">
-            {paso === 'done' ? 'Cerrar' : 'Cancelar'}
-          </button>
-          {paso === 'preview' && (
-            <button onClick={importar} disabled={importando || seleccionadas.size === 0}
-              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:opacity-90 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center gap-2"
-            >
-              {importando
-                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Importando...</>
-                : <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>Importar {seleccionadas.size} registros</>
-              }
-            </button>
-          )}
-          {paso === 'done' && resultado?.ok.length > 0 && (
-            <button onClick={onImportado} className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-xl text-sm shadow-md">
-              Ver reportes →
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
