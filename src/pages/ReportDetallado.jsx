@@ -436,12 +436,38 @@ export default function ReportDetallado({ onClose } = {}) {
     return errors;
   };
 
-  const handleNextStep = (e) => {
+  const handleNextStep = async (e) => {
     e.preventDefault();
     
     if (!selectedProject || !formData.machineId) {
       alert("❌ Selecciona proyecto y máquina");
       return;
+    }
+
+    // ── Validación 1: No permitir fecha futura ────────────────────
+    const today = isoToday();
+    if (formData.fecha > today) {
+      alert("❌ No puedes ingresar un reporte con fecha futura.\nLa fecha debe ser igual o anterior a hoy.");
+      return;
+    }
+
+    // ── Validación 2: No permitir duplicado misma máquina mismo día ─
+    try {
+      const dupQ = query(
+        collection(db, 'reportes_detallados'),
+        where('machineId', '==', formData.machineId),
+        where('fecha', '==', formData.fecha)
+      );
+      const dupSnap = await getDocs(dupQ);
+      if (!dupSnap.empty) {
+        const selectedMachineName = machines.find(m => m.id === formData.machineId);
+        const machineName = selectedMachineName?.code || selectedMachineName?.patente || 'esta máquina';
+        alert(`❌ Ya existe un reporte de "${machineName}" para el ${formData.fecha}.\nNo se pueden ingresar dos reportes de la misma máquina el mismo día.`);
+        return;
+      }
+    } catch (err) {
+      console.error('Error verificando duplicados:', err);
+      // Si falla la consulta, dejamos pasar (no bloqueamos por error de red)
     }
     
     const validationErrors = validatePaso1();
@@ -540,18 +566,21 @@ export default function ReportDetallado({ onClose } = {}) {
     
     setQrError('');
     
-    // Buscar máquina con prioridad: qrCode > code > patente
+    // Normalizar el código ingresado para búsqueda case-insensitive
+    const qrNorm = qrCode.trim().toUpperCase();
+    
+    // Buscar máquina con prioridad: qrCode > code > patente (case-insensitive)
     let machine = null;
     
     // 1. Intentar por qrCode
-    machine = machines.find(m => m.qrCode && m.qrCode === qrCode);
+    machine = machines.find(m => m.qrCode && m.qrCode.toUpperCase() === qrNorm);
     if (machine) {
       console.log(`✅ Máquina encontrada por qrCode:`, machine);
     }
     
     // 2. Si no encontró, intentar por code
     if (!machine) {
-      machine = machines.find(m => m.code && m.code === qrCode);
+      machine = machines.find(m => m.code && m.code.toUpperCase() === qrNorm);
       if (machine) {
         console.log(`✅ Máquina encontrada por code:`, machine);
       }
@@ -559,7 +588,7 @@ export default function ReportDetallado({ onClose } = {}) {
     
     // 3. Si no encontró, intentar por patente
     if (!machine) {
-      machine = machines.find(m => m.patente && m.patente === qrCode);
+      machine = machines.find(m => m.patente && m.patente.toUpperCase() === qrNorm);
       if (machine) {
         console.log(`✅ Máquina encontrada por patente:`, machine);
       }
@@ -643,6 +672,7 @@ export default function ReportDetallado({ onClose } = {}) {
                   type="date"
                   value={formData.fecha}
                   onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+                  max={isoToday()}
                   required
                 />
               </div>
@@ -1099,7 +1129,7 @@ function QRScannerModal({ onScan, onClose, error }) {
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleManualSubmit()}
-                placeholder="Ej: EX-01, RE-02..."
+                placeholder="Ej: ex-01, TSBS36, bcdf12..."
                 className="input-modern flex-1 text-sm sm:text-base"
               />
               <button

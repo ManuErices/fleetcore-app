@@ -15,7 +15,7 @@ const getQRUrl = (text, size = 300) =>
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────
 const ROLES = ['administrador', 'operador', 'mandante'];
-const TIPOS_MAQUINA = ['EXCAVADORA', 'BULLDOZER', 'MOTONIVELADORA', 'RETROEXCAVADORA', 'CARGADOR FRONTAL', 'CAMION ALJIBE', 'CAMION COMBUSTIBLE', 'CAMIONETA', 'MOCHILA COMBUSTIBLE'];
+const TIPOS_MAQUINA = ['Excavadora', 'Bulldozer', 'Motoniveladora', 'Retroexcavadora', 'Cargador Frontal', 'Grúa', 'Camión', 'Camión de Combustible', 'Otro'];
 
 const TAB_DEFS = [
   { id: 'operadores',  label: 'Operadores',  color: 'blue',   icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -24,6 +24,7 @@ const TAB_DEFS = [
   { id: 'surtidores',  label: 'Surtidores',  color: 'amber',  icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z' },
   { id: 'empresas',    label: 'Empresas',    color: 'teal',   icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
   { id: 'proyectos',   label: 'Proyectos',   color: 'indigo', icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
+  { id: 'estaciones',  label: 'Est. Combustible', color: 'cyan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z' },
   { id: 'usuarios',    label: 'Usuarios',    color: 'rose',   icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
 ];
 
@@ -35,6 +36,7 @@ const GRADIENTS = {
   teal:   'from-teal-600 to-cyan-600',
   indigo: 'from-indigo-600 to-blue-600',
   rose:   'from-rose-600 to-pink-600',
+  cyan:   'from-cyan-500 to-teal-600',
   slate:  'from-slate-700 to-slate-800',
 };
 
@@ -46,6 +48,7 @@ const TAB_ACTIVE = {
   teal:   'bg-teal-600 text-white shadow-lg shadow-teal-200',
   indigo: 'bg-indigo-600 text-white shadow-lg shadow-indigo-200',
   rose:   'bg-rose-600 text-white shadow-lg shadow-rose-200',
+  cyan:   'bg-cyan-600 text-white shadow-lg shadow-cyan-200',
 };
 
 const ROLE_STYLES = {
@@ -127,84 +130,219 @@ function ConfirmDialog({ isOpen, onClose, onConfirm, title, message }) {
 // ─────────────────────────────────────────────────────────────
 // QR CARD
 // ─────────────────────────────────────────────────────────────
-function QRCard({ isOpen, onClose, title, qrText }) {
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const [imgError, setImgError] = useState(false);
+function QRCard({ isOpen, onClose, title, qrText, code = '', patente = '' }) {
+  const [qrReady, setQrReady] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [building, setBuilding] = useState(false);
 
   useEffect(() => {
-    if (isOpen) { setImgLoaded(false); setImgError(false); }
+    if (isOpen) { setQrReady(false); setPreviewUrl(null); buildQR(); }
   }, [isOpen, qrText]);
 
+  const buildQR = () => {
+    setBuilding(true);
+    const QR_API = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qrText)}&ecc=H&margin=8`;
+    const LOGO_SRC = '/logo-mpf.jpg';
+
+    const canvas = document.createElement('canvas');
+    const W = 800, PAD = 52;
+    const HEADER_H = 120, QR_AREA = 580, FOOTER_H = 140;
+    canvas.width = W;
+    canvas.height = HEADER_H + QR_AREA + FOOTER_H;
+    const ctx = canvas.getContext('2d');
+
+    const render = (qrImg, logoImg) => {
+      const H = canvas.height;
+
+      // ── Fondo completo oscuro ──
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Franja naranja top ──
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(0, 0, W, 6);
+
+      // ── Header ──
+      ctx.fillStyle = '#64748b';
+      ctx.font = '500 20px -apple-system, system-ui, Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('MPF INGENIERÍA CIVIL', PAD, 52);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 40px -apple-system, system-ui, Arial';
+      ctx.fillText(title || qrText, PAD, 102);
+
+      // Línea separadora
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(PAD, HEADER_H);
+      ctx.lineTo(W - PAD, HEADER_H);
+      ctx.stroke();
+
+      // ── Área QR (fondo ligeramente más claro) ──
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(0, HEADER_H, W, QR_AREA);
+
+      const QR_SIZE = 480;
+      const qrX = (W - QR_SIZE) / 2;
+      const qrY = HEADER_H + (QR_AREA - QR_SIZE) / 2;
+
+      // Sombra / borde blanco alrededor del QR
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(qrX - 16, qrY - 16, QR_SIZE + 32, QR_SIZE + 32, 24);
+      } else {
+        ctx.rect(qrX - 16, qrY - 16, QR_SIZE + 32, QR_SIZE + 32);
+      }
+      ctx.fill();
+
+      // QR image
+      ctx.drawImage(qrImg, qrX, qrY, QR_SIZE, QR_SIZE);
+
+      // ── Logo centrado sobre el QR ──
+      const BOX = 96;
+      const lx = qrX + (QR_SIZE - BOX) / 2;
+      const ly = qrY + (QR_SIZE - BOX) / 2;
+
+      // Fondo blanco del logo
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(lx - 10, ly - 10, BOX + 20, BOX + 20, 14);
+      } else {
+        ctx.rect(lx - 10, ly - 10, BOX + 20, BOX + 20);
+      }
+      ctx.fill();
+
+      if (logoImg) {
+        const aspect = logoImg.width / logoImg.height;
+        const lw = aspect >= 1 ? BOX : BOX * aspect;
+        const lh = aspect >= 1 ? BOX / aspect : BOX;
+        ctx.drawImage(logoImg, lx + (BOX - lw) / 2, ly + (BOX - lh) / 2, lw, lh);
+      } else {
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 30px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('MPF', lx + BOX / 2, ly + BOX / 2 + 10);
+      }
+
+      // ── Footer ──
+      const fy = HEADER_H + QR_AREA;
+
+      // Línea naranja separadora
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(PAD, fy + 20, 3, 90);
+
+      // Código — izquierda
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 18px -apple-system, system-ui, Arial';
+      ctx.fillText('CÓDIGO', PAD + 20, fy + 52);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 42px -apple-system, system-ui, Arial';
+      ctx.fillText(code || qrText, PAD + 20, fy + 106);
+
+      // Patente — derecha
+      if (patente) {
+        ctx.fillStyle = '#f97316';
+        ctx.fillRect(W - PAD - 3, fy + 20, 3, 90);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '600 18px -apple-system, system-ui, Arial';
+        ctx.fillText('PATENTE', W - PAD - 20, fy + 52);
+        ctx.fillStyle = '#f97316';
+        ctx.font = 'bold 42px -apple-system, system-ui, Arial';
+        ctx.fillText(patente, W - PAD - 20, fy + 106);
+      }
+
+      const url = canvas.toDataURL('image/png');
+      setPreviewUrl(url);
+      setQrReady(true);
+      setBuilding(false);
+    };
+
+    // Cargar QR
+    const qrImg = new Image();
+    qrImg.crossOrigin = 'anonymous';
+    qrImg.src = QR_API;
+    qrImg.onload = () => {
+      // Cargar logo
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+      logoImg.src = LOGO_SRC;
+      logoImg.onload = () => render(qrImg, logoImg);
+      logoImg.onerror = () => render(qrImg, null);
+    };
+    qrImg.onerror = () => { setBuilding(false); };
+  };
+
   const downloadPNG = () => {
+    if (!previewUrl) return;
     const a = document.createElement('a');
-    a.href = getQRUrl(qrText, 600);
-    a.download = `QR_${(title || qrText).replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
-    a.target = '_blank';
+    a.href = previewUrl;
+    a.download = `QR_MPF_${(code || qrText).replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
     a.click();
   };
 
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:max-w-xs bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
-        <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-5 py-4 flex items-center justify-between">
-          <div className="min-w-0">
-            <p className="text-xs text-slate-400 uppercase tracking-wider font-bold">Código QR</p>
-            <h3 className="text-sm font-black text-white truncate">{title}</h3>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full sm:max-w-sm bg-[#0f172a] rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden border border-slate-700">
+
+        {/* Header modal */}
+        <div className="px-5 py-4 flex items-center justify-between border-b border-slate-700">
+          <div>
+            <p className="text-[11px] text-orange-400 uppercase tracking-widest font-bold">Código QR · Máquina</p>
+            <h3 className="text-base font-black text-white truncate mt-0.5">{title}</h3>
           </div>
-          <button onClick={onClose} className="p-1.5 bg-white/15 hover:bg-white/25 rounded-lg transition-colors ml-3 flex-shrink-0">
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <button onClick={onClose} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg flex items-center justify-center transition-colors ml-3 flex-shrink-0">
+            <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="p-5 flex flex-col items-center gap-4">
-          {/* QR Image */}
-          <div className="relative w-[192px] h-[192px] bg-slate-50 rounded-2xl border-2 border-slate-100 flex items-center justify-center overflow-hidden shadow-inner">
-            {!imgLoaded && !imgError && (
-              <div className="flex flex-col items-center gap-2 text-slate-300">
-                <div className="w-7 h-7 border-2 border-slate-200 border-t-slate-400 rounded-full animate-spin" />
-                <span className="text-xs font-medium">Generando...</span>
+        <div className="p-5 flex flex-col gap-4">
+          {/* Preview */}
+          <div className="w-full rounded-xl overflow-hidden border border-slate-700 shadow-xl bg-slate-800" style={{minHeight: 200}}>
+            {building || !qrReady ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3">
+                <div className="w-9 h-9 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+                <p className="text-slate-400 text-sm font-medium">Generando QR...</p>
               </div>
+            ) : (
+              <img src={previewUrl} alt="QR Preview" className="w-full h-auto" />
             )}
-            {imgError && (
-              <div className="flex flex-col items-center gap-2 text-slate-400 px-4 text-center">
-                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-                <span className="text-xs">Sin conexión</span>
-              </div>
-            )}
-            <img
-              src={getQRUrl(qrText, 192)}
-              alt={`QR ${title}`}
-              width={192}
-              height={192}
-              className="rounded-xl"
-              style={{ display: imgLoaded ? 'block' : 'none', imageRendering: 'pixelated' }}
-              onLoad={() => setImgLoaded(true)}
-              onError={() => setImgError(true)}
-            />
           </div>
 
-          {/* Contenido */}
-          <div className="w-full bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Contenido</p>
-            <p className="text-sm font-mono font-bold text-slate-800 break-all">{qrText}</p>
+          {/* Info chips */}
+          <div className="flex gap-2">
+            <div className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Código</p>
+              <p className="text-sm font-mono font-black text-white mt-0.5">{code || qrText}</p>
+            </div>
+            {patente && (
+              <div className="flex-1 bg-orange-500/10 border border-orange-500/30 rounded-xl px-3 py-2.5">
+                <p className="text-[10px] font-bold text-orange-400 uppercase tracking-wider">Patente</p>
+                <p className="text-sm font-mono font-black text-orange-300 mt-0.5">{patente}</p>
+              </div>
+            )}
           </div>
 
           {/* Botón descarga */}
           <button
             onClick={downloadPNG}
-            disabled={!imgLoaded}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-slate-800 to-slate-900 hover:opacity-90 active:scale-[0.98] disabled:opacity-40 text-white font-bold text-sm rounded-xl transition-all shadow-lg"
+            disabled={!qrReady}
+            className="w-full flex items-center justify-center gap-2 py-3.5 bg-orange-500 hover:bg-orange-400 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold text-sm rounded-xl transition-all shadow-lg"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Descargar PNG
+            {qrReady ? 'Descargar PNG' : 'Generando...'}
           </button>
         </div>
       </div>
@@ -234,7 +372,7 @@ function DataTable({ columns, data, onEdit, onDelete, emptyText = 'Sin registros
   );
   return (
     <div className="overflow-x-auto -mx-5 sm:mx-0">
-      <table className="w-full min-w-[480px]">
+      <table className="w-full min-w-[900px]">
         <thead>
           <tr className="bg-slate-50 border-y border-slate-100">
             {columns.map(col => (
@@ -344,9 +482,12 @@ function OperadoresSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombre: '', rut: '', cargo: '', empresa: '' });
+  const [form, setForm] = useState({ nombre: '', rut: '', cargo: '', empresa: '', esSurtidor: false });
+  const [cargoCustom, setCargoCustom] = useState('');
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [busquedaOp, setBusquedaOp] = useState('');
+  const [filtroEmpresaOp, setFiltroEmpresaOp] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -359,14 +500,22 @@ function OperadoresSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombre: '', rut: '', cargo: '', empresa: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ nombre: row.nombre || '', rut: row.rut || '', cargo: row.cargo || '', empresa: row.empresa || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ nombre: '', rut: '', cargo: '', empresa: '', esSurtidor: false }); setCargoCustom(''); setEditId(null); setModal(true); };
+  const CARGOS_LIST = ['Conductor camion tolva','Operador de maquinaria pesada','Soldador','Conductor camion combustible','Mecanico','Administrador de contrato','Encargado de logistica','Supervisor mecanico','Prevencionista de riesgos','Operador reemplazo'];
+  const openEdit = (row) => {
+    const cargo = row.cargo || '';
+    const isCustom = cargo && !CARGOS_LIST.includes(cargo);
+    setForm({ nombre: row.nombre || '', rut: row.rut || '', cargo: isCustom ? 'otro' : cargo, empresa: row.empresa || '', esSurtidor: row.esSurtidor || false });
+    setCargoCustom(isCustom ? cargo : '');
+    setEditId(row.id); setModal(true);
+  };
 
   const save = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
-      const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), cargo: form.cargo.trim(), empresa: form.empresa.trim(), updatedAt: serverTimestamp() };
+      const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
+      const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'employees', editId), p);
       else await addDoc(collection(db, 'employees'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -384,11 +533,26 @@ function OperadoresSection() {
       <SectionCard title="Operadores" subtitle="Empleados registrados en el sistema" count={data.length} color="blue" onAdd={openNew} addLabel="Nuevo Operador"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
       >
-        <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
+        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" placeholder="Buscar por nombre, RUT o cargo..." value={busquedaOp} onChange={e => setBusquedaOp(e.target.value)} />
+          </div>
+          <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400 bg-white" value={filtroEmpresaOp} onChange={e => setFiltroEmpresaOp(e.target.value)}>
+            <option value="">Todas las empresas</option>
+            {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <DataTable loading={loading} data={data.filter(r => {
+          const q = busquedaOp.toLowerCase();
+          const matchQ = !q || r.nombre?.toLowerCase().includes(q) || r.rut?.includes(busquedaOp) || r.cargo?.toLowerCase().includes(q);
+          const matchE = !filtroEmpresaOp || r.empresa === filtroEmpresaOp;
+          return matchQ && matchE;
+        })} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
           columns={[
             { key: 'nombre', label: 'Nombre' },
             { key: 'rut', label: 'RUT' },
-            { key: 'cargo', label: 'Cargo' },
+            { key: 'cargo', label: 'Cargo', render: r => (<div className="flex items-center gap-2"><span>{r.cargo || '-'}</span>{r.esSurtidor && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full border border-amber-300">Surtidor</span>}</div>) },
             { key: 'empresa', label: 'Empresa' },
           ]}
         />
@@ -398,8 +562,44 @@ function OperadoresSection() {
         <div className="space-y-4">
           <Field label="Nombre Completo" required><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Juan Pérez González" /></Field>
           <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 12.345.678-9" /></Field>
-          <Field label="Cargo"><input className={inputCls} value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })} placeholder="Ej: Operador Maquinaria" /></Field>
-          <Field label="Empresa"><input className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })} placeholder="Ej: MPF Ingeniería" /></Field>
+          <Field label="Cargo">
+            <select className={inputCls} value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })}>
+              <option value="">Seleccione cargo</option>
+              <option value="Conductor camion tolva">Conductor camion tolva</option>
+              <option value="Operador de maquinaria pesada">Operador de maquinaria pesada</option>
+              <option value="Soldador">Soldador</option>
+              <option value="Conductor camion combustible">Conductor camion combustible</option>
+              <option value="Mecanico">Mecanico</option>
+              <option value="Administrador de contrato">Administrador de contrato</option>
+              <option value="Encargado de logistica">Encargado de logistica</option>
+              <option value="Supervisor mecanico">Supervisor mecanico</option>
+              <option value="Prevencionista de riesgos">Prevencionista de riesgos</option>
+              <option value="Operador reemplazo">Operador reemplazo</option>
+              <option value="otro">Otro...</option>
+            </select>
+            {form.cargo === 'otro' && <input className={inputCls + ' mt-2'} value={cargoCustom} onChange={e => setCargoCustom(e.target.value)} placeholder="Escribe el cargo..." />}
+          </Field>
+          <Field label="Empresa">
+            <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
+              <option value="">Seleccione empresa</option>
+              <option value="LifeMed">LifeMed</option>
+              <option value="Intosim">Intosim</option>
+              <option value="Río Tinto">Río Tinto</option>
+              <option value="Global">Global</option>
+              <option value="Celenor">Celenor</option>
+              <option value="MPF Ingeniería Civil">MPF Ingeniería Civil</option>
+              {form.empresa && !['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil',''].includes(form.empresa) && (
+                <option value={form.empresa}>{form.empresa}</option>
+              )}
+            </select>
+          </Field>
+          <label className="flex items-center gap-3 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl cursor-pointer hover:bg-amber-100 transition-all select-none">
+            <input type="checkbox" checked={form.esSurtidor} onChange={e => setForm({ ...form, esSurtidor: e.target.checked })} className="w-4 h-4 rounded accent-amber-500" />
+            <div>
+              <div className="font-bold text-amber-900 text-sm">Surtidor de Combustible</div>
+              <div className="text-xs text-amber-700 mt-0.5">Este operador puede ser asignado como repartidor de combustible</div>
+            </div>
+          </label>
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="blue" />
         </div>
       </Modal>
@@ -417,9 +617,11 @@ function MaquinasSection() {
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [qr, setQr] = useState(null);
-  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '' });
+  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [busquedaMaq, setBusquedaMaq] = useState('');
+  const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -432,15 +634,15 @@ function MaquinasSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '' }); setEditId(row.id); setModal(true); };
-  const openQR = (row) => setQr({ title: row.name || row.code, qrText: row.code || row.patente || row.id });
+  const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '', empresa: row.empresa || '', propietario: row.propietario || '' }); setEditId(row.id); setModal(true); };
+  const openQR = (row) => setQr({ title: row.name || row.code, qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
 
   const save = async () => {
     if (!form.name.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
-      const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), updatedAt: serverTimestamp() };
+      const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), empresa: form.empresa, propietario: form.propietario.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'machines', editId), p);
       else await addDoc(collection(db, 'machines'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -466,7 +668,22 @@ function MaquinasSection() {
       <SectionCard title="Máquinas" subtitle="Equipos registrados en la flota" count={data.length} color="purple" onAdd={openNew} addLabel="Nueva Máquina"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>}
       >
-        <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
+        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" placeholder="Buscar por nombre, código, patente o tipo..." value={busquedaMaq} onChange={e => setBusquedaMaq(e.target.value)} />
+          </div>
+          <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400 bg-white" value={filtroEmpresaMaq} onChange={e => setFiltroEmpresaMaq(e.target.value)}>
+            <option value="">Todas las empresas</option>
+            {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <DataTable loading={loading} data={data.filter(r => {
+          const q = busquedaMaq.toLowerCase();
+          const matchQ = !q || r.name?.toLowerCase().includes(q) || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
+          const matchE = !filtroEmpresaMaq || r.empresa === filtroEmpresaMaq;
+          return matchQ && matchE;
+        })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
           columns={[
             { key: 'name', label: 'Nombre' },
             { key: 'code', label: 'Código', render: r => <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg text-xs">{r.code || r.patente || '—'}</span> },
@@ -474,6 +691,8 @@ function MaquinasSection() {
             { key: 'type', label: 'Tipo' },
             { key: 'marca', label: 'Marca' },
             { key: 'modelo', label: 'Modelo' },
+            { key: 'empresa', label: 'Empresa' },
+            { key: 'propietario', label: 'Propietario' },
           ]}
         />
       </SectionCard>
@@ -493,11 +712,26 @@ function MaquinasSection() {
           </Field>
           <Field label="Marca"><input className={inputCls} value={form.marca} onChange={e => setForm({ ...form, marca: e.target.value })} placeholder="Ej: Caterpillar, Komatsu" /></Field>
           <Field label="Modelo"><input className={inputCls} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej: Caterpillar 320D" /></Field>
+          <Field label="Empresa">
+            <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
+              <option value="">Seleccione empresa</option>
+              <option value="LifeMed">LifeMed</option>
+              <option value="Intosim">Intosim</option>
+              <option value="Río Tinto">Río Tinto</option>
+              <option value="Global">Global</option>
+              <option value="Celenor">Celenor</option>
+              <option value="MPF Ingeniería Civil">MPF Ingeniería Civil</option>
+              {form.empresa && !['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil',''].includes(form.empresa) && (
+                <option value={form.empresa}>{form.empresa}</option>
+              )}
+            </select>
+          </Field>
+          <Field label="Propietario"><input className={inputCls} value={form.propietario} onChange={e => setForm({ ...form, propietario: e.target.value })} placeholder="Ej: MPF Ingeniería Civil" /></Field>
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="purple" />
         </div>
       </Modal>
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
-      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} />
+      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
     </>
   );
 }
@@ -878,6 +1112,388 @@ function ProyectosSection() {
 // ─────────────────────────────────────────────────────────────
 // SECCIÓN: USUARIOS
 // ─────────────────────────────────────────────────────────────
+
+// =================================================================
+// SECCION: ESTACIONES DE COMBUSTIBLE
+// =================================================================
+const MARCA_BADGE = {
+  Copec:     'bg-red-100 text-red-700 border-red-300',
+  Shell:     'bg-yellow-100 text-yellow-700 border-yellow-300',
+  Petrobras: 'bg-green-100 text-green-700 border-green-300',
+  Aramco:    'bg-blue-100 text-blue-700 border-blue-300',
+};
+
+function EstacionesSection() {
+  const [data, setData]               = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [modal, setModal]             = useState(false);
+  const [asignModal, setAsignModal]   = useState(null);
+  const [confirm, setConfirm]         = useState(null);
+  const [saving, setSaving]           = useState(false);
+  const [projects, setProjects]       = useState([]);
+  const [busqueda, setBusqueda]       = useState('');
+  const [filtroMarca, setFiltroMarca] = useState('');
+  const [editId, setEditId]           = useState(null);
+  const [form, setForm] = useState({ nombre: '', marca: '', region: '', ciudad: '', direccion: '', telefono: '', rut: '' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [estSnap, projSnap] = await Promise.all([
+        getDocs(query(collection(db, 'estaciones_combustible'), orderBy('nombre'))),
+        getDocs(query(collection(db, 'projects'), orderBy('name'))),
+      ]);
+      setData(estSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setProjects(projSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) { console.error(e); setData([]); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openNew  = () => {
+    setForm({ nombre: '', marca: '', region: '', ciudad: '', direccion: '', telefono: '', rut: '' });
+    setEditId(null);
+    setModal(true);
+  };
+  const openEdit = (row) => {
+    setForm({
+      nombre:    row.nombre    || '',
+      marca:     row.marca     || '',
+      region:    row.region    || '',
+      ciudad:    row.ciudad    || '',
+      direccion: row.direccion || '',
+      telefono:  row.telefono  || '',
+      rut:       row.rut       || '',
+    });
+    setEditId(row.id);
+    setModal(true);
+  };
+
+  const save = async () => {
+    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
+    if (!form.ciudad.trim()) return alert('La ciudad es obligatoria');
+    setSaving(true);
+    try {
+      const p = {
+        nombre:    form.nombre.trim(),
+        marca:     form.marca,
+        region:    form.region.trim(),
+        ciudad:    form.ciudad.trim(),
+        direccion: form.direccion.trim(),
+        telefono:  form.telefono.trim(),
+        rut:       form.rut.trim(),
+        updatedAt: serverTimestamp(),
+      };
+      if (editId) {
+        await updateDoc(doc(db, 'estaciones_combustible', editId), p);
+      } else {
+        await addDoc(collection(db, 'estaciones_combustible'), { ...p, obras: [], createdAt: serverTimestamp() });
+      }
+      setModal(false);
+      load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(false);
+  };
+
+  const del = async () => {
+    try {
+      await deleteDoc(doc(db, 'estaciones_combustible', confirm.id));
+      load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setConfirm(null);
+  };
+
+  const asignarObra = async (estacion, obraId, add) => {
+    const obras = estacion.obras || [];
+    const nuevas = add
+      ? [...new Set([...obras, obraId])]
+      : obras.filter(o => o !== obraId);
+    await updateDoc(doc(db, 'estaciones_combustible', estacion.id), { obras: nuevas });
+    setData(prev => prev.map(e => e.id === estacion.id ? { ...e, obras: nuevas } : e));
+    if (asignModal && asignModal.id === estacion.id) {
+      setAsignModal(prev => ({ ...prev, obras: nuevas }));
+    }
+  };
+
+  const filtradas = data.filter(e => {
+    const q = busqueda.toLowerCase();
+    const matchQ = !q
+      || (e.nombre||'').toLowerCase().includes(q)
+      || (e.ciudad||'').toLowerCase().includes(q)
+      || (e.marca||'').toLowerCase().includes(q)
+      || (e.region||'').toLowerCase().includes(q);
+    const matchM = !filtroMarca || e.marca === filtroMarca;
+    return matchQ && matchM;
+  });
+
+  const REGIONES = [
+    'Arica y Parinacota','Tarapaca','Antofagasta','Atacama','Coquimbo',
+    'Valparaiso','Metropolitana','O\'Higgins','Maule','Nuble',
+    'Biobio','La Araucania','Los Rios','Los Lagos','Aysen','Magallanes',
+  ];
+
+  return (
+    <>
+      <div className="bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
+
+        {/* ── Header ─────────────────────────────────────────── */}
+        <div className="bg-gradient-to-r from-cyan-500 to-teal-600 p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-white font-black text-lg">
+                Estaciones de Combustible
+                <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full ml-2">{data.length}</span>
+              </h3>
+              <p className="text-cyan-100 text-xs mt-0.5">Copec · Shell · Petrobras · Aramco y otras</p>
+            </div>
+          </div>
+          <button onClick={openNew}
+            className="px-4 py-2 bg-white text-cyan-700 text-sm font-black rounded-xl hover:bg-cyan-50 transition-all shadow flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Nueva Estacion
+          </button>
+        </div>
+
+        {/* ── Filtros ─────────────────────────────────────────── */}
+        <div className="p-4 border-b border-slate-100 flex flex-wrap gap-3">
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre, ciudad, region o marca..."
+            className="flex-1 min-w-[220px] px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-cyan-400"
+          />
+          <select
+            value={filtroMarca}
+            onChange={e => setFiltroMarca(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-cyan-400 bg-white"
+          >
+            <option value="">Todas las marcas</option>
+            {['Copec','Shell','Petrobras','Aramco','Otra'].map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* ── Tabla / Empty ───────────────────────────────────── */}
+        {loading ? (
+          <div className="p-12 text-center text-slate-400 text-sm">Cargando...</div>
+        ) : filtradas.length === 0 ? (
+          <div className="p-12 text-center">
+            <div className="w-14 h-14 bg-cyan-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <svg className="w-7 h-7 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+              </svg>
+            </div>
+            <p className="text-slate-600 font-semibold mb-1">No hay estaciones registradas</p>
+            <p className="text-slate-400 text-sm mb-4">Crea la primera estacion de combustible</p>
+            <button onClick={openNew}
+              className="px-4 py-2 bg-cyan-600 text-white text-sm font-bold rounded-xl hover:bg-cyan-500 transition-all">
+              + Nueva Estacion
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  {['Marca','Nombre','RUT','Ciudad / Region','Direccion','Obras asignadas','Acciones'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtradas.map(est => (
+                  <tr key={est.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="px-4 py-3">
+                      <span className={'px-2 py-0.5 rounded-full text-xs font-bold border ' + (MARCA_BADGE[est.marca] || 'bg-slate-100 text-slate-600 border-slate-200')}>
+                        {est.marca || 'Otra'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-800">{est.nombre}</td>
+                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">{est.rut || '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-700">{est.ciudad || '—'}</div>
+                      <div className="text-xs text-slate-400">{est.region || ''}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 text-xs max-w-[180px] truncate" title={est.direccion}>
+                      {est.direccion || '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(est.obras || []).length === 0 ? (
+                        <span className="text-xs text-slate-400 italic">Sin obras</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {(est.obras || []).map(oId => {
+                            const p = projects.find(x => x.id === oId);
+                            return p ? (
+                              <span key={oId} className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded border border-indigo-200">
+                                {p.name || p.codigo}
+                              </span>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => setAsignModal(est)}
+                          className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-xs font-bold border border-indigo-200 transition-all whitespace-nowrap"
+                        >
+                          + Obras
+                        </button>
+                        <button
+                          onClick={() => openEdit(est)}
+                          className="p-1.5 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-all"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => setConfirm(est)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Modal Crear / Editar ─────────────────────────────── */}
+      <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Estacion' : 'Nueva Estacion de Combustible'} color="cyan">
+        <div className="space-y-4">
+          <Field label="Nombre de la Estacion" required>
+            <input className={inputCls} value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Copec Antofagasta Norte" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Marca / Cadena">
+              <select className={inputCls} value={form.marca} onChange={e => setForm({...form, marca: e.target.value})}>
+                <option value="">Seleccione marca</option>
+                <option value="Copec">Copec</option>
+                <option value="Shell">Shell</option>
+                <option value="Petrobras">Petrobras</option>
+                <option value="Aramco">Aramco</option>
+                <option value="Otra">Otra</option>
+              </select>
+            </Field>
+            <Field label="RUT (opcional)">
+              <input className={inputCls} value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 99.520.000-7" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ciudad" required>
+              <input className={inputCls} value={form.ciudad} onChange={e => setForm({...form, ciudad: e.target.value})} placeholder="Ej: Antofagasta" />
+            </Field>
+            <Field label="Region">
+              <select className={inputCls} value={form.region} onChange={e => setForm({...form, region: e.target.value})}>
+                <option value="">Seleccione region</option>
+                {REGIONES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Direccion">
+            <input className={inputCls} value={form.direccion} onChange={e => setForm({...form, direccion: e.target.value})} placeholder="Ej: Av. Pedro Aguirre Cerda 8500" />
+          </Field>
+          <Field label="Telefono (opcional)">
+            <input className={inputCls} value={form.telefono} onChange={e => setForm({...form, telefono: e.target.value})} placeholder="Ej: +56 2 2345 6789" />
+          </Field>
+          <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="cyan" />
+        </div>
+      </Modal>
+
+      {/* ── Modal Asignar Obras ──────────────────────────────── */}
+      {asignModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-5 flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-black text-lg">Asignar Obras</h3>
+                <p className="text-indigo-200 text-xs mt-0.5 truncate max-w-[260px]">{asignModal.nombre}</p>
+              </div>
+              <button
+                onClick={() => setAsignModal(null)}
+                className="w-8 h-8 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center text-white transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 max-h-80 overflow-y-auto space-y-2">
+              {projects.length === 0 ? (
+                <p className="text-slate-500 text-sm text-center py-6">No hay obras registradas en el sistema</p>
+              ) : (
+                projects.map(p => {
+                  const checked = (asignModal.obras || []).includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className={'flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ' + (checked ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200 hover:border-indigo-200')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e => asignarObra(asignModal, p.id, e.target.checked)}
+                        className="w-4 h-4 accent-indigo-600 rounded"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-slate-800 text-sm truncate">{p.name}</div>
+                        {p.ubicacion && <div className="text-xs text-slate-500 truncate">{p.ubicacion}</div>}
+                        {p.codigo && <div className="text-xs text-indigo-500 font-mono">{p.codigo}</div>}
+                      </div>
+                      {checked && (
+                        <svg className="w-4 h-4 text-indigo-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                        </svg>
+                      )}
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                {(asignModal.obras||[]).length} obra(s) asignada(s)
+              </span>
+              <button
+                onClick={() => setAsignModal(null)}
+                className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl text-sm hover:bg-indigo-500 transition-all"
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={!!confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={del}
+        title="Eliminar Estacion"
+        message={'Eliminar la estacion ' + (confirm ? confirm.nombre : '') + '? Esta accion no se puede deshacer.'}
+      />
+    </>
+  );
+}
+
 function UsuariosSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -998,7 +1614,7 @@ export default function AdminPanel() {
 
       {/* Header negro con tabs integrados — igual que imagen 1 */}
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 shadow-xl">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1014,7 +1630,7 @@ export default function AdminPanel() {
         </div>
 
         {/* Tabs dentro del header negro */}
-        <div className="max-w-5xl mx-auto px-2 sm:px-6">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6">
           <div className="flex gap-1 overflow-x-auto scrollbar-none">
             {TAB_DEFS.map(tab => {
               const isActive = activeTab === tab.id;
@@ -1041,13 +1657,14 @@ export default function AdminPanel() {
       </div>
 
       {/* Contenido */}
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
         {activeTab === 'operadores'  && <OperadoresSection />}
         {activeTab === 'maquinas'    && <MaquinasSection />}
         {activeTab === 'actividades' && <ActividadesSection />}
         {activeTab === 'surtidores'  && <SurtidoresSection />}
         {activeTab === 'empresas'    && <EmpresasSection />}
         {activeTab === 'proyectos'   && <ProyectosSection />}
+        {activeTab === 'estaciones'  && <EstacionesSection />}
         {activeTab === 'usuarios'    && <UsuariosSection />}
       </div>
     </div>

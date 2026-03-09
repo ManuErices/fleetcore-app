@@ -265,10 +265,11 @@ export default function ReporteCombustible() {
     const machineId = reporte.datosEntrega?.machineId;
     const operadorId = reporte.datosEntrega?.operadorId;
     const empresaId = reporte.datosEntrega?.empresa;
-
-    const machineInfo = machines.find(m => m.id === machineId);
-    const operadorInfo = empleados.find(e => e.id === operadorId);
-    const empresaInfo = empresas.find(e => e.id === empresaId);
+    // empresa puede ser un nombre string (nuevo) o un ID de Firebase (legado)
+    const empresaInfoFirebase = empresas.find(e => e.id === empresaId);
+    const empresaInfo = empresaInfoFirebase
+      ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaInfoFirebase.rut || '' }
+      : empresaId ? { nombre: empresaId, rut: '' } : null;
     const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
       nombre: reporte.repartidorNombre || '',
       rut: reporte.repartidorRut || ''
@@ -1275,7 +1276,8 @@ export default function ReporteCombustible() {
             ...reporteDetalle,
             ...reporteDetalle.datosEntrega,
             empresa: reporteDetalle.datosEntrega?.empresaNombre
-              || empresas.find(e => e.id === reporteDetalle.datosEntrega?.empresa)?.nombre
+              || (empresas.find(e => e.id === reporteDetalle.datosEntrega?.empresa)?.nombre)
+              || reporteDetalle.datosEntrega?.empresa  // string directo (nuevo formato)
               || reporteDetalle.empresa
               || '-'
           }}

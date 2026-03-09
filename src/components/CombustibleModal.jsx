@@ -3,6 +3,7 @@ import { collection, getDocs, addDoc } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import VoucherGenerator from './VoucherGenerator';
+import VoucherHistorialDia from './VoucherHistorialDia';
 import SignaturePad from "./SignaturePad";
 
 export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados }) {
@@ -12,12 +13,15 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const [loadingEquipo, setLoadingEquipo] = useState(false);
   const [loadingEmpresa, setLoadingEmpresa] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [currentUserData, setCurrentUserData] = useState(null); // Datos del user desde Firebase
+  const [currentUserData, setCurrentUserData] = useState(null);
   const [userRole, setUserRole] = useState('operador');
+  const [surtidoresPersonas, setSurtidoresPersonas] = useState([]); // empleados disponibles para admin
+  const [repartidorSeleccionado, setRepartidorSeleccionado] = useState(null); // empleado elegido por admin
 
 
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [lastReportData, setLastReportData] = useState(null);
+  const [showHistorial, setShowHistorial] = useState(false);
   
   // Estados para las firmas
   const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
@@ -51,12 +55,18 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   // Listas locales que se actualizan cuando agregamos nuevos items
   const [machinesLocal, setMachinesLocal] = useState([]);
   const [empresasLocal, setEmpresasLocal] = useState([]);
-  // Detecta si la empresa seleccionada es MPF (por nombre)
-  const esMPF = (empresaId) => {
-    if (!empresaId) return false;
-    const emp = empresasLocal.find(e => e.id === empresaId);
-    return emp?.nombre?.toLowerCase().includes('mpf') || false;
+  const [estacionesLocal, setEstacionesLocal] = useState([]);
+  // Detecta si la empresa seleccionada tiene registros internos (operadores/máquinas)
+  const EMPRESAS_SISTEMA = ['LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor', 'MPF Ingeniería Civil'];
+  const esEmpresaInterna = (empresaNombre) => {
+    if (!empresaNombre) return false;
+    // Tiene registros internos si hay operadores o máquinas con esa empresa
+    const tieneOps = (empleados || []).some(e => e.empresa === empresaNombre);
+    const tieneMaq = (machines || []).some(m => m.empresa === empresaNombre);
+    return tieneOps || tieneMaq;
   };
+  // Alias para compatibilidad con código existente
+  const esMPF = esEmpresaInterna;
   
   // Datos del formulario - Página 1 (Control de Combustible)
   const [datosControl, setDatosControl] = useState({
@@ -150,6 +160,19 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
     }
   }, [currentUser, isOpen]);
 
+  // Cargar lista de empleados para selector de admin
+  useEffect(() => {
+    if (isOpen && userRole === 'administrador') {
+      (async () => {
+        try {
+          const snap = await getDocs(collection(db, 'employees'));
+          const lista = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(e => e.esSurtidor === true);
+          setSurtidoresPersonas(lista);
+        } catch (e) { console.error('Error cargando empleados:', e); }
+      })();
+    }
+  }, [isOpen, userRole]);
+
   // Inicializar listas locales cuando el modal se abre
   useEffect(() => {
     if (isOpen) {
@@ -171,6 +194,23 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
     } catch (error) {
       console.error("Error cargando empresas:", error);
       setEmpresasLocal([]);
+    }
+  };
+
+  // Carga estaciones filtradas por la obra seleccionada
+  const cargarEstaciones = async (projectId) => {
+    if (!projectId) { setEstacionesLocal([]); return; }
+    try {
+      const snap = await getDocs(collection(db, 'estaciones_combustible'));
+      const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Mostrar solo las asignadas a esta obra (o sin obras = sin restriccion)
+      const filtradas = todas.filter(e =>
+        !e.obras || e.obras.length === 0 || (e.obras || []).includes(projectId)
+      );
+      setEstacionesLocal(filtradas);
+    } catch (e) {
+      console.error('Error cargando estaciones:', e);
+      setEstacionesLocal([]);
     }
   };
 
@@ -331,14 +371,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         return;
       }
     } else if (tipoReporte === 'entrega') {
-      if (!datosEntrega.empresa) {
-        alert("Por favor selecciona una empresa");
-        return;
-      }
-      const maquinaOk = esMPF(datosEntrega.empresa) ? !!datosEntrega.machineId : !!maquinaExterna.patente;
-      const operadorOk = esMPF(datosEntrega.empresa) ? true : !!operadorExterno.nombre;
-      if (!maquinaOk || !datosEntrega.cantidadLitros) {
-        alert("Por favor completa los campos obligatorios de la entrega (Máquina y Cantidad)");
+      if (!datosEntrega.machineId || !datosEntrega.cantidadLitros) {
+        alert("Por favor completa los campos obligatorios de la entrega");
         return;
       }
       if (!firmaReceptor) {
@@ -360,8 +394,12 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         ...datosControl,
         fechaCreacion: new Date().toISOString(),
         creadoPor: currentUser?.email || 'unknown',
-        repartidorNombre: currentUserData?.nombre || '',
-        repartidorRut: currentUserData?.rut || ''
+        repartidorNombre: userRole === 'administrador'
+          ? (repartidorSeleccionado?.nombre || repartidorSeleccionado?.name || '')
+          : (currentUserData?.nombre || ''),
+        repartidorRut: userRole === 'administrador'
+          ? (repartidorSeleccionado?.rut || '')
+          : (currentUserData?.rut || '')
       };
 
       if (tipoReporte === 'entrada') {
@@ -396,7 +434,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       const projectInfo = projects?.find(p => p.id === datosControl.projectId);
       const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
       const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
-      const empresaInfo = empresasLocal?.find(e => e.id === datosEntrega.empresa);
+      const empresaInfo = { nombre: datosEntrega.empresa }; // empresa guardada como nombre
       
       // NUEVO: Obtener información del repartidor y equipo surtidor
       const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
@@ -540,7 +578,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <select
                     required
                     value={datosControl.projectId}
-                    onChange={(e) => setDatosControl({...datosControl, projectId: e.target.value})}
+                    onChange={(e) => { setDatosControl({...datosControl, projectId: e.target.value, origen: ''}); cargarEstaciones(e.target.value); }}
                     className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
                   >
                     <option value="">Seleccione obra</option>
@@ -573,53 +611,66 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                       Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
                     </label>
-                    <div className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg bg-amber-50 font-semibold text-amber-900 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                      <div className="flex-1">
-                        {currentUserData ? (
-                          <div>
-                            <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
-                            {currentUserData.rut && (
-                              <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>
-                            )}
-                            {currentUserData.email && (
-                              <div className="text-xs text-amber-600">{currentUserData.email}</div>
-                            )}
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="text-red-600 font-bold">⚠No se encontró usuario en el sistema</div>
-                            <div className="text-xs text-slate-600 mt-1">
-                              Usuario: {currentUser?.email || 'Sin email'}
-                            </div>
-                            <div className="text-xs text-red-500 mt-1">
-                              Por favor contacta al administrador para crear tu perfil en la colección "users"
-                            </div>
+
+                    {userRole === 'administrador' ? (
+                      // Admin: selector manual de empleado
+                      <div>
+                        <select
+                          value={datosControl.repartidorId}
+                          onChange={(e) => {
+                            const emp = surtidoresPersonas.find(p => p.id === e.target.value);
+                            setRepartidorSeleccionado(emp || null);
+                            setDatosControl(prev => ({ ...prev, repartidorId: e.target.value }));
+                          }}
+                          className="w-full px-4 py-2.5 border-2 border-amber-300 rounded-lg focus:outline-none focus:border-amber-500 bg-white text-slate-800 font-semibold"
+                        >
+                          <option value="">{surtidoresPersonas.length === 0 ? "No hay surtidores registrados" : "— Seleccione repartidor —"}</option>
+                          {surtidoresPersonas.map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.nombre || emp.name || emp.displayName || emp.email}
+                            </option>
+                          ))}
+                        </select>
+                        {repartidorSeleccionado && (
+                          <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-0.5">
+                            {repartidorSeleccionado.rut && <div><span className="font-bold">RUT:</span> {repartidorSeleccionado.rut}</div>}
+                            {repartidorSeleccionado.email && <div><span className="font-bold">Email:</span> {repartidorSeleccionado.email}</div>}
                           </div>
                         )}
+                        <p className="text-xs text-amber-600 mt-1">Selecciona el empleado que realiza la entrega</p>
                       </div>
-                      {currentUserData && (
-                        <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                    </div>
-                    {currentUserData ? (
-                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Autocompletado con tu usuario
-                      </p>
                     ) : (
-                      <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        Tu usuario no existe en la colección "users"
-                      </p>
+                      // Operador: display estático del usuario actual
+                      <div>
+                        <div className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg bg-amber-50 font-semibold text-amber-900 flex items-center gap-2">
+                          <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                          <div className="flex-1">
+                            {currentUserData ? (
+                              <div>
+                                <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
+                                {currentUserData.rut && <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>}
+                                {currentUserData.email && <div className="text-xs text-amber-600">{currentUserData.email}</div>}
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="text-red-600 font-bold">⚠ No se encontró usuario en el sistema</div>
+                                <div className="text-xs text-red-500 mt-1">Por favor contacta al administrador</div>
+                              </div>
+                            )}
+                          </div>
+                          {currentUserData && (
+                            <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </div>
+                        <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                          Autocompletado con tu usuario
+                        </p>
+                      </div>
                     )}
                   </div>
 
@@ -666,6 +717,17 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-orange-200">
+                {/* Botón historial vouchers del día */}
+                <button
+                  type="button"
+                  onClick={() => setShowHistorial(true)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold rounded-xl transition-all text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+                  </svg>
+                  Ver Vouchers del Día
+                </button>
                 <button
                   type="button"
                   onClick={handleClose}
@@ -788,12 +850,23 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
                       className="flex-1 px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                     >
-                      <option value="">Seleccione origen</option>
-                      {empresasLocal.map(emp => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
-                        </option>
-                      ))}
+                      <option value="">
+                        {datosEntrada.tipoOrigen === 'estacion'
+                          ? (estacionesLocal.length === 0 ? 'Sin estaciones asignadas a esta obra' : 'Seleccione estacion de servicio')
+                          : 'Seleccione origen'}
+                      </option>
+                      {datosEntrada.tipoOrigen === 'estacion'
+                        ? estacionesLocal.map(est => (
+                            <option key={est.id} value={est.id}>
+                              {(est.marca ? est.marca + ' - ' : '') + est.nombre + (est.ciudad ? ' (' + est.ciudad + ')' : '')}
+                            </option>
+                          ))
+                        : empresasLocal.map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.nombre + (emp.rut ? ' - ' + emp.rut : '')}
+                            </option>
+                          ))
+                      }
                     </select>
                     {userRole === 'administrador' && (
                       <button
@@ -818,16 +891,18 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       : 'N° de Documento'} <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="text"
+                    type="number"
                     required
+                    min="1"
+                    step="1"
                     value={datosEntrada.numeroDocumento}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value})}
+                    onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value.replace(/[^0-9]/g, '')})}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                     placeholder={
                       datosEntrada.tipoOrigen === 'estacion' 
-                        ? 'Ej: GD-12345' 
+                        ? 'Ej: 12345' 
                         : datosEntrada.tipoOrigen === 'estanque'
-                        ? 'Ej: VALE-001'
+                        ? 'Ej: 001'
                         : 'Número de documento'
                     }
                   />
@@ -996,25 +1071,24 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     >
                       <option value="">Seleccione empresa</option>
-                      {empresasLocal.map(emp => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.nombre} {emp.rut ? `- ${emp.rut}` : ''}
-                        </option>
+                      {EMPRESAS_SISTEMA.map(emp => (
+                        <option key={emp} value={emp}>{emp}</option>
                       ))}
                     </select>
-                    {userRole === 'administrador' && (
-                      <button
-                        type="button"
-                        onClick={() => setShowModalEmpresa(true)}
-                        className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
-                        title="Agregar nueva empresa"
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                      </button>
-                    )}
                   </div>
+                  {datosEntrega.empresa && (() => {
+                    const nOps  = (empleados||[]).filter(e => e.empresa === datosEntrega.empresa).length;
+                    const nMaq  = (machines||[]).filter(m => m.empresa === datosEntrega.empresa).length;
+                    return (nOps > 0 || nMaq > 0) ? (
+                      <p className="text-xs text-blue-500 mt-1.5 font-medium">
+                        {nOps} operador{nOps !== 1 ? 'es' : ''} · {nMaq} máquina{nMaq !== 1 ? 's' : ''} registradas
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-500 mt-1.5 font-medium">
+                        ⚠ Sin operadores ni máquinas registradas para esta empresa
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -1066,7 +1140,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       })()}
                       {!datosEntrega.operadorId && (
                         <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {empleados
+                          {(empleados || [])
+                            .filter(emp => !datosEntrega.empresa || emp.empresa === datosEntrega.empresa)
                             .filter(emp => !searchOperador ||
                               emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
                               emp.rut?.includes(searchOperador))
@@ -1121,7 +1196,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                           className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
                       </div>
                       {datosEntrega.machineId && (() => {
-                        const sel = machines.find(m => m.id === datosEntrega.machineId);
+                        const sel = (machinesLocal || machines || []).find(m => m.id === datosEntrega.machineId);
                         return sel ? (
                           <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
                             <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
@@ -1142,8 +1217,9 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       })()}
                       {!datosEntrega.machineId && (
                         <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {machines
+                          {(machines || [])
                             .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
+                            .filter(m => !datosEntrega.empresa || m.empresa === datosEntrega.empresa)
                             .filter(m => !searchMaquina ||
                               m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
                               m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
@@ -1172,7 +1248,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         value={maquinaExterna.patente}
                         onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
                         className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
-                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…)"
+                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
                         value={maquinaExterna.tipo}
                         onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
                         className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
@@ -1289,7 +1365,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={loading || !datosEntrega.empresa || (esMPF(datosEntrega.empresa) ? !datosEntrega.machineId : !maquinaExterna.patente) || !datosEntrega.cantidadLitros || !firmaReceptor}
+                  disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
                 >
                   {loading ? 'Guardando...' : '✓ Guardar Entrega'}
@@ -1558,6 +1634,22 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
           }}
         />
       )}
+
+      {/* Historial de vouchers del día */}
+      <VoucherHistorialDia
+        isOpen={showHistorial}
+        onClose={() => setShowHistorial(false)}
+        repartidorId={datosControl.repartidorId || currentUser?.uid}
+        repartidorNombre={
+          repartidorSeleccionado?.nombre ||
+          currentUserData?.nombre ||
+          currentUser?.email || ''
+        }
+        userRole={userRole}
+        projects={projects}
+        machines={machinesLocal?.length ? machinesLocal : (machines || [])}
+        empleados={empleados || []}
+      />
 
     </div>
   );
