@@ -387,8 +387,8 @@ function DataTable({ columns, data, onEdit, onDelete, emptyText = 'Sin registros
           {data.map(row => (
             <tr key={row.id} className="hover:bg-purple-50/40 transition-colors group">
               {columns.map(col => (
-                <td key={col.key} className="px-4 py-3 text-sm text-slate-700">
-                  {col.render ? col.render(row) : (row[col.key] || <span className="text-slate-300 text-xs italic">—</span>)}
+                <td key={col.key} className="px-4 py-3 text-sm text-slate-700 uppercase">
+                  {col.render ? col.render(row) : (row[col.key] || <span className="text-slate-300 text-xs italic normal-case">—</span>)}
                 </td>
               ))}
               <td className="px-4 py-3">
@@ -477,17 +477,34 @@ function FormButtons({ onCancel, onSave, saving, isEdit, color = 'purple' }) {
 // ─────────────────────────────────────────────────────────────
 // SECCIÓN: OPERADORES
 // ─────────────────────────────────────────────────────────────
+// Helper para formatear RUT chileno en tiempo real
+const CARGOS_LIST = ['Conductor camion tolva','Operador de maquinaria pesada','Soldador','Conductor camion combustible','Mecanico','Administrador de contrato','Encargado de logistica','Supervisor mecanico','Prevencionista de riesgos','Operador reemplazo'];
+
+function fmtRut(raw) {
+  // Limpiar todo excepto dígitos y K/k
+  let v = raw.replace(/[^0-9kK]/g, '').toUpperCase();
+  if (v.length < 2) return v;
+  const dv  = v.slice(-1);
+  const num = v.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return num + '-' + dv;
+}
+
 function OperadoresSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombre: '', rut: '', cargo: '', empresa: '', esSurtidor: false });
+  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false });
   const [cargoCustom, setCargoCustom] = useState('');
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [busquedaOp, setBusquedaOp] = useState('');
   const [filtroEmpresaOp, setFiltroEmpresaOp] = useState('');
+  const [catCargoModal, setCatCargoModal] = useState(false);
+
+  // Catálogo dinámico de cargos
+  const { items: cargosDB } = useCatalogo('cargo_operador');
+  const CARGOS_TODOS = [...new Set([...CARGOS_LIST, ...cargosDB.map(c=>c.nombre)])].sort();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -500,22 +517,27 @@ function OperadoresSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombre: '', rut: '', cargo: '', empresa: '', esSurtidor: false }); setCargoCustom(''); setEditId(null); setModal(true); };
-  const CARGOS_LIST = ['Conductor camion tolva','Operador de maquinaria pesada','Soldador','Conductor camion combustible','Mecanico','Administrador de contrato','Encargado de logistica','Supervisor mecanico','Prevencionista de riesgos','Operador reemplazo'];
+  const openNew = () => { setForm({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false }); setCargoCustom(''); setEditId(null); setModal(true); };
   const openEdit = (row) => {
     const cargo = row.cargo || '';
     const isCustom = cargo && !CARGOS_LIST.includes(cargo);
-    setForm({ nombre: row.nombre || '', rut: row.rut || '', cargo: isCustom ? 'otro' : cargo, empresa: row.empresa || '', esSurtidor: row.esSurtidor || false });
+    setForm({
+      nombres: row.nombres || row.nombre?.split(' ').slice(0,-2).join(' ') || row.nombre || '',
+      apellidoPaterno: row.apellidoPaterno || row.nombre?.split(' ').slice(-2,-1)[0] || '',
+      apellidoMaterno: row.apellidoMaterno || row.nombre?.split(' ').slice(-1)[0] || '',
+      rut: row.rut || '', cargo: isCustom ? 'otro' : cargo,
+      empresa: row.empresa || '', esSurtidor: row.esSurtidor || false
+    });
     setCargoCustom(isCustom ? cargo : '');
     setEditId(row.id); setModal(true);
   };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
-      const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
+      const nombreCompleto = [form.nombres, form.apellidoPaterno, form.apellidoMaterno].filter(Boolean).map(s=>s.trim()).join(' ');
+      const p = { nombres: form.nombres.trim(), apellidoPaterno: form.apellidoPaterno.trim(), apellidoMaterno: form.apellidoMaterno.trim(), nombre: nombreCompleto, rut: form.rut.trim(), cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'employees', editId), p);
       else await addDoc(collection(db, 'employees'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -550,7 +572,7 @@ function OperadoresSection() {
           return matchQ && matchE;
         })} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
           columns={[
-            { key: 'nombre', label: 'Nombre' },
+            { key: 'nombres', label: 'Nombres', render: r => <span>{r.nombres || r.nombre?.split(' ').slice(0,-2).join(' ') || r.nombre || '—'}</span> },
             { key: 'rut', label: 'RUT' },
             { key: 'cargo', label: 'Cargo', render: r => (<div className="flex items-center gap-2"><span>{r.cargo || '-'}</span>{r.esSurtidor && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full border border-amber-300">Surtidor</span>}</div>) },
             { key: 'empresa', label: 'Empresa' },
@@ -560,24 +582,64 @@ function OperadoresSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Operador' : 'Nuevo Operador'} color="blue">
         <div className="space-y-4">
-          <Field label="Nombre Completo" required><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Juan Pérez González" /></Field>
-          <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 12.345.678-9" /></Field>
+          <Field label="Nombres" required>
+            <input
+              className={inputCls}
+              value={form.nombres}
+              onChange={e => setForm({ ...form, nombres: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '') })}
+              placeholder="Ej: Juan Carlos"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Apellido Paterno" required>
+              <input
+                className={inputCls}
+                value={form.apellidoPaterno}
+                onChange={e => setForm({ ...form, apellidoPaterno: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '') })}
+                placeholder="Ej: Pérez"
+              />
+            </Field>
+            <Field label="Apellido Materno">
+              <input
+                className={inputCls}
+                value={form.apellidoMaterno}
+                onChange={e => setForm({ ...form, apellidoMaterno: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '') })}
+                placeholder="Ej: González"
+              />
+            </Field>
+          </div>
+
+          <Field label="RUT">
+            <input
+              className={inputCls}
+              value={form.rut}
+              onChange={e => {
+                // Solo dígitos y K; auto-formato XX.XXX.XXX-X
+                const raw = e.target.value.replace(/[^0-9kK]/g, '');
+                setForm({ ...form, rut: fmtRut(raw) });
+              }}
+              placeholder="Ej: 12.345.678-9"
+              maxLength={12}
+            />
+          </Field>
+
           <Field label="Cargo">
-            <select className={inputCls} value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })}>
-              <option value="">Seleccione cargo</option>
-              <option value="Conductor camion tolva">Conductor camion tolva</option>
-              <option value="Operador de maquinaria pesada">Operador de maquinaria pesada</option>
-              <option value="Soldador">Soldador</option>
-              <option value="Conductor camion combustible">Conductor camion combustible</option>
-              <option value="Mecanico">Mecanico</option>
-              <option value="Administrador de contrato">Administrador de contrato</option>
-              <option value="Encargado de logistica">Encargado de logistica</option>
-              <option value="Supervisor mecanico">Supervisor mecanico</option>
-              <option value="Prevencionista de riesgos">Prevencionista de riesgos</option>
-              <option value="Operador reemplazo">Operador reemplazo</option>
-              <option value="otro">Otro...</option>
-            </select>
-            {form.cargo === 'otro' && <input className={inputCls + ' mt-2'} value={cargoCustom} onChange={e => setCargoCustom(e.target.value)} placeholder="Escribe el cargo..." />}
+            <div className="flex gap-2">
+              <select className={inputCls} style={{flex:1}} value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })}>
+                <option value="">Seleccione cargo</option>
+                {CARGOS_TODOS.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="otro">Otro...</option>
+              </select>
+              <button type="button" onClick={() => setCatCargoModal(true)}
+                className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
+                style={{background:'rgba(59,130,246,0.08)', color:'#2563eb', border:'1px solid rgba(59,130,246,0.2)'}}>
+                + Crear
+              </button>
+            </div>
+            {form.cargo === 'otro' && (
+              <input className={inputCls + ' mt-2'} value={cargoCustom}
+                onChange={e => setCargoCustom(e.target.value)} placeholder="Escribe el cargo..." />
+            )}
           </Field>
           <Field label="Empresa">
             <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
@@ -603,6 +665,14 @@ function OperadoresSection() {
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="blue" />
         </div>
       </Modal>
+      {/* Modal catálogo cargos */}
+      <CatalogoModal
+        isOpen={catCargoModal}
+        onClose={() => setCatCargoModal(false)}
+        categoria="cargo_operador"
+        titulo="Cargos de operadores"
+      />
+
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Operador" message={`¿Eliminar a "${confirm?.nombre}"?`} />
     </>
   );
@@ -611,6 +681,205 @@ function OperadoresSection() {
 // ─────────────────────────────────────────────────────────────
 // SECCIÓN: MÁQUINAS
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// CATÁLOGO DE MÁQUINAS — Tipos, Marcas, Propietarios dinámicos
+// ─────────────────────────────────────────────────────────────
+
+// Hook para cargar una categoría del catálogo
+function useCatalogo(categoria) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'catalogo_maquinas'),
+        orderBy('nombre')
+      ));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setItems(all.filter(x => x.categoria === categoria));
+    } catch { setItems([]); }
+    setLoading(false);
+  }, [categoria]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const add = async (nombre) => {
+    if (!nombre.trim()) return;
+    await addDoc(collection(db, 'catalogo_maquinas'), {
+      nombre: nombre.trim(),
+      categoria,
+      createdAt: serverTimestamp(),
+    });
+    load();
+  };
+
+  const remove = async (id) => {
+    await deleteDoc(doc(db, 'catalogo_maquinas', id));
+    load();
+  };
+
+  return { items, loading, add, remove };
+}
+
+// Panel modal para gestionar una categoría del catálogo
+function CatalogoModal({ isOpen, onClose, categoria, titulo }) {
+  const { items, loading, add, remove } = useCatalogo(categoria);
+  const [nuevo, setNuevo] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const handleAdd = async () => {
+    if (!nuevo.trim()) return;
+    setSaving(true);
+    await add(nuevo);
+    setNuevo('');
+    setSaving(false);
+  };
+
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{background:'rgba(15,12,41,0.75)', backdropFilter:'blur(12px)'}}>
+      <div className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"
+        style={{background:'#fff', border:'1px solid rgba(124,58,237,0.15)'}}>
+
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between"
+          style={{background:'linear-gradient(135deg, #1e1b4b, #312e81)'}}>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest" style={{color:'rgba(196,181,253,0.6)'}}>
+              Catálogo de máquinas
+            </p>
+            <h3 className="text-base font-black text-white" style={{letterSpacing:'-0.01em'}}>{titulo}</h3>
+          </div>
+          <button onClick={onClose}
+            className="p-1.5 rounded-lg transition-colors"
+            style={{background:'rgba(255,255,255,0.1)'}}>
+            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Agregar nuevo */}
+        <div className="px-4 py-4 border-b border-slate-100">
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              placeholder={`Nuevo ${titulo.toLowerCase()}...`}
+              value={nuevo}
+              onChange={e => setNuevo(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+            />
+            <button
+              onClick={handleAdd}
+              disabled={saving || !nuevo.trim()}
+              className="px-4 py-2.5 text-white font-bold text-sm rounded-xl disabled:opacity-40 transition-all"
+              style={{background:'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow:'0 4px 12px rgba(124,58,237,0.3)'}}>
+              {saving ? '...' : '+ Agregar'}
+            </button>
+          </div>
+        </div>
+
+        {/* Lista */}
+        <div className="overflow-y-auto" style={{maxHeight:'320px'}}>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="w-6 h-6 rounded-full animate-spin"
+                style={{border:'2px solid rgba(124,58,237,0.15)', borderTopColor:'#7c3aed'}}/>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm">
+              <p className="text-2xl mb-2">📋</p>
+              <p>Sin {titulo.toLowerCase()} registrados</p>
+              <p className="text-xs mt-1">Agrega el primero arriba</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {items.map(item => (
+                <div key={item.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
+                  <span className="text-sm font-semibold text-slate-700">{item.nombre}</span>
+                  {confirmDel === item.id ? (
+                    <div className="flex gap-1.5">
+                      <button onClick={() => setConfirmDel(null)}
+                        className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">
+                        No
+                      </button>
+                      <button onClick={async () => { await remove(item.id); setConfirmDel(null); }}
+                        className="text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-600">
+                        Sí, eliminar
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDel(item.id)}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-red-50 hover:text-red-400 transition-colors">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-100">
+          <button onClick={onClose}
+            className="w-full py-2.5 font-bold text-sm rounded-xl transition-colors"
+            style={{background:'#f1f5f9', color:'#475569'}}>
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Prefijos de código interno por empresa
+const EMPRESA_PREFIJOS = {
+  'MPF Ingeniería Civil': 'MPF',
+  'LifeMed':   'LM',
+  'Intosim':   'IT',
+  'Río Tinto': 'RT',
+  'Global':    'GL',
+  'Celenor':   'CE',
+};
+
+// Formatea código interno según empresa: MPF→TSTB36 / resto→AB-CD01
+function fmtCodigo(raw, empresa) {
+  const isMPF = empresa === 'MPF Ingeniería Civil';
+  // Limpiar: solo letras y números, uppercase
+  let v = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!v) return '';
+  if (isMPF) {
+    // Formato MPF: TBJP70 — hasta 6 chars alfanuméricos libres
+    return v.slice(0, 8);
+  } else {
+    // Formato otras empresas: AB-CD01 → 2 letras + '-' + 2 letras + 2 números
+    const letras1 = v.replace(/[^A-Z]/g, '').slice(0, 2);
+    const letras2 = v.replace(/[^A-Z]/g, '').slice(2, 4);
+    const nums    = v.replace(/[^0-9]/g, '').slice(0, 2);
+    let result = letras1;
+    if (letras2 || nums) result += '-' + letras2;
+    if (nums) result += nums;
+    return result;
+  }
+}
+
+// Formatea patente: ABCD-12
+function fmtPatente(raw) {
+  let v = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  if (!v) return '';
+  const letras = v.replace(/[^A-Z]/g, '').slice(0, 4);
+  const nums   = v.replace(/[^0-9]/g, '').slice(0, 2);
+  if (!letras) return v.slice(0,6);
+  return nums ? letras + '-' + nums : letras;
+}
 function MaquinasSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -622,6 +891,19 @@ function MaquinasSection() {
   const [saving, setSaving] = useState(false);
   const [busquedaMaq, setBusquedaMaq] = useState('');
   const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
+
+  // Catálogos dinámicos
+  const { items: tiposDB,       add: addTipo,        remove: removeTipo }        = useCatalogo('tipo');
+  const { items: marcasDB,      add: addMarca,       remove: removeMarca }       = useCatalogo('marca');
+  const { items: propietariosDB,add: addPropietario, remove: removePropietario } = useCatalogo('propietario');
+
+  // Combinar estáticos + dinámicos
+  const tiposOpciones       = [...new Set([...TIPOS_MAQUINA, ...tiposDB.map(t=>t.nombre)])].sort();
+  const marcasOpciones      = [...new Set([...marcasDB.map(m=>m.nombre)])].sort();
+  const propietariosOpciones= [...new Set([...propietariosDB.map(p=>p.nombre)])].sort();
+
+  // Estado modales de catálogo
+  const [catModal, setCatModal] = useState(null); // 'tipo' | 'marca' | 'propietario'
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -636,10 +918,9 @@ function MaquinasSection() {
 
   const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' }); setEditId(null); setModal(true); };
   const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '', empresa: row.empresa || '', propietario: row.propietario || '' }); setEditId(row.id); setModal(true); };
-  const openQR = (row) => setQr({ title: row.name || row.code, qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
+  const openQR = (row) => setQr({ title: row.code || row.patente, qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
 
   const save = async () => {
-    if (!form.name.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), empresa: form.empresa, propietario: form.propietario.trim(), updatedAt: serverTimestamp() };
@@ -671,7 +952,7 @@ function MaquinasSection() {
         <div className="flex flex-col sm:flex-row gap-2 mb-4">
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
-            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" placeholder="Buscar por nombre, código, patente o tipo..." value={busquedaMaq} onChange={e => setBusquedaMaq(e.target.value)} />
+            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" placeholder="Buscar por código, patente, tipo o marca..." value={busquedaMaq} onChange={e => setBusquedaMaq(e.target.value)} />
           </div>
           <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400 bg-white" value={filtroEmpresaMaq} onChange={e => setFiltroEmpresaMaq(e.target.value)}>
             <option value="">Todas las empresas</option>
@@ -680,12 +961,11 @@ function MaquinasSection() {
         </div>
         <DataTable loading={loading} data={data.filter(r => {
           const q = busquedaMaq.toLowerCase();
-          const matchQ = !q || r.name?.toLowerCase().includes(q) || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
+          const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
           const matchE = !filtroEmpresaMaq || r.empresa === filtroEmpresaMaq;
           return matchQ && matchE;
         })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
           columns={[
-            { key: 'name', label: 'Nombre' },
             { key: 'code', label: 'Código', render: r => <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg text-xs">{r.code || r.patente || '—'}</span> },
             { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-slate-700">{r.patente || '—'}</span> },
             { key: 'type', label: 'Tipo' },
@@ -699,37 +979,121 @@ function MaquinasSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Máquina' : 'Nueva Máquina'} color="purple">
         <div className="space-y-4">
-          <Field label="Nombre" required><input className={inputCls} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ej: Excavadora CAT 320" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Código Interno"><input className={inputCls} value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="Ej: EXC-001" /></Field>
-            <Field label="Patente"><input className={inputCls} value={form.patente} onChange={e => setForm({ ...form, patente: e.target.value })} placeholder="Ej: BCDF12" /></Field>
-          </div>
-          <Field label="Tipo">
-            <select className={selectCls} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
-              <option value="">Seleccionar tipo...</option>
-              {TIPOS_MAQUINA.map(t => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="Marca"><input className={inputCls} value={form.marca} onChange={e => setForm({ ...form, marca: e.target.value })} placeholder="Ej: Caterpillar, Komatsu" /></Field>
-          <Field label="Modelo"><input className={inputCls} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej: Caterpillar 320D" /></Field>
+          {/* ── Empresa PRIMERO para determinar formato código ── */}
           <Field label="Empresa">
-            <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
+            <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value, code: '' })}>
               <option value="">Seleccione empresa</option>
-              <option value="LifeMed">LifeMed</option>
-              <option value="Intosim">Intosim</option>
-              <option value="Río Tinto">Río Tinto</option>
-              <option value="Global">Global</option>
-              <option value="Celenor">Celenor</option>
-              <option value="MPF Ingeniería Civil">MPF Ingeniería Civil</option>
+              {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => (
+                <option key={e} value={e}>{e}</option>
+              ))}
               {form.empresa && !['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil',''].includes(form.empresa) && (
                 <option value={form.empresa}>{form.empresa}</option>
               )}
             </select>
           </Field>
-          <Field label="Propietario"><input className={inputCls} value={form.propietario} onChange={e => setForm({ ...form, propietario: e.target.value })} placeholder="Ej: MPF Ingeniería Civil" /></Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={form.empresa && form.empresa !== 'MPF Ingeniería Civil' ? 'Código Interno (AB-CD01)' : 'Código Interno'}>
+              <input
+                className={inputCls}
+                value={form.code}
+                onChange={e => setForm({ ...form, code: fmtCodigo(e.target.value, form.empresa) })}
+                placeholder={form.empresa && form.empresa !== 'MPF Ingeniería Civil' ? 'Ej: AB-CD01' : 'Ej: TBJP70'}
+                disabled={!form.empresa}
+              />
+              {!form.empresa && (
+                <p className="text-[10px] text-amber-500 mt-1 font-medium">⚠ Selecciona empresa primero</p>
+              )}
+            </Field>
+            <Field label="Patente (ABCD-12)">
+              <input
+                className={inputCls}
+                value={form.patente}
+                onChange={e => setForm({ ...form, patente: fmtPatente(e.target.value) })}
+                placeholder="Ej: TBJP-70"
+                maxLength={7}
+              />
+            </Field>
+          </div>
+
+          {/* ── Tipo con botón gestionar ── */}
+          <Field label="Tipo">
+            <div className="flex gap-2">
+              <select className={selectCls} style={{flex:1}} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>
+                <option value="">Seleccionar tipo...</option>
+                {tiposOpciones.map(t => <option key={t}>{t}</option>)}
+              </select>
+              <button type="button" onClick={() => setCatModal('tipo')} title="Gestionar tipos"
+                className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
+                style={{background:'rgba(124,58,237,0.08)', color:'#7c3aed', border:'1px solid rgba(124,58,237,0.2)'}}>
+                + Crear
+              </button>
+            </div>
+          </Field>
+
+          {/* ── Marca con botón gestionar ── */}
+          <Field label="Marca">
+            <div className="flex gap-2">
+              <select className={selectCls} style={{flex:1}} value={form.marca} onChange={e => setForm({ ...form, marca: e.target.value })}>
+                <option value="">Seleccionar marca...</option>
+                {marcasOpciones.map(m => <option key={m}>{m}</option>)}
+                {form.marca && !marcasOpciones.includes(form.marca) && (
+                  <option value={form.marca}>{form.marca}</option>
+                )}
+              </select>
+              <button type="button" onClick={() => setCatModal('marca')} title="Gestionar marcas"
+                className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
+                style={{background:'rgba(124,58,237,0.08)', color:'#7c3aed', border:'1px solid rgba(124,58,237,0.2)'}}>
+                + Crear
+              </button>
+            </div>
+          </Field>
+
+          <Field label="Modelo">
+            <input className={inputCls} value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })} placeholder="Ej: Caterpillar 320D" />
+          </Field>
+
+          {/* ── Propietario con botón gestionar ── */}
+          <Field label="Propietario">
+            <div className="flex gap-2">
+              <select className={selectCls} style={{flex:1}} value={form.propietario} onChange={e => setForm({ ...form, propietario: e.target.value })}>
+                <option value="">Seleccionar propietario...</option>
+                {propietariosOpciones.map(p => <option key={p}>{p}</option>)}
+                {form.propietario && !propietariosOpciones.includes(form.propietario) && (
+                  <option value={form.propietario}>{form.propietario}</option>
+                )}
+              </select>
+              <button type="button" onClick={() => setCatModal('propietario')} title="Gestionar propietarios"
+                className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
+                style={{background:'rgba(124,58,237,0.08)', color:'#7c3aed', border:'1px solid rgba(124,58,237,0.2)'}}>
+                + Crear
+              </button>
+            </div>
+          </Field>
+
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="purple" />
         </div>
       </Modal>
+
+      {/* ── Modales de catálogo ── */}
+      <CatalogoModal
+        isOpen={catModal === 'tipo'}
+        onClose={() => setCatModal(null)}
+        categoria="tipo"
+        titulo="Tipos de máquina"
+      />
+      <CatalogoModal
+        isOpen={catModal === 'marca'}
+        onClose={() => setCatModal(null)}
+        categoria="marca"
+        titulo="Marcas"
+      />
+      <CatalogoModal
+        isOpen={catModal === 'propietario'}
+        onClose={() => setCatModal(null)}
+        categoria="propietario"
+        titulo="Propietarios"
+      />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
     </>
@@ -788,7 +1152,6 @@ function ActividadesSection() {
   };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const p = {
@@ -839,10 +1202,7 @@ function ActividadesSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Actividad' : 'Nueva Actividad'} color="green">
         <div className="space-y-4">
-          <Field label="Nombre" required>
-            <input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Trabajos en Plataforma" />
-          </Field>
-
+         
           <Field label="Tipo de Registro" required>
             <select className={selectCls} value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}>
               <option value="efectiva">Actividad Efectiva</option>
@@ -916,7 +1276,6 @@ function SurtidoresSection() {
   const openEdit = (row) => { setForm({ nombre: row.nombre || '', patente: row.patente || '', capacidad: row.capacidad || '', tipo: row.tipo || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const p = { nombre: form.nombre.trim(), patente: form.patente.trim().toUpperCase(), capacidad: form.capacidad, tipo: form.tipo.trim(), updatedAt: serverTimestamp() };
@@ -990,7 +1349,6 @@ function EmpresasSection() {
   const openEdit = (row) => { setForm({ nombre: row.nombre || '', rut: row.rut || '', giro: row.giro || '', contacto: row.contacto || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), giro: form.giro.trim(), contacto: form.contacto.trim(), updatedAt: serverTimestamp() };
@@ -1023,10 +1381,41 @@ function EmpresasSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Empresa' : 'Nueva Empresa'} color="teal">
         <div className="space-y-4">
-          <Field label="Nombre" required><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: LIFEMED SpA" /></Field>
-          <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 77.123.456-7" /></Field>
-          <Field label="Giro"><input className={inputCls} value={form.giro} onChange={e => setForm({ ...form, giro: e.target.value })} placeholder="Ej: Construcción" /></Field>
-          <Field label="Contacto"><input className={inputCls} value={form.contacto} onChange={e => setForm({ ...form, contacto: e.target.value })} placeholder="Ej: nombre@empresa.cl" /></Field>
+          <Field label="Nombre" required>
+            <input
+              className={inputCls}
+              value={form.nombre}
+              onChange={e => setForm({ ...form, nombre: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '') })}
+              placeholder="Ej: Constructora Norte"
+            />
+          </Field>
+          <Field label="RUT">
+            <input
+              className={inputCls}
+              value={form.rut}
+              onChange={e => setForm({ ...form, rut: fmtRut(e.target.value) })}
+              placeholder="Ej: 77.123.456-7"
+              maxLength={12}
+            />
+          </Field>
+          <Field label="Giro">
+            <input
+              className={inputCls}
+              value={form.giro}
+              onChange={e => setForm({ ...form, giro: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]/g, '') })}
+              placeholder="Ej: Construcción"
+            />
+          </Field>
+          <Field label="Contacto (correo)">
+            <input
+              className={inputCls}
+              value={form.contacto}
+              onChange={e => setForm({ ...form, contacto: e.target.value.replace(/[^a-zA-Z0-9@._\-+]/g, '') })}
+              placeholder="Ej: nombre@empresa.cl"
+              type="email"
+              inputMode="email"
+            />
+          </Field>
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="teal" />
         </div>
       </Modal>
@@ -1038,14 +1427,26 @@ function EmpresasSection() {
 // ─────────────────────────────────────────────────────────────
 // SECCIÓN: PROYECTOS
 // ─────────────────────────────────────────────────────────────
+
+// Formato código proyecto: siempre "CC-NN" (CC-01, CC-23, etc.)
+function fmtCodigoProyecto(raw) {
+  const prefix = 'CC-';
+  const nums = raw.replace(/[^0-9]/g, '').slice(0, 2);
+  return prefix + nums;
+}
 function ProyectosSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ name: '', codigo: '', mandante: '', ubicacion: '' });
+  const [form, setForm] = useState({ name: '', codigo: 'CC-', mandante: '', ubicacion: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [catMandanteModal, setCatMandanteModal] = useState(false);
+
+  // Catálogo dinámico de mandantes
+  const { items: mandantesDB } = useCatalogo('mandante');
+  const mandantesOpciones = mandantesDB.map(m => m.nombre).sort();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1058,11 +1459,10 @@ function ProyectosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', ubicacion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', ubicacion: row.ubicacion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: 'CC-', mandante: '', ubicacion: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { const cod = row.codigo || 'CC-'; setForm({ name: row.name || '', codigo: cod.startsWith('CC-') ? cod : 'CC-' + cod, mandante: row.mandante || '', ubicacion: row.ubicacion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
-    if (!form.name.trim()) return alert('El nombre es obligatorio');
     setSaving(true);
     try {
       const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), ubicacion: form.ubicacion.trim(), updatedAt: serverTimestamp() };
@@ -1085,7 +1485,6 @@ function ProyectosSection() {
       >
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay proyectos registrados"
           columns={[
-            { key: 'name', label: 'Nombre' },
             { key: 'codigo', label: 'Código' },
             { key: 'mandante', label: 'Mandante' },
             { key: 'ubicacion', label: 'Ubicación' },
@@ -1095,15 +1494,79 @@ function ProyectosSection() {
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Proyecto' : 'Nuevo Proyecto'} color="indigo">
         <div className="space-y-4">
-          <Field label="Nombre" required><input className={inputCls} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ej: Proyecto Ruta 5 Norte" /></Field>
+
+          <Field label="Nombre" required>
+            <input
+              className={inputCls}
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜ0-9\s]/g, '') })}
+              placeholder="Ej: Ruta Cinco Norte"
+            />
+          </Field>
+
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Código"><input className={inputCls} value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} placeholder="PRY-001" /></Field>
-            <Field label="Mandante"><input className={inputCls} value={form.mandante} onChange={e => setForm({ ...form, mandante: e.target.value })} placeholder="Ej: MOP" /></Field>
+            <Field label="Código (CC-NN)">
+              <input
+                className={inputCls}
+                value={form.codigo}
+                onChange={e => {
+                  const raw = e.target.value;
+                  // Si el usuario borra el prefijo, restaurarlo
+                  if (!raw.startsWith('CC-')) {
+                    setForm({ ...form, codigo: fmtCodigoProyecto(raw) });
+                  } else {
+                    const nums = raw.slice(3).replace(/[^0-9]/g, '').slice(0, 2);
+                    setForm({ ...form, codigo: 'CC-' + nums });
+                  }
+                }}
+                placeholder="CC-01"
+                maxLength={5}
+              />
+            </Field>
+
+            <Field label="Ubicación">
+              <input
+                className={inputCls}
+                value={form.ubicacion}
+                onChange={e => setForm({ ...form, ubicacion: e.target.value })}
+                placeholder="Ej: Antofagasta, II Región"
+              />
+            </Field>
           </div>
-          <Field label="Ubicación"><input className={inputCls} value={form.ubicacion} onChange={e => setForm({ ...form, ubicacion: e.target.value })} placeholder="Ej: Antofagasta, II Región" /></Field>
+
+          <Field label="Mandante">
+            <div className="flex gap-2">
+              <select
+                className={inputCls}
+                style={{flex:1}}
+                value={form.mandante}
+                onChange={e => setForm({ ...form, mandante: e.target.value })}
+              >
+                <option value="">Seleccionar mandante...</option>
+                {mandantesOpciones.map(m => <option key={m} value={m}>{m}</option>)}
+                {form.mandante && !mandantesOpciones.includes(form.mandante) && (
+                  <option value={form.mandante}>{form.mandante}</option>
+                )}
+              </select>
+              <button type="button" onClick={() => setCatMandanteModal(true)}
+                className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
+                style={{background:'rgba(99,102,241,0.08)', color:'#4f46e5', border:'1px solid rgba(99,102,241,0.2)'}}>
+                + Crear
+              </button>
+            </div>
+          </Field>
+
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="indigo" />
         </div>
       </Modal>
+
+      <CatalogoModal
+        isOpen={catMandanteModal}
+        onClose={() => setCatMandanteModal(false)}
+        categoria="mandante"
+        titulo="Mandantes"
+      />
+
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
     </>
   );
@@ -1171,7 +1634,6 @@ function EstacionesSection() {
   };
 
   const save = async () => {
-    if (!form.nombre.trim()) return alert('El nombre es obligatorio');
     if (!form.ciudad.trim()) return alert('La ciudad es obligatoria');
     setSaving(true);
     try {

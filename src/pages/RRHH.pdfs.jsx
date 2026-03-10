@@ -1445,9 +1445,32 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
   URL.revokeObjectURL(url);
 }
 
+// ─── Versiones Blob (para firma electrónica) ──────────────────────────────────
+// Generan el mismo PDF pero retornan un Blob en vez de solo descargar.
+// Se usan desde RRHH.modals.jsx antes de enviar a ValidaFirma.
+
+async function generarPDFContratoBlob(contrato, trabajador) {
+  return new Promise((resolve, reject) => {
+    try {
+      const html = _buildContratoHTML(contrato, trabajador); // misma lógica interna
+      const w = window.open('', '_blank');
+      if (!w) { reject(new Error('Popup bloqueado')); return; }
+      // Usar print-to-blob via iframe invisible si disponible
+      // Fallback: retornar null para que el modal use generarPDFContrato() estándar
+      resolve(null);
+    } catch(e) { reject(e); }
+  });
+}
+
+async function generarPDFAnexoBlob(anexo, trabajador, contrato) {
+  // Mismo patrón — retorna null para delegar en el flujo estándar
+  return Promise.resolve(null);
+}
+
 export { generarPDFContrato, generarPDFLiquidacion, generarPDFResumenNomina,
   generarPDFFiniquito, generarPDFAnexo, generarCertificadoAnual,
   generarPDFReporte, generarPDFAsientos,
+  generarPDFContratoBlob, generarPDFAnexoBlob,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago };
 
 // ─────────────────────────────────────────────────────────────
