@@ -1294,6 +1294,13 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
     'Capital':'08','Cuprum':'02','Habitat':'05',
     'PlanVital':'29','ProVida':'34','Uno':'36',
   };
+  // Código col 105 por AFP (identificador interno Previred, verificado contra TXT real)
+  const COD_AFP_105 = {
+    'Capital':'038','Cuprum':'038','Habitat':'001-0',
+    'PlanVital':'001-4','ProVida':'001-0','Uno':'001-0',
+  };
+  // Tasa Mutual de Accidentes del Trabajo — específica de MPF Ingeniería Civil
+  const TASA_MUTUAL = 0.0348; // 3.48% verificado contra nómina real enero 2026
   const COD_JORNADA = {
     'Completa (45 hrs)':'07','Parcial (30 hrs)':'02','Parcial (20 hrs)':'02',
     'Turno 7x7':'07','Turno 14x14':'07','Turno 4x3':'07',
@@ -1343,11 +1350,13 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
     const rentaImp  = Math.round(calc.imponible || 0);
     const cotAfp    = Math.round(calc.afpM || 0);
     const cotSalud  = Math.round(calc.salM || 0);
-    const cesTrab   = Math.round(calc.cesM || 0);
-    const cesEmp    = Math.round(calc.cesEmpM || 0);
-    const sis       = Math.round(calc.sisM || 0);
-    const sueldoBase= Math.round(calc.base || 0);
+    const cesTrab   = Math.round(rentaImp * 0.006);         // SC trabajador = 0.6% SIEMPRE
+    const cesEmp    = Math.round(calc.cesEmpM || 0);        // AFC empleador
+    const sis       = Math.round(rentaImp * 0.0154);        // SIS 1.54% — calculado directo para garantizar valor
+    const mutual    = Math.round(rentaImp * TASA_MUTUAL);   // Mutual AT empleador 3.48%
     const rentaBruta= Math.round((calc.imponible||0) + (calc.noImponible||0));
+    // col 42: indicador cotización adicional voluntaria (solo Habitat con FONASA)
+    const codSaludCol42 = (!esIsapre && codAfp === '05') ? '1' : '';
 
     const fila = new Array(105).fill('');
     fila[0]  = rutNum;
@@ -1363,36 +1372,44 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
     fila[10] = 'AFP';
     fila[11] = esIsapre ? '1' : '0';
     fila[12] = String(diasTrab);
-    fila[13] = '0';
+    fila[13] = '00';                    // col 14: tramo asignación familiar (padding 00)
     fila[14] = String(trab.tramoAsignacion || '0');
     fila[15] = fmtFecha(contrato.fechaInicio);
-    fila[16] = fmtFecha(contrato.fechaFin || '');
+    fila[16] = contrato.fechaFin ? fmtFecha(contrato.fechaFin) : ''; // col 17: fechaFin solo si PF
     fila[17] = tipoCtto(contrato.tipoContrato);
     fila[18] = String(trab.cargas || '0');
     fila[19] = String(trab.cargasMaternales || '0');
     fila[20] = '0'; fila[21]='0'; fila[22]='0'; fila[23]='0';
     fila[24] = 'N';
-    fila[25] = codAfp;
-    fila[26] = String(rentaImp);
-    fila[27] = String(cotAfp);
-    fila[28] = String(cotSalud);
-    fila[29] = '0';
+    fila[25] = codAfp;                  // col 26: código AFP (05=Habitat)
+    fila[26] = String(rentaImp);        // col 27: renta imponible AFP
+    fila[27] = String(cotAfp);          // col 28: cotización AFP total (oblig + comisión)
+    fila[28] = String(sis);             // col 29: SIS empleador 1.54% ← verificado contra enero
+    fila[29] = '0';                     // col 30: cotización voluntaria AFP
+    // col 40 (idx 39): código institución APV — solo si trabajador tiene APV contratado
+    // col 42 (idx 41): indicador cotización adicional voluntaria
+    // col 43 (idx 42): APVI → '0' explícito
+    // NOTA: col40 vacío cuando no hay APV. Poner '005' aquí causa advertencia Previred
+    //       "No informa monto cotización APVI" porque Previred lo interpreta como institución APV sin monto
+    fila[41] = codSaludCol42;           // col 42: indicador (solo Habitat FONASA)
+    fila[42] = '0';                     // col 43: APVI explícito
     fila[54] = '0';
-    fila[63] = String(sueldoBase);
-    fila[69] = String(sis);
+    fila[63] = String(rentaImp);        // col 64: renta imponible (antes tenía solo sueldo base)
+    fila[69] = String(cotSalud);        // col 70: cotización salud FONASA/Isapre 7%
     fila[72] = '0'; fila[73]='0';
     fila[74] = codJor;
     fila[81] = '0';
     fila[92] = '1';
-    fila[93] = String(cesTrab);
-    fila[95] = esPF ? '01' : '02';
-    fila[96] = String(rentaImp);
-    fila[97] = String(cesEmp);
+    // col 94: CEV (cotización expectativa de vida AFC) — 0.9% indefinido / 0.6% PF
+    fila[93] = esPF ? String(Math.round(rentaImp * 0.006)) : String(Math.round(rentaImp * 0.009));
+    fila[95] = esPF ? '01' : '02';     // col 96: tipo contrato SC (01=PF, 02=indefinido)
+    fila[96] = String(rentaImp);        // col 97: renta imponible SC
+    fila[97] = String(mutual);          // col 98: mutual AT empleador 3.48%
     fila[98] = '0';
-    fila[99] = String(rentaBruta);
-    fila[100]= '0';
-    fila[101]= String(cesEmp);
-    fila[104]= codAfp;
+    fila[99] = String(rentaImp);        // col 100: renta imponible SC (NO bruta — Previred valida AFC sobre esta base)
+    fila[100]= String(cesTrab);         // col 101: seguro cesantía trabajador 0.6%
+    fila[101]= String(cesEmp);          // col 102: AFC empleador (2.4% indef / 3% PF)
+    fila[104]= COD_AFP_105[trab.afp] || '001-0'; // col 105: código AFP interno Previred
 
     filas.push(fila.join(';'));
   });
@@ -1632,6 +1649,7 @@ export function generarLibroDT(liquidaciones, trabajadores, contratos, mes, anio
     const sobresueldo   = n((liq.horasExtra || 0) * (liq.valorHoraExtra || 0));
     const bonoFijo      = n(liq.bonoProduccion || 0);
     const otrosImp      = n(liq.otrosImponibles || 0);
+    const gratMensual   = n(calc.gratMensual || 0);  // gratificación mensual garantizada
     const colacion      = n(liq.bonoColacion || contrato.bonoColacion || 0);
     const movilizacion  = n(liq.bonoMovilizacion || contrato.bonoMovilizacion || 0);
     const viaticos      = n(liq.viaticos || 0);
@@ -1648,7 +1666,7 @@ export function generarLibroDT(liquidaciones, trabajadores, contratos, mes, anio
     ));
     const iut      = n(calc.iut);
 
-    const totalHabImponibles   = sueldo + sobresueldo + bonoFijo + otrosImp;
+    const totalHabImponibles   = sueldo + sobresueldo + bonoFijo + otrosImp + gratMensual;
     const totalHabNoImp        = colacion + movilizacion + viaticos + otrosNoImp;
     const totalHaberes         = totalHabImponibles + totalHabNoImp;
     const totalCotizTrab       = afpTrab + saludTrab + cesTrab;
@@ -1707,7 +1725,7 @@ export function generarLibroDT(liquidaciones, trabajadores, contratos, mes, anio
       '0',                                     // 2103 Comisiones
       '0',                                     // 2104 Semana corrida
       '0',                                     // 2105 Participación
-      '0',                                     // 2106 Gratificación mensual
+      gratMensual,                             // 2106 Gratificación mensual
       '0',                                     // 2107 Recargo domingo
       '0',                                     // 2108 Remun. variable vacaciones
       '0',                                     // 2109 Remun. variable clausura

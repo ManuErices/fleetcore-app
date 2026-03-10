@@ -704,12 +704,13 @@ function PanelFirma({ docId, coleccion, firmaData = {}, pdfBlob, nombreArchivo, 
         : Firma.crearProcesoDeFirmaDemo({ firmantes });
 
       await updateDoc(doc(db, coleccion, docId), {
-        estadoFirma:      'enviado',
-        firmaProcesoId:   resultado.procesoId,
-        firmaEnviadoAt:   serverTimestamp(),
-        firmaFirmantes:   resultado.firmantesUrls,
-        firmaDemo:        resultado.demo || false,
-        updatedAt:        serverTimestamp(),
+        estadoFirma:    'enviado',
+        firmaProcesoId: resultado.procesoId   ?? null,
+        firmaEnviadoAt: serverTimestamp(),
+        firmaFirmantes: resultado.firmantesUrls ?? [],
+        firmaDemo:      resultado.demo         ?? resultado.simulated ?? false,
+        firmaSimulado:  resultado.simulated    ?? false,
+        updatedAt:      serverTimestamp(),
       });
       onUpdate?.();
     } catch (e) { setError(e.message); }
@@ -723,11 +724,11 @@ function PanelFirma({ docId, coleccion, firmaData = {}, pdfBlob, nombreArchivo, 
     try {
       const r = await Firma.consultarEstadoFirma(procesoId);
       await updateDoc(doc(db, coleccion, docId), {
-        estadoFirma:    r.completado ? 'completamente_firmado' : r.estado,
-        firmaFirmadoPor: r.firmadoPor,
-        firmaCheckedAt: serverTimestamp(),
+        estadoFirma:     r.completado ? 'completamente_firmado' : (r.estado ?? 'enviado'),
+        firmaFirmadoPor: r.firmadoPor ?? [],
+        firmaCheckedAt:  serverTimestamp(),
         ...(r.pdfFirmadoUrl ? { firmaPdfUrl: r.pdfFirmadoUrl } : {}),
-        updatedAt:      serverTimestamp(),
+        updatedAt:       serverTimestamp(),
       });
       onUpdate?.();
     } catch (e) { setError(e.message); }

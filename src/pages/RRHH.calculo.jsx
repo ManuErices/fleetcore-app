@@ -79,11 +79,12 @@ function calcularLiquidacion(rem) {
   const noImponible = bColacion + bMovil + viaticos + otrosNoImp;
 
   // ── Descuentos legales (cargo trabajador) ──
-  const tasaAfp = TASAS_AFP[rem.afp] || 0.1127;
+  const tasaAfp = TASAS_AFP[rem.afp] || 0.1137;
   const afpM  = Math.round(imponible * tasaAfp);
   const salM  = Math.round(imponible * TASAS.salud);
   const esCt  = rem.tipoContrato === 'Plazo Fijo' || rem.tipoContrato === 'Obra o Faena';
-  const cesM  = Math.round(imponible * (esCt ? TASAS.ces_pf_trab : TASAS.ces_trab));
+  // CEV AFC: indefinido 0.9%, plazo fijo/obra 0.6%
+  const cesM  = Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
   // SIS: cargo empleador (solo referencial, no descuenta al trabajador)
   const sisM  = Math.round(imponible * TASAS.sis);
   const totalDescuentos = afpM + salM + cesM;

@@ -7,22 +7,25 @@ export const IMM_2026 = 539000;
 export const IMM_2024 = 501787;
 
 export const TASAS_AFP = {
-  'Capital':   0.1144,
-  'Cuprum':    0.1144,
-  'Habitat':   0.1127,
-  'PlanVital': 0.1116,
-  'ProVida':   0.1145,
+  // Tasas vigentes 2026: 10% cotización obligatoria + comisión AFP
+  'Capital':   0.1144, // 10% + 1.44%
+  'Cuprum':    0.1144, // 10% + 1.44%
+  'Habitat':   0.1137, // 10% + 1.37% ← corregido (era 1.27%)
+  'PlanVital': 0.1116, // 10% + 1.16%
+  'ProVida':   0.1145, // 10% + 1.45%
   'Uno':       0.0069,
 };
 
 export const TASAS = {
-  afp:      0.1057,
-  salud:    0.07,
-  sis:      0.0154,
-  ces_trab: 0.006,
-  ces_emp:  0.024,
+  afp:         0.1057,
+  salud:       0.07,
+  sis:         0.0154,
+  ces_trab:    0.009,  // AFC trabajador contrato INDEFINIDO (era 0.006)
+  ces_trab_pf: 0.006,  // AFC trabajador contrato PLAZO FIJO / OBRA
+  ces_emp:     0.024,
   ces_pf_trab: 0.0,
   ces_pf_emp:  0.03,
+  mutual:      0.0348, // Mutual AT — tasa específica MPF Ingeniería Civil (3.48%)
 };
 
 export const UTM_DEFAULT = 64085;
