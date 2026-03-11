@@ -1,5 +1,5 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT } from './RRHH.shared';
-import { calcularLiquidacion, calcularLiquidacionConIUT, calcularIUT, calcularRentaTributable, labelPeriodo } from './RRHH.calculo';
+import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo } from './RRHH.calculo';
 
 function generarPDFContrato(contrato, trabajador) {
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
@@ -231,47 +231,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato) {
   const liquidoFinal = calc.liquido - iut;
   const rentaTrib    = calcularRentaTributable(calc);
   const diasTrab     = rem.diasTrabajados || 30;
-  const empresa      = contrato?.empresa || 'MPF Ingeniería Civil';
-  const fmtFechaIngreso = (f) => {
-    if (!f) return '—';
-    const [y,m,d] = f.split('-');
-    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-    return `${parseInt(d)} ${meses[parseInt(m)-1]}. ${y}`;
-  };
-
-  const haberes = [
-    { label: 'Sueldo base',           tipo: 'imp',   monto: calc.base        },
-    { label: 'Bono de producción',     tipo: 'imp',   monto: calc.bProd       },
-    { label: 'Horas extraordinarias',  tipo: 'imp',   monto: calc.montoHE     },
-    { label: 'Gratificación mensual',  tipo: 'imp',   monto: calc.gratMensual },
-    { label: 'Otros imponibles',       tipo: 'imp',   monto: calc.otrosImp    },
-    { label: 'Colación',               tipo: 'noimp', monto: calc.bColacion   },
-    { label: 'Movilización',           tipo: 'noimp', monto: calc.bMovil      },
-    { label: 'Viáticos',               tipo: 'noimp', monto: calc.viaticos    },
-    { label: 'Otros no imponibles',    tipo: 'noimp', monto: calc.otrosNoImp  },
-  ].filter(r => r.monto > 0);
-
-  const descuentos = [
-    { label: `AFP ${trabajador?.afp||''} (${tasaAfp}%)`,              monto: calc.afpM           },
-    { label: `Salud (${trabajador?.prevision||'FONASA'}) 7%`,         monto: calc.salM           },
-    { label: 'Seguro cesantía (0.6%)',                                 monto: calc.cesM           },
-    { label: `IUT 2ª Categoría`,                                       monto: iut                 },
-    { label: 'Anticipo',                                               monto: calc.anticipo       },
-    { label: rem.glosaDescuento||'Descuento adicional',                monto: calc.descAdicional  },
-  ].filter(r => r.monto > 0);
-
-  const rowH = (r) => `
-    <tr>
-      <td class="row-label">${r.label}</td>
-      <td class="row-badge"><span class="badge ${r.tipo}">${r.tipo==='imp'?'Imponible':'No imponible'}</span></td>
-      <td class="row-amount">${fmt(r.monto)}</td>
-    </tr>`;
-
-  const rowD = (r) => `
-    <tr>
-      <td class="row-label" colspan="2">${r.label}</td>
-      <td class="row-amount desc">${fmt(r.monto)}</td>
-    </tr>`;
+  const horasBase    = rem.horasBase || (contrato?.jornada?.includes('45') ? 44 : 45);
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -280,188 +240,187 @@ function generarPDFLiquidacion(rem, trabajador, contrato) {
 <title>Liquidación ${mesLabel} — ${nombre}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;background:#f4f4f8;color:#1a1a2e;}
-  .page{max-width:720px;margin:24px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.10);}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9.5pt;color:#1a1a2e;background:#fff;}
+  .page{max-width:800px;margin:0 auto;padding:28px 36px;}
 
-  /* ── Cabecera ── */
-  .head{background:linear-gradient(135deg,#1e1b4b 0%,#3730a3 100%);padding:28px 36px 22px;display:flex;justify-content:space-between;align-items:flex-end;}
-  .head-empresa{font-size:18pt;font-weight:900;color:#fff;letter-spacing:-0.5px;line-height:1;}
-  .head-sub{font-size:8pt;color:rgba(255,255,255,0.5);margin-top:5px;letter-spacing:0.3px;}
-  .head-right{text-align:right;}
-  .head-periodo{font-size:22pt;font-weight:900;color:#a5b4fc;letter-spacing:-1px;line-height:1;}
-  .head-doc{font-size:8pt;color:rgba(255,255,255,0.5);margin-top:4px;}
+  /* Header */
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid #e8e8f0;}
+  .empresa-nombre{font-size:15pt;font-weight:900;color:#1a1a2e;letter-spacing:-0.5px;}
+  .doc-titulo{font-size:11pt;font-weight:900;color:#1a1a2e;text-align:right;}
+  .doc-mes{font-size:12pt;font-weight:900;color:#4f46e5;text-align:right;margin-top:2px;}
 
-  /* ── Franja de datos trabajador ── */
-  .trab-strip{background:#f8f8fc;border-bottom:1px solid #ebebf5;padding:18px 36px;display:grid;grid-template-columns:1fr 1fr;gap:0;}
-  .trab-col{}
-  .trab-name{font-size:13pt;font-weight:900;color:#1e1b4b;}
-  .trab-rut{font-size:9pt;color:#6b7280;margin-top:2px;}
-  .trab-meta{display:flex;flex-wrap:wrap;gap:16px;margin-top:10px;}
-  .trab-item{display:flex;flex-direction:column;}
-  .trab-item-label{font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#9ca3af;}
-  .trab-item-val{font-size:8.5pt;font-weight:700;color:#374151;margin-top:1px;}
-  .emp-col{display:flex;flex-direction:column;gap:6px;align-items:flex-end;justify-content:center;}
-  .emp-tag{background:#ede9fe;color:#5b21b6;font-size:7.5pt;font-weight:800;padding:3px 10px;border-radius:20px;}
-  .emp-fecha{font-size:8pt;color:#9ca3af;}
+  /* Info cards — layout 2 columnas como Talana */
+  .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+  .info-card{background:#f7f7fc;border:1px solid #e8e8f0;border-radius:8px;padding:12px 14px;}
+  .info-card-title{font-size:7.5pt;font-weight:900;text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;margin-bottom:8px;}
+  .info-row{display:flex;justify-content:space-between;margin-bottom:3px;}
+  .info-key{font-size:8.5pt;color:#6b7280;font-weight:500;}
+  .info-val{font-size:8.5pt;color:#1a1a2e;font-weight:700;text-align:right;}
 
-  /* ── Stats ── */
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #ebebf5;}
-  .stat{padding:14px 0;text-align:center;border-right:1px solid #ebebf5;}
-  .stat:last-child{border-right:none;}
-  .stat-val{font-size:13pt;font-weight:900;color:#3730a3;}
-  .stat-lbl{font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#9ca3af;margin-top:2px;}
+  /* Stats row */
+  .stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;}
+  .stat{background:#f7f7fc;border:1px solid #e8e8f0;border-radius:6px;padding:8px 10px;text-align:center;}
+  .stat-v{font-size:11pt;font-weight:900;color:#4f46e5;}
+  .stat-l{font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#9ca3af;margin-top:2px;}
 
-  /* ── Tablas ── */
-  .tables{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:1px solid #ebebf5;}
-  .col-hab{border-right:1px solid #ebebf5;}
-  .col-desc{}
-  .col-title{padding:10px 20px 8px;font-size:7.5pt;font-weight:900;text-transform:uppercase;letter-spacing:0.8px;color:#9ca3af;border-bottom:1px solid #ebebf5;}
+  /* Tablas haberes/descuentos — layout 2 columnas como Talana */
+  .habdesc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+  .seccion{background:#f7f7fc;border:1px solid #e8e8f0;border-radius:8px;overflow:hidden;}
+  .sec-header{background:#1a1a2e;color:#fff;padding:7px 12px;font-size:8pt;font-weight:900;text-transform:uppercase;letter-spacing:0.8px;}
   table{width:100%;border-collapse:collapse;}
-  .row-label{padding:7px 20px;font-size:8.5pt;color:#374151;}
-  .row-badge{padding:7px 4px;width:80px;}
-  .row-amount{padding:7px 20px 7px 4px;font-size:8.5pt;font-weight:700;text-align:right;white-space:nowrap;}
-  tr{border-bottom:1px solid #f3f4f6;}
-  tr:last-child{border-bottom:none;}
-  .badge{font-size:6.5pt;font-weight:700;padding:2px 6px;border-radius:10px;}
-  .imp{background:#dcfce7;color:#15803d;}
+  td{padding:5px 12px;font-size:9pt;border-bottom:1px solid #eff0f6;}
+  td:last-child{text-align:right;font-weight:700;}
+  tr:last-child td{border-bottom:none;}
+  .subtotal-row td{background:#eff0f6;font-weight:900;font-size:9.5pt;border-top:1px solid #d1d5db;}
+  .badge{display:inline-block;font-size:7pt;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;}
+  .imp{background:#dcfce7;color:#166534;}
   .noimp{background:#dbeafe;color:#1d4ed8;}
-  .subtotal{background:#f3f4f6;}
-  .subtotal td{font-weight:800;font-size:8.5pt;color:#1e1b4b;padding:8px 20px;}
-  .subtotal td:last-child{padding-right:20px;}
   .desc{color:#dc2626;}
 
-  /* ── Total líquido ── */
-  .liquido{padding:20px 36px;background:linear-gradient(135deg,#1e1b4b 0%,#3730a3 100%);display:flex;align-items:center;justify-content:space-between;}
-  .liq-label{color:rgba(255,255,255,0.7);font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;}
-  .liq-val{font-size:26pt;font-weight:900;color:#86efac;letter-spacing:-1.5px;}
+  /* Total líquido */
+  .total-section{background:#1a1a2e;border-radius:10px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+  .total-label{font-size:10pt;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:0.5px;}
+  .total-valor{font-size:20pt;font-weight:900;color:#4ade80;letter-spacing:-1px;}
 
-  /* ── Costo empresa ── */
-  .costo{padding:12px 36px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:8pt;color:#92400e;}
-  .costo b{font-weight:800;}
+  /* Costo empleador */
+  .emp-box{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:8.5pt;}
+  .emp-box b{color:#92400e;}
 
-  /* ── Firmas ── */
-  .firmas{display:grid;grid-template-columns:1fr 1fr;padding:28px 36px 20px;gap:40px;}
-  .firma{text-align:center;}
-  .firma-line{border-top:1.5px solid #d1d5db;margin-bottom:8px;margin-top:44px;}
-  .firma-name{font-size:9pt;font-weight:800;color:#1e1b4b;}
-  .firma-role{font-size:8pt;color:#9ca3af;margin-top:2px;}
+  /* Certificación */
+  .cert-box{background:#f7f7fc;border:1px solid #e8e8f0;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:8.5pt;color:#374151;font-style:italic;}
 
-  /* ── Footer ── */
-  .foot{padding:10px 36px 18px;font-size:7pt;color:#c4c4d4;text-align:center;line-height:1.7;border-top:1px solid #f0f0f8;}
+  /* Firmas */
+  .firma-row{display:flex;justify-content:space-between;gap:30px;margin-top:8px;}
+  .firma{flex:1;text-align:center;}
+  .firma-linea{border-top:1.5px solid #1a1a2e;margin-bottom:6px;margin-top:40px;}
+  .firma-nombre{font-weight:900;font-size:9pt;}
+  .firma-cargo{font-size:8.5pt;color:#6b7280;margin-top:2px;}
 
-  @media print{
-    body{background:#fff;}
-    .page{margin:0;border-radius:0;box-shadow:none;}
-    @page{margin:0;size:A4;}
-  }
+  /* Footer */
+  .footer{margin-top:16px;border-top:1px solid #e8e8f0;padding-top:8px;font-size:7.5pt;color:#9ca3af;text-align:center;line-height:1.6;}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 </style>
 </head>
 <body>
 <div class="page">
 
-  <!-- CABECERA -->
-  <div class="head">
+  <!-- HEADER -->
+  <div class="header">
     <div>
-      <div class="head-empresa">${empresa}</div>
-      <div class="head-sub">Liquidación de Remuneraciones · Art. 54 Código del Trabajo</div>
+      <div class="empresa-nombre">${contrato?.empresa||'MPF Ingeniería Civil'}</div>
+      <div style="font-size:8.5pt;color:#9ca3af;margin-top:3px">Liquidación de Remuneraciones · Art. 54 Código del Trabajo</div>
     </div>
-    <div class="head-right">
-      <div class="head-periodo">${mesLabel}</div>
-      <div class="head-doc">Fecha emisión: ${new Date().toLocaleDateString('es-CL')}</div>
-    </div>
-  </div>
-
-  <!-- DATOS TRABAJADOR -->
-  <div class="trab-strip">
-    <div class="trab-col">
-      <div class="trab-name">${nombre}</div>
-      <div class="trab-rut">RUT ${trabajador?.rut||'—'}</div>
-      <div class="trab-meta">
-        <div class="trab-item"><span class="trab-item-label">Cargo</span><span class="trab-item-val">${contrato?.cargo||trabajador?.cargo||'—'}</span></div>
-        <div class="trab-item"><span class="trab-item-label">Ingreso</span><span class="trab-item-val">${fmtFechaIngreso(contrato?.fechaInicio)}</span></div>
-        <div class="trab-item"><span class="trab-item-label">AFP</span><span class="trab-item-val">${trabajador?.afp||'—'}</span></div>
-        <div class="trab-item"><span class="trab-item-label">Salud</span><span class="trab-item-val">${trabajador?.prevision||'—'}${trabajador?.isapre?' · '+trabajador.isapre:''}</span></div>
-        <div class="trab-item"><span class="trab-item-label">Contrato</span><span class="trab-item-val">${contrato?.tipoContrato||'—'}</span></div>
-        <div class="trab-item"><span class="trab-item-label">Jornada</span><span class="trab-item-val">${contrato?.jornada||'—'}</span></div>
-      </div>
-    </div>
-    <div class="emp-col">
-      <span class="emp-tag">${trabajador?.area||empresa}</span>
-      <span class="emp-fecha">Período: ${mesLabel}</span>
+    <div>
+      <div class="doc-titulo">Liquidación de Remuneraciones</div>
+      <div class="doc-mes">Mes: ${mesLabel}</div>
     </div>
   </div>
 
-  <!-- STATS -->
-  <div class="stats">
-    <div class="stat"><div class="stat-val">${diasTrab}</div><div class="stat-lbl">Días trabajados</div></div>
-    <div class="stat"><div class="stat-val">${fmt(calc.imponible)}</div><div class="stat-lbl">Base imponible</div></div>
-    <div class="stat"><div class="stat-val">${fmt(rentaTrib)}</div><div class="stat-lbl">Renta tributable</div></div>
-    <div class="stat"><div class="stat-val">${fmt(calc.noImponible)}</div><div class="stat-lbl">No imponible</div></div>
+  <!-- INFO GRID (2 columnas como Talana) -->
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="info-card-title">Trabajador</div>
+      <div class="info-row"><span class="info-key">Nombre</span><span class="info-val">${nombre}</span></div>
+      <div class="info-row"><span class="info-key">Rut</span><span class="info-val">${trabajador?.rut||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Fecha de Ingreso</span><span class="info-val">${contrato?.fechaInicio||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Tipo de Contrato</span><span class="info-val">${contrato?.tipoContrato||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Cargo</span><span class="info-val">${contrato?.cargo||trabajador?.cargo||'—'}</span></div>
+      <div class="info-row"><span class="info-key">AFP</span><span class="info-val">${trabajador?.afp||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Salud</span><span class="info-val">${trabajador?.prevision||'—'}${trabajador?.isapre?' ('+trabajador.isapre+')':''}</span></div>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title">Información Empresa</div>
+      <div class="info-row"><span class="info-key">Razón Social</span><span class="info-val">${contrato?.empresa||'MPF Ingeniería Civil'}</span></div>
+      <div class="info-row"><span class="info-key">Área</span><span class="info-val">${trabajador?.area||'—'}</span></div>
+      <div class="info-row"><span class="info-key">C. Costo</span><span class="info-val">${trabajador?.centroCosto||contrato?.centroCosto||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Jornada</span><span class="info-val">${contrato?.jornada||'—'}</span></div>
+      <div class="info-row"><span class="info-key">Período</span><span class="info-val">${mesLabel}</span></div>
+      <div class="info-row"><span class="info-key">Fecha Emisión</span><span class="info-val">${new Date().toLocaleDateString('es-CL')}</span></div>
+    </div>
   </div>
 
-  <!-- HABERES / DESCUENTOS -->
-  <div class="tables">
-    <div class="col-hab">
-      <div class="col-title">Haberes</div>
+  <!-- STATS ROW -->
+  <div class="stats-row">
+    <div class="stat"><div class="stat-v">${diasTrab}</div><div class="stat-l">Días Trabajados</div></div>
+    <div class="stat"><div class="stat-v">0</div><div class="stat-l">Días Licencia</div></div>
+    <div class="stat"><div class="stat-v">${horasBase}</div><div class="stat-l">Horas Base</div></div>
+    <div class="stat"><div class="stat-v">${fmt(calc.imponible)}</div><div class="stat-l">Tope Imponible</div></div>
+    <div class="stat"><div class="stat-v">${fmt(rentaTrib)}</div><div class="stat-l">Tributable</div></div>
+  </div>
+
+  <!-- HABERES / DESCUENTOS (2 columnas) -->
+  <div class="habdesc-grid">
+
+    <!-- HABERES -->
+    <div class="seccion">
+      <div class="sec-header">Haberes</div>
       <table>
-        ${haberes.map(rowH).join('')}
-        ${calc.diasTrab < 30 ? `
-        <tr style="background:#fff7ed;border-top:1px solid #fed7aa;">
-          <td class="row-label" colspan="2" style="color:#92400e;font-size:7.5pt;">
-            ⚠ Prorrateo por ${calc.diasTrab} días trabajados de 30 · Factor: ${(calc.fdias*100).toFixed(1)}%
-            · Sueldo día: ${fmt(Math.round(calc.baseCompleto/30))}
-          </td>
-          <td class="row-amount" style="color:#92400e;font-size:7.5pt;"></td>
-        </tr>` : ''}
-        <tr class="subtotal"><td colspan="2">Total imponible</td><td style="text-align:right">${fmt(calc.imponible)}</td></tr>
-        <tr class="subtotal"><td colspan="2">Total no imponible</td><td style="text-align:right">${fmt(calc.noImponible)}</td></tr>
-        <tr class="subtotal"><td colspan="2"><b>Total haberes</b></td><td style="text-align:right"><b>${fmt(calc.imponible + calc.noImponible)}</b></td></tr>
+        <tr><td>Sueldo Base<span class="badge imp">Imponible</span></td><td>${fmt(calc.base)}</td></tr>
+        ${calc.bProd     ? `<tr><td>Bono de Producción<span class="badge imp">Imponible</span></td><td>${fmt(calc.bProd)}</td></tr>` : ''}
+        ${calc.montoHE   ? `<tr><td>Horas Extraordinarias<span class="badge imp">Imponible</span></td><td>${fmt(calc.montoHE)}</td></tr>` : ''}
+        ${calc.otrosImp  ? `<tr><td>Otros Imponibles<span class="badge imp">Imponible</span></td><td>${fmt(calc.otrosImp)}</td></tr>` : ''}
+        <tr><td>Gratificación Mensual<span class="badge imp">Imponible</span></td><td>${fmt(calc.gratMensual)}</td></tr>
+        <tr class="subtotal-row"><td>TOTAL IMPONIBLE</td><td>${fmt(calc.imponible)}</td></tr>
+        ${calc.bColacion ? `<tr><td>Colación</td><td>${fmt(calc.bColacion)}</td></tr>` : ''}
+        ${calc.bMovil    ? `<tr><td>Movilización</td><td>${fmt(calc.bMovil)}</td></tr>` : ''}
+        ${calc.viaticos  ? `<tr><td>Viáticos</td><td>${fmt(calc.viaticos)}</td></tr>` : ''}
+        ${calc.otrosNoImp? `<tr><td>Otros No Imponibles</td><td>${fmt(calc.otrosNoImp)}</td></tr>` : ''}
+        ${calc.noImponible ? `<tr class="subtotal-row"><td>TOTAL NO IMPONIBLE</td><td>${fmt(calc.noImponible)}</td></tr>` : ''}
+        <tr class="subtotal-row"><td><b>TOTAL HABERES</b></td><td><b>${fmt(calc.imponible + calc.noImponible)}</b></td></tr>
       </table>
     </div>
-    <div class="col-desc">
-      <div class="col-title">Descuentos</div>
+
+    <!-- DESCUENTOS -->
+    <div class="seccion">
+      <div class="sec-header">Descuentos</div>
       <table>
-        ${descuentos.map(rowD).join('')}
-        <tr class="subtotal"><td colspan="2"><b>Total descuentos</b></td><td style="text-align:right" class="desc"><b>${fmt(descuentos.reduce((s,r)=>s+r.monto,0))}</b></td></tr>
+        <tr><td>AFP ${trabajador?.afp||''} (${tasaAfp}% · Renta Imp.: ${fmt(calc.imponible)})</td><td class="desc">${fmt(calc.afpM)}</td></tr>
+        <tr><td>Salud 7% (${trabajador?.prevision||'Fonasa'})</td><td class="desc">${fmt(calc.salM)}</td></tr>
+        <tr><td>Seguro Cesantía Trabajador (${contrato?.tipoContrato==='Plazo Fijo'||contrato?.tipoContrato==='Obra o Faena'?'0.0':'0.6'}%)</td><td class="desc">${fmt(calc.cesM)}</td></tr>
+        ${iut > 0 ? `<tr><td>Impuestos (Renta Tributable: ${fmt(rentaTrib)})</td><td class="desc">${fmt(iut)}</td></tr>` : ''}
+        <tr class="subtotal-row"><td>TOTAL DESC. LEGALES</td><td class="desc">${fmt(calc.totalDescuentos + iut)}</td></tr>
+        ${calc.anticipo ? `<tr><td>Anticipo de sueldo</td><td class="desc">${fmt(calc.anticipo)}</td></tr>` : ''}
+        ${calc.descAdicional ? `<tr><td>${rem.glosaDescuento||'Descuento adicional'}</td><td class="desc">${fmt(calc.descAdicional)}</td></tr>` : ''}
+        ${(calc.anticipo||calc.descAdicional) ? `<tr class="subtotal-row"><td>TOTAL OTROS DESC.</td><td class="desc">${fmt(calc.anticipo+calc.descAdicional)}</td></tr>` : ''}
       </table>
     </div>
   </div>
 
   <!-- TOTAL LÍQUIDO -->
-  <div class="liquido">
-    <div>
-      <div class="liq-label">Alcance líquido</div>
-      <div style="font-size:8pt;color:rgba(255,255,255,0.4);margin-top:3px">${mesLabel} · ${nombre}</div>
-    </div>
-    <div class="liq-val">${fmt(liquidoFinal)}</div>
+  <div class="total-section">
+    <div class="total-label">Alcance Líquido: ${mesLabel}</div>
+    <div class="total-valor">${fmt(liquidoFinal)}</div>
   </div>
 
-  <!-- COSTO EMPRESA -->
-  <div class="costo">
-    <b>Costo empleador (referencial):</b> &nbsp;
-    SIS 1.54% ${fmt(calc.sisM)} &nbsp;·&nbsp;
-    Cesantía empleador ${fmt(calc.cesEmpM)} &nbsp;·&nbsp;
-    <b>Total costo empresa ${fmt(calc.imponible + calc.noImponible + calc.sisM + calc.cesEmpM)}</b>
+  <!-- COSTO EMPLEADOR -->
+  <div class="emp-box">
+    <b>Costo adicional empleador (referencial, no descontado al trabajador):</b>
+    SIS 1.54%: ${fmt(calc.sisM)} · Cesantía empleador: ${fmt(calc.cesEmpM)} · Total costo empresa: ${fmt(calc.imponible + calc.noImponible + calc.sisM + calc.cesEmpM)}
+  </div>
+
+  <!-- CERTIFICACIÓN -->
+  <div class="cert-box">
+    Certifico que he recibido a mi entera satisfacción la suma de ${fmt(liquidoFinal)} indicada en la presente liquidación,
+    y no tengo cargo ni cobro posterior que hacer por los conceptos de esta liquidación.
   </div>
 
   <!-- FIRMAS -->
-  <div class="firmas">
+  <div class="firma-row">
     <div class="firma">
-      <div class="firma-line"></div>
-      <div class="firma-name">${empresa}</div>
-      <div class="firma-role">Empleador · Departamento RRHH</div>
+      <div class="firma-linea"></div>
+      <div class="firma-nombre">${contrato?.empresa||'MPF Ingeniería Civil'}</div>
+      <div class="firma-cargo">Empleador / Departamento RRHH</div>
     </div>
     <div class="firma">
-      <div class="firma-line"></div>
-      <div class="firma-name">${nombre}</div>
-      <div class="firma-role">Trabajador/a · RUT ${trabajador?.rut||'—'}</div>
+      <div class="firma-linea"></div>
+      <div class="firma-nombre">${nombre}</div>
+      <div class="firma-cargo">V°B° Trabajador/a — RUT: ${trabajador?.rut||'—'}</div>
     </div>
   </div>
 
-  <!-- FOOTER -->
-  <div class="foot">
-    Certifico que he recibido la suma de <b>${fmt(liquidoFinal)}</b> a mi entera satisfacción y sin cargo ni cobro posterior que hacer por los conceptos de esta liquidación.<br/>
-    FleetCore RRHH · ${empresa} · Art. 54 CT
+  <div class="footer">
+    Liquidación generada por FleetCore RRHH · ${contrato?.empresa||'MPF Ingeniería Civil'} · ${new Date().toLocaleDateString('es-CL')} ·
+    Art. 54 CT: el empleador deberá entregar al trabajador un comprobante con indicación del monto pagado, de la forma en que se determinó y de las deducciones efectuadas.
   </div>
 
 </div>
@@ -487,157 +446,101 @@ function generarPDFResumenNomina(liquidaciones, periodoLabel) {
   const totalLiq   = liquidaciones.reduce((s,l)=>s+(l._calc?.liquido||0),0);
   const totalCesEmp= liquidaciones.reduce((s,l)=>s+(l._calc?.cesEmpM||0),0);
 
-  const filas = liquidaciones.map((l, i) => {
+  const filas = liquidaciones.map(l => {
     const nombre = l._trabajador
       ? `${l._trabajador.apellidoPaterno} ${l._trabajador.nombre}`
       : 'Desconocido';
     const c = l._calc;
-    const pagado = l.estado === 'pagado';
-    return `<tr class="${i%2===1?'alt':''}">
-      <td class="td-name">${nombre}</td>
-      <td class="td-mono">${l._trabajador?.rut||'—'}</td>
+    return `<tr>
+      <td>${nombre}</td>
+      <td>${l._trabajador?.rut||'—'}</td>
       <td>${l._trabajador?.afp||'—'}</td>
-      <td class="td-num">${fmt(c?.imponible)}</td>
-      <td class="td-num red">-${fmt(c?.afpM)}</td>
-      <td class="td-num red">-${fmt(c?.salM)}</td>
-      <td class="td-num red">-${fmt(c?.sisM+c?.cesM)}</td>
-      <td class="td-num blue">${fmt(c?.noImponible)}</td>
-      <td class="td-num green bold">${fmt(c?.liquido)}</td>
-      <td class="td-center"><span class="badge-estado ${pagado?'pagado':'pendiente'}">${pagado?'Pagado':'Pendiente'}</span></td>
+      <td style="text-align:right">${fmt(c?.imponible)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(c?.afpM)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(c?.salM)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(c?.sisM+c?.cesM)}</td>
+      <td style="text-align:right;color:#2563eb">${fmt(c?.noImponible)}</td>
+      <td style="text-align:right;font-weight:900;color:#059669">${fmt(c?.liquido)}</td>
+      <td style="text-align:center"><span style="padding:2px 6px;border-radius:4px;font-size:9pt;font-weight:700;background:${l.estado==='pagado'?'#dcfce7':'#fef3c7'};color:${l.estado==='pagado'?'#166534':'#92400e'}">${l.estado==='pagado'?'Pagado':'Pendiente'}</span></td>
     </tr>`;
   }).join('');
 
   const html = `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8"/>
+<html lang="es"><head><meta charset="UTF-8"/>
 <title>Resumen Nómina — ${periodoLabel}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;background:#f4f4f8;color:#1a1a2e;}
-  .page{max-width:1000px;margin:24px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.10);}
-
-  /* Cabecera */
-  .head{background:linear-gradient(135deg,#1e1b4b 0%,#3730a3 100%);padding:26px 36px;display:flex;justify-content:space-between;align-items:flex-end;}
-  .head-title{font-size:20pt;font-weight:900;color:#fff;letter-spacing:-0.5px;line-height:1;}
-  .head-sub{font-size:8.5pt;color:rgba(255,255,255,0.5);margin-top:5px;}
-  .head-right{text-align:right;}
-  .head-empresa{font-size:13pt;font-weight:900;color:#a5b4fc;}
-  .head-fecha{font-size:8pt;color:rgba(255,255,255,0.4);margin-top:4px;}
-
-  /* Stats */
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #ebebf5;}
-  .stat{padding:18px 20px;border-right:1px solid #ebebf5;}
-  .stat:last-child{border-right:none;}
-  .stat-lbl{font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#9ca3af;}
-  .stat-val{font-size:16pt;font-weight:900;margin-top:4px;letter-spacing:-0.5px;}
-  .violet{color:#5b21b6;} .red{color:#dc2626;} .blue{color:#1d4ed8;} .green{color:#059669;}
-
-  /* Tabla */
-  .table-wrap{padding:0 0 0 0;overflow-x:auto;}
-  table{width:100%;border-collapse:collapse;font-size:8.5pt;}
-  thead tr{background:#1e1b4b;}
-  th{padding:10px 12px;color:rgba(255,255,255,0.7);font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;text-align:left;}
-  th.td-num,th.td-center{text-align:right;}
-  td{padding:9px 12px;border-bottom:1px solid #f0f0f8;color:#374151;vertical-align:middle;}
-  tr.alt td{background:#fafafa;}
-  .td-name{font-weight:700;color:#1e1b4b;}
-  .td-mono{font-family:monospace;font-size:8pt;color:#6b7280;}
-  .td-num{text-align:right;font-weight:600;}
-  .td-center{text-align:right;}
-  .bold{font-weight:900!important;}
-  td.red{color:#dc2626;} td.blue{color:#1d4ed8;} td.green{color:#059669;}
-
-  /* Fila total */
-  .tfoot-row td{background:#1e1b4b;color:#fff;font-weight:800;font-size:9pt;padding:11px 12px;border:none;}
-  .tfoot-row td.red{color:#fca5a5;} .tfoot-row td.blue{color:#93c5fd;} .tfoot-row td.green{color:#86efac;font-size:11pt;}
-
-  /* Badge estado */
-  .badge-estado{display:inline-block;padding:3px 9px;border-radius:20px;font-size:7pt;font-weight:700;}
-  .pagado{background:#dcfce7;color:#15803d;}
-  .pendiente{background:#fef3c7;color:#92400e;}
-
-  /* Costo empresa */
-  .costo{padding:14px 36px;background:#fffbeb;border-top:1px solid #fde68a;font-size:8.5pt;color:#92400e;}
-  .costo b{font-weight:800;}
-
-  /* Footer */
-  .foot{padding:12px 36px;font-size:7.5pt;color:#c4c4d4;text-align:center;border-top:1px solid #f0f0f8;}
-
-  @media print{
-    body{background:#fff;}
-    .page{margin:0;border-radius:0;box-shadow:none;}
-    @page{margin:0;size:A4 landscape;}
-  }
-</style>
-</head>
-<body>
+  body{font-family:Arial,sans-serif;font-size:9.5pt;color:#1a1a1a;}
+  .page{max-width:1000px;margin:0 auto;padding:28px 36px;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:12px;margin-bottom:18px;}
+  .empresa{font-size:15pt;font-weight:900;text-transform:uppercase;}
+  .titulo{font-size:12pt;font-weight:900;text-align:right;}
+  .periodo{font-size:10pt;color:#555;text-align:right;margin-top:2px;}
+  .resumen{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+  .card{background:#f8f8f8;border:1px solid #e0e0e0;border-radius:6px;padding:10px 14px;}
+  .card-label{font-size:8pt;font-weight:700;text-transform:uppercase;color:#666;letter-spacing:0.3px;}
+  .card-value{font-size:14pt;font-weight:900;margin-top:2px;}
+  table{width:100%;border-collapse:collapse;font-size:9pt;}
+  th{background:#1a1a1a;color:#fff;padding:6px 8px;text-align:left;font-size:8pt;text-transform:uppercase;letter-spacing:0.3px;}
+  td{padding:5px 8px;border-bottom:1px solid #eee;vertical-align:middle;}
+  tr:nth-child(even) td{background:#f9f9f9;}
+  .total-row td{font-weight:900;font-size:10pt;border-top:2px solid #1a1a1a;background:#f0f0f0;}
+  .costo-emp{background:#fffde7;border:1px solid #fde047;border-radius:6px;padding:10px 14px;margin-top:14px;font-size:9pt;}
+  .footer{margin-top:16px;border-top:1px solid #ddd;padding-top:8px;font-size:8pt;color:#888;text-align:center;}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+</style></head><body>
 <div class="page">
-
-  <!-- CABECERA -->
-  <div class="head">
+  <div class="header">
     <div>
-      <div class="head-title">Resumen Nómina</div>
-      <div class="head-sub">Período: ${periodoLabel} · ${liquidaciones.length} trabajador${liquidaciones.length!==1?'es':''}</div>
+      <div class="empresa">Resumen Nómina</div>
+      <div style="font-size:10pt;color:#555;margin-top:3px;">Período: ${periodoLabel} · ${liquidaciones.length} trabajadores</div>
     </div>
-    <div class="head-right">
-      <div class="head-empresa">MPF Ingeniería Civil</div>
-      <div class="head-fecha">Emitido: ${new Date().toLocaleDateString('es-CL')}</div>
+    <div>
+      <div class="titulo">MPF Ingeniería Civil</div>
+      <div class="periodo">Emitido: ${new Date().toLocaleDateString('es-CL')}</div>
     </div>
   </div>
 
-  <!-- STATS -->
-  <div class="stats">
-    <div class="stat"><div class="stat-lbl">Total imponible</div><div class="stat-val violet">${fmt(totalImp)}</div></div>
-    <div class="stat"><div class="stat-lbl">Total cotizaciones</div><div class="stat-val red">-${fmt(totalDesc)}</div></div>
-    <div class="stat"><div class="stat-lbl">Total no imponible</div><div class="stat-val blue">${fmt(totalNoImp)}</div></div>
-    <div class="stat"><div class="stat-lbl">Total líquido a pagar</div><div class="stat-val green">${fmt(totalLiq)}</div></div>
+  <div class="resumen">
+    <div class="card"><div class="card-label">Total imponible</div><div class="card-value" style="color:#5b21b6">${fmt(totalImp)}</div></div>
+    <div class="card"><div class="card-label">Total cotizaciones</div><div class="card-value" style="color:#dc2626">-${fmt(totalDesc)}</div></div>
+    <div class="card"><div class="card-label">Total no imponible</div><div class="card-value" style="color:#2563eb">${fmt(totalNoImp)}</div></div>
+    <div class="card"><div class="card-label">Total líquido a pagar</div><div class="card-value" style="color:#059669">${fmt(totalLiq)}</div></div>
   </div>
 
-  <!-- TABLA -->
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Trabajador</th><th>RUT</th><th>AFP</th>
-        <th class="td-num">Imponible</th>
-        <th class="td-num">AFP</th>
-        <th class="td-num">Salud</th>
-        <th class="td-num">SIS+Ces.</th>
-        <th class="td-num">No Imp.</th>
-        <th class="td-num">Líquido</th>
-        <th class="td-center">Estado</th>
-      </tr></thead>
-      <tbody>${filas}</tbody>
-      <tfoot><tr class="tfoot-row">
-        <td colspan="3">Totales · ${liquidaciones.length} trabajador${liquidaciones.length!==1?'es':''}</td>
-        <td class="td-num">${fmt(totalImp)}</td>
-        <td class="td-num red">-${fmt(totalAfp)}</td>
-        <td class="td-num red">-${fmt(totalSalud)}</td>
-        <td class="td-num red">-${fmt(totalSis+totalCes)}</td>
-        <td class="td-num blue">${fmt(totalNoImp)}</td>
-        <td class="td-num green bold">${fmt(totalLiq)}</td>
-        <td></td>
-      </tr></tfoot>
-    </table>
-  </div>
+  <table>
+    <thead><tr>
+      <th>Trabajador</th><th>RUT</th><th>AFP</th>
+      <th style="text-align:right">Imponible</th>
+      <th style="text-align:right">AFP</th>
+      <th style="text-align:right">Salud</th>
+      <th style="text-align:right">SIS+Ces.</th>
+      <th style="text-align:right">No Imp.</th>
+      <th style="text-align:right">Líquido</th>
+      <th style="text-align:center">Estado</th>
+    </tr></thead>
+    <tbody>${filas}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="3">TOTALES (${liquidaciones.length} trabajadores)</td>
+      <td style="text-align:right">${fmt(totalImp)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(totalAfp)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(totalSalud)}</td>
+      <td style="text-align:right;color:#dc2626">-${fmt(totalSis+totalCes)}</td>
+      <td style="text-align:right;color:#2563eb">${fmt(totalNoImp)}</td>
+      <td style="text-align:right;color:#059669;font-size:11pt">${fmt(totalLiq)}</td>
+      <td></td>
+    </tr></tfoot>
+  </table>
 
-  <!-- COSTO EMPRESA -->
-  <div class="costo">
-    <b>Costo empleador (referencial):</b> &nbsp;
-    Cesantía empleador ${fmt(totalCesEmp)} &nbsp;·&nbsp;
-    SIS empleador ${fmt(totalSis)} &nbsp;·&nbsp;
-    <b>Costo bruto total empresa: ${fmt(totalImp + totalNoImp + totalCesEmp + totalSis)}</b>
+  <div class="costo-emp">
+    <strong>📋 Costo total empresa (referencial):</strong>
+    Cesantía empleador: ${fmt(totalCesEmp)} · SIS empleador: ${fmt(totalSis)} ·
+    <strong>Costo bruto total empresa: ${fmt(totalImp + totalNoImp + totalCesEmp + totalSis)}</strong>
   </div>
-
-  <!-- FOOTER -->
-  <div class="foot">
-    Resumen generado por FleetCore RRHH · ${new Date().toLocaleDateString('es-CL')} · Los valores corresponden a estimaciones. Verificar con liquidaciones individuales.
-  </div>
-
+  <div class="footer">Resumen generado por FleetCore RRHH · ${new Date().toLocaleDateString('es-CL')} · Los valores corresponden a estimaciones. Verificar con liquidaciones individuales.</div>
 </div>
 <script>window.onload=function(){window.print();}</script>
-</body>
-</html>`;
+</body></html>`;
 
   const blob = new Blob([html], { type:'text/html;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
@@ -930,138 +833,224 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
 function generarCertificadoAnual(trabajador, contrato, liquidacionesAnio, anio, utm) {
-  const fmt  = n => `$${(n||0).toLocaleString('es-CL')}`;
+  const fmt   = n => `$${Math.round(n||0).toLocaleString('es-CL')}`;
+  const fmtN  = n => Math.round(n||0).toLocaleString('es-CL');
+  const utmVal = utm || UTM_DEFAULT;
   const nombre = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
     : '_______________';
-  const empresa = contrato?.empresa || 'MPF Ingeniería Civil';
+  const empresa    = contrato?.empresa    || 'MPF Ingeniería Civil';
+  const rutEmpresa = contrato?.rutEmpresa || '77.158.216-8';
 
-  // Acumular totales anuales
-  let totalImp=0, totalNoImp=0, totalAfp=0, totalSalud=0, totalCes=0, totalIUT=0, totalLiquido=0;
+  // ── Acumular totales ──────────────────────────────────────────────────────
+  let totalImp=0, totalNoImp=0, totalTrib=0;
+  let totalAfp=0, totalSalud=0, totalCesTrab=0, totalSisEmp=0;
+  let totalIUT=0, totalLiquido=0;
+
   const filasMeses = liquidacionesAnio.map(liq => {
-    const c   = calcularLiquidacionConIUT({ ...contrato, ...liq }, utm);
-    totalImp     += c.imponible;
-    totalNoImp   += c.noImponible;
-    totalAfp     += c.afpM;
-    totalSalud   += c.salM;
-    totalCes     += c.cesM + c.sisM;
-    totalIUT     += c.iut;
-    totalLiquido += c.liquidoFinal;
+    const c = calcularLiquidacionConIUT({ ...contrato, ...liq, afp: trabajador?.afp }, utmVal);
+    const rentaTrib = Math.max(0, c.imponible - c.afpM - c.salM - c.cesM - c.sisM);
+    totalImp      += c.imponible;
+    totalNoImp    += c.noImponible;
+    totalTrib     += rentaTrib;
+    totalAfp      += c.afpM;
+    totalSalud    += c.salM;
+    totalCesTrab  += c.cesM;
+    totalSisEmp   += c.sisM;
+    totalIUT      += c.iut;
+    totalLiquido  += c.liquidoFinal;
     return `<tr>
       <td>${MESES[parseInt(liq.mes)-1]||liq.mes}</td>
-      <td style="text-align:right">${fmt(c.imponible)}</td>
-      <td style="text-align:right">${fmt(c.noImponible)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(c.afpM)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(c.salM)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(c.cesM+c.sisM)}</td>
-      <td style="text-align:right;color:#7c3aed">-${fmt(c.iut)}</td>
-      <td style="text-align:right;font-weight:900;color:#059669">${fmt(c.liquidoFinal)}</td>
+      <td class="nr">${fmtN(c.imponible)}</td>
+      <td class="nr">${fmtN(c.noImponible)}</td>
+      <td class="nr red">-${fmtN(c.afpM)}</td>
+      <td class="nr red">-${fmtN(c.salM)}</td>
+      <td class="nr red">-${fmtN(c.cesM)}</td>
+      <td class="nr red">-${fmtN(c.sisM)}</td>
+      <td class="nr trib">${fmtN(rentaTrib)}</td>
+      <td class="nr purple">-${fmtN(c.iut)}</td>
+      <td class="nr green bold">${fmtN(c.liquidoFinal)}</td>
     </tr>`;
   }).join('');
 
+  const totalCotiz = totalAfp + totalSalud + totalCesTrab + totalSisEmp;
+
   const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"/>
-<title>Certificado Anual — ${nombre} — ${anio}</title>
+<title>Certificado Anual Remuneraciones — ${nombre} — ${anio}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#1a1a1a;}
-  .page{max-width:900px;margin:0 auto;padding:30px 40px;}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:14px;margin-bottom:18px;}
-  .empresa{font-size:14pt;font-weight:900;text-transform:uppercase;}
-  .sii-badge{background:#003087;color:#fff;font-size:9pt;font-weight:900;padding:4px 10px;border-radius:4px;text-align:center;}
-  .doc-title{font-size:12pt;font-weight:900;text-align:right;margin-top:4px;}
-  .trabajador-box{background:#f4f4f8;border-left:4px solid #5b21b6;padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:18px;display:flex;gap:30px;flex-wrap:wrap;}
-  .tw-field .label{font-size:8pt;font-weight:700;text-transform:uppercase;color:#6b7280;}
-  .tw-field .value{font-size:10.5pt;font-weight:700;}
-  .sec-titulo{font-size:8.5pt;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;background:#1a1a1a;color:#fff;padding:5px 10px;margin-bottom:0;}
-  table{width:100%;border-collapse:collapse;font-size:9.5pt;}
-  th{background:#374151;color:#fff;padding:6px 10px;text-align:left;font-size:8pt;text-transform:uppercase;}
-  td{padding:5px 10px;border-bottom:1px solid #eee;}
-  tr:nth-child(even) td{background:#f9f9f9;}
-  .total-row td{font-weight:900;font-size:10pt;border-top:2px solid #1a1a1a;background:#f0f0f0;}
-  .resumen{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0;}
-  .card{background:#f8f8f8;border:1px solid #e0e0e0;border-radius:6px;padding:10px 14px;}
-  .card-label{font-size:8pt;font-weight:700;text-transform:uppercase;color:#666;}
-  .card-value{font-size:14pt;font-weight:900;margin-top:2px;}
-  .disclaimer{background:#fffde7;border:1px solid #fde047;border-radius:5px;padding:10px 14px;font-size:8.5pt;margin-top:14px;line-height:1.6;}
-  .firma-row{display:flex;justify-content:space-between;margin-top:40px;gap:30px;}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#111;background:#fff;}
+  .page{max-width:960px;margin:0 auto;padding:28px 36px;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;
+          border-bottom:3px solid #003087;padding-bottom:12px;margin-bottom:16px;}
+  .emp-nombre{font-size:13pt;font-weight:900;text-transform:uppercase;color:#003087;}
+  .emp-rut{font-size:8.5pt;color:#555;margin-top:3px;}
+  .sii-bloque{text-align:right;}
+  .sii-badge{display:inline-block;background:#003087;color:#fff;font-size:9pt;
+             font-weight:900;padding:4px 12px;border-radius:4px;letter-spacing:.5px;}
+  .doc-title{font-size:11.5pt;font-weight:900;margin-top:5px;color:#111;}
+  .doc-sub{font-size:8.5pt;color:#555;margin-top:2px;}
+  .art-tag{display:inline-block;background:#e8f0fe;color:#1a56db;font-size:8pt;
+           font-weight:700;padding:2px 8px;border-radius:10px;margin-top:4px;border:1px solid #c3d8fd;}
+  .ficha{display:grid;grid-template-columns:repeat(6,1fr);gap:0;
+         border:1px solid #d1d5db;border-radius:6px;overflow:hidden;margin-bottom:16px;}
+  .ficha-cell{padding:8px 12px;border-right:1px solid #e5e7eb;}
+  .ficha-cell:last-child{border-right:none;}
+  .ficha-cell .lbl{font-size:7.5pt;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:2px;}
+  .ficha-cell .val{font-size:9.5pt;font-weight:700;color:#111;}
+  .ficha-header{background:#f3f4f6;grid-column:1/-1;padding:6px 12px;
+                font-size:8pt;font-weight:900;text-transform:uppercase;
+                letter-spacing:.5px;color:#374151;border-bottom:1px solid #d1d5db;}
+  .sec-titulo{font-size:8pt;font-weight:900;text-transform:uppercase;
+              letter-spacing:.5px;background:#1e3a5f;color:#fff;padding:5px 10px;margin-bottom:0;}
+  table{width:100%;border-collapse:collapse;font-size:8.5pt;}
+  th{background:#374151;color:#fff;padding:5px 8px;font-size:7.5pt;text-transform:uppercase;white-space:nowrap;}
+  th.nr,td.nr{text-align:right;}
+  td{padding:4px 8px;border-bottom:1px solid #f0f0f0;}
+  tr:nth-child(even) td{background:#fafafa;}
+  td.red{color:#dc2626;}
+  td.purple{color:#7c3aed;}
+  td.green{color:#059669;}
+  td.trib{color:#0369a1;font-weight:700;}
+  td.bold{font-weight:900;}
+  .total-row td{font-weight:900;font-size:9pt;border-top:2px solid #1a1a1a;background:#f0f0f0;}
+  .trib-nota{font-size:7.5pt;color:#0369a1;font-style:italic;padding:3px 8px;
+             background:#f0f9ff;border-bottom:1px solid #bae6fd;}
+  .resumen{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0;}
+  .card{border:1px solid #e0e0e0;border-radius:6px;padding:10px 12px;}
+  .card .lbl{font-size:7.5pt;font-weight:700;text-transform:uppercase;color:#6b7280;}
+  .card .val{font-size:13pt;font-weight:900;margin-top:2px;}
+  .disclaimer{background:#fffde7;border:1px solid #fde047;border-radius:5px;
+              padding:10px 14px;font-size:8pt;margin-top:12px;line-height:1.65;}
+  .firma-row{display:flex;justify-content:space-between;margin-top:36px;gap:40px;}
   .firma{flex:1;text-align:center;}
-  .firma-linea{border-top:1.5px solid #1a1a1a;margin-bottom:6px;margin-top:40px;}
-  .footer{margin-top:16px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#888;text-align:center;line-height:1.6;}
-  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+  .firma-linea{border-top:1.5px solid #1a1a1a;margin-bottom:5px;margin-top:44px;}
+  .firma-nombre{font-weight:900;font-size:9.5pt;}
+  .firma-sub{font-size:8pt;color:#555;margin-top:2px;}
+  .footer{margin-top:14px;border-top:1px solid #ddd;padding-top:8px;
+          font-size:7.5pt;color:#999;text-align:center;line-height:1.7;}
+  @media print{
+    body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    @page{margin:15mm 12mm;}
+  }
 </style></head><body>
 <div class="page">
+
   <div class="header">
     <div>
-      <div class="empresa">${empresa}</div>
-      <div style="font-size:9pt;color:#555;margin-top:3px">RUT Empresa: _______________ · Giro: Ingeniería y Construcción</div>
+      <div class="emp-nombre">${empresa}</div>
+      <div class="emp-rut">RUT Empleador: ${rutEmpresa} &nbsp;·&nbsp; Giro: Ingeniería y Construcción</div>
     </div>
-    <div style="text-align:right">
+    <div class="sii-bloque">
       <div class="sii-badge">SII — Formulario 1887</div>
       <div class="doc-title">Certificado Anual de Remuneraciones</div>
-      <div style="font-size:9pt;color:#555;margin-top:2px">Año tributario ${parseInt(anio)+1} · Año comercial ${anio}</div>
+      <div class="doc-sub">Año tributario ${parseInt(anio)+1} &nbsp;·&nbsp; Año comercial ${anio}</div>
+      <span class="art-tag">Art. 42 N°1 LIR &nbsp;|&nbsp; Art. 101 LIR</span>
     </div>
   </div>
 
-  <div class="trabajador-box">
-    <div class="tw-field"><div class="label">Trabajador</div><div class="value">${nombre}</div></div>
-    <div class="tw-field"><div class="label">RUT</div><div class="value">${trabajador?.rut||'—'}</div></div>
-    <div class="tw-field"><div class="label">Cargo</div><div class="value">${contrato?.cargo||'—'}</div></div>
-    <div class="tw-field"><div class="label">AFP</div><div class="value">${trabajador?.afp||'—'}</div></div>
-    <div class="tw-field"><div class="label">Salud</div><div class="value">${trabajador?.prevision||'Fonasa'}</div></div>
-    <div class="tw-field"><div class="label">UTM usada</div><div class="value">$${(utm||UTM_DEFAULT).toLocaleString('es-CL')}</div></div>
+  <div class="ficha">
+    <div class="ficha-header">Datos del Trabajador</div>
+    <div class="ficha-cell"><div class="lbl">Nombre</div><div class="val">${nombre}</div></div>
+    <div class="ficha-cell"><div class="lbl">RUT</div><div class="val">${trabajador?.rut||'—'}</div></div>
+    <div class="ficha-cell"><div class="lbl">Cargo</div><div class="val">${contrato?.cargo||'—'}</div></div>
+    <div class="ficha-cell"><div class="lbl">AFP</div><div class="val">${trabajador?.afp||'—'}</div></div>
+    <div class="ficha-cell"><div class="lbl">Salud</div><div class="val">${trabajador?.prevision||'FONASA'}</div></div>
+    <div class="ficha-cell"><div class="lbl">UTM Promedio</div><div class="val">$${utmVal.toLocaleString('es-CL')}</div></div>
   </div>
 
-  <div class="sec-titulo">Detalle mensual ${anio}</div>
+  <div class="sec-titulo">Detalle Mensual ${anio}</div>
   <table>
     <thead><tr>
-      <th>Mes</th><th style="text-align:right">Imponible</th><th style="text-align:right">No Imp.</th>
-      <th style="text-align:right">AFP</th><th style="text-align:right">Salud</th>
-      <th style="text-align:right">Ces.+SIS</th><th style="text-align:right;color:#c4b5fd">IUT 2ª Cat.</th>
-      <th style="text-align:right">Líquido</th>
+      <th>Mes</th>
+      <th class="nr">Rem. Imponible</th>
+      <th class="nr">No Imponible</th>
+      <th class="nr">AFP / IPS</th>
+      <th class="nr">Salud 7%</th>
+      <th class="nr">AFC Trab.</th>
+      <th class="nr">SIS Emp.</th>
+      <th class="nr" style="color:#93c5fd">Renta Tributable *</th>
+      <th class="nr" style="color:#c4b5fd">IUT 2ª Cat.</th>
+      <th class="nr">Líquido Pagado</th>
     </tr></thead>
     <tbody>${filasMeses}</tbody>
-    <tfoot><tr class="total-row">
-      <td>TOTALES ${anio}</td>
-      <td style="text-align:right">${fmt(totalImp)}</td>
-      <td style="text-align:right">${fmt(totalNoImp)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(totalAfp)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(totalSalud)}</td>
-      <td style="text-align:right;color:#dc2626">-${fmt(totalCes)}</td>
-      <td style="text-align:right;color:#7c3aed;font-size:11pt">-${fmt(totalIUT)}</td>
-      <td style="text-align:right;color:#059669;font-size:11pt">${fmt(totalLiquido)}</td>
-    </tr></tfoot>
+    <tfoot>
+      <tr><td colspan="10" class="trib-nota">
+        * Renta Tributable = Rem. Imponible − AFP − Salud − AFC Trab. − SIS &nbsp;(base de cálculo IUT según Art. 42 N°1 LIR)
+      </td></tr>
+      <tr class="total-row">
+        <td>TOTALES ${anio}</td>
+        <td class="nr">${fmtN(totalImp)}</td>
+        <td class="nr">${fmtN(totalNoImp)}</td>
+        <td class="nr red">-${fmtN(totalAfp)}</td>
+        <td class="nr red">-${fmtN(totalSalud)}</td>
+        <td class="nr red">-${fmtN(totalCesTrab)}</td>
+        <td class="nr red">-${fmtN(totalSisEmp)}</td>
+        <td class="nr trib">${fmtN(totalTrib)}</td>
+        <td class="nr purple">-${fmtN(totalIUT)}</td>
+        <td class="nr green bold">${fmtN(totalLiquido)}</td>
+      </tr>
+    </tfoot>
   </table>
 
   <div class="resumen">
-    <div class="card"><div class="card-label">Renta anual imponible</div><div class="card-value" style="color:#5b21b6">${fmt(totalImp)}</div></div>
-    <div class="card"><div class="card-label">Total cotizaciones</div><div class="card-value" style="color:#dc2626">-${fmt(totalAfp+totalSalud+totalCes)}</div></div>
-    <div class="card"><div class="card-label">Total IUT 2ª Cat.</div><div class="card-value" style="color:#7c3aed">-${fmt(totalIUT)}</div></div>
-    <div class="card"><div class="card-label">Total líquido anual</div><div class="card-value" style="color:#059669">${fmt(totalLiquido)}</div></div>
+    <div class="card">
+      <div class="lbl">Renta Imponible Anual</div>
+      <div class="val" style="color:#1e3a5f">${fmt(totalImp)}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Renta Tributable Anual</div>
+      <div class="val" style="color:#0369a1">${fmt(totalTrib)}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Total Cotizaciones</div>
+      <div class="val" style="color:#dc2626">-${fmt(totalCotiz)}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Total IUT 2ª Cat.</div>
+      <div class="val" style="color:#7c3aed">-${fmt(totalIUT)}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Total Líquido Anual</div>
+      <div class="val" style="color:#059669">${fmt(totalLiquido)}</div>
+    </div>
   </div>
 
   <div class="disclaimer">
-    <strong>📋 Declaración Jurada 1887 (Art. 42 N°1 y Art. 101 LIR):</strong> El empleador declara que las remuneraciones indicadas corresponden a los valores efectivamente pagados al trabajador durante el año comercial ${anio}. Este certificado debe ser entregado al trabajador para acreditar sus rentas ante el SII, instituciones financieras, organismos públicos y privados. El IUT fue calculado usando UTM promedio de $${(utm||UTM_DEFAULT).toLocaleString('es-CL')}. Los valores son referenciales y deben ser verificados con la liquidación oficial de cada período.
+    <strong>Declaración Jurada — Formulario 1887 SII (Art. 42 N°1 y Art. 101 LIR):</strong>
+    El empleador <strong>${empresa}</strong>, RUT <strong>${rutEmpresa}</strong>, declara que las
+    remuneraciones indicadas corresponden a los montos efectivamente pagados al trabajador durante
+    el año comercial <strong>${anio}</strong>. Este certificado se emite en cumplimiento del Art. 101
+    de la Ley sobre Impuesto a la Renta y debe ser entregado al trabajador para acreditar sus rentas
+    ante el SII, instituciones financieras y organismos públicos y privados. El IUT 2ª Categoría fue
+    calculado aplicando los tramos vigentes sobre la renta tributable mensual, usando UTM promedio de
+    <strong>$${utmVal.toLocaleString('es-CL')}</strong>.
   </div>
 
   <div class="firma-row">
     <div class="firma">
       <div class="firma-linea"></div>
-      <div style="font-weight:900;font-size:10pt">${empresa}</div>
-      <div style="font-size:9pt;color:#555">Empleador / Representante Legal · RUT: _______________</div>
+      <div class="firma-nombre">${empresa}</div>
+      <div class="firma-sub">RUT: ${rutEmpresa}</div>
+      <div class="firma-sub">Empleador / Representante Legal</div>
     </div>
     <div class="firma">
       <div class="firma-linea"></div>
-      <div style="font-weight:900;font-size:10pt">${nombre}</div>
-      <div style="font-size:9pt;color:#555">Trabajador/a · RUT: ${trabajador?.rut||'—'}</div>
+      <div class="firma-nombre">${nombre}</div>
+      <div class="firma-sub">RUT: ${trabajador?.rut||'—'}</div>
+      <div class="firma-sub">Trabajador/a — Art. 42 N°1 LIR</div>
     </div>
   </div>
 
   <div class="footer">
-    Certificado Anual de Remuneraciones · ${empresa} · Generado: ${new Date().toLocaleDateString('es-CL')} ·
-    Art. 42 N°1 LIR · Art. 101 LIR · Formulario 1887 SII ·
-    Este documento no reemplaza la declaración oficial al SII. Verifique con su contador o asesor tributario.
+    Certificado Anual de Remuneraciones &nbsp;·&nbsp; ${empresa} &nbsp;·&nbsp;
+    Generado: ${new Date().toLocaleDateString('es-CL')} &nbsp;·&nbsp;
+    Formulario 1887 SII &nbsp;·&nbsp; Art. 42 N°1 LIR &nbsp;·&nbsp; Art. 101 LIR<br/>
+    Este documento no reemplaza la declaración oficial ante el SII.
+    Verifique los valores con su contador o asesor tributario.
   </div>
+
 </div>
 <script>window.onload=function(){window.print();}</script>
 </body></html>`;
@@ -1289,142 +1278,47 @@ function validarRutPrevired(rut) {
   return dvEsp===dv ? { ok:true } : { ok:false, error:`DV incorrecto (esperado ${dvEsp})` };
 }
 function generarPreviredAvanzado(liqEnriquecidas, periodo) {
-  // Tablas de códigos Previred
-  const COD_AFP = {
-    'Capital':'08','Cuprum':'02','Habitat':'05',
-    'PlanVital':'29','ProVida':'34','Uno':'36',
-  };
-  // Código col 105 por AFP (identificador interno Previred, verificado contra TXT real)
-  const COD_AFP_105 = {
-    'Capital':'038','Cuprum':'038','Habitat':'001-0',
-    'PlanVital':'001-4','ProVida':'001-0','Uno':'001-0',
-  };
-  // Tasa Mutual de Accidentes del Trabajo — específica de MPF Ingeniería Civil
-  const TASA_MUTUAL = 0.0348; // 3.48% verificado contra nómina real enero 2026
-  const COD_JORNADA = {
-    'Completa (45 hrs)':'07','Parcial (30 hrs)':'02','Parcial (20 hrs)':'02',
-    'Turno 7x7':'07','Turno 14x14':'07','Turno 4x3':'07',
-  };
-  const splitRut = (rut) => {
-    if (!rut) return ['',''];
-    const clean = rut.replace(/\./g,'').split('-');
-    return [clean[0]||'', (clean[1]||'').toUpperCase()];
-  };
-  const fmtFecha = (f) => {
-    if (!f) return '';
-    const [y,m,d] = f.split('-');
-    return `${d}/${m}/${y}`;
-  };
-  const tipoCtto = (tipo) => {
-    if (!tipo) return 'D';
-    if (tipo.includes('Indefinido')) return 'D';
-    if (tipo.includes('Plazo'))      return 'P';
-    if (tipo.includes('Obra'))       return 'O';
-    return 'D';
-  };
-
-  // Extraer mes y año del período (ej: "Marzo 2026")
-  const [mesLabel, anioStr] = periodo.split(' ');
-  const MESES_NUM = { Enero:'01',Febrero:'02',Marzo:'03',Abril:'04',Mayo:'05',Junio:'06',
-    Julio:'07',Agosto:'08',Septiembre:'09',Octubre:'10',Noviembre:'11',Diciembre:'12' };
-  const mesNum  = MESES_NUM[mesLabel] || '01';
-  const periodoStr = `${mesNum}${anioStr || new Date().getFullYear()}`;
-
   const errores = [];
   const filas   = [];
 
-  liqEnriquecidas.forEach(({ trabajador: trab, contrato, liq }, i) => {
-    const validRut = validarRutPrevired(trab?.rut||'');
-    if (!validRut.ok) errores.push(`Fila ${i+1} — ${trab?.nombre||'?'}: ${validRut.error}`);
+  liqEnriquecidas.forEach(({ trabajador, contrato, liq }, i) => {
+    const validRut = validarRutPrevired(trabajador?.rut||'');
+    if (!validRut.ok) errores.push(`Fila ${i+1} — ${trabajador?.nombre||'?'}: ${validRut.error}`);
 
-    if (!trab || !contrato) return;
+    const c   = calcularLiquidacion({ ...contrato, ...liq });
+    const rut = (trabajador?.rut||'').replace(/\./g,'').replace('-','').toUpperCase();
+    const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
 
-    const calc     = calcularLiquidacionConIUT({ ...contrato, ...liq, afp: trab.afp }, UTM_DEFAULT);
-    const [rutNum, dv] = splitRut(trab.rut);
-    const esIsapre = trab.prevision && trab.prevision !== 'FONASA' && trab.prevision !== 'Fonasa';
-    const esPF     = contrato.tipoContrato === 'Plazo Fijo' || contrato.tipoContrato === 'Obra o Faena';
-    const codAfp   = COD_AFP[trab.afp] || '05';
-    const codJor   = COD_JORNADA[contrato.jornada] || '07';
-    const diasTrab = calc.diasTrab ?? 30;
-
-    const rentaImp  = Math.round(calc.imponible || 0);
-    const cotAfp    = Math.round(calc.afpM || 0);
-    const cotSalud  = Math.round(calc.salM || 0);
-    const cesTrab   = Math.round(rentaImp * 0.006);         // SC trabajador = 0.6% SIEMPRE
-    const cesEmp    = Math.round(calc.cesEmpM || 0);        // AFC empleador
-    const sis       = Math.round(rentaImp * 0.0154);        // SIS 1.54% — calculado directo para garantizar valor
-    const mutual    = Math.round(rentaImp * TASA_MUTUAL);   // Mutual AT empleador 3.48%
-    const rentaBruta= Math.round((calc.imponible||0) + (calc.noImponible||0));
-    // col 42: indicador cotización adicional voluntaria (solo Habitat con FONASA)
-    const codSaludCol42 = (!esIsapre && codAfp === '05') ? '1' : '';
-
-    const fila = new Array(105).fill('');
-    fila[0]  = rutNum;
-    fila[1]  = dv;
-    fila[2]  = trab.apellidoPaterno || '';
-    fila[3]  = trab.apellidoMaterno || '';
-    fila[4]  = trab.nombre || '';
-    fila[5]  = trab.sexo || 'M';
-    fila[6]  = '0';
-    fila[7]  = '01';
-    fila[8]  = periodoStr;
-    fila[9]  = periodoStr;
-    fila[10] = 'AFP';
-    fila[11] = esIsapre ? '1' : '0';
-    fila[12] = String(diasTrab);
-    fila[13] = '00';                    // col 14: tramo asignación familiar (padding 00)
-    fila[14] = String(trab.tramoAsignacion || '0');
-    fila[15] = fmtFecha(contrato.fechaInicio);
-    fila[16] = contrato.fechaFin ? fmtFecha(contrato.fechaFin) : ''; // col 17: fechaFin solo si PF
-    fila[17] = tipoCtto(contrato.tipoContrato);
-    fila[18] = String(trab.cargas || '0');
-    fila[19] = String(trab.cargasMaternales || '0');
-    fila[20] = '0'; fila[21]='0'; fila[22]='0'; fila[23]='0';
-    fila[24] = 'N';
-    fila[25] = codAfp;                  // col 26: código AFP (05=Habitat)
-    fila[26] = String(rentaImp);        // col 27: renta imponible AFP
-    fila[27] = String(cotAfp);          // col 28: cotización AFP total (oblig + comisión)
-    fila[28] = String(sis);             // col 29: SIS empleador 1.54% ← verificado contra enero
-    fila[29] = '0';                     // col 30: cotización voluntaria AFP
-    // col 40 (idx 39): código institución APV — solo si trabajador tiene APV contratado
-    // col 42 (idx 41): indicador cotización adicional voluntaria
-    // col 43 (idx 42): APVI → '0' explícito
-    // NOTA: col40 vacío cuando no hay APV. Poner '005' aquí causa advertencia Previred
-    //       "No informa monto cotización APVI" porque Previred lo interpreta como institución APV sin monto
-    fila[41] = codSaludCol42;           // col 42: indicador (solo Habitat FONASA)
-    fila[42] = '0';                     // col 43: APVI explícito
-    fila[54] = '0';
-    fila[63] = String(rentaImp);        // col 64: renta imponible (antes tenía solo sueldo base)
-    fila[69] = String(cotSalud);        // col 70: cotización salud FONASA/Isapre 7%
-    fila[72] = '0'; fila[73]='0';
-    fila[74] = codJor;
-    fila[81] = '0';
-    fila[92] = '1';
-    // col 94: CEV (cotización expectativa de vida AFC) — 0.9% indefinido / 0.6% PF
-    fila[93] = esPF ? String(Math.round(rentaImp * 0.006)) : String(Math.round(rentaImp * 0.009));
-    fila[95] = esPF ? '01' : '02';     // col 96: tipo contrato SC (01=PF, 02=indefinido)
-    fila[96] = String(rentaImp);        // col 97: renta imponible SC
-    fila[97] = String(mutual);          // col 98: mutual AT empleador 3.48%
-    fila[98] = '0';
-    fila[99] = String(rentaImp);        // col 100: renta imponible SC (NO bruta — Previred valida AFC sobre esta base)
-    fila[100]= String(cesTrab);         // col 101: seguro cesantía trabajador 0.6%
-    fila[101]= String(cesEmp);          // col 102: AFC empleador (2.4% indef / 3% PF)
-    fila[104]= COD_AFP_105[trab.afp] || '001-0'; // col 105: código AFP interno Previred
-
-    filas.push(fila.join(';'));
+    filas.push([
+      rut,
+      nombre,
+      (trabajador?.afp||'').toUpperCase(),
+      c.afpM,
+      (trabajador?.prevision==='Fonasa'||!trabajador?.prevision ? 'FONASA' : trabajador.isapre||'ISAPRE').toUpperCase(),
+      c.salM,
+      c.sisM,
+      c.cesM,
+      c.cesEmpM||0,
+      c.imponible,
+      c.imponible + c.noImponible,
+      Math.max(0, c.liquido),
+      contrato?.tipoContrato==='Plazo Fijo'?'PF':'IND',
+      liq.mes||'',
+      liq.anio||'',
+    ].join(';'));
   });
 
   if (errores.length > 0) {
     alert(`⚠ Previred — ${errores.length} error(es) de validación:\n\n${errores.join('\n')}\n\nEl archivo se generará igualmente. Corrija los RUTs antes de subir.`);
   }
 
-  // Sin cabecera — formato nativo Previred (TXT separado por ;)
-  const txt  = filas.join('\r\n');
-  const blob = new Blob([txt], { type:'text/plain;charset=latin1' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
+  const header = 'RUT;NOMBRE;AFP;COT_AFP;SALUD;COT_SALUD;SIS;CES_TRAB;CES_EMP;RENTA_IMP;RENTA_BRUTA;LIQUIDO;TIPO_CONTRATO;MES;ANIO';
+  const csv    = header + '\n' + filas.join('\n');
+  const blob   = new Blob(['\uFEFF'+csv], { type:'text/csv;charset=utf-8' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
   a.href = url;
-  a.download = `previred_${anioStr || ''}${mesNum}.txt`;
+  a.download = `Previred_${periodo}_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   return errores;
@@ -1462,390 +1356,139 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
   URL.revokeObjectURL(url);
 }
 
-// ─── Versiones Blob (para firma electrónica) ──────────────────────────────────
-// Generan el mismo PDF pero retornan un Blob en vez de solo descargar.
-// Se usan desde RRHH.modals.jsx antes de enviar a ValidaFirma.
+// ─────────────────────────────────────────────────────────────────────────────
+// generarCSVImportadorSII — F1887 AT{anio+1} — 35 columnas
+// Genera el archivo CSV para subir directamente al Importador de Datos del SII
+// https://www2.sii.cl/manual/importador → DJ 1887
+//
+// Formato AT2026 (35 columnas por registro):
+//   C1  : Cuerpo RUT trabajador (sin dígito, sin puntos, sin guión)
+//   C2  : Dígito verificador (puede ser K mayúscula)
+//   C3  : Número correlativo de certificado (asignado secuencialmente)
+//   C4  : Renta Total Neta Art.42 N°1 = suma anual renta tributable
+//   C5  : IUT 2ª Categoría retenido total año
+//   C6  : Mayor retención solicitada Art.88 (0 si no aplica)
+//   C7  : Renta Total No Gravada (total no imponible anual)
+//   C8  : Renta Total Exenta (0)
+//   C9  : Rebajas zonas extremas D.L.889 (0)
+//   C10 : 3% Préstamo tasa 0% año 2021 (0)
+//   C11–C22 : Indicador meses ENE–DIC (1=trabajó, vacío=no trabajó)
+//   C23 : Horas semanales pactadas a diciembre (45 jornada completa, 30 parcial)
+//   C24–C35 : Renta tributable mensual ENE–DIC (0 si no trabajó ese mes)
+//
+// Reglas generales SII:
+//   - Separador de campos: ";"
+//   - Sin separador de miles ni decimales en montos
+//   - Sin encabezado (solo filas de datos)
+//   - Celdas vacías permitidas solo en indicadores de mes (C11-C22)
+//   - Encoding UTF-8 (o CSV MS-DOS)
+// ─────────────────────────────────────────────────────────────────────────────
+function generarCSVImportadorSII(liqPorTrabajador, anio, utm) {
+  // liqPorTrabajador: Array de { trabajador, contrato, liquidaciones[] }
+  // liquidaciones[]: Array con los meses del año, cada uno con mes='01'..'12'
 
-async function generarPDFContratoBlob(contrato, trabajador) {
-  return new Promise((resolve, reject) => {
-    try {
-      const html = _buildContratoHTML(contrato, trabajador); // misma lógica interna
-      const w = window.open('', '_blank');
-      if (!w) { reject(new Error('Popup bloqueado')); return; }
-      // Usar print-to-blob via iframe invisible si disponible
-      // Fallback: retornar null para que el modal use generarPDFContrato() estándar
-      resolve(null);
-    } catch(e) { reject(e); }
-  });
-}
+  const utmVal = utm || UTM_DEFAULT;
+  const n = v => Math.round(v || 0);  // entero sin decimales
 
-async function generarPDFAnexoBlob(anexo, trabajador, contrato) {
-  // Mismo patrón — retorna null para delegar en el flujo estándar
-  return Promise.resolve(null);
+  // Separar RUT en cuerpo + dígito verificador
+  // Acepta formatos: "12345678-9", "12.345.678-K", "123456789" (sin guión)
+  function splitRut(rut) {
+    if (!rut) return ['', ''];
+    const limpio = String(rut).replace(/\./g, '').trim();
+    const idx = limpio.lastIndexOf('-');
+    if (idx !== -1) {
+      return [limpio.slice(0, idx), limpio.slice(idx + 1).toUpperCase()];
+    }
+    // Sin guión: asume último char es dígito verificador
+    return [limpio.slice(0, -1), limpio.slice(-1).toUpperCase()];
+  }
+
+  const filas = [];
+  let numCertificado = 1;
+
+  for (const { trabajador, contrato, liquidaciones } of liqPorTrabajador) {
+    if (!trabajador || !liquidaciones?.length) continue;
+
+    const [rutCuerpo, rutDv] = splitRut(trabajador.rut);
+
+    // Calcular acumulados anuales y datos por mes
+    let totalTrib = 0, totalIUT = 0, totalNoImp = 0;
+
+    // Mapa mes → datos calculados (mes como número 1..12)
+    const datosMes = {};
+    for (const liq of liquidaciones) {
+      const mesNum = parseInt(liq.mes);
+      if (!mesNum || mesNum < 1 || mesNum > 12) continue;
+      const c = calcularLiquidacionConIUT(
+        { ...contrato, ...liq, afp: trabajador.afp },
+        utmVal
+      );
+      // Renta tributable mensual = imponible − AFP − salud − AFC trab − SIS
+      const rentaTrib = Math.max(0, c.imponible - c.afpM - c.salM - c.cesM - c.sisM);
+      datosMes[mesNum] = { rentaTrib, iut: c.iut, noImp: c.noImponible };
+      totalTrib  += rentaTrib;
+      totalIUT   += c.iut;
+      totalNoImp += c.noImponible;
+    }
+
+    // C11–C22: indicadores de meses (1=trabajó, ''=no trabajó)
+    // C24–C35: renta tributable de cada mes (0 si no trabajó)
+    const indicadores = [];  // C11–C22
+    const rentasMes   = [];  // C24–C35
+    for (let m = 1; m <= 12; m++) {
+      if (datosMes[m] !== undefined) {
+        indicadores.push('1');
+        rentasMes.push(n(datosMes[m].rentaTrib));
+      } else {
+        indicadores.push('');   // vacío = no trabajó ese mes
+        rentasMes.push(0);
+      }
+    }
+
+    // Horas semanales: 45 jornada completa, 30 jornada parcial
+    // Se toma del contrato si existe, sino 45 por defecto
+    const horasSemana = contrato?.horasSemana || 45;
+
+    // Construir fila de 35 columnas
+    const fila = [
+      rutCuerpo,          // C1  RUT cuerpo
+      rutDv,              // C2  dígito verificador
+      numCertificado,     // C3  número certificado
+      n(totalTrib),       // C4  Renta Total Neta Art.42 N°1
+      n(totalIUT),        // C5  IUT retenido total año
+      0,                  // C6  Mayor retención (0)
+      n(totalNoImp),      // C7  Renta no gravada (no imponibles)
+      0,                  // C8  Renta exenta (0)
+      0,                  // C9  Zonas extremas (0)
+      0,                  // C10 Préstamo 2021 (0)
+      ...indicadores,     // C11–C22 indicadores meses
+      horasSemana,        // C23 horas semanales
+      ...rentasMes,       // C24–C35 renta tributable por mes
+    ];
+
+    filas.push(fila.join(';'));
+    numCertificado++;
+  }
+
+  if (!filas.length) {
+    alert('No hay liquidaciones para generar el archivo.');
+    return;
+  }
+
+  // Sin encabezado — el SII no lo acepta
+  const csvStr = filas.join('\r\n') + '\r\n';
+
+  const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `F1887_AT${parseInt(anio) + 1}_${anio}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export { generarPDFContrato, generarPDFLiquidacion, generarPDFResumenNomina,
   generarPDFFiniquito, generarPDFAnexo, generarCertificadoAnual,
   generarPDFReporte, generarPDFAsientos,
-  generarPDFContratoBlob, generarPDFAnexoBlob,
-  generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago };
-
-// ─────────────────────────────────────────────────────────────
-// LIBRO ELECTRÓNICO DE REMUNERACIONES — DIRECCIÓN DEL TRABAJO
-// Formato oficial DT · Separador ";" · Encoding latin1 · 147 columnas
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Mapeo jornada FleetCore → código DT (campo 1107)
- * 1=Completa, 2=Parcial, 3=Por turno, 4=Excepcional, 5=Obra o faena
- */
-function codigoJornada(jornada = '') {
-  if (jornada.includes('45'))   return '1';
-  if (jornada.includes('30'))   return '2';
-  if (jornada.includes('20'))   return '2';
-  if (jornada.includes('7x7'))  return '3';
-  if (jornada.includes('14x'))  return '3';
-  if (jornada.includes('4x3'))  return '3';
-  return '1';
-}
-
-/**
- * Código AFP para campo 1141
- * Capital=3, Cuprum=5, Habitat=6, PlanVital=7, ProVida=8, Uno=10
- */
-function codigoAFP(afp = '') {
-  const mapa = { Capital:3, Cuprum:5, Habitat:6, PlanVital:7, ProVida:8, Uno:10 };
-  return mapa[afp] ?? '';
-}
-
-/**
- * Código FONASA/ISAPRE para campo 1143
- * FONASA=7, Banmédica=2, Colmena=3, CruzBlanca=4, Masvida=6, NuevaMasvida=6, VidaTres=9, Esencial=14
- */
-function codigoSalud(prevision = '', isapre = '') {
-  if (prevision === 'FONASA') return '7';
-  const mapa = { Banmédica:2, Colmena:3, 'Cruz Blanca':4, Masvida:6, 'Nueva Masvida':6, 'Vida Tres':9, Esencial:14 };
-  return mapa[isapre] ?? '7';
-}
-
-/**
- * Convierte causal FleetCore → código DT (campo 1104)
- */
-function codigoCausal(causal = '') {
-  const mapa = {
-    '159-1':'1', '159-2':'2', '159-3':'3', '159-4':'4',
-    '159-5':'5', '159-6':'6', '160-1':'7', '160-3':'9',
-    '160-4':'10','160-7':'13','161':'22',
-  };
-  return mapa[causal] ?? '';
-}
-
-/**
- * Genera y descarga el Libro Electrónico de Remuneraciones (DT)
- * @param {Array} liquidaciones  - liquidaciones del período filtradas
- * @param {Array} trabajadores   - todos los trabajadores
- * @param {Array} contratos      - todos los contratos
- * @param {string} mes           - "01".."12"
- * @param {string} anio          - "2026"
- * @param {number} utm           - valor UTM del mes
- */
-export function generarLibroDT(liquidaciones, trabajadores, contratos, mes, anio, utm = 64085) {
-
-  // Cabecera oficial DT (147 columnas, separador ;)
-  const CABECERA = [
-    'Rut trabajador(1101)','Fecha inicio contrato(1102)','Fecha término de contrato(1103)',
-    'Causal término de contrato(1104)','Región prestación de servicios(1105)',
-    'Comuna prestación de servicios(1106)','Tipo impuesto a la renta(1170)',
-    'Técnico extranjero exención cot. previsionales(1146)','Código tipo de jornada(1107)',
-    'Persona con Discapacidad - Pensionado por Invalidez(1108)','Pensionado por vejez(1109)',
-    'AFP(1141)','IPS (ExINP)(1142)','FONASA - ISAPRE(1143)','AFC(1151)','CCAF(1110)',
-    'Org. administrador ley 16.744(1152)',
-    'Nro cargas familiares legales autorizadas(1111)','Nro de cargas familiares maternales(1112)',
-    'Nro de cargas familiares invalidez(1113)','Tramo asignación familiar(1114)',
-    'Rut org sindical 1(1171)','Rut org sindical 2(1172)','Rut org sindical 3(1173)',
-    'Rut org sindical 4(1174)','Rut org sindical 5(1175)','Rut org sindical 6(1176)',
-    'Rut org sindical 7(1177)','Rut org sindical 8(1178)','Rut org sindical 9(1179)',
-    'Rut org sindical 10(1180)',
-    'Nro días trabajados en el mes(1115)','Nro días de licencia médica en el mes(1116)',
-    'Nro días de vacaciones en el mes(1117)','Subsidio trabajador joven(1118)',
-    'Puesto Trabajo Pesado(1154)','APVI(1155)','APVC(1157)',
-    'Indemnización a todo evento(1131)','Tasa indemnización a todo evento(1132)',
-    'Sueldo(2101)','Sobresueldo(2102)','Comisiones(2103)','Semana corrida(2104)',
-    'Participación(2105)','Gratificación(2106)','Recargo 30% día domingo(2107)',
-    'Remun. variable pagada en vacaciones(2108)','Remun. variable pagada en clausura(2109)',
-    'Aguinaldo(2110)','Bonos u otras remun. fijas mensuales(2111)','Tratos(2112)',
-    'Bonos u otras remun. variables mensuales o superiores a un mes(2113)',
-    'Ejercicio opción no pactada en contrato(2114)',
-    'Beneficios en especie constitutivos de remun(2115)',
-    'Remuneraciones bimestrales(2116)','Remuneraciones trimestrales(2117)',
-    'Remuneraciones cuatrimestral(2118)','Remuneraciones semestrales(2119)',
-    'Remuneraciones anuales(2120)','Participación anual(2121)','Gratificación anual(2122)',
-    'Otras remuneraciones superiores a un mes(2123)','Pago por horas de trabajo sindical(2124)',
-    'Sueldo empresarial (2161)','Subsidio por incapacidad laboral por licencia médica(2201)',
-    'Beca de estudio(2202)','Gratificaciones de zona(2203)',
-    'Otros ingresos no constitutivos de renta(2204)',
-    'Colación(2301)','Movilización(2302)','Viáticos(2303)',
-    'Asignación de pérdida de caja(2304)','Asignación de desgaste herramienta(2305)',
-    'Asignación familiar legal(2311)','Gastos por causa del trabajo(2306)',
-    'Gastos por cambio de residencia(2307)','Sala cuna(2308)',
-    'Asignación trabajo a distancia o teletrabajo(2309)','Depósito convenido hasta UF 900(2347)',
-    'Alojamiento por razones de trabajo(2310)','Asignación de traslación(2312)',
-    'Indemnización por feriado legal(2313)','Indemnización años de servicio(2314)',
-    'Indemnización sustitutiva del aviso previo(2315)','Indemnización fuero maternal(2316)',
-    'Pago indemnización a todo evento(2331)','Indemnizaciones voluntarias tributables(2417)',
-    'Indemnizaciones contractuales tributables(2418)',
-    'Cotización obligatoria previsional (AFP o IPS)(3141)',
-    'Cotización obligatoria salud 7%(3143)','Cotización voluntaria para salud(3144)',
-    'Cotización AFC - trabajador(3151)',
-    'Cotizaciones técnico extranjero para seguridad social fuera de Chile(3146)',
-    'Descuento depósito convenido hasta UF 900 anual(3147)',
-    'Cotización APVi Mod A(3155)','Cotización APVi Mod B hasta UF50(3156)',
-    'Cotización APVc Mod A(3157)','Cotización APVc Mod B hasta UF50(3158)',
-    'Impuesto retenido por remuneraciones(3161)','Impuesto retenido por indemnizaciones(3162)',
-    'Mayor retención de impuestos solicitada por el trabajador(3163)',
-    'Impuesto retenido por reliquidación remun. devengadas otros períodos(3164)',
-    'Diferencia impuesto reliquidación remun. devengadas en este período(3165)',
-    'Retención préstamo clase media 2020 (Ley 21.252) (3166)','Rebaja zona extrema DL 889 (3167)',
-    'Cuota sindical 1(3171)','Cuota sindical 2(3172)','Cuota sindical 3(3173)',
-    'Cuota sindical 4(3174)','Cuota sindical 5(3175)','Cuota sindical 6(3176)',
-    'Cuota sindical 7(3177)','Cuota sindical 8(3178)','Cuota sindical 9(3179)',
-    'Cuota sindical 10(3180)','Crédito social CCAF(3110)','Cuota vivienda o educación(3181)',
-    'Crédito cooperativas de ahorro(3182)',
-    'Otros descuentos autorizados y solicitados por el trabajador(3183)',
-    'Cotización adicional trabajo pesado - trabajador(3154)',
-    'Donaciones culturales y de reconstrucción(3184)','Otros descuentos(3185)',
-    'Pensiones de alimentos(3186)','Descuento mujer casada(3187)',
-    'Descuentos por anticipos y préstamos(3188)',
-    'AFC - Aporte empleador(4151)',
-    'Aporte empleador seguro accidentes del trabajo y Ley SANNA(4152)',
-    'Aporte empleador indemnización a todo evento(4131)',
-    'Aporte adicional trabajo pesado - empleador(4154)',
-    'Aporte empleador seguro invalidez y sobrevivencia(4155)','APVC - Aporte Empleador(4157)',
-    'Total haberes(5201)','Total haberes imponibles y tributables(5210)',
-    'Total haberes imponibles no tributables(5220)',
-    'Total haberes no imponibles y no tributables(5230)',
-    'Total haberes no imponibles y tributables(5240)',
-    'Total descuentos(5301)','Total descuentos impuestos a las remuneraciones(5361)',
-    'Total descuentos impuestos por indemnizaciones(5362)',
-    'Total descuentos por cotizaciones del trabajador(5341)',
-    'Total otros descuentos(5302)','Total aportes empleador(5410)',
-    'Total líquido(5501)','Total indemnizaciones(5502)',
-    'Total indemnizaciones tributables(5564)','Total indemnizaciones no tributables(5565)',
-  ];
-
-  const n = v => Math.round(v || 0);  // entero sin decimales
-  const rows = [];
-
-  for (const liq of liquidaciones) {
-    const trab     = trabajadores.find(t => t.id === liq.trabajadorId);
-    const contrato = contratos.find(c => c.id === liq.contratoId)
-                  || contratos.find(c => c.trabajadorId === liq.trabajadorId && c.estado === 'vigente');
-    if (!trab || !contrato) continue;
-
-    // Calcular usando la misma lógica que el resto del sistema
-    const calc = calcularLiquidacionConIUT({ ...contrato, ...liq, afp: trab.afp }, utm);
-
-    const sueldo        = n(liq.sueldoBase || contrato.sueldoBase || 0);
-    const sobresueldo   = n((liq.horasExtra || 0) * (liq.valorHoraExtra || 0));
-    const bonoFijo      = n(liq.bonoProduccion || 0);
-    const otrosImp      = n(liq.otrosImponibles || 0);
-    const gratMensual   = n(calc.gratMensual || 0);  // gratificación mensual garantizada
-    const colacion      = n(liq.bonoColacion || contrato.bonoColacion || 0);
-    const movilizacion  = n(liq.bonoMovilizacion || contrato.bonoMovilizacion || 0);
-    const viaticos      = n(liq.viaticos || 0);
-    const otrosNoImp    = n(liq.otrosNoImponibles || 0);
-    const anticipo      = n(liq.anticipo || 0);
-    const descAdicional = n(liq.descuentoAdicional || 0);
-
-    const afpTrab  = n(calc.afpM);
-    const saludTrab= n(calc.salM);
-    const cesTrab  = n(calc.cesM);
-    const sisEmp   = n(calc.sisM);
-    const cesEmp   = n((calc.imponible || 0) * (
-      contrato.tipoContrato === 'Indefinido' ? 0.024 : 0.03
-    ));
-    const iut      = n(calc.iut);
-
-    const totalHabImponibles   = sueldo + sobresueldo + bonoFijo + otrosImp + gratMensual;
-    const totalHabNoImp        = colacion + movilizacion + viaticos + otrosNoImp;
-    const totalHaberes         = totalHabImponibles + totalHabNoImp;
-    const totalCotizTrab       = afpTrab + saludTrab + cesTrab;
-    const totalDescuentos      = totalCotizTrab + iut + anticipo + descAdicional;
-    const totalAportesEmp      = sisEmp + cesEmp;
-    const totalLiquido         = n(calc.liquidoFinal);
-
-    // Fecha contrato formateada DD/MM/AAAA
-    const fmtFecha = f => {
-      if (!f) return '';
-      const [y, m, d] = f.split('-');
-      return `${d}/${m}/${y}`;
-    };
-
-    // Días trabajados del mes (30 si no hay registro de asistencia)
-    const diasTrabajados = liq.diasTrabajados || 30;
-    const diasLicencia   = liq.diasLicencia   || 0;
-    const diasVacaciones = liq.diasVacaciones || 0;
-
-    // 147 valores en orden exacto del DT
-    rows.push([
-      trab.rut || '',                          // 1101 RUT trabajador
-      fmtFecha(contrato.fechaInicio),           // 1102 Fecha inicio contrato
-      fmtFecha(contrato.fechaFin),              // 1103 Fecha término
-      codigoCausal(contrato.causalTermino),     // 1104 Causal término
-      trab.region || '',                        // 1105 Región
-      trab.comuna || '',                        // 1106 Comuna
-      '1',                                     // 1170 Tipo impuesto (1=2ª categoría)
-      '0',                                     // 1146 Técnico extranjero
-      codigoJornada(contrato.jornada),          // 1107 Tipo jornada
-      '0',                                     // 1108 Discapacidad/invalidez
-      '0',                                     // 1109 Pensionado vejez
-      codigoAFP(trab.afp),                     // 1141 AFP
-      '',                                      // 1142 IPS (ExINP)
-      codigoSalud(trab.prevision, trab.isapre),// 1143 FONASA/ISAPRE
-      '1',                                     // 1151 AFC (1=sí)
-      '',                                      // 1110 CCAF
-      '',                                      // 1152 Org. ley 16.744
-      '0',                                     // 1111 Cargas familiares legales
-      '0',                                     // 1112 Cargas maternales
-      '0',                                     // 1113 Cargas invalidez
-      'D',                                     // 1114 Tramo asig. familiar (D=sin derecho)
-      '','','','','','','','','','',            // 1171-1180 Sindicatos (10 columnas)
-      diasTrabajados,                          // 1115 Días trabajados
-      diasLicencia,                            // 1116 Días licencia médica
-      diasVacaciones,                          // 1117 Días vacaciones
-      '0',                                     // 1118 Subsidio trabajador joven
-      '0',                                     // 1154 Trabajo pesado
-      '0',                                     // 1155 APVI
-      '0',                                     // 1157 APVC
-      '0',                                     // 1131 Indemnización todo evento
-      '0',                                     // 1132 Tasa indem. todo evento
-      // ── Haberes imponibles ──
-      sueldo,                                  // 2101 Sueldo
-      sobresueldo,                             // 2102 Sobresueldo (horas extra)
-      '0',                                     // 2103 Comisiones
-      '0',                                     // 2104 Semana corrida
-      '0',                                     // 2105 Participación
-      gratMensual,                             // 2106 Gratificación mensual
-      '0',                                     // 2107 Recargo domingo
-      '0',                                     // 2108 Remun. variable vacaciones
-      '0',                                     // 2109 Remun. variable clausura
-      '0',                                     // 2110 Aguinaldo
-      bonoFijo,                                // 2111 Bonos fijos mensuales
-      '0',                                     // 2112 Tratos
-      otrosImp,                                // 2113 Bonos variables mensuales
-      '0',                                     // 2114 Ejercicio opción
-      '0',                                     // 2115 Beneficios en especie
-      '0',                                     // 2116 Remun. bimestrales
-      '0',                                     // 2117 Remun. trimestrales
-      '0',                                     // 2118 Remun. cuatrimestral
-      '0',                                     // 2119 Remun. semestrales
-      '0',                                     // 2120 Remun. anuales
-      '0',                                     // 2121 Participación anual
-      '0',                                     // 2122 Gratificación anual
-      '0',                                     // 2123 Otras remun. sup. a un mes
-      '0',                                     // 2124 Pago horas trabajo sindical
-      '0',                                     // 2161 Sueldo empresarial
-      // ── Ingresos no renta ──
-      '0',                                     // 2201 Subsidio incap. laboral
-      '0',                                     // 2202 Beca estudio
-      '0',                                     // 2203 Gratif. zona
-      '0',                                     // 2204 Otros no renta
-      // ── No imponibles ──
-      colacion,                                // 2301 Colación
-      movilizacion,                            // 2302 Movilización
-      viaticos,                                // 2303 Viáticos
-      '0',                                     // 2304 Asig. pérdida caja
-      '0',                                     // 2305 Asig. desgaste herramienta
-      '0',                                     // 2311 Asig. familiar legal
-      '0',                                     // 2306 Gastos causa del trabajo
-      '0',                                     // 2307 Gastos cambio residencia
-      '0',                                     // 2308 Sala cuna
-      '0',                                     // 2309 Asig. teletrabajo
-      '0',                                     // 2347 Depósito convenido UF900
-      '0',                                     // 2310 Alojamiento
-      '0',                                     // 2312 Asig. traslación
-      // ── Indemnizaciones ──
-      '0',                                     // 2313 Indem. feriado legal
-      '0',                                     // 2314 Indem. años servicio
-      '0',                                     // 2315 Indem. aviso previo
-      '0',                                     // 2316 Indem. fuero maternal
-      '0',                                     // 2331 Pago indem. todo evento
-      '0',                                     // 2417 Indem. voluntarias tributables
-      '0',                                     // 2418 Indem. contractuales tributables
-      // ── Descuentos cotizaciones ──
-      afpTrab,                                 // 3141 Cotización AFP/IPS
-      saludTrab,                               // 3143 Cotización salud 7%
-      '0',                                     // 3144 Cotización voluntaria salud
-      cesTrab,                                 // 3151 Cotización AFC trabajador
-      '0',                                     // 3146 Cot. técnico extranjero
-      '0',                                     // 3147 Desc. depósito convenido
-      '0',                                     // 3155 APVi Mod A
-      '0',                                     // 3156 APVi Mod B
-      '0',                                     // 3157 APVc Mod A
-      '0',                                     // 3158 APVc Mod B
-      iut,                                     // 3161 Impuesto retenido remun.
-      '0',                                     // 3162 Impuesto retenido indem.
-      '0',                                     // 3163 Mayor retención solicitada
-      '0',                                     // 3164 Impuesto reliquidación otros
-      '0',                                     // 3165 Diferencia reliquidación
-      '0',                                     // 3166 Retención préstamo clase media
-      '0',                                     // 3167 Rebaja zona extrema
-      '0','0','0','0','0','0','0','0','0','0', // 3171-3180 Cuotas sindicales
-      '0',                                     // 3110 Crédito CCAF
-      '0',                                     // 3181 Cuota vivienda/educación
-      '0',                                     // 3182 Crédito cooperativas
-      '0',                                     // 3183 Otros descuentos autorizados
-      '0',                                     // 3154 Cotiz. trabajo pesado trab.
-      '0',                                     // 3184 Donaciones
-      descAdicional,                           // 3185 Otros descuentos
-      '0',                                     // 3186 Pensiones alimentos
-      '0',                                     // 3187 Descuento mujer casada
-      anticipo,                                // 3188 Descuentos anticipos/préstamos
-      // ── Aportes empleador ──
-      cesEmp,                                  // 4151 AFC empleador
-      '0',                                     // 4152 Seguro accidentes
-      '0',                                     // 4131 Indem. todo evento empleador
-      '0',                                     // 4154 Trabajo pesado empleador
-      sisEmp,                                  // 4155 SIS empleador
-      '0',                                     // 4157 APVC empleador
-      // ── Totales ──
-      totalHaberes,                            // 5201 Total haberes
-      totalHabImponibles,                      // 5210 Total hab. imponibles y tributables
-      '0',                                     // 5220 Total hab. imponibles no tributables
-      otrosNoImp,                              // 5230 Total hab. no imponibles y no tributables
-      colacion + movilizacion + viaticos,      // 5240 Total hab. no imponibles y tributables
-      totalDescuentos,                         // 5301 Total descuentos
-      iut,                                     // 5361 Total desc. impuestos remun.
-      '0',                                     // 5362 Total desc. impuestos indem.
-      totalCotizTrab,                          // 5341 Total desc. cotizaciones trab.
-      anticipo + descAdicional,                // 5302 Total otros descuentos
-      totalAportesEmp,                         // 5410 Total aportes empleador
-      totalLiquido,                            // 5501 Total líquido
-      '0',                                     // 5502 Total indemnizaciones
-      '0',                                     // 5564 Total indem. tributables
-      '0',                                     // 5565 Total indem. no tributables
-    ]);
-  }
-
-  // Construir CSV con separador ; y encoding latin1
-  const lineas = [CABECERA.join(';')];
-  for (const row of rows) {
-    lineas.push(row.map(v => String(v ?? '')).join(';'));
-  }
-  const csvStr = lineas.join('\r\n') + '\r\n';
-
-  // Convertir a latin1 (ISO-8859-1) para cumplir formato DT
-  const latin1 = new Uint8Array(csvStr.length);
-  for (let i = 0; i < csvStr.length; i++) {
-    latin1[i] = csvStr.charCodeAt(i) & 0xff;
-  }
-
-  const blob = new Blob([latin1], { type: 'text/csv;charset=iso-8859-1;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  // Nombre sugerido por DT: RUT_AAAAMM.csv
-  a.download = `LibroDT_${anio}${mes}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+  generarAsientos, validarRutPrevired, generarPreviredAvanzado,
+  generarArchivoPago, generarCSVImportadorSII };

@@ -17,7 +17,7 @@ const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
   generarCertificadoAnual, generarPDFReporte, generarPDFAsientos,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago,
-  generarPDFContrato, generarPDFFiniquito, generarPDFAnexo, generarLibroDT } = PDFs;
+  generarPDFContrato, generarPDFFiniquito, generarPDFAnexo, generarCSVImportadorSII } = PDFs;
 const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
@@ -453,6 +453,24 @@ function ImpuestosSection() {
               <p className="text-xs text-white/70 mt-0.5">Art. 42 N°1 LIR · UTM ${utm.toLocaleString('es-CL')} · Certificado 1887</p>
             </div>
           </div>
+          {/* ── Botón exportar CSV Importador SII ── */}
+          <button
+            onClick={() => {
+              const datos = resumenPorTrabajador.map(row => ({
+                trabajador:   row,
+                contrato:     row._contrato,
+                liquidaciones: row.liqs,
+              }));
+              generarCSVImportadorSII(datos, anio, utm);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 text-white font-bold text-sm rounded-xl transition-colors border border-white/20"
+            title="Descargar CSV para subir al Importador de Datos del SII — DJ 1887"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            CSV SII
+          </button>
         </div>
 
         {/* Filtro búsqueda */}
@@ -923,11 +941,6 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
   const [saving,    setSaving]    = useState(false);
   const [editId,    setEditId]    = useState(null);
   const [confirm,   setConfirm]   = useState(null);
-  const [showModal, setShowModal] = useState(false);
-
-  const openNew  = () => { setForm({ nivel:'', cargo:'', sueldoMin:'', sueldoMax:'', area:'' }); setEditId(null); setShowModal(true); };
-  const openEdit = (b) => { setForm({ nivel:b.nivel, cargo:b.cargo, sueldoMin:String(b.sueldoMin), sueldoMax:String(b.sueldoMax), area:b.area||'' }); setEditId(b.id); setShowModal(true); };
-  const closeModal = () => { setShowModal(false); setEditId(null); };
 
   const activos = trabajadores.filter(t => t.estado === 'activo');
 
@@ -957,7 +970,10 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
     setSaving(false);
   };
 
-  const handleEdit = (b) => { openEdit(b); };
+  const handleEdit = (b) => {
+    setForm({ nivel: b.nivel, cargo: b.cargo, sueldoMin: String(b.sueldoMin), sueldoMax: String(b.sueldoMax), area: b.area || '' });
+    setEditId(b.id);
+  };
 
   const handleDelete = async () => {
     try { await deleteDoc(doc(db, 'bandas_salariales', confirm.id)); onReload(); }
@@ -979,112 +995,42 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
 
   const fmt = n => `$${(n||0).toLocaleString('es-CL')}`;
 
-  const handleSaveAndClose = async () => {
-    await handleSave();
-    if (!saving) closeModal();
-  };
-
   return (
     <div className="space-y-5">
 
-      {/* Botón nueva banda */}
-      <div className="flex justify-end">
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-5 py-2.5 text-white font-black text-sm rounded-xl transition-all active:scale-95"
-          style={{ background:'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow:'0 4px 12px rgba(124,58,237,0.25)' }}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
-          </svg>
-          Nueva banda salarial
-        </button>
-      </div>
-
-      {/* Modal banda */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(15,10,40,0.55)', backdropFilter:'blur(4px)'}}>
-          <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{background:'#fff', boxShadow:'0 24px 64px rgba(0,0,0,0.18)'}}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4" style={{background:'linear-gradient(135deg,#1e1b4b,#312e81)'}}>
-              <div>
-                <h3 className="text-base font-black text-white">{editId ? 'Editar banda salarial' : 'Nueva banda salarial'}</h3>
-                <p className="text-xs text-white/60 mt-0.5">Define el nivel, cargo tipo y rango salarial</p>
-              </div>
-              <button onClick={closeModal} className="text-white/60 hover:text-white transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-            {/* Body */}
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Nivel <span className="text-red-400">*</span></label>
-                  <select className={inp} value={form.nivel} onChange={e => setForm(f => ({ ...f, nivel: e.target.value }))}>
-                    <option value="">Seleccionar…</option>
-                    {[
-                      'N1 — Gerente / Director',
-                      'N2 — Subgerente / Jefe de Área',
-                      'N3 — Profesional Senior / Ingeniero Sr.',
-                      'N4 — Profesional / Ingeniero',
-                      'N5 — Técnico de Terreno / Capataz',
-                      'N6 — Administrativo / Asistente',
-                      'N7 — Operador de Maquinaria',
-                      'N8 — Conductor / Chofer',
-                      'N9 — Operario Especializado',
-                      'N10 — Operario General / Auxiliar',
-                    ].map(n => <option key={n}>{n}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Cargo tipo <span className="text-red-400">*</span></label>
-                  <input className={inp} placeholder="Ej: Operador de maquinaria" value={form.cargo}
-                    onChange={e => setForm(f => ({ ...f, cargo: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Área</label>
-                <select className={inp} value={form.area} onChange={e => setForm(f => ({ ...f, area: e.target.value }))}>
-                  <option value="">Todas las áreas</option>
-                  {AREAS.map(a => <option key={a}>{a}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Sueldo mínimo ($) <span className="text-red-400">*</span></label>
-                  <input className={inp} type="number" placeholder="Ej: 600000" value={form.sueldoMin}
-                    onChange={e => setForm(f => ({ ...f, sueldoMin: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Sueldo máximo ($) <span className="text-red-400">*</span></label>
-                  <input className={inp} type="number" placeholder="Ej: 900000" value={form.sueldoMax}
-                    onChange={e => setForm(f => ({ ...f, sueldoMax: e.target.value }))} />
-                </div>
-              </div>
-              {form.sueldoMin && form.sueldoMax && parseInt(form.sueldoMin) > 0 && parseInt(form.sueldoMax) > 0 && (
-                <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3 flex items-center justify-between">
-                  <span className="text-xs font-bold text-violet-600">Rango salarial</span>
-                  <span className="text-sm font-black text-violet-700">
-                    ${parseInt(form.sueldoMin).toLocaleString('es-CL')} — ${parseInt(form.sueldoMax).toLocaleString('es-CL')}
-                  </span>
-                </div>
-              )}
-            </div>
-            {/* Footer */}
-            <div className="flex justify-end gap-3 px-6 pb-6">
-              <button onClick={closeModal}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors">
-                Cancelar
-              </button>
-              <button onClick={async () => { await handleSave(); setShowModal(false); }} disabled={saving}
-                className="px-5 py-2.5 text-white font-black text-sm rounded-xl disabled:opacity-50 transition-all active:scale-95"
-                style={{ background:'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow:'0 4px 12px rgba(124,58,237,0.25)' }}>
-                {saving ? 'Guardando…' : editId ? '✓ Actualizar banda' : '+ Crear banda'}
-              </button>
-            </div>
-          </div>
+      {/* Formulario */}
+      <div className="rounded-xl border border-slate-200 p-4 bg-slate-50/50">
+        <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">
+          {editId ? '✏️ Editando banda' : '+ Nueva banda salarial'}
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <input className={inp} placeholder="Nivel (ej: N1)" value={form.nivel}
+            onChange={e => setForm(f => ({ ...f, nivel: e.target.value }))} />
+          <input className={inp} placeholder="Cargo tipo" value={form.cargo}
+            onChange={e => setForm(f => ({ ...f, cargo: e.target.value }))} />
+          <select className={inp} value={form.area} onChange={e => setForm(f => ({ ...f, area: e.target.value }))}>
+            <option value="">Todas las áreas</option>
+            {AREAS.map(a => <option key={a}>{a}</option>)}
+          </select>
+          <input className={inp} type="number" placeholder="Sueldo mínimo" value={form.sueldoMin}
+            onChange={e => setForm(f => ({ ...f, sueldoMin: e.target.value }))} />
+          <input className={inp} type="number" placeholder="Sueldo máximo" value={form.sueldoMax}
+            onChange={e => setForm(f => ({ ...f, sueldoMax: e.target.value }))} />
         </div>
-      )}
+        <div className="flex gap-2 mt-3">
+          <button onClick={handleSave} disabled={saving}
+            className="px-4 py-2 text-white font-bold text-sm rounded-xl disabled:opacity-50 transition-all active:scale-95"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow: '0 4px 12px rgba(124,58,237,0.25)' }}>
+            {saving ? 'Guardando…' : editId ? 'Actualizar' : 'Agregar banda'}
+          </button>
+          {editId && (
+            <button onClick={() => { setEditId(null); setForm({ nivel:'', cargo:'', sueldoMin:'', sueldoMax:'', area:'' }); }}
+              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm rounded-xl transition-colors">
+              Cancelar
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Tabla de bandas */}
       {bandasConPersonal.length === 0 ? (
@@ -2177,9 +2123,6 @@ function ContabilidadSection() {
   const [validando,     setValidando]     = useState(false);
   const [planCuentas,   setPlanCuentas]   = useState(PLAN_CUENTAS_DEFAULT);
   const [editPlan,      setEditPlan]      = useState(false);
-  // Libro DT — selectores propios de período
-  const [dtMes,  setDtMes]  = useState(() => String(new Date().getMonth()+1).padStart(2,'0'));
-  const [dtAnio, setDtAnio] = useState(() => String(new Date().getFullYear()));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2250,11 +2193,10 @@ function ContabilidadSection() {
   };
 
   const INNER_TABS = [
-    { id:'asientos',  label:'Asientos contables'        },
-    { id:'previred',  label:'Previred avanzado'          },
-    { id:'pago',      label:'Archivo de pago'            },
-    { id:'plan',      label:'Plan de cuentas'            },
-    { id:'libroDT',   label:'📋 Libro DT (F-1887)'       },
+    { id:'asientos',  label:'Asientos contables' },
+    { id:'previred',  label:'Previred avanzado'  },
+    { id:'pago',      label:'Archivo de pago'    },
+    { id:'plan',      label:'Plan de cuentas'    },
   ];
 
   if (loading) return (
@@ -2662,139 +2604,6 @@ function ContabilidadSection() {
               </div>
             </div>
           )}
-
-          {/* ════════════════════════════════════
-              LIBRO ELECTRÓNICO DT (F-1887)
-          ════════════════════════════════════ */}
-          {tabInner === 'libroDT' && (() => {
-            const liqDT = liquidaciones.filter(l =>
-              l.mes === dtMes && l.anio === dtAnio &&
-              (!filtroEmpresa || trabajadores.find(t=>t.id===l.trabajadorId)?.empresa === filtroEmpresa)
-            );
-            const liqDTEnriquecidas = liqDT.map(liq => ({
-              liq,
-              trabajador: trabajadores.find(t=>t.id===liq.trabajadorId),
-              contrato:   contratos.find(c=>c.id===liq.contratoId) || contratos.find(c=>c.trabajadorId===liq.trabajadorId&&c.estado==='vigente'),
-            })).filter(x => x.contrato);
-            return (
-            <div className="space-y-5">
-
-              {/* Header informativo */}
-              <div className="rounded-2xl p-5" style={{background:'linear-gradient(135deg,#1e1b4b 0%,#312e81 100%)'}}>
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/10 text-white/70 tracking-widest">F-1887</span>
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 tracking-widest">OBLIGATORIO</span>
-                    </div>
-                    <h3 className="text-base font-black text-white mt-1">Libro Electrónico de Remuneraciones</h3>
-                    <p className="text-xs text-white/60 mt-1">Dirección del Trabajo · Art. 31 bis CT · Envío mensual obligatorio · Formato CSV 147 columnas · Separador punto y coma · Encoding latin1</p>
-                    {/* ── Selectores de período propios del Libro DT ── */}
-                    <div className="flex items-center gap-2 mt-3">
-                      <select
-                        value={dtMes}
-                        onChange={e => setDtMes(e.target.value)}
-                        className="px-3 py-1.5 text-sm font-bold bg-white/10 text-white border border-white/20 rounded-xl focus:outline-none focus:border-white/50">
-                        {MESES.map((m,i) => <option key={m} value={String(i+1).padStart(2,'0')} style={{color:'#1e1b4b'}}>{m}</option>)}
-                      </select>
-                      <select
-                        value={dtAnio}
-                        onChange={e => setDtAnio(e.target.value)}
-                        className="px-3 py-1.5 text-sm font-bold bg-white/10 text-white border border-white/20 rounded-xl focus:outline-none focus:border-white/50">
-                        {[2023,2024,2025,2026].map(y => <option key={y} value={String(y)} style={{color:'#1e1b4b'}}>{y}</option>)}
-                      </select>
-                      <span className="text-xs text-white/50 ml-1">{liqDTEnriquecidas.length} liquidaciones</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (liqDTEnriquecidas.length === 0) { alert(`No hay liquidaciones para ${MESES[parseInt(dtMes)-1]} ${dtAnio}.`); return; }
-                      generarLibroDT(liqDTEnriquecidas.map(x=>x.liq), trabajadores, contratos, dtMes, dtAnio, utm);
-                    }}
-                    className="flex-shrink-0 flex items-center gap-2 px-5 py-3 font-black text-sm rounded-xl transition-all active:scale-95"
-                    style={{background:'linear-gradient(135deg,#10b981,#059669)', boxShadow:'0 4px 14px rgba(16,185,129,0.35)', color:'#fff'}}>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                    </svg>
-                    Descargar Libro DT
-                  </button>
-                </div>
-              </div>
-
-              {/* Stats del período */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { label:'Trabajadores en nómina', value: liqDTEnriquecidas.length,                                                                     color:'text-violet-700', bg:'bg-violet-50' },
-                  { label:'Período',                value: `${MESES[parseInt(dtMes)-1]} ${dtAnio}`,                                                      color:'text-slate-700',  bg:'bg-slate-50'  },
-                  { label:'Total líquido',          value: `$${liqDTEnriquecidas.reduce((s,{liq,contrato})=>{ const c=calcularLiquidacionConIUT({...contrato,...liq},utm); return s+(c.liquidoFinal||0); },0).toLocaleString('es-CL')}`, color:'text-emerald-700', bg:'bg-emerald-50' },
-                  { label:'Columnas formato DT',    value: '147',                                                                          color:'text-indigo-700', bg:'bg-indigo-50'  },
-                ].map(({ label, value, color, bg }) => (
-                  <div key={label} className={`${bg} rounded-xl px-4 py-3 border border-slate-100`}>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
-                    <p className={`text-lg font-black ${color} mt-1`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Preview tabla trabajadores */}
-              {liqDTEnriquecidas.length > 0 ? (
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Vista previa — trabajadores incluidos</p>
-                  <div className="overflow-x-auto rounded-xl border border-slate-100">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr style={{background:'#1e1b4b'}}>
-                          {['RUT','Nombre','AFP','Previsión','Jornada','Sueldo base','AFP desc.','Salud desc.','Cesantía','IUT','Líquido'].map(h=>(
-                            <th key={h} className="px-3 py-3 text-[10px] font-black text-slate-300 uppercase tracking-widest text-left whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {liqDTEnriquecidas.map(({liq, trabajador: t, contrato: c}, i) => {
-                          const calc = c ? calcularLiquidacionConIUT({...c,...liq,afp:t?.afp},utm) : null;
-                          const fmt = n => `$${Math.round(n||0).toLocaleString('es-CL')}`;
-                          return (
-                            <tr key={i} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{t?.rut||'—'}</td>
-                              <td className="px-3 py-2.5 text-xs font-bold text-slate-700 whitespace-nowrap">{t ? `${t.apellidoPaterno} ${t.nombre}` : '—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-slate-500">{t?.afp||'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-slate-500">{t?.prevision||'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{c?.jornada||'—'}</td>
-                              <td className="px-3 py-2.5 text-xs font-bold text-slate-700">{fmt(liq.sueldoBase||c?.sueldoBase)}</td>
-                              <td className="px-3 py-2.5 text-xs text-red-500 font-bold">{calc?fmt(calc.afpM):'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-red-500 font-bold">{calc?fmt(calc.salM):'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-red-500 font-bold">{calc?fmt(calc.cesM):'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-purple-600 font-bold">{calc?fmt(calc.iut):'—'}</td>
-                              <td className="px-3 py-2.5 text-xs text-emerald-600 font-black">{calc?fmt(calc.liquidoFinal):'—'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center text-slate-400">
-                  <p className="font-bold">Sin liquidaciones para {MESES[parseInt(dtMes)-1]} {dtAnio}</p>
-                  <p className="text-xs mt-1">Selecciona un período con liquidaciones registradas</p>
-                </div>
-              )}
-
-              {/* Instrucciones subida DT */}
-              <div className="rounded-xl bg-amber-50 border border-amber-200 px-5 py-4 space-y-2">
-                <p className="text-xs font-black text-amber-800 uppercase tracking-widest">Instrucciones de subida al portal DT</p>
-                <ol className="text-xs text-amber-700 space-y-1 list-decimal list-inside">
-                  <li>Ingresa a <strong>tramites.dt.gob.cl</strong> con tu RUT empresa y clave DT</li>
-                  <li>Ve a <strong>Libro de Remuneraciones Electrónico → Cargar archivo</strong></li>
-                  <li>Selecciona el archivo <strong>LibroDT_{dtAnio}{dtMes}.csv</strong> descargado</li>
-                  <li>Verifica que el sistema DT acepte el archivo sin errores de formato</li>
-                  <li>Plazo máximo: <strong>día 15 del mes siguiente</strong> al período informado</li>
-                </ol>
-              </div>
-
-            </div>
-            );
-          })()}
 
         </div>
       </div>

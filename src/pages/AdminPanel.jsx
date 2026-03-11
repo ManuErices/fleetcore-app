@@ -533,11 +533,20 @@ function OperadoresSection() {
   };
 
   const save = async () => {
+    const rutNorm = form.rut.trim();
+    if (rutNorm) {
+      const duplicado = data.find(op => op.rut?.trim() === rutNorm && op.id !== editId);
+      if (duplicado) {
+        const nombre = [duplicado.nombres, duplicado.apellidoPaterno, duplicado.apellidoMaterno].filter(Boolean).join(' ') || duplicado.nombre || 'otro operador';
+        alert(`El RUT ${rutNorm} ya está registrado para ${nombre}.`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
       const nombreCompleto = [form.nombres, form.apellidoPaterno, form.apellidoMaterno].filter(Boolean).map(s=>s.trim()).join(' ');
-      const p = { nombres: form.nombres.trim(), apellidoPaterno: form.apellidoPaterno.trim(), apellidoMaterno: form.apellidoMaterno.trim(), nombre: nombreCompleto, rut: form.rut.trim(), cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
+      const p = { nombres: form.nombres.trim(), apellidoPaterno: form.apellidoPaterno.trim(), apellidoMaterno: form.apellidoMaterno.trim(), nombre: nombreCompleto, rut: rutNorm, cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'employees', editId), p);
       else await addDoc(collection(db, 'employees'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -573,6 +582,13 @@ function OperadoresSection() {
         })} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
           columns={[
             { key: 'nombres', label: 'Nombres', render: r => <span>{r.nombres || r.nombre?.split(' ').slice(0,-2).join(' ') || r.nombre || '—'}</span> },
+            { key: 'apellidos', label: 'Apellidos', render: r => {
+                const ap = [r.apellidoPaterno, r.apellidoMaterno].filter(Boolean).join(' ');
+                if (ap) return <span>{ap}</span>;
+                const parts = (r.nombre || '').split(' ');
+                return <span>{parts.length > 1 ? parts.slice(-2).join(' ') : '—'}</span>;
+              }
+            },
             { key: 'rut', label: 'RUT' },
             { key: 'cargo', label: 'Cargo', render: r => (<div className="flex items-center gap-2"><span>{r.cargo || '-'}</span>{r.esSurtidor && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full border border-amber-300">Surtidor</span>}</div>) },
             { key: 'empresa', label: 'Empresa' },
@@ -671,6 +687,7 @@ function OperadoresSection() {
         onClose={() => setCatCargoModal(false)}
         categoria="cargo_operador"
         titulo="Cargos de operadores"
+        onCreated={nombre => { setCatCargoModal(false); setForm(f => ({ ...f, cargo: nombre })); }}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Operador" message={`¿Eliminar a "${confirm?.nombre}"?`} />
@@ -713,7 +730,8 @@ function useCatalogo(categoria) {
       categoria,
       createdAt: serverTimestamp(),
     });
-    load();
+    await load();
+    return nombre.trim();
   };
 
   const remove = async (id) => {
@@ -725,7 +743,7 @@ function useCatalogo(categoria) {
 }
 
 // Panel modal para gestionar una categoría del catálogo
-function CatalogoModal({ isOpen, onClose, categoria, titulo }) {
+function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
   const { items, loading, add, remove } = useCatalogo(categoria);
   const [nuevo, setNuevo] = useState('');
   const [saving, setSaving] = useState(false);
@@ -737,6 +755,7 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo }) {
     await add(nuevo);
     setNuevo('');
     setSaving(false);
+    if (onCreated) onCreated(nuevo.trim());
   };
 
   if (!isOpen) return null;
@@ -1081,18 +1100,21 @@ function MaquinasSection() {
         onClose={() => setCatModal(null)}
         categoria="tipo"
         titulo="Tipos de máquina"
+        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, type: nombre })); }}
       />
       <CatalogoModal
         isOpen={catModal === 'marca'}
         onClose={() => setCatModal(null)}
         categoria="marca"
         titulo="Marcas"
+        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, marca: nombre })); }}
       />
       <CatalogoModal
         isOpen={catModal === 'propietario'}
         onClose={() => setCatModal(null)}
         categoria="propietario"
         titulo="Propietarios"
+        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, propietario: nombre })); }}
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
@@ -1429,6 +1451,26 @@ function EmpresasSection() {
 // ─────────────────────────────────────────────────────────────
 
 // Formato código proyecto: siempre "CC-NN" (CC-01, CC-23, etc.)
+
+// Comunas de Chile por región
+const COMUNAS_POR_REGION = {
+  'Arica y Parinacota': ['Arica','Camarones','Putre','General Lagos'],
+  'Tarapacá': ['Iquique','Alto Hospicio','Pozo Almonte','Camiña','Colchane','Huara','Pica'],
+  'Antofagasta': ['Antofagasta','Mejillones','Sierra Gorda','Taltal','Calama','Ollagüe','San Pedro de Atacama','Tocopilla','María Elena'],
+  'Atacama': ['Copiapó','Caldera','Tierra Amarilla','Chañaral','Diego de Almagro','Vallenar','Alto del Carmen','Freirina','Huasco'],
+  'Coquimbo': ['La Serena','Coquimbo','Andacollo','La Higuera','Paihuano','Vicuña','Illapel','Canela','Los Vilos','Salamanca','Ovalle','Combarbalá','Monte Patria','Punitaqui','Río Hurtado'],
+  'Valparaíso': ['Valparaíso','Casablanca','Concón','Juan Fernández','Puchuncaví','Quintero','Viña del Mar','Isla de Pascua','Los Andes','Calle Larga','Rinconada','San Esteban','La Ligua','Cabildo','Papudo','Petorca','Zapallar','Quillota','Calera','Hijuelas','La Cruz','Nogales','San Antonio','Algarrobo','Cartagena','El Quisco','El Tabo','Santo Domingo','San Felipe','Catemu','Llaillay','Panquehue','Putaendo','Santa María','Quilpué','Limache','Olmué','Villa Alemana'],
+  'Metropolitana': ['Santiago','Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación Central','Huechuraba','Independencia','La Cisterna','La Florida','La Granja','La Pintana','La Reina','Las Condes','Lo Barnechea','Lo Espejo','Lo Prado','Macul','Maipú','Ñuñoa','Pedro Aguirre Cerda','Peñalolén','Providencia','Pudahuel','Quilicura','Quinta Normal','Recoleta','Renca','San Joaquín','San Miguel','San Ramón','Vitacura','Puente Alto','Pirque','San José de Maipo','Colina','Lampa','Tiltil','San Bernardo','Buin','Calera de Tango','Paine','Melipilla','Alhué','Curacaví','María Pinto','San Pedro','Talagante','El Monte','Isla de Maipo','Padre Hurtado','Peñaflor'],
+  "O'Higgins": ['Rancagua','Codegua','Coinco','Coltauco','Doñihue','Graneros','Las Cabras','Machalí','Malloa','Mostazal','Olivar','Peumo','Pichidegua','Quinta de Tilcoco','Rengo','Requínoa','San Vicente','Pichilemu','La Estrella','Litueche','Marchihue','Navidad','Paredones','San Fernando','Chépica','Chimbarongo','Lolol','Nancagua','Palmilla','Peralillo','Placilla','Pumanque','Santa Cruz'],
+  'Maule': ['Talca','Constitución','Curepto','Empedrado','Maule','Pelarco','Pencahue','Río Claro','San Clemente','San Rafael','Cauquenes','Chanco','Pelluhue','Curicó','Hualañé','Licantén','Molina','Rauco','Romeral','Sagrada Familia','Teno','Vichuquén','Linares','Colbún','Longaví','Parral','Retiro','San Javier','Villa Alegre','Yerbas Buenas'],
+  'Ñuble': ['Chillán','Bulnes','Chillán Viejo','El Carmen','Pemuco','Pinto','Quillón','San Ignacio','Yungay','Coihueco','Ñiquén','San Carlos','San Fabián','San Nicolás'],
+  'Biobío': ['Concepción','Coronel','Chiguayante','Florida','Hualqui','Lota','Penco','San Pedro de la Paz','Santa Juana','Talcahuano','Tomé','Hualpén','Lebu','Arauco','Cañete','Contulmo','Curanilahue','Los Álamos','Tirúa','Los Ángeles','Antuco','Cabrero','Laja','Mulchén','Nacimiento','Negrete','Quilaco','Quilleco','San Rosendo','Santa Bárbara','Tucapel','Yumbel','Alto Biobío'],
+  'La Araucanía': ['Temuco','Carahue','Cunco','Curarrehue','Freire','Galvarino','Gorbea','Lautaro','Loncoche','Melipeuco','Nueva Imperial','Padre Las Casas','Perquenco','Pitrufquén','Pucón','Saavedra','teodoro Schmidt','Toltén','Vilcún','Villarrica','Cholchol','Angol','Collipulli','Curacautín','Ercilla','Lonquimay','Los Sauces','Lumaco','Purén','Renaico','Traiguén','Victoria'],
+  'Los Ríos': ['Valdivia','Corral','Futrono','La Unión','Lago Ranco','Lanco','Los Lagos','Máfil','Mariquina','Paillaco','Panguipulli','Río Bueno'],
+  'Los Lagos': ['Puerto Montt','Calbuco','Cochamó','Fresia','Frutillar','Los Muermos','Llanquihue','Maullín','Puerto Varas','Castro','Ancud','Chonchi','Curaco de Vélez','Dalcahue','Puqueldón','Queilén','Quellón','Quemchi','Quinchao','Osorno','Puerto Octay','Purranque','Puyehue','Río Negro','San Juan de la Costa','San Pablo','Chaitén','Futaleufú','Hualaihué','Palena'],
+  "Aysén": ['Coyhaique','Lago Verde','Aysén','Cisnes','Guaitecas','Cochrane',"O'Higgins",'Tortel','Chile Chico','Río Ibáñez'],
+  "Magallanes": ['Punta Arenas','Laguna Blanca','Río Verde','San Gregorio','Cabo de Hornos','Antártica','Porvenir','Primavera','Timaukel','Natales','Torres del Paine'],
+};
 function fmtCodigoProyecto(raw) {
   const prefix = 'CC-';
   const nums = raw.replace(/[^0-9]/g, '').slice(0, 2);
@@ -1439,7 +1481,7 @@ function ProyectosSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ name: '', codigo: 'CC-', mandante: '', ubicacion: '' });
+  const [form, setForm] = useState({ name: '', codigo: 'CC-', mandante: '', region: '', comuna: '', direccion: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [catMandanteModal, setCatMandanteModal] = useState(false);
@@ -1459,13 +1501,13 @@ function ProyectosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', codigo: 'CC-', mandante: '', ubicacion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { const cod = row.codigo || 'CC-'; setForm({ name: row.name || '', codigo: cod.startsWith('CC-') ? cod : 'CC-' + cod, mandante: row.mandante || '', ubicacion: row.ubicacion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: 'CC-', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { const cod = row.codigo || 'CC-'; setForm({ name: row.name || '', codigo: cod.startsWith('CC-') ? cod : 'CC-' + cod, mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
     setSaving(true);
     try {
-      const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), ubicacion: form.ubicacion.trim(), updatedAt: serverTimestamp() };
+      const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'projects', editId), p);
       else await addDoc(collection(db, 'projects'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
@@ -1485,9 +1527,10 @@ function ProyectosSection() {
       >
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay proyectos registrados"
           columns={[
+            { key: 'name', label: 'Nombre' },
             { key: 'codigo', label: 'Código' },
             { key: 'mandante', label: 'Mandante' },
-            { key: 'ubicacion', label: 'Ubicación' },
+            { key: 'ubicacion', label: 'Ubicación', render: r => <span>{[r.comuna, r.region].filter(Boolean).join(', ') || r.ubicacion || '—'}</span> },
           ]}
         />
       </SectionCard>
@@ -1524,15 +1567,45 @@ function ProyectosSection() {
               />
             </Field>
 
-            <Field label="Ubicación">
-              <input
+            <Field label="Región">
+              <select
                 className={inputCls}
-                value={form.ubicacion}
-                onChange={e => setForm({ ...form, ubicacion: e.target.value })}
-                placeholder="Ej: Antofagasta, II Región"
-              />
+                value={form.region}
+                onChange={e => setForm({ ...form, region: e.target.value, comuna: '' })}
+              >
+                <option value="">Seleccionar región...</option>
+                {Object.keys(COMUNAS_POR_REGION).map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
             </Field>
           </div>
+
+          {form.region && (
+            <Field label="Comuna">
+              <select
+                className={inputCls}
+                value={form.comuna}
+                onChange={e => setForm({ ...form, comuna: e.target.value })}
+              >
+                <option value="">Seleccionar comuna...</option>
+                {(COMUNAS_POR_REGION[form.region] || []).map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {form.comuna && (
+            <Field label="Dirección">
+              <input
+                className={inputCls}
+                value={form.direccion}
+                onChange={e => setForm({ ...form, direccion: e.target.value })}
+                placeholder={`Ej: Av. Principal 123, ${form.comuna}`}
+              />
+            </Field>
+          )}
 
           <Field label="Mandante">
             <div className="flex gap-2">
@@ -1565,6 +1638,7 @@ function ProyectosSection() {
         onClose={() => setCatMandanteModal(false)}
         categoria="mandante"
         titulo="Mandantes"
+        onCreated={nombre => { setCatMandanteModal(false); setForm(f => ({ ...f, mandante: nombre })); }}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
