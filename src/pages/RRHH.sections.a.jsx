@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from 'firebase/auth';
 import * as Shared from './RRHH.shared';
 import * as Calc from './RRHH.calculo';
 import * as PDFs from './RRHH.pdfs';
@@ -1021,95 +1022,6 @@ function RemuneracionesSection() {
     { label:'Total líquido',    value: `$${totalLiquido.toLocaleString('es-CL')}`,        color:'text-emerald-600',mono:true  },
   ];
 
-  // ── Inline edits rápidos ──────────────────────────────────────────
-  const [diasEdit, setDiasEdit] = useState({});   // { [id]: valor local }
-  const [savingDias, setSavingDias] = useState({}); // { [id]: true }
-  const [savingPago, setSavingPago] = useState({}); // { [id]: true }
-
-  const guardarDias = async (row, valor) => {
-    const n = parseInt(valor);
-    if (isNaN(n) || n < 0 || n > 30) return;
-    setSavingDias(p => ({ ...p, [row.id]: true }));
-    try {
-      await updateDoc(doc(db, 'remuneraciones', row.id), { diasTrabajados: n, updatedAt: serverTimestamp() });
-      await load();
-    } finally {
-      setSavingDias(p => ({ ...p, [row.id]: false }));
-      setDiasEdit(p => { const n2 = { ...p }; delete n2[row.id]; return n2; });
-    }
-  };
-
-  const marcarPagado = async (row) => {
-    const nuevoEstado = row.estado === 'pagado' ? 'pendiente' : 'pagado';
-    setSavingPago(p => ({ ...p, [row.id]: true }));
-    try {
-      await updateDoc(doc(db, 'remuneraciones', row.id), { estado: nuevoEstado, updatedAt: serverTimestamp() });
-      await load();
-    } finally {
-      setSavingPago(p => ({ ...p, [row.id]: false }));
-    }
-  };
-
-  // ── Generación masiva ──────────────────────────────────────────
-  const [showMasivo, setShowMasivo] = useState(false);
-  const [masivoProgress, setMasivoProgress] = useState({ total:0, done:0, running:false, errors:[] });
-
-  const generarMasivo = async () => {
-    // Trabajadores activos con contrato vigente en el período
-    const candidatos = trabajadores.filter(t => t.estado === 'activo').map(t => {
-      const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
-      return contrato ? { trab: t, contrato } : null;
-    }).filter(Boolean);
-
-    if (!candidatos.length) { alert('No hay trabajadores activos con contrato vigente.'); return; }
-
-    // Verificar cuáles ya tienen liquidación en el período
-    const yaExisten = liquidaciones.filter(l => l.mes === filtroMes && l.anio === filtroAnio);
-    const sinLiquidar = candidatos.filter(c =>
-      !yaExisten.find(l => l.trabajadorId === c.trab.id)
-    );
-
-    if (!sinLiquidar.length) { alert(`Todos los trabajadores ya tienen liquidación en ${MESES[parseInt(filtroMes)-1]} ${filtroAnio}.`); return; }
-
-    setMasivoProgress({ total: sinLiquidar.length, done: 0, running: true, errors: [] });
-
-    let done = 0;
-    const errors = [];
-    for (const { trab, contrato } of sinLiquidar) {
-      try {
-        await addDoc(collection(db, 'remuneraciones'), {
-          trabajadorId:    trab.id,
-          contratoId:      contrato.id,
-          mes:             filtroMes,
-          anio:            filtroAnio,
-          tipoPeriodo:     'mensual',
-          sueldoBase:      contrato.sueldoBase || '',
-          bonoProduccion:  contrato.bonoProduccion || '0',
-          horasExtra:      '0',
-          valorHoraExtra:  contrato.valorHoraExtra || '0',
-          bonoColacion:    contrato.bonoColacion || '',
-          bonoMovilizacion:contrato.bonoMovilizacion || '',
-          viaticos:        '0',
-          otrosImponibles: '0',
-          otrosNoImponibles:'0',
-          descuentoAdicional:'0',
-          anticipo:        '0',
-          estado:          'pendiente',
-          observaciones:   `Generado automáticamente - ${MESES[parseInt(filtroMes)-1]} ${filtroAnio}`,
-          createdAt:       serverTimestamp(),
-          updatedAt:       serverTimestamp(),
-        });
-        done++;
-        setMasivoProgress(p => ({ ...p, done }));
-      } catch(e) {
-        errors.push(`${trab.apellidoPaterno} ${trab.nombre}: ${e.message}`);
-        setMasivoProgress(p => ({ ...p, errors: [...p.errors, `${trab.apellidoPaterno} ${trab.nombre}`] }));
-      }
-    }
-    setMasivoProgress(p => ({ ...p, running: false }));
-    setTimeout(() => { setShowMasivo(false); onReload?.(); reload(); }, 1800);
-  };
-
   // Export Previred TXT
   const exportarPrevired = () => {
     const data = filtradas
@@ -1214,13 +1126,9 @@ function RemuneracionesSection() {
           </div>
           {/* Botones exportar */}
           <div className="flex gap-1.5 ml-auto">
-            <button onClick={() => setShowMasivo(true)}
-              className="flex items-center gap-1.5 px-3 py-2 text-white font-bold text-xs rounded-xl transition-all active:scale-95"
-              style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow:'0 2px 8px rgba(124,58,237,0.3)'}}>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-              </svg>
-              Generar masivo
+            <button onClick={exportarPrevired} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-colors">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Previred
             </button>
             <button onClick={()=>generarPDFResumenNomina(filtradas.filter(l=>l._calc), `${MESES[parseInt(filtroMes)-1]||'Todos'} ${filtroAnio}`)} className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition-colors">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -1251,8 +1159,8 @@ function RemuneracionesSection() {
             <table className="w-full min-w-[900px]">
               <thead>
                 <tr style={{background:"#1e1b4b"}}>
-                  {['Trabajador','Período','Días','Imponible','AFP','Salud','SIS+Ces.','No Imp.','Líquido','Estado','Acciones'].map(h=>(
-                    <th key={h} className={`px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest ${h==='Días'?'text-center':''}`}>{h}</th>
+                  {['Trabajador','Período','Imponible','AFP','Salud','SIS+Ces.','No Imp.','Líquido','Estado','Acciones'].map(h=>(
+                    <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1273,27 +1181,6 @@ function RemuneracionesSection() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-600">{labelPeriodo(row)}</td>
-                      {/* ── Días trabajados inline ── */}
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number" min="0" max="30"
-                            value={diasEdit[row.id] !== undefined ? diasEdit[row.id] : (row.diasTrabajados ?? 30)}
-                            onChange={e => setDiasEdit(p => ({ ...p, [row.id]: e.target.value }))}
-                            onBlur={e => {
-                              if (diasEdit[row.id] !== undefined && String(diasEdit[row.id]) !== String(row.diasTrabajados ?? 30)) {
-                                guardarDias(row, diasEdit[row.id]);
-                              }
-                            }}
-                            onKeyDown={e => { if (e.key === 'Enter') guardarDias(row, diasEdit[row.id]); }}
-                            className="w-14 text-center text-sm font-black rounded-lg border-2 border-slate-200 focus:border-violet-400 focus:outline-none py-1 transition-colors"
-                            style={{color: (row.diasTrabajados ?? 30) < 30 ? '#dc2626' : '#1e1b4b'}}
-                          />
-                          {savingDias[row.id] && (
-                            <div className="w-3.5 h-3.5 rounded-full animate-spin border-2 border-violet-400 border-t-transparent" />
-                          )}
-                        </div>
-                      </td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{c?`$${c.imponible.toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3 text-sm text-red-500">-{c?`$${c.afpM.toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3 text-sm text-red-500">-{c?`$${c.salM.toLocaleString('es-CL')}`:'—'}</td>
@@ -1307,25 +1194,9 @@ function RemuneracionesSection() {
                         })() : <span>—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => marcarPagado(row)}
-                          disabled={savingPago[row.id]}
-                          title={row.estado === 'pagado' ? 'Clic para marcar como pendiente' : 'Clic para marcar como pagado'}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase transition-all active:scale-95 disabled:opacity-60"
-                          style={row.estado === 'pagado'
-                            ? {background:'#dcfce7', color:'#15803d', border:'2px solid #86efac'}
-                            : {background:'#fef3c7', color:'#92400e', border:'2px solid #fde68a'}
-                          }
-                        >
-                          {savingPago[row.id] ? (
-                            <div className="w-2.5 h-2.5 rounded-full animate-spin border-2 border-current border-t-transparent" />
-                          ) : row.estado === 'pagado' ? (
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
-                          ) : (
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="9"/></svg>
-                          )}
-                          {row.estado === 'pagado' ? 'Pagado' : 'Pendiente'}
-                        </button>
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado==='pagado'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>
+                          {row.estado==='pagado'?'Pagado':'Pendiente'}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
@@ -1376,76 +1247,6 @@ function RemuneracionesSection() {
               <button onClick={()=>setConfirm(null)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm">Cancelar</button>
               <button onClick={handleDelete} className="flex-1 py-2.5 text-white font-bold rounded-xl text-sm" style={{background:"linear-gradient(135deg, #ef4444, #e11d48)", boxShadow:"0 4px 12px rgba(239,68,68,0.3)"}}>Eliminar</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal generación masiva ── */}
-      {showMasivo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:'rgba(15,10,40,0.6)', backdropFilter:'blur(4px)'}}>
-          <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{background:'#fff', boxShadow:'0 24px 64px rgba(0,0,0,0.2)'}}>
-            <div className="px-6 py-5" style={{background:'linear-gradient(135deg,#1e1b4b,#312e81)'}}>
-              <h3 className="text-base font-black text-white">Generación masiva de liquidaciones</h3>
-              <p className="text-xs text-white/60 mt-1">{MESES[parseInt(filtroMes)-1]} {filtroAnio} · Trabajadores activos sin liquidación en el período</p>
-            </div>
-            <div className="p-6 space-y-4">
-              {!masivoProgress.running && masivoProgress.total === 0 ? (
-                <>
-                  <div className="rounded-xl bg-violet-50 border border-violet-100 p-4 space-y-2">
-                    <p className="text-sm font-black text-violet-800">¿Qué hace este proceso?</p>
-                    <ul className="text-xs text-violet-700 space-y-1 list-disc list-inside">
-                      <li>Crea liquidaciones con los datos del contrato vigente de cada trabajador activo</li>
-                      <li>Solo genera para quienes <strong>aún no tienen liquidación</strong> en {MESES[parseInt(filtroMes)-1]} {filtroAnio}</li>
-                      <li>Las liquidaciones quedan en estado <strong>Pendiente</strong> para revisión individual</li>
-                      <li>Puedes editar cada una antes de marcarla como pagada</li>
-                    </ul>
-                  </div>
-                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
-                    <strong>Nota:</strong> Las horas extra, bonos variables y descuentos adicionales deben ajustarse manualmente en cada liquidación generada.
-                  </div>
-                </>
-              ) : masivoProgress.running ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-bold text-slate-700">Generando liquidaciones…</span>
-                    <span className="font-black text-violet-600">{masivoProgress.done}/{masivoProgress.total}</span>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                    <div className="h-3 rounded-full transition-all duration-300"
-                      style={{width:`${masivoProgress.total > 0 ? (masivoProgress.done/masivoProgress.total*100) : 0}%`, background:'linear-gradient(90deg,#7c3aed,#4f46e5)'}} />
-                  </div>
-                  {masivoProgress.errors.length > 0 && (
-                    <p className="text-xs text-red-500">Errores: {masivoProgress.errors.join(', ')}</p>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
-                    <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                  <p className="text-base font-black text-slate-800">{masivoProgress.done} liquidaciones generadas</p>
-                  <p className="text-xs text-slate-400 mt-1">Cerrando…</p>
-                </div>
-              )}
-            </div>
-            {!masivoProgress.running && masivoProgress.total === 0 && (
-              <div className="flex justify-end gap-3 px-6 pb-6">
-                <button onClick={() => setShowMasivo(false)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors">
-                  Cancelar
-                </button>
-                <button onClick={generarMasivo}
-                  className="flex items-center gap-2 px-5 py-2.5 text-white font-black text-sm rounded-xl transition-all active:scale-95"
-                  style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)', boxShadow:'0 4px 12px rgba(124,58,237,0.3)'}}>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                  </svg>
-                  Generar ahora
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1696,4 +1497,271 @@ function FiniquitosSection() {
     </>
   );
 }
-export { DashboardSection, TrabajadoresSection, ContratosSection, RemuneracionesSection, FiniquitosSection };
+// ═══════════════════════════════════════════════════════
+// PANEL PORTAL TRABAJADORES — Crear cuentas Firebase Auth
+// ═══════════════════════════════════════════════════════
+function PortalTrabajadoresPanel({ trabajadores }) {
+  const [resultados, setResultados] = useState([]); // [{ nombre, rut, email, estado: 'ok'|'existe'|'error', msg }]
+  const [procesando,  setProcesando]  = useState(false);
+  const [progreso,    setProgreso]    = useState(0);
+  const [seleccion,   setSeleccion]   = useState([]); // ids de trabajadores seleccionados
+  const [busqueda,    setBusqueda]    = useState('');
+  const [mostrarLog,  setMostrarLog]  = useState(false);
+
+  const auth = getAuth();
+
+  function rutToEmail(rut) {
+    return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
+  }
+  function rutToPass(rut) {
+    return rut.replace(/[^0-9kK]/gi, '').toLowerCase();
+  }
+
+  const activosFiltrados = trabajadores
+    .filter(t => t.estado === 'activo' || !t.estado)
+    .filter(t => {
+      const q = busqueda.toLowerCase();
+      return !q || `${t.nombre} ${t.apellidoPaterno} ${t.rut||''}`.toLowerCase().includes(q);
+    });
+
+  const todosSeleccionados = activosFiltrados.length > 0 &&
+    activosFiltrados.every(t => seleccion.includes(t.id));
+
+  function toggleTodos() {
+    if (todosSeleccionados) {
+      setSeleccion(s => s.filter(id => !activosFiltrados.find(t => t.id === id)));
+    } else {
+      setSeleccion(s => [...new Set([...s, ...activosFiltrados.map(t => t.id)])]);
+    }
+  }
+
+  function toggleUno(id) {
+    setSeleccion(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+
+  async function crearCuentas() {
+    if (!seleccion.length) { alert('Selecciona al menos un trabajador.'); return; }
+    if (!window.confirm(`¿Crear cuentas de portal para ${seleccion.length} trabajador(es)? La contraseña inicial será el RUT sin puntos ni guión.`)) return;
+
+    setProcesando(true);
+    setMostrarLog(true);
+    setResultados([]);
+    setProgreso(0);
+
+    const trabajadoresSeleccionados = trabajadores.filter(t => seleccion.includes(t.id));
+    const logs = [];
+
+    for (let i = 0; i < trabajadoresSeleccionados.length; i++) {
+      const t = trabajadoresSeleccionados[i];
+      const nombre = `${t.nombre} ${t.apellidoPaterno}`.trim();
+      const email  = rutToEmail(t.rut || '');
+      const pass   = rutToPass(t.rut  || '');
+
+      if (!t.rut || pass.length < 4) {
+        logs.push({ nombre, rut: t.rut||'—', email, estado: 'error', msg: 'RUT inválido o muy corto' });
+        setResultados([...logs]);
+        setProgreso(Math.round(((i+1)/trabajadoresSeleccionados.length)*100));
+        continue;
+      }
+
+      try {
+        // Crear cuenta en Firebase Auth
+        const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        const uid  = cred.user.uid;
+
+        // 1. Vincular uid al documento del trabajador
+        await updateDoc(doc(db, 'trabajadores', t.id), { portalUid: uid, portalEmail: email });
+        // 2. Escribir índice uid→firestoreId para que el portal pueda leer el perfil
+        //    (las reglas no permiten query sobre toda la colección desde el trabajador)
+        await setDoc(doc(db, 'trabajadores_portal', uid), {
+          trabajadorDocId: t.id,
+          rut: t.rut || '',
+          email,
+        });
+
+        logs.push({ nombre, rut: t.rut, email, estado: 'ok', msg: `UID: ${uid.slice(0,8)}...` });
+      } catch (err) {
+        if (err.code === 'auth/email-already-in-use') {
+          logs.push({ nombre, rut: t.rut, email, estado: 'existe', msg: 'Cuenta ya existe' });
+        } else {
+          logs.push({ nombre, rut: t.rut, email, estado: 'error', msg: err.message });
+        }
+      }
+
+      setResultados([...logs]);
+      setProgreso(Math.round(((i+1)/trabajadoresSeleccionados.length)*100));
+      // Pequeña pausa para no saturar Firebase Auth
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    setProcesando(false);
+    setSeleccion([]);
+  }
+
+  const countOk     = resultados.filter(r => r.estado === 'ok').length;
+  const countExiste = resultados.filter(r => r.estado === 'existe').length;
+  const countError  = resultados.filter(r => r.estado === 'error').length;
+
+  const estadoBadge = {
+    ok:     'background:#dcfce7;color:#166534',
+    existe: 'background:#fef3c7;color:#92400e',
+    error:  'background:#fee2e2;color:#991b1b',
+  };
+  const estadoLabel = { ok: '✓ Creada', existe: '↩ Ya existe', error: '✗ Error' };
+
+  return (
+    <div style={{padding:'0 0 24px'}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20,gap:12,flexWrap:'wrap'}}>
+        <div>
+          <h3 style={{fontSize:15,fontWeight:800,color:'#1e1b4b',letterSpacing:'-0.3px'}}>
+            Portal Trabajadores
+          </h3>
+          <p style={{fontSize:12,color:'#6b7280',marginTop:3,lineHeight:1.5}}>
+            Crea cuentas de acceso al portal para que los trabajadores puedan marcar asistencia.<br/>
+            <span style={{fontFamily:'monospace',fontSize:11}}>Contraseña inicial = RUT sin puntos ni guión</span>
+          </p>
+        </div>
+        {seleccion.length > 0 && !procesando && (
+          <button
+            onClick={crearCuentas}
+            style={{
+              display:'flex',alignItems:'center',gap:8,padding:'10px 18px',
+              background:'linear-gradient(135deg,#1e1b4b,#312e81)',
+              color:'#fff',border:'none',borderRadius:10,fontWeight:700,
+              fontSize:13,cursor:'pointer',whiteSpace:'nowrap',flexShrink:0,
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+            Crear {seleccion.length} cuenta{seleccion.length > 1 ? 's' : ''}
+          </button>
+        )}
+      </div>
+
+      {/* Barra de progreso */}
+      {procesando && (
+        <div style={{marginBottom:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,fontSize:12,color:'#6b7280'}}>
+            <span>Creando cuentas...</span>
+            <span>{progreso}%</span>
+          </div>
+          <div style={{height:6,background:'#e5e7eb',borderRadius:99,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${progreso}%`,background:'linear-gradient(90deg,#4f46e5,#7c3aed)',transition:'width 0.3s',borderRadius:99}}/>
+          </div>
+        </div>
+      )}
+
+      {/* Búsqueda */}
+      <div style={{position:'relative',marginBottom:12}}>
+        <svg style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:'#9ca3af'}} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+        <input
+          style={{width:'100%',paddingLeft:32,paddingRight:12,paddingTop:8,paddingBottom:8,border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}
+          placeholder="Buscar trabajador..."
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+        />
+      </div>
+
+      {/* Tabla de selección */}
+      <div style={{border:'1px solid #e5e7eb',borderRadius:12,overflow:'hidden',marginBottom:16}}>
+        {/* Cabecera */}
+        <div style={{display:'grid',gridTemplateColumns:'36px 1fr 140px 80px',padding:'8px 14px',background:'#f8f8fc',borderBottom:'1px solid #e5e7eb'}}>
+          <input type="checkbox" checked={todosSeleccionados} onChange={toggleTodos} style={{cursor:'pointer'}}/>
+          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:'#9ca3af'}}>Trabajador</span>
+          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:'#9ca3af'}}>Email portal</span>
+          <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:'#9ca3af',textAlign:'center'}}>Estado</span>
+        </div>
+
+        {activosFiltrados.length === 0 ? (
+          <div style={{padding:'24px',textAlign:'center',color:'#9ca3af',fontSize:13}}>
+            No hay trabajadores activos
+          </div>
+        ) : activosFiltrados.map(t => {
+          const email    = t.rut ? rutToEmail(t.rut) : '—';
+          const tieneCta = !!t.portalUid;
+          const nombre   = `${t.nombre} ${t.apellidoPaterno}`.trim();
+          const ini      = `${t.nombre?.[0]||''}${t.apellidoPaterno?.[0]||''}`.toUpperCase();
+          return (
+            <div key={t.id}
+              style={{
+                display:'grid',gridTemplateColumns:'36px 1fr 140px 80px',
+                padding:'10px 14px',borderBottom:'1px solid #f1f1f7',
+                alignItems:'center',cursor:'pointer',
+                background: seleccion.includes(t.id) ? '#f5f3ff' : 'white',
+                transition:'background 0.1s',
+              }}
+              onClick={() => toggleUno(t.id)}
+            >
+              <input type="checkbox" checked={seleccion.includes(t.id)} onChange={() => toggleUno(t.id)}
+                onClick={e => e.stopPropagation()} style={{cursor:'pointer'}}/>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{
+                  width:28,height:28,borderRadius:8,flexShrink:0,
+                  background:'linear-gradient(135deg,#7c3aed,#4f46e5)',
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  color:'white',fontSize:10,fontWeight:800,
+                }}>{ini}</div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:'#1e1b4b'}}>{nombre}</div>
+                  <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{t.rut||'—'}</div>
+                </div>
+              </div>
+              <span style={{fontSize:11,color:'#6b7280',fontFamily:'monospace',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {email}
+              </span>
+              <div style={{textAlign:'center'}}>
+                {tieneCta
+                  ? <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:99,background:'#dcfce7',color:'#166534'}}>Activa</span>
+                  : <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:99,background:'#f1f5f9',color:'#94a3b8'}}>Sin cuenta</span>
+                }
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Resumen estadísticas */}
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        {[
+          { label:'Total activos', value: trabajadores.filter(t=>!t.estado||t.estado==='activo').length, color:'#6b7280' },
+          { label:'Con cuenta',    value: trabajadores.filter(t=>t.portalUid).length, color:'#16a34a' },
+          { label:'Sin cuenta',    value: trabajadores.filter(t=>(!t.estado||t.estado==='activo')&&!t.portalUid).length, color:'#d97706' },
+        ].map(s => (
+          <div key={s.label} style={{flex:1,minWidth:100,background:'#f8f8fc',border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 14px'}}>
+            <div style={{fontSize:10,color:'#9ca3af',fontWeight:600,textTransform:'uppercase',letterSpacing:'1px',marginBottom:3}}>{s.label}</div>
+            <div style={{fontSize:20,fontWeight:800,color:s.color}}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Log de resultados */}
+      {mostrarLog && resultados.length > 0 && (
+        <div style={{border:'1px solid #e5e7eb',borderRadius:12,overflow:'hidden'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',background:'#f8f8fc',borderBottom:'1px solid #e5e7eb'}}>
+            <span style={{fontSize:12,fontWeight:700,color:'#1e1b4b'}}>
+              Resultado — {countOk} creadas · {countExiste} ya existían · {countError} errores
+            </span>
+            <button onClick={() => setMostrarLog(false)} style={{background:'none',border:'none',cursor:'pointer',color:'#9ca3af',fontSize:18,lineHeight:1}}>×</button>
+          </div>
+          <div style={{maxHeight:260,overflowY:'auto'}}>
+            {resultados.map((r, i) => (
+              <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 160px 90px',padding:'9px 14px',borderBottom:'1px solid #f1f1f7',alignItems:'center',gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:'#1e1b4b'}}>{r.nombre}</div>
+                  <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{r.email}</div>
+                </div>
+                <span style={{fontSize:11,color:'#6b7280',fontFamily:'monospace',overflow:'hidden',textOverflow:'ellipsis'}}>{r.msg}</span>
+                <span style={{
+                  fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:99,textAlign:'center',
+                  ...Object.fromEntries(estadoBadge[r.estado].split(';').map(s => { const [k,v]=s.split(':'); return [k.trim(),v?.trim()]; }).filter(([k])=>k))
+                }}>{estadoLabel[r.estado]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export { DashboardSection, TrabajadoresSection, ContratosSection, RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel };

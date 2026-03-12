@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import * as Shared from './RRHH.shared';
 import * as Calc from './RRHH.calculo';
 import * as PDFs from './RRHH.pdfs';
@@ -17,7 +17,7 @@ const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
   generarCertificadoAnual, generarPDFReporte, generarPDFAsientos,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago,
-  generarPDFContrato, generarPDFFiniquito, generarPDFAnexo, generarCSVImportadorSII } = PDFs;
+  generarPDFContrato, generarPDFFiniquito, generarPDFAnexo } = PDFs;
 const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
@@ -453,24 +453,6 @@ function ImpuestosSection() {
               <p className="text-xs text-white/70 mt-0.5">Art. 42 N°1 LIR · UTM ${utm.toLocaleString('es-CL')} · Certificado 1887</p>
             </div>
           </div>
-          {/* ── Botón exportar CSV Importador SII ── */}
-          <button
-            onClick={() => {
-              const datos = resumenPorTrabajador.map(row => ({
-                trabajador:   row,
-                contrato:     row._contrato,
-                liquidaciones: row.liqs,
-              }));
-              generarCSVImportadorSII(datos, anio, utm);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 text-white font-bold text-sm rounded-xl transition-colors border border-white/20"
-            title="Descargar CSV para subir al Importador de Datos del SII — DJ 1887"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-            CSV SII
-          </button>
         </div>
 
         {/* Filtro búsqueda */}
@@ -616,249 +598,532 @@ function ImpuestosSection() {
 }
 
 function AsistenciaSection() {
-  const [registros,    setRegistros]    = useState([]);
+  const now   = new Date();
+  const hoy   = { anio: now.getFullYear(), mes: now.getMonth(), dia: now.getDate() };
+  const fmt2  = n => String(n).padStart(2,'0');
+  const diaKey = fmt2(hoy.dia);
+
+  const [vista,        setVista]        = useState('hoy');    // 'hoy' | 'historial'
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos,    setContratos]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [modal,        setModal]        = useState(false);
-  const [editData,     setEditData]     = useState(null);
-  const [confirm,      setConfirm]      = useState(null);
-  const [filtroMes,    setFiltroMes]    = useState(String(new Date().getMonth()+1).padStart(2,'0'));
-  const [filtroAnio,   setFiltroAnio]   = useState(String(new Date().getFullYear()));
+  const [marcacionesHoy, setMarcacionesHoy] = useState({});  // { docId: { entrada, salida, ... } }
+  const [historial,    setHistorial]    = useState([]);
+  const [loadingBase,  setLoadingBase]  = useState(true);
+  const [filtroMes,    setFiltroMes]    = useState(fmt2(hoy.mes + 1));
+  const [filtroAnio,   setFiltroAnio]   = useState(String(hoy.anio));
   const [busqueda,     setBusqueda]     = useState('');
   const [pagina,       setPagina]       = useState(1);
-  const POR_PAGINA = 10;
+  const [editModal,    setEditModal]    = useState(null); // { trabajador, registro, docId, diaKey }
+  const [confirm,      setConfirm]      = useState(null);
+  const POR_PAGINA = 15;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [aSnap, tSnap, cSnap] = await Promise.all([
-        getDocs(query(collection(db,'asistencia'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-      ]);
-      setRegistros(aSnap.docs.map(d=>({id:d.id,...d.data()})));
-      setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
-      setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
-    } catch(e) { console.error(e); }
-    setLoading(false);
+  // ── Cargar trabajadores y contratos una sola vez ──
+  useEffect(() => {
+    Promise.all([
+      getDocs(query(collection(db,'trabajadores'), orderBy('apellidoPaterno'))),
+      getDocs(collection(db,'contratos')),
+    ]).then(([tSnap, cSnap]) => {
+      setTrabajadores(tSnap.docs.map(d => ({ id:d.id,...d.data() })));
+      setContratos(cSnap.docs.map(d => ({ id:d.id,...d.data() })));
+      setLoadingBase(false);
+    });
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-
-  const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'asistencia',confirm.id)); load(); }
-    catch(e) { alert('Error: '+e.message); }
-    setConfirm(null);
-  };
-
-  // Enriquecer con stats calculados
-  const enriquecidos = registros.map(r => {
-    const trabajador = trabajadores.find(t=>t.id===r.trabajadorId);
-    const contrato   = contratos.find(c=>c.id===r.contratoId);
-    const dias       = (r.mes && r.anio) ? diasDelMes(r.anio, r.mes) : [];
-    let trabajados=0, ausentes=0, totalHExtra=0, diasExceso=0;
-    dias.forEach(d => {
-      const reg = (r.registros||{})[d.fecha] || {};
-      const { extra, exceso } = analizarDia(reg, contrato?.jornada);
-      if (reg.estado==='trabajado')  trabajados++;
-      if (reg.estado==='ausente')    ausentes++;
-      totalHExtra += extra;
-      if (exceso) diasExceso++;
+  // ── Tiempo real: marcaciones del día de hoy ──
+  useEffect(() => {
+    if (vista !== 'hoy' || loadingBase) return;
+    // Escuchar todos los docs del mes actual
+    const mesStr = fmt2(hoy.mes + 1);
+    const q = query(collection(db, 'asistencia'));
+    const unsub = onSnapshot(q, snap => {
+      const m = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        // Filtrar solo documentos del mes y año actual
+        if (String(data.anio) === String(hoy.anio) && data.mes === mesStr) {
+          m[data.trabajadorId] = {
+            docId:   d.id,
+            entrada: data.registros?.[diaKey]?.entrada || null,
+            salida:  data.registros?.[diaKey]?.salida  || null,
+            gps_e:   data.registros?.[diaKey]?.gps_e   || null,
+            gps_s:   data.registros?.[diaKey]?.gps_s   || null,
+            modificaciones: data.modificaciones || [],
+          };
+        }
+      });
+      setMarcacionesHoy(m);
     });
-    return { ...r, _trabajador:trabajador, _contrato:contrato, trabajados, ausentes, totalHExtra, diasExceso };
+    return unsub;
+  }, [vista, loadingBase, hoy.anio, hoy.mes, diaKey]);
+
+  // ── Cargar historial cuando se cambia de vista ──
+  useEffect(() => {
+    if (vista !== 'historial') return;
+    getDocs(query(collection(db,'asistencia'), orderBy('anio','desc')))
+      .then(snap => setHistorial(snap.docs.map(d => ({ id:d.id,...d.data() }))));
+  }, [vista]);
+
+  // ── Helpers ──
+  function fmtHora(ts) {
+    if (!ts) return null;
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return `${fmt2(d.getHours())}:${fmt2(d.getMinutes())}`;
+  }
+  function diffHoras(ts1, ts2) {
+    if (!ts1 || !ts2) return null;
+    const d1 = ts1.toDate ? ts1.toDate() : new Date(ts1);
+    const d2 = ts2.toDate ? ts2.toDate() : new Date(ts2);
+    const mins = Math.round((d2 - d1) / 60000);
+    return `${Math.floor(mins/60)}h ${fmt2(mins%60)}m`;
+  }
+
+  // ── Estadísticas del día ──
+  // Solo trabajadores activos que TIENEN cuenta de portal (portalUid)
+  // Los que no tienen cuenta no pueden marcar, no los contamos como "sin marcar"
+  const activos         = trabajadores.filter(t => !t.estado || t.estado === 'activo');
+  const activosSinPortal = activos; // nombre mantenido por compatibilidad con el render
+  const conPortal       = activos.filter(t => t.portalUid);
+  const conEntrada      = conPortal.filter(t => marcacionesHoy[t.portalUid]?.entrada);
+  const conJornada      = conPortal.filter(t => {
+    const m = marcacionesHoy[t.portalUid];
+    return m?.entrada && m?.salida;
+  });
+  const sinMarcar = conPortal.filter(t => !marcacionesHoy[t.portalUid]?.entrada);
+
+  // ── Guardar edición con log de auditoría ──
+  async function guardarEdicion({ docId, trabajadorId, dKey, entrada, salida, justificacion, adminEmail }) {
+    const ref  = doc(db, 'asistencia', docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const data = snap.data();
+
+    const regActual = data.registros?.[dKey] || {};
+    const modLog = {
+      campo:        `registros.${dKey}`,
+      valorAntes:   { entrada: regActual.entrada || null, salida: regActual.salida || null },
+      valorDespues: { entrada, salida },
+      justificacion,
+      modificadoPor: adminEmail || 'admin',
+      timestamp:     serverTimestamp(),
+    };
+
+    await updateDoc(ref, {
+      [`registros.${dKey}.entrada`]: entrada,
+      [`registros.${dKey}.salida`]:  salida,
+      modificaciones: [...(data.modificaciones || []), modLog],
+    });
+    setEditModal(null);
+  }
+
+  // ── Componente modal de edición ──
+  function ModalEdicion({ item, onClose }) {
+    const [entrada,      setEntrada]      = useState(item.entrada      ? fmtHora(item.entrada)      : '');
+    const [salida,       setSalida]       = useState(item.salida       ? fmtHora(item.salida)       : '');
+    const [justificacion,setJustificacion]= useState('');
+    const [saving,       setSaving]       = useState(false);
+    const [error,        setError]        = useState('');
+
+    async function handleSave() {
+      if (!justificacion.trim()) { setError('La justificación es obligatoria para modificar un registro.'); return; }
+      setSaving(true);
+      try {
+        // Convertir HH:MM a timestamp del mismo día
+        function toTs(horaStr) {
+          if (!horaStr) return null;
+          const [h, m] = horaStr.split(':').map(Number);
+          const d = new Date(hoy.anio, hoy.mes, parseInt(item.diaKey));
+          d.setHours(h, m, 0, 0);
+          return d;
+        }
+        await guardarEdicion({
+          docId:         item.docId,
+          trabajadorId:  item.trabajadorUid,
+          dKey:          item.diaKey,
+          entrada:       toTs(entrada),
+          salida:        toTs(salida),
+          justificacion: justificacion.trim(),
+          adminEmail:    'admin@mpf.cl',
+        });
+      } catch(e) { setError('Error al guardar: ' + e.message); }
+      finally { setSaving(false); }
+    }
+
+    const inp2 = 'w-full border-2 border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-purple-400 bg-white transition-colors';
+
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}/>
+        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{background:'rgba(124,58,237,0.08)',border:'1px solid rgba(124,58,237,0.15)'}}>
+              <svg className="w-5 h-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </div>
+            <div>
+              <h3 className="font-black text-slate-900 text-base">Editar registro</h3>
+              <p className="text-xs text-slate-400">{item.nombre} · {item.diaKey}/{fmt2(hoy.mes+1)}/{hoy.anio}</p>
+            </div>
+          </div>
+
+          <div className="space-y-3 mb-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Hora entrada</label>
+              <input type="time" className={inp2} value={entrada} onChange={e=>setEntrada(e.target.value)}/>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Hora salida</label>
+              <input type="time" className={inp2} value={salida} onChange={e=>setSalida(e.target.value)}/>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                Justificación <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                className={`${inp2} resize-none`} rows={3}
+                placeholder="Motivo de la modificación (ej: el trabajador olvidó marcar salida)"
+                value={justificacion} onChange={e=>setJustificacion(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Queda registrado en el log de auditoría para fiscalización DT.</p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-xs text-red-700 font-medium mb-3">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              {error}
+            </div>
+          )}
+
+          {/* Log auditoría previo */}
+          {item.modificaciones?.length > 0 && (
+            <div className="mb-4 border border-slate-100 rounded-xl overflow-hidden">
+              <div className="px-3 py-2 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Historial de cambios ({item.modificaciones.length})
+              </div>
+              <div className="max-h-28 overflow-y-auto divide-y divide-slate-50">
+                {item.modificaciones.slice(-3).map((m,i) => (
+                  <div key={i} className="px-3 py-2">
+                    <p className="text-xs text-slate-600 font-medium">{m.justificacion}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{m.modificadoPor}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm transition-colors">Cancelar</button>
+            <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 text-white font-bold rounded-xl text-sm transition-all disabled:opacity-50" style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)',boxShadow:'0 4px 12px rgba(124,58,237,0.3)'}}>
+              {saving ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Vista HOY ──
+  const activosFiltradosHoy = activosSinPortal.filter(t => {
+    const q = busqueda.toLowerCase();
+    return !q || `${t.nombre} ${t.apellidoPaterno} ${t.rut||''}`.toLowerCase().includes(q);
   });
 
-  const filtrados = enriquecidos.filter(r => {
+  // ── Vista HISTORIAL ──
+  const enriquecidos = historial.map(r => {
+    const trabajador = trabajadores.find(t => t.id === r.trabajadorId || t.portalUid === r.trabajadorId);
+    const contrato   = contratos.find(c => c.trabajadorId === (trabajador?.id));
+    return { ...r, _trabajador: trabajador, _contrato: contrato };
+  }).filter(r => {
     const q = busqueda.toLowerCase();
     const nombre = `${r._trabajador?.nombre||''} ${r._trabajador?.apellidoPaterno||''}`.toLowerCase();
     return (
       (!filtroMes  || r.mes  === filtroMes) &&
-      (!filtroAnio || r.anio === filtroAnio) &&
+      (!filtroAnio || String(r.anio) === filtroAnio) &&
       (!busqueda   || nombre.includes(q) || r._trabajador?.rut?.includes(busqueda))
     );
   });
-
-  const totalPag  = Math.ceil(filtrados.length / POR_PAGINA);
-  const paginados = filtrados.slice((pagina-1)*POR_PAGINA, pagina*POR_PAGINA);
-
-  const conExceso      = filtrados.filter(r=>r.diasExceso>0).length;
-  const totalHExtraGlob= filtrados.reduce((s,r)=>s+r.totalHExtra,0);
+  const totalPag  = Math.ceil(enriquecidos.length / POR_PAGINA);
+  const paginados = enriquecidos.slice((pagina-1)*POR_PAGINA, pagina*POR_PAGINA);
 
   return (
     <>
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {[
-          ['Registros',       filtrados.length,                'text-purple-600', false],
-          ['Con horas extra',filtrados.filter(r=>r.totalHExtra>0).length, 'text-indigo-600',false],
-          ['Total hrs extra', `${totalHExtraGlob.toFixed(1)}h`, 'text-indigo-700', true],
-          ['Con exceso legal',conExceso,                       conExceso>0?'text-red-500':'text-slate-400',false],
-        ].map(([l,v,c,m])=>(
-          <div key={l} className="rounded-2xl px-5 py-4" style={{background:"#fff", border:"1px solid rgba(0,0,0,0.06)", boxShadow:"0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(124,58,237,0.04)"}}>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{l}</p>
-            <p className={`${m?'text-2xl':'text-4xl'} font-black ${c} mt-1`}>{v}</p>
-          </div>
-        ))}
+      {/* ── HEADER con toggle de vista ── */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 tracking-tight">Asistencia</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Art. 22 CT · Registro electrónico de jornada</p>
+        </div>
+        <div className="flex gap-1.5 p-1 rounded-xl" style={{background:'rgba(0,0,0,0.04)'}}>
+          {[
+            { id:'hoy',       label:'Hoy en tiempo real' },
+            { id:'historial', label:'Historial mensual'  },
+          ].map(v => (
+            <button key={v.id} onClick={() => { setVista(v.id); setBusqueda(''); setPagina(1); }}
+              className="px-4 py-2 rounded-lg text-xs font-bold transition-all"
+              style={vista === v.id
+                ? {background:'linear-gradient(135deg,#7c3aed,#4f46e5)',color:'#fff',boxShadow:'0 2px 8px rgba(124,58,237,0.3)'}
+                : {color:'#64748b'}
+              }>
+              {v.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Alerta excesos legales */}
-      {conExceso > 0 && (
-        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-5 py-4 mb-5">
-          <svg className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          <div>
-            <p className="text-sm font-black text-red-800">{conExceso} registro{conExceso!==1?'s con días que superan':' con días que superan'} el límite de 2 hrs extra/día (Art. 31 CT)</p>
-            <p className="text-xs text-red-600 mt-0.5">Las horas extra sobre el límite deben pagarse con recargo mínimo 50% (Art. 32 CT). Corrija o justifique los registros marcados.</p>
+      {/* ════════════════════════════════
+          VISTA: HOY EN TIEMPO REAL
+      ════════════════════════════════ */}
+      {vista === 'hoy' && (
+        <>
+          {/* Stats del día */}
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            {[
+              { label:'Sin marcar',   value: sinMarcar.length,   color:'text-red-500',     bg:'bg-red-50 border-red-100',     dot:'bg-red-400' },
+              { label:'En jornada',   value: conEntrada.length - conJornada.length, color:'text-amber-600', bg:'bg-amber-50 border-amber-100', dot:'bg-amber-400' },
+              { label:'Jornada completa', value: conJornada.length, color:'text-emerald-600', bg:'bg-emerald-50 border-emerald-100', dot:'bg-emerald-400' },
+            ].map(s => (
+              <div key={s.label} className={`rounded-2xl px-4 py-3 border ${s.bg}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div className={`w-2 h-2 rounded-full ${s.dot}`}/>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{s.label}</span>
+                </div>
+                <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* Tabla */}
-      <div className="rounded-2xl overflow-hidden" style={{background:"#fff", border:"1px solid rgba(0,0,0,0.06)", boxShadow:"0 2px 8px rgba(0,0,0,0.05), 0 8px 24px rgba(124,58,237,0.04)"}}>
-        <div className="px-5 py-4 flex items-center justify-between" style={{background:"linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)"}}>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          {/* Alerta si hay trabajadores sin marcar */}
+          {sinMarcar.length > 0 && (
+            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 mb-5">
+              <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0"/>
+              <p className="text-sm font-semibold text-amber-800">
+                {sinMarcar.length} trabajador{sinMarcar.length > 1 ? 'es' : ''} aún no {sinMarcar.length > 1 ? 'han marcado' : 'ha marcado'} entrada hoy
+              </p>
             </div>
-            <div>
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                Asistencia <span className="text-xs bg-white/20 text-white/90 px-2 py-0.5 rounded-full">{filtrados.length}</span>
-              </h2>
-              <p className="text-xs text-white/70 mt-0.5">Art. 22 CT · Horas extra Art. 31–32 CT · Ausentismo</p>
-            </div>
-          </div>
-          <button onClick={()=>{setEditData(null);setModal(true);}} className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{background:"rgba(255,255,255,0.12)", color:"#e0d9ff", border:"1px solid rgba(255,255,255,0.15)"}}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-            + Nuevo Registro
-          </button>
-        </div>
+          )}
 
-        {/* Filtros */}
-        <div className="px-5 py-3 border-b flex flex-wrap gap-2" style={{borderColor:"rgba(0,0,0,0.05)", background:"rgba(248,248,252,0.8)"}}>
-          <select className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-purple-400" value={filtroMes} onChange={e=>{setFiltroMes(e.target.value);setPagina(1);}}>
-            <option value="">Todos los meses</option>
-            {MESES.map((m,i)=><option key={m} value={String(i+1).padStart(2,'0')}>{m}</option>)}
-          </select>
-          <select className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-purple-400" value={filtroAnio} onChange={e=>{setFiltroAnio(e.target.value);setPagina(1);}}>
-            {[2023,2024,2025,2026].map(y=><option key={y}>{y}</option>)}
-          </select>
-          <div className="relative flex-1 min-w-[150px]">
+          {/* Búsqueda */}
+          <div className="relative mb-4">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
-            <input className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 bg-white" placeholder="Buscar trabajador..." value={busqueda} onChange={e=>{setBusqueda(e.target.value);setPagina(1);}} />
+            <input className="w-full pl-9 pr-4 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 bg-white" placeholder="Buscar trabajador..." value={busqueda} onChange={e=>setBusqueda(e.target.value)}/>
           </div>
-        </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-8 h-8 rounded-full animate-spin" style={{border:"2px solid rgba(124,58,237,0.15)", borderTopColor:"#7c3aed"}} />
-          </div>
-        ) : paginados.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3" style={{background:"rgba(124,58,237,0.06)", border:"1px solid rgba(124,58,237,0.1)"}}>
-              <svg className="w-7 h-7 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          {/* Tabla tiempo real */}
+          <div className="rounded-2xl overflow-hidden" style={{background:'#fff',border:'1px solid rgba(0,0,0,0.06)',boxShadow:'0 2px 8px rgba(0,0,0,0.05)'}}>
+            <div className="px-5 py-3 flex items-center justify-between" style={{background:'linear-gradient(135deg,#1e1b4b,#312e81)'}}>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"/>
+                <span className="text-sm font-black text-white">
+                  {now.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'})}
+                </span>
+              </div>
+              <span className="text-xs text-white/60">{activosFiltradosHoy.length} trabajadores activos</span>
             </div>
-            <p className="font-semibold text-sm">Sin registros de asistencia</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px]">
-              <thead>
-                <tr style={{background:"#1e1b4b"}}>
-                  {['Trabajador','Período','Trabajados','Ausentes','Hrs extra','Exceso legal','Jornada','Acciones'].map(h=>(
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {paginados.map(row => {
-                  const ini = `${row._trabajador?.nombre?.[0]||''}${row._trabajador?.apellidoPaterno?.[0]||''}`;
-                  return (
-                    <tr key={row.id} className="transition-colors" style={{}} onMouseEnter={e=>e.currentTarget.style.background="#faf9ff"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0" style={{background:"linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow:"0 2px 6px rgba(124,58,237,0.25)"}}>{ini}</div>
-                          <div>
-                            <p className="font-bold text-slate-800 text-sm">{row._trabajador?.nombre||'—'} {row._trabajador?.apellidoPaterno||''}</p>
-                            <p className="text-[11px] text-slate-400">{row._trabajador?.rut||'—'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-600">{MESES[parseInt(row.mes)-1]||'—'} {row.anio}</td>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-black text-emerald-600">{row.trabajados}</span>
-                        <span className="text-xs text-slate-400 ml-1">días</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {row.ausentes > 0
-                          ? <span className="text-sm font-black text-red-500">{row.ausentes} días</span>
-                          : <span className="text-sm text-slate-300">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {row.totalHExtra > 0
-                          ? <span className="text-sm font-black text-indigo-600">{row.totalHExtra.toFixed(1)}h</span>
-                          : <span className="text-sm text-slate-300">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {row.diasExceso > 0
-                          ? <span className="flex items-center gap-1 text-xs font-bold text-red-600"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>{row.diasExceso} día{row.diasExceso!==1?'s':''}</span>
-                          : <span className="text-xs text-emerald-500 font-bold">✓ OK</span>}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-500 max-w-[120px] truncate">{row._contrato?.jornada||'—'}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button onClick={()=>{setEditData(row);setModal(true);}} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar / Ver detalle">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
-                          </button>
-                          <button onClick={()=>exportarAsistenciaCSV(row._trabajador, row._contrato, row.registros||{}, row.mes, row.anio)}
-                            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Exportar CSV">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                          </button>
-                          <button onClick={()=>setConfirm(row)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors" title="Eliminar">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                          </button>
-                        </div>
-                      </td>
+
+            {loadingBase ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="w-8 h-8 rounded-full animate-spin" style={{border:'2px solid rgba(124,58,237,0.15)',borderTopColor:'#7c3aed'}}/>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px]">
+                  <thead>
+                    <tr style={{background:'#1e1b4b'}}>
+                      {['Trabajador','Estado','Entrada','Salida','Horas','Acciones'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {activosFiltradosHoy.map(t => {
+                      // portalUid = uid de Firebase Auth = key en marcacionesHoy
+                      const uid  = t.portalUid;
+                      const marc = uid ? (marcacionesHoy[uid] || {}) : {};
+                      const ini  = `${t.nombre?.[0]||''}${t.apellidoPaterno?.[0]||''}`.toUpperCase();
+                      const nombre = `${t.nombre} ${t.apellidoPaterno}`.trim();
 
-        {totalPag > 1 && (
-          <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/40">
-            <p className="text-xs text-slate-400">Mostrando {(pagina-1)*POR_PAGINA+1}–{Math.min(pagina*POR_PAGINA,filtrados.length)} de <strong>{filtrados.length}</strong></p>
-            <div className="flex gap-1">
-              <button disabled={pagina===1}       onClick={()=>setPagina(p=>p-1)} className="px-3 py-1.5 text-xs font-bold bg-white border-2 border-slate-200 hover:border-purple-300 hover:text-purple-600 disabled:opacity-40 rounded-xl">← Ant</button>
-              <button disabled={pagina===totalPag} onClick={()=>setPagina(p=>p+1)} className="px-3 py-1.5 text-xs font-bold bg-white border-2 border-slate-200 hover:border-purple-300 hover:text-purple-600 disabled:opacity-40 rounded-xl">Sig →</button>
-            </div>
-          </div>
-        )}
-      </div>
+                      let estadoBadge, estadoLabel;
+                      if (!uid) {
+                        estadoBadge = 'bg-slate-100 text-slate-400';
+                        estadoLabel = '○ Sin cuenta';
+                      } else if (marc.entrada && marc.salida) {
+                        estadoBadge = 'bg-emerald-100 text-emerald-700';
+                        estadoLabel = '✓ Completa';
+                      } else if (marc.entrada) {
+                        estadoBadge = 'bg-amber-100 text-amber-700';
+                        estadoLabel = '● En jornada';
+                      } else {
+                        estadoBadge = 'bg-red-100 text-red-600';
+                        estadoLabel = '— Sin marcar';
+                      }
 
-      <AsistenciaModal isOpen={modal} onClose={()=>setModal(false)} editData={editData}
-        trabajadores={trabajadores} contratos={contratos} onSaved={load} />
-
-      {confirm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={()=>setConfirm(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.2)"}}>
-              <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-            </div>
-            <h3 className="text-base font-black text-slate-900 text-center">¿Eliminar registro?</h3>
-            <p className="text-sm text-slate-500 text-center mt-1 mb-5">Esta acción no se puede deshacer.</p>
-            <div className="flex gap-3">
-              <button onClick={()=>setConfirm(null)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm">Cancelar</button>
-              <button onClick={handleDelete} className="flex-1 py-2.5 text-white font-bold rounded-xl text-sm" style={{background:"linear-gradient(135deg, #ef4444, #e11d48)", boxShadow:"0 4px 12px rgba(239,68,68,0.3)"}}>Eliminar</button>
-            </div>
+                      return (
+                        <tr key={t.id} className="transition-colors" onMouseEnter={e=>e.currentTarget.style.background='#faf9ff'} onMouseLeave={e=>e.currentTarget.style.background=''}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0" style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)'}}>{ini}</div>
+                              <div>
+                                <p className="font-bold text-slate-800 text-sm">{nombre}</p>
+                                <p className="text-[11px] text-slate-400 font-mono">{t.rut||'—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold ${estadoBadge}`}>{estadoLabel}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-sm font-semibold text-slate-700">
+                              {marc.entrada ? fmtHora(marc.entrada) : <span className="text-slate-300">—</span>}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-sm font-semibold text-slate-700">
+                              {marc.salida ? fmtHora(marc.salida) : <span className="text-slate-300">—</span>}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-sm text-emerald-600 font-semibold">
+                              {marc.entrada && marc.salida ? diffHoras(marc.entrada, marc.salida) : <span className="text-slate-300">—</span>}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {marc.docId && (
+                              <button
+                                onClick={() => setEditModal({
+                                  nombre, diaKey, docId: marc.docId,
+                                  trabajadorUid: uid,
+                                  entrada: marc.entrada,
+                                  salida:  marc.salida,
+                                  modificaciones: marc.modificaciones || [],
+                                })}
+                                className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors"
+                                title="Editar registro con justificación"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
+
+      {/* ════════════════════════════════
+          VISTA: HISTORIAL MENSUAL
+      ════════════════════════════════ */}
+      {vista === 'historial' && (
+        <>
+          <div className="rounded-2xl overflow-hidden mb-2" style={{background:'#fff',border:'1px solid rgba(0,0,0,0.06)',boxShadow:'0 2px 8px rgba(0,0,0,0.05)'}}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{background:'linear-gradient(135deg,#1e1b4b,#312e81)'}}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white">Historial de asistencia</h2>
+                  <p className="text-xs text-white/70 mt-0.5">Art. 22 CT · Horas extra Art. 31–32 CT</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Filtros historial */}
+            <div className="px-5 py-3 border-b flex flex-wrap gap-2" style={{borderColor:'rgba(0,0,0,0.05)',background:'rgba(248,248,252,0.8)'}}>
+              <select className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-purple-400" value={filtroMes} onChange={e=>{setFiltroMes(e.target.value);setPagina(1);}}>
+                <option value="">Todos los meses</option>
+                {MESES.map((m,i) => <option key={m} value={fmt2(i+1)}>{m}</option>)}
+              </select>
+              <select className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:border-purple-400" value={filtroAnio} onChange={e=>{setFiltroAnio(e.target.value);setPagina(1);}}>
+                {[2023,2024,2025,2026].map(y => <option key={y}>{y}</option>)}
+              </select>
+              <div className="relative flex-1 min-w-[150px]">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+                <input className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 bg-white" placeholder="Buscar trabajador..." value={busqueda} onChange={e=>{setBusqueda(e.target.value);setPagina(1);}}/>
+              </div>
+            </div>
+
+            {paginados.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <svg className="w-12 h-12 opacity-20 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <p className="font-semibold text-sm">Sin registros para este período</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px]">
+                  <thead>
+                    <tr style={{background:'#1e1b4b'}}>
+                      {['Trabajador','Período','Días registrados','Modificaciones','Acciones'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {paginados.map(row => {
+                      const ini = `${row._trabajador?.nombre?.[0]||''}${row._trabajador?.apellidoPaterno?.[0]||''}`;
+                      const diasConEntrada = Object.values(row.registros||{}).filter(r => r.entrada).length;
+                      const mods = (row.modificaciones||[]).length;
+                      return (
+                        <tr key={row.id} className="transition-colors" onMouseEnter={e=>e.currentTarget.style.background='#faf9ff'} onMouseLeave={e=>e.currentTarget.style.background=''}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs" style={{background:'linear-gradient(135deg,#7c3aed,#4f46e5)'}}>{ini}</div>
+                              <div>
+                                <p className="font-bold text-slate-800 text-sm">{row._trabajador?.nombre||'—'} {row._trabajador?.apellidoPaterno||''}</p>
+                                <p className="text-[11px] text-slate-400 font-mono">{row._trabajador?.rut||'—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm font-bold text-slate-600">{MESES[parseInt(row.mes)-1]||'—'} {row.anio}</td>
+                          <td className="px-4 py-3">
+                            <span className="text-lg font-black text-emerald-600">{diasConEntrada}</span>
+                            <span className="text-xs text-slate-400 ml-1">días</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {mods > 0
+                              ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
+                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                                  {mods} cambio{mods>1?'s':''}
+                                </span>
+                              : <span className="text-xs text-slate-300">Sin cambios</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3">
+                            <button onClick={() => exportarAsistenciaCSV(row._trabajador, row._contrato, row.registros||{}, row.mes, row.anio)}
+                              className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Exportar CSV">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {totalPag > 1 && (
+              <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/40">
+                <p className="text-xs text-slate-400">Mostrando {(pagina-1)*POR_PAGINA+1}–{Math.min(pagina*POR_PAGINA,enriquecidos.length)} de <strong>{enriquecidos.length}</strong></p>
+                <div className="flex gap-1">
+                  <button disabled={pagina===1}        onClick={()=>setPagina(p=>p-1)} className="px-3 py-1.5 text-xs font-bold bg-white border-2 border-slate-200 hover:border-purple-300 hover:text-purple-600 disabled:opacity-40 rounded-xl">← Ant</button>
+                  <button disabled={pagina===totalPag}  onClick={()=>setPagina(p=>p+1)} className="px-3 py-1.5 text-xs font-bold bg-white border-2 border-slate-200 hover:border-purple-300 hover:text-purple-600 disabled:opacity-40 rounded-xl">Sig →</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Modal edición con justificación */}
+      {editModal && <ModalEdicion item={editModal} onClose={() => setEditModal(null)} />}
     </>
   );
 }
+
 
 function Organigrama({ trabajadores, contratos, filtroEmpresa }) {
   const activos = trabajadores.filter(t =>

@@ -4,12 +4,12 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy,
 import * as Shared from './RRHH.shared';
 import * as Calc from './RRHH.calculo';
 import * as PDFs from './RRHH.pdfs';
-import * as Firma from './RRHH.firma';
 
 const {
   inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, IMM_2024,
   TASAS, TASAS_AFP, TIPOS_ANEXO, ESTADOS_DIA, UTM_DEFAULT, COLORES_AREA,
+  REGIONES_COMUNAS, REGIONES,
 } = Shared;
 
 const {
@@ -20,7 +20,7 @@ const {
 
 const {
   generarPDFContrato, generarPDFLiquidacion, generarPDFFiniquito,
-  generarPDFAnexo, generarPDFContratoBlob, generarPDFAnexoBlob, generarCertificadoAnual,
+  generarPDFAnexo, generarCertificadoAnual,
 } = PDFs;
 
 // ─── Helpers UI ───────────────────────────────────────────────────────────────
@@ -103,13 +103,25 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
     direccion: '', comuna: '', region: '',
-    telefono: '', email: '',
+    codigoPais: '+56', telefono: '', email: '',
     empresa: '', area: '', cargo: '', fechaIngreso: '',
     afp: '', prevision: 'FONASA', isapre: '',
     estado: 'activo', observaciones: '',
   };
-  const [form,   setForm]   = useState(empty);
-  const [saving, setSaving] = useState(false);
+  const [form,    setForm]    = useState(empty);
+  const [saving,  setSaving]  = useState(false);
+  const [cargos,  setCargos]  = useState([]);  // desde bandas_salariales
+
+  // Cargar cargos desde Firestore al abrir
+  useEffect(() => {
+    if (!isOpen) return;
+    getDocs(collection(db, 'bandas_salariales'))
+      .then(snap => {
+        const lista = [...new Set(snap.docs.map(d => d.data().cargo).filter(Boolean))].sort();
+        setCargos(lista);
+      })
+      .catch(() => setCargos([]));
+  }, [isOpen]);
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
@@ -117,13 +129,35 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // ── Helpers de validación/formato ──
+  function soloLetras(v) {
+    return v.replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s'-]/g, '');
+  }
+
+  function formatRut(v) {
+    // Permite solo dígitos y k/K, aplica formato xx.xxx.xxx-x
+    const limpio = v.replace(/[^0-9kK]/g, '').toUpperCase();
+    if (limpio.length <= 1) return limpio;
+    const cuerpo = limpio.slice(0, -1);
+    const dv     = limpio.slice(-1);
+    const miles  = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `${miles}-${dv}`;
+  }
+
+  function soloTelefono(v) {
+    return v.replace(/[^0-9]/g, '').slice(0, 11);
+  }
+
+  const comunasDeRegion = form.region ? (REGIONES_COMUNAS[form.region] || []) : [];
+
   const handleSave = async () => {
     if (!form.nombre || !form.apellidoPaterno || !form.rut) {
       alert('Nombre, apellido paterno y RUT son obligatorios.'); return;
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      const telefonoCompleto = form.telefono ? `${form.codigoPais}${form.telefono}` : '';
+      const payload = { ...form, telefono: telefonoCompleto, updatedAt: serverTimestamp() };
       if (editData?.id) {
         await updateDoc(doc(db, 'trabajadores', editData.id), payload);
       } else {
@@ -133,6 +167,9 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
+
+  // Códigos de país más comunes
+  const CODIGOS_PAIS = ['+56', '+54', '+55', '+51', '+57', '+58', '+591', '+593', '+595', '+598', '+1', '+34', '+52'];
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}
@@ -144,18 +181,31 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         <Divider label="Datos personales" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Nombre" required>
-            <input className={inp} value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Nombre(s)" />
+            <input className={inp}
+              value={form.nombre}
+              onChange={e => set('nombre', soloLetras(e.target.value))}
+              placeholder="Nombre(s)" />
           </Field>
           <Field label="Apellido paterno" required>
-            <input className={inp} value={form.apellidoPaterno} onChange={e => set('apellidoPaterno', e.target.value)} placeholder="Apellido paterno" />
+            <input className={inp}
+              value={form.apellidoPaterno}
+              onChange={e => set('apellidoPaterno', soloLetras(e.target.value))}
+              placeholder="Apellido paterno" />
           </Field>
           <Field label="Apellido materno">
-            <input className={inp} value={form.apellidoMaterno} onChange={e => set('apellidoMaterno', e.target.value)} placeholder="Apellido materno" />
+            <input className={inp}
+              value={form.apellidoMaterno}
+              onChange={e => set('apellidoMaterno', soloLetras(e.target.value))}
+              placeholder="Apellido materno" />
           </Field>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="RUT" required>
-            <input className={inp} value={form.rut} onChange={e => set('rut', e.target.value)} placeholder="12.345.678-9" />
+            <input className={inp}
+              value={form.rut}
+              onChange={e => set('rut', formatRut(e.target.value))}
+              placeholder="12.345.678-9"
+              maxLength={12} />
           </Field>
           <Field label="Fecha de nacimiento">
             <input type="date" className={inp} value={form.fechaNacimiento} onChange={e => set('fechaNacimiento', e.target.value)} />
@@ -168,16 +218,37 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           <Field label="Dirección">
             <input className={inp} value={form.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle y número" />
           </Field>
-          <Field label="Comuna">
-            <input className={inp} value={form.comuna} onChange={e => set('comuna', e.target.value)} />
-          </Field>
           <Field label="Región">
-            <input className={inp} value={form.region} onChange={e => set('region', e.target.value)} />
+            <select className={inp} value={form.region} onChange={e => { set('region', e.target.value); set('comuna', ''); }}>
+              <option value="">Seleccionar región…</option>
+              {REGIONES.map(r => <option key={r}>{r}</option>)}
+            </select>
+          </Field>
+          <Field label="Comuna">
+            <select className={inp} value={form.comuna} onChange={e => set('comuna', e.target.value)} disabled={!form.region}>
+              <option value="">{form.region ? 'Seleccionar comuna…' : 'Primero elige región'}</option>
+              {comunasDeRegion.map(c => <option key={c}>{c}</option>)}
+            </select>
           </Field>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Teléfono">
-            <input className={inp} value={form.telefono} onChange={e => set('telefono', e.target.value)} placeholder="+56 9 1234 5678" />
+            <div className="flex" style={{border:'2px solid #e2e8f0',borderRadius:8,overflow:'hidden',background:'#fff',transition:'border-color 0.15s'}}
+              onFocusCapture={e=>e.currentTarget.style.borderColor='#a78bfa'}
+              onBlurCapture={e=>e.currentTarget.style.borderColor='#e2e8f0'}>
+              <select
+                style={{width:72,flexShrink:0,border:'none',outline:'none',background:'#f8f8fc',fontSize:13,fontWeight:600,color:'#475569',padding:'0 4px 0 8px',borderRight:'1px solid #e2e8f0',cursor:'pointer'}}
+                value={form.codigoPais || '+56'}
+                onChange={e => set('codigoPais', e.target.value)}>
+                {CODIGOS_PAIS.map(c => <option key={c}>{c}</option>)}
+              </select>
+              <input
+                style={{flex:1,border:'none',outline:'none',padding:'8px 10px',fontSize:14,background:'#fff',minWidth:0}}
+                value={form.telefono}
+                onChange={e => set('telefono', soloTelefono(e.target.value))}
+                placeholder="9 1234 5678"
+                inputMode="numeric" />
+            </div>
           </Field>
           <Field label="Email">
             <input type="email" className={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.cl" />
@@ -199,7 +270,15 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             </select>
           </Field>
           <Field label="Cargo">
-            <input className={inp} value={form.cargo} onChange={e => set('cargo', e.target.value)} placeholder="Cargo o función" />
+            <select className={inp} value={form.cargo} onChange={e => set('cargo', e.target.value)}>
+              <option value="">Seleccionar cargo…</option>
+              {cargos.map(c => <option key={c}>{c}</option>)}
+              <option value="__otro__">Otro (escribir)</option>
+            </select>
+            {form.cargo === '__otro__' && (
+              <input className={inp + ' mt-1.5'} placeholder="Escribe el cargo"
+                onChange={e => set('cargo', e.target.value)} autoFocus />
+            )}
           </Field>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -482,387 +561,6 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
   );
 }
 
-// ─── Generadores de Blob PDF real para firma electrónica ────────────────────
-// Usa jsPDF para generar un PDF binario válido que ValidaFirma puede procesar.
-
-async function loadJsPDF() {
-  if (window.jspdf) return window.jspdf.jsPDF;
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    s.onload = () => resolve(window.jspdf.jsPDF);
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
-
-async function buildContratoBlob(contrato, trabajador) {
-  const jsPDF = await loadJsPDF();
-  const doc   = new jsPDF({ unit: 'mm', format: 'a4' });
-  const fmtM  = n => `$${(parseInt(n)||0).toLocaleString('es-CL')}`;
-  const fmtD  = d => d ? d.split('-').reverse().join('/') : '—';
-  const nombre = `${trabajador.nombre||''} ${trabajador.apellidoPaterno||''} ${trabajador.apellidoMaterno||''}`.trim();
-  const W = 210, mg = 20, cw = W - mg*2;
-
-  // ── Header ──────────────────────────────────────────────────────────────
-  doc.setFillColor(30, 27, 75);
-  doc.rect(0, 0, W, 28, 'F');
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(14); doc.setFont('helvetica','bold');
-  doc.text('CONTRATO INDIVIDUAL DE TRABAJO', W/2, 12, { align:'center' });
-  doc.setFontSize(9); doc.setFont('helvetica','normal');
-  doc.text(`Art. 10 Código del Trabajo · ${contrato.tipoContrato||'Indefinido'}`, W/2, 20, { align:'center' });
-  doc.text(`Empresa: ${contrato.empresa||'—'}`, W/2, 25, { align:'center' });
-
-  doc.setTextColor(30, 27, 75);
-  let y = 38;
-
-  const section = (title) => {
-    doc.setFillColor(240, 240, 255);
-    doc.rect(mg, y-4, cw, 7, 'F');
-    doc.setFontSize(8); doc.setFont('helvetica','bold');
-    doc.setTextColor(100,100,160);
-    doc.text(title.toUpperCase(), mg+2, y+0.5);
-    doc.setTextColor(30,27,75);
-    y += 8;
-  };
-
-  const field = (label, value, x, colW) => {
-    doc.setFontSize(7.5); doc.setFont('helvetica','normal');
-    doc.setTextColor(120,120,140);
-    doc.text(label, x, y);
-    doc.setFontSize(9); doc.setFont('helvetica','bold');
-    doc.setTextColor(30,27,75);
-    doc.text(String(value||'—'), x, y+4.5);
-  };
-
-  // ── Trabajador ──────────────────────────────────────────────────────────
-  section('Trabajador');
-  field('Nombre completo', nombre, mg, cw/2);
-  field('RUT', trabajador.rut||'—', mg + cw/2, cw/2);
-  y += 10;
-  field('Cargo', contrato.cargo||'—', mg, cw/2);
-  field('Jornada', contrato.jornada||'—', mg + cw/2, cw/2);
-  y += 14;
-
-  // ── Vigencia ─────────────────────────────────────────────────────────────
-  section('Vigencia del contrato');
-  field('Fecha de inicio', fmtD(contrato.fechaInicio), mg, cw/2);
-  field('Fecha de término', contrato.tipoContrato==='Indefinido' ? 'Indefinido' : fmtD(contrato.fechaFin), mg+cw/2, cw/2);
-  y += 10;
-  field('Lugar de trabajo', contrato.lugarTrabajo||contrato.empresa||'—', mg, cw);
-  y += 14;
-
-  // ── Remuneración ──────────────────────────────────────────────────────────
-  section('Remuneración (Art. 42 CT)');
-  field('Sueldo base', fmtM(contrato.sueldoBase), mg, cw/3);
-  field('Bono colación', fmtM(contrato.bonoColacion), mg+cw/3, cw/3);
-  field('Bono movilización', fmtM(contrato.bonoMovilizacion), mg+2*cw/3, cw/3);
-  y += 10;
-  field('Gratificación', contrato.gratificacion||'Art. 50 CT (25% tope 4.75 IMM)', mg, cw);
-  y += 14;
-
-  // ── Observaciones ──────────────────────────────────────────────────────
-  if (contrato.observaciones) {
-    section('Observaciones');
-    doc.setFontSize(9); doc.setFont('helvetica','normal');
-    const lines = doc.splitTextToSize(contrato.observaciones, cw);
-    doc.text(lines, mg, y);
-    y += lines.length * 5 + 8;
-  }
-
-  // ── Firmas ───────────────────────────────────────────────────────────────
-  y = Math.max(y, 230);
-  doc.setDrawColor(30,27,75);
-  doc.line(mg, y, mg+cw/2-10, y);
-  doc.line(mg+cw/2+10, y, mg+cw, y);
-  doc.setFontSize(9); doc.setFont('helvetica','bold');
-  doc.text(nombre, mg + cw/4, y+5, { align:'center' });
-  doc.text(contrato.empresa||'Empleador', mg + 3*cw/4, y+5, { align:'center' });
-  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,140);
-  doc.text(`RUT ${trabajador.rut||'—'} · Trabajador`, mg+cw/4, y+10, { align:'center' });
-  doc.text('Empleador', mg+3*cw/4, y+10, { align:'center' });
-
-  // ── Footer ───────────────────────────────────────────────────────────────
-  doc.setFontSize(7); doc.setTextColor(160,160,180);
-  doc.text('Documento generado por FleetCore · Firma electrónica simple Ley 19.799 · ValidaFirma.cl', W/2, 287, { align:'center' });
-
-  return new Blob([doc.output('arraybuffer')], { type: 'application/pdf' });
-}
-
-async function buildAnexoBlob(anexo, trabajador, contrato) {
-  const jsPDF = await loadJsPDF();
-  const doc   = new jsPDF({ unit: 'mm', format: 'a4' });
-  const fmtM  = n => `$${(parseInt(n)||0).toLocaleString('es-CL')}`;
-  const fmtD  = d => d ? d.split('-').reverse().join('/') : '—';
-  const nombre = `${trabajador.nombre||''} ${trabajador.apellidoPaterno||''}`.trim();
-  const { TIPOS_ANEXO } = Shared;
-  const tipoLabel = TIPOS_ANEXO?.find(t => t.value === anexo.tipo)?.label || anexo.tipo || '—';
-  const W = 210, mg = 20, cw = W - mg*2;
-
-  doc.setFillColor(30, 27, 75);
-  doc.rect(0, 0, W, 28, 'F');
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(14); doc.setFont('helvetica','bold');
-  doc.text('ANEXO DE CONTRATO DE TRABAJO', W/2, 12, { align:'center' });
-  doc.setFontSize(9); doc.setFont('helvetica','normal');
-  doc.text(`Art. 11 Código del Trabajo · ${tipoLabel}`, W/2, 20, { align:'center' });
-  doc.text(`Fecha: ${fmtD(anexo.fechaAnexo)}`, W/2, 25, { align:'center' });
-
-  doc.setTextColor(30, 27, 75);
-  let y = 38;
-
-  const section = (title) => {
-    doc.setFillColor(240,240,255);
-    doc.rect(mg, y-4, cw, 7, 'F');
-    doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(100,100,160);
-    doc.text(title.toUpperCase(), mg+2, y+0.5);
-    doc.setTextColor(30,27,75); y += 8;
-  };
-  const field = (label, value, x) => {
-    doc.setFontSize(7.5); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,140);
-    doc.text(label, x, y);
-    doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(30,27,75);
-    doc.text(String(value||'—'), x, y+4.5);
-  };
-
-  section('Partes');
-  field('Trabajador', nombre, mg);
-  field('RUT', trabajador.rut||'—', mg+cw/2);
-  y += 10;
-  field('Empresa', contrato?.empresa||'—', mg);
-  field('Contrato base', `${contrato?.tipoContrato||'—'} desde ${fmtD(contrato?.fechaInicio)}`, mg+cw/2);
-  y += 14;
-
-  section('Modificaciones acordadas');
-  const cambios = [
-    anexo.nuevoSueldo  ? `Nuevo sueldo base: ${fmtM(anexo.nuevoSueldo)}` : null,
-    anexo.nuevoCargo   ? `Nuevo cargo: ${anexo.nuevoCargo}` : null,
-    anexo.nuevaJornada ? `Nueva jornada: ${anexo.nuevaJornada}` : null,
-    anexo.nuevaEmpresa ? `Nueva empresa: ${anexo.nuevaEmpresa}` : null,
-    anexo.nuevaFechaFin? `Nueva fecha término: ${fmtD(anexo.nuevaFechaFin)}` : null,
-  ].filter(Boolean);
-
-  if (cambios.length) {
-    cambios.forEach(c => {
-      doc.setFillColor(240,253,244);
-      doc.rect(mg, y-3, cw, 7, 'F');
-      doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(30,100,60);
-      doc.text(`✓ ${c}`, mg+3, y+1.5);
-      y += 9;
-    });
-  }
-
-  if (anexo.descripcion) {
-    y += 4;
-    doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(30,27,75);
-    const lines = doc.splitTextToSize(anexo.descripcion, cw);
-    doc.text(lines, mg, y);
-    y += lines.length * 5;
-  }
-
-  y = Math.max(y + 10, 230);
-  doc.setDrawColor(30,27,75);
-  doc.line(mg, y, mg+cw/2-10, y);
-  doc.line(mg+cw/2+10, y, mg+cw, y);
-  doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(30,27,75);
-  doc.text(nombre, mg+cw/4, y+5, { align:'center' });
-  doc.text(contrato?.empresa||'Empleador', mg+3*cw/4, y+5, { align:'center' });
-  doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(100,100,140);
-  doc.text(`RUT ${trabajador.rut||'—'} · Trabajador`, mg+cw/4, y+10, { align:'center' });
-  doc.text('Empleador', mg+3*cw/4, y+10, { align:'center' });
-
-  doc.setFontSize(7); doc.setTextColor(160,160,180);
-  doc.text('Documento generado por FleetCore · Firma electrónica simple Ley 19.799 · ValidaFirma.cl', W/2, 287, { align:'center' });
-
-  return new Blob([doc.output('arraybuffer')], { type: 'application/pdf' });
-}
-
-// ─── PanelFirma — componente reutilizable ─────────────────────────────────────
-// Gestiona el ciclo completo: sin enviar → enviado → firmado
-// Props: docId (Firestore id), docType, firmaData, pdfBlob, firmantes, onUpdate
-
-function PanelFirma({ docId, coleccion, firmaData = {}, pdfBlob, nombreArchivo, firmantes = [], onUpdate }) {
-  const [enviando,     setEnviando]     = useState(false);
-  const [consultando,  setConsultando]  = useState(false);
-  const [reenviando,   setReenviando]   = useState(null); // email
-  const [error,        setError]        = useState('');
-
-  const estado = firmaData?.estadoFirma || 'sin_enviar';
-  const procesoId = firmaData?.firmaProcesoId;
-  const badge = Firma.ESTADOS_FIRMA[estado] || Firma.ESTADOS_FIRMA.sin_enviar;
-
-  // ── Enviar a firmar ──────────────────────────────────────────────────────
-  const enviar = async () => {
-    if (!firmantes.length) { setError('No hay firmantes configurados. Verifica que el trabajador tenga email.'); return; }
-    if (!pdfBlob) { setError('Genera el PDF primero antes de enviar a firma.'); return; }
-    setEnviando(true); setError('');
-    try {
-      const apiKey = import.meta.env.VITE_VALIDAFIRMA_API_KEY;
-      const resultado = apiKey
-        ? await Firma.crearProcesoDeFirma({ pdfBlob, nombreArchivo, firmantes })
-        : Firma.crearProcesoDeFirmaDemo({ firmantes });
-
-      await updateDoc(doc(db, coleccion, docId), {
-        estadoFirma:    'enviado',
-        firmaProcesoId: resultado.procesoId   ?? null,
-        firmaEnviadoAt: serverTimestamp(),
-        firmaFirmantes: resultado.firmantesUrls ?? [],
-        firmaDemo:      resultado.demo         ?? resultado.simulated ?? false,
-        firmaSimulado:  resultado.simulated    ?? false,
-        updatedAt:      serverTimestamp(),
-      });
-      onUpdate?.();
-    } catch (e) { setError(e.message); }
-    setEnviando(false);
-  };
-
-  // ── Consultar estado ─────────────────────────────────────────────────────
-  const consultar = async () => {
-    if (!procesoId) return;
-    setConsultando(true); setError('');
-    try {
-      const r = await Firma.consultarEstadoFirma(procesoId);
-      await updateDoc(doc(db, coleccion, docId), {
-        estadoFirma:     r.completado ? 'completamente_firmado' : (r.estado ?? 'enviado'),
-        firmaFirmadoPor: r.firmadoPor ?? [],
-        firmaCheckedAt:  serverTimestamp(),
-        ...(r.pdfFirmadoUrl ? { firmaPdfUrl: r.pdfFirmadoUrl } : {}),
-        updatedAt:       serverTimestamp(),
-      });
-      onUpdate?.();
-    } catch (e) { setError(e.message); }
-    setConsultando(false);
-  };
-
-  // ── Descargar PDF firmado ────────────────────────────────────────────────
-  const descargar = async () => {
-    if (!procesoId) return;
-    try {
-      const blob = await Firma.descargarPDFFirmado(procesoId);
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = `FIRMADO_${nombreArchivo || 'documento.pdf'}`;
-      a.click(); URL.revokeObjectURL(url);
-    } catch (e) { setError(e.message); }
-  };
-
-  // ── Reenviar a firmante ──────────────────────────────────────────────────
-  const reenviar = async (email) => {
-    if (!procesoId) return;
-    setReenviando(email); setError('');
-    try {
-      await Firma.reenviarSolicitudFirma(procesoId, email);
-      alert(`✓ Solicitud reenviada a ${email}`);
-    } catch (e) { setError(e.message); }
-    setReenviando(null);
-  };
-
-  const firmantesGuardados = firmaData?.firmaFirmantes || [];
-  const esDemo = firmaData?.firmaDemo;
-
-  return (
-    <div className="rounded-2xl border border-slate-200 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-          </svg>
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Firma electrónica</span>
-        </div>
-        <span className={badge.bg + ' ' + badge.color + ' text-[11px] font-bold px-2.5 py-1 rounded-full'}>
-          {badge.dot} {badge.label}
-          {esDemo && <span className="ml-1 opacity-60">(demo)</span>}
-        </span>
-      </div>
-
-      <div className="p-4 space-y-3">
-        {/* Firmantes */}
-        {firmantes.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Firmantes</p>
-            {firmantes.map((f, i) => {
-              const guardado = firmantesGuardados.find(g => g.email === f.email);
-              const firmado  = guardado?.estado === 'firmado';
-              return (
-                <div key={i} className="flex items-center justify-between bg-white border border-slate-100 rounded-xl px-3 py-2">
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">{f.nombre}</p>
-                    <p className="text-[11px] text-slate-400">{f.email} {f.rut ? `· ${f.rut}` : ''}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {firmado
-                      ? <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">✓ Firmado</span>
-                      : procesoId && estado !== 'sin_enviar'
-                        ? <button
-                            onClick={() => reenviar(f.email)}
-                            disabled={reenviando === f.email}
-                            className="text-[11px] font-bold text-blue-600 hover:underline disabled:opacity-40">
-                            {reenviando === f.email ? '…' : '↩ Reenviar'}
-                          </button>
-                        : <span className="text-[11px] text-slate-300">Pendiente</span>
-                    }
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {firmantes.length === 0 && (
-          <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
-            ⚠ El trabajador no tiene email registrado. Agréguelo en sus datos para poder enviar a firma.
-          </p>
-        )}
-
-        {error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>
-        )}
-
-        {/* Acciones */}
-        <div className="flex gap-2 pt-1">
-          {estado === 'sin_enviar' || estado === 'pendiente' ? (
-            <button
-              onClick={enviar}
-              disabled={enviando || firmantes.length === 0}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white text-sm font-bold rounded-xl transition-all active:scale-95 disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
-              {enviando
-                ? <><span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"/><span>Enviando…</span></>
-                : <><span>✉</span><span>Enviar a firma digital</span></>
-              }
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={consultar}
-                disabled={consultando}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-colors disabled:opacity-40">
-                {consultando
-                  ? <><span className="w-3 h-3 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin"/><span>Consultando…</span></>
-                  : <><span>↻</span><span>Actualizar estado</span></>
-                }
-              </button>
-              {(estado === 'completamente_firmado' || estado === 'firmado') && (
-                <button
-                  onClick={descargar}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors">
-                  ⬇ PDF firmado
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        <p className="text-[10px] text-slate-300 text-center">
-          Firma electrónica simple · Ley 19.799 · ValidaFirma.cl
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ─── ContratoModal ────────────────────────────────────────────────────────────
 
 function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
@@ -870,45 +568,15 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
     cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
-    estadoFirma: 'sin_enviar',
   };
-  const [form,     setForm]     = useState(empty);
-  const [saving,   setSaving]   = useState(false);
-  const [pdfBlob,  setPdfBlob]  = useState(null);
-  const [genPdf,   setGenPdf]   = useState(false);
+  const [form, setForm]     = useState(empty);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
-    setPdfBlob(null);
   }, [editData, isOpen]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
-
-  // Firmantes: representante empresa + trabajador (si tiene email)
-  const firmantes = [
-    ...(trabajadorSel?.email ? [{
-      nombre: `${trabajadorSel.apellidoPaterno} ${trabajadorSel.nombre}`,
-      email:  trabajadorSel.email,
-      rut:    trabajadorSel.rut || '',
-    }] : []),
-  ];
-
-  // Generar PDF como Blob para firma + abrir vista previa
-  const handleGenerarPDF = async () => {
-    if (!trabajadorSel || !form.fechaInicio) { alert('Completa trabajador y fecha de inicio.'); return; }
-    setGenPdf(true);
-    try {
-      const blob = await buildContratoBlob(form, trabajadorSel);
-      setPdfBlob(blob);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch(e) {
-      alert('Error generando PDF: ' + e.message);
-    }
-    setGenPdf(false);
-  };
 
   const handleSave = async () => {
     if (!form.trabajadorId || !form.fechaInicio || !form.sueldoBase) {
@@ -920,14 +588,12 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
       if (editData?.id) {
         await updateDoc(doc(db, 'contratos', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'contratos'), { ...payload, estadoFirma: 'sin_enviar', createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'contratos'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
-
-  const nombrePdf = `Contrato_${trabajadorSel?.apellidoPaterno || 'Trabajador'}_${form.fechaInicio?.slice(0,7) || ''}.pdf`;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}
@@ -1005,42 +671,6 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
             <input className={inp} value={form.observaciones} onChange={e => set('observaciones', e.target.value)} placeholder="Notas opcionales" />
           </Field>
         </div>
-
-        {/* Firma electrónica — solo para contratos ya guardados */}
-        {editData?.id && (
-          <>
-            <Divider label="Firma electrónica · Ley 19.799" />
-            <div className="space-y-2">
-              {/* Botón generar PDF (necesario antes de firmar) */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleGenerarPDF}
-                  disabled={genPdf || !form.trabajadorId || !form.fechaInicio}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors disabled:opacity-40">
-                  {genPdf ? '…' : '📄'} {pdfBlob ? 'Regenerar PDF' : 'Generar PDF para firma'}
-                </button>
-                {pdfBlob && (
-                  <span className="text-xs text-emerald-600 font-bold">✓ PDF listo para enviar</span>
-                )}
-              </div>
-              <PanelFirma
-                docId={editData.id}
-                coleccion="contratos"
-                firmaData={form}
-                pdfBlob={pdfBlob}
-                nombreArchivo={nombrePdf}
-                firmantes={firmantes}
-                onUpdate={() => { onSaved?.(); }}
-              />
-            </div>
-          </>
-        )}
-        {!editData?.id && (
-          <p className="text-[11px] text-slate-400 text-center bg-slate-50 rounded-xl px-3 py-2">
-            Guarda el contrato primero para habilitar la firma electrónica
-          </p>
-        )}
-
         <div className="flex justify-end gap-3 pt-2">
           <CancelBtn onClose={onClose} />
           <SaveBtn saving={saving} onClick={handleSave} label={editData ? 'Actualizar contrato' : 'Crear contrato'} />
@@ -1432,16 +1062,13 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
     fechaAnexo: new Date().toISOString().split('T')[0],
     descripcion: '', nuevoSueldo: '', nuevoCargo: '',
     nuevaJornada: '', nuevaEmpresa: '', nuevaFechaFin: '',
-    estado: 'vigente', estadoFirma: 'sin_enviar',
+    estado: 'vigente',
   };
-  const [form,    setForm]    = useState(empty);
-  const [saving,  setSaving]  = useState(false);
-  const [pdfBlob, setPdfBlob] = useState(null);
-  const [genPdf,  setGenPdf]  = useState(false);
+  const [form,   setForm]   = useState(empty);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
-    setPdfBlob(null);
   }, [editData, isOpen]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -1574,52 +1201,6 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
             <SaveBtn saving={saving} onClick={handleSave} label={editData ? 'Actualizar anexo' : 'Guardar anexo'} />
           </div>
         </div>
-
-        {/* Firma electrónica */}
-        {editData?.id && trabajadorSel ? (
-          <>
-            <Divider label="Firma electrónica · Ley 19.799" />
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    setGenPdf(true);
-                    try {
-                      const blob = await buildAnexoBlob(form, trabajadorSel, contratoSel);
-                      setPdfBlob(blob);
-                      const url = URL.createObjectURL(blob);
-                      window.open(url, '_blank');
-                    } catch(e) {
-                      alert('Error generando PDF: ' + e.message);
-                    }
-                    setGenPdf(false);
-                  }}
-                  disabled={genPdf || !form.tipo}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors disabled:opacity-40">
-                  {genPdf ? '…' : '📄'} {pdfBlob ? 'Regenerar PDF' : 'Generar PDF para firma'}
-                </button>
-                {pdfBlob && <span className="text-xs text-emerald-600 font-bold">✓ PDF listo</span>}
-              </div>
-              <PanelFirma
-                docId={editData.id}
-                coleccion="anexos"
-                firmaData={form}
-                pdfBlob={pdfBlob}
-                nombreArchivo={`Anexo_${trabajadorSel?.apellidoPaterno || ''}_${form.fechaAnexo || ''}.pdf`}
-                firmantes={trabajadorSel?.email ? [{
-                  nombre: `${trabajadorSel.apellidoPaterno} ${trabajadorSel.nombre}`,
-                  email:  trabajadorSel.email,
-                  rut:    trabajadorSel.rut || '',
-                }] : []}
-                onUpdate={() => onSaved?.()}
-              />
-            </div>
-          </>
-        ) : !editData?.id && (
-          <p className="text-[11px] text-slate-400 text-center bg-slate-50 rounded-xl px-3 py-2">
-            Guarda el anexo primero para habilitar la firma electrónica
-          </p>
-        )}
       </div>
     </Modal>
   );

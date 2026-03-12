@@ -3,7 +3,7 @@ import { db } from '../lib/firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import * as Shared from './RRHH.shared';
 import { DashboardSection, TrabajadoresSection, ContratosSection,
-  RemuneracionesSection, FiniquitosSection } from './RRHH.sections.a';
+  RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel } from './RRHH.sections.a';
 import { AnexosSection, ImpuestosSection, AsistenciaSection,
   OrganizacionSection, ReportesSection, ContabilidadSection } from './RRHH.sections.b';
 
@@ -16,19 +16,29 @@ const PAGE_TABS = [
   { id:'impuestos',      label:'Impuestos',       ready:true  },
   { id:'asistencia',     label:'Asistencia',      ready:true  },
   { id:'organizacion',   label:'Organización',    ready:true  },
-  { id:'reportes',       label:'Métricas',        ready:true  },
-  { id:'contabilidad',   label:'Reportes',    ready:true  },
+  { id:'reportes',       label:'Reportes',        ready:true  },
+  { id:'contabilidad',   label:'Contabilidad',    ready:true  },
   { id:'finiquitos',     label:'Finiquitos',      ready:true  },
+  { id:'portal',         label:'Portal',          ready:true  },
 ];
 
 export default function RRHH() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab,    setActiveTab]    = useState('dashboard');
+  const [trabajadores, setTrabajadores] = useState([]);
+
+  // Cargar trabajadores para el panel Portal
+  useEffect(() => {
+    if (activeTab !== 'portal') return;
+    getDocs(query(collection(db, 'trabajadores'), orderBy('apellidoPaterno')))
+      .then(snap => setTrabajadores(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => {});
+  }, [activeTab]);
 
   const TAB_ICONS = {
     dashboard:     '◈', trabajadores: '◉', contratos:  '◎',
     anexos:        '◍', remuneraciones:'◑',impuestos:  '◐',
     asistencia:    '◒', organizacion: '◓', reportes:   '◔',
-    contabilidad:  '◕', finiquitos:   '●',
+    contabilidad:  '◕', finiquitos:   '●', portal:     '◆',
   };
 
   return (
@@ -148,6 +158,7 @@ export default function RRHH() {
         {activeTab === 'reportes'        && <ReportesSection />}
         {activeTab === 'contabilidad'    && <ContabilidadSection />}
         {activeTab === 'finiquitos'      && <FiniquitosSection />}
+        {activeTab === 'portal'          && <PortalTrabajadoresPanel trabajadores={trabajadores} />}
         {!PAGE_TABS.find(t=>t.id===activeTab)?.ready && (
           <div className="flex flex-col items-center justify-center py-32 text-slate-400">
             <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">

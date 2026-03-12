@@ -22,6 +22,7 @@ import CombustibleModal from "./components/CombustibleModal";
 import CombustiblePage from "./components/CombustiblePage";
 import AdminPanel from "./pages/AdminPanel.jsx";
 import RRHH from "./pages/RRHH.jsx";
+import TrabajadorApp from "./pages/TrabajadorApp.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -911,6 +912,11 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
+
+  // ── Portal trabajadores: interceptar /trabajador antes de todo ──
+  if (window.location.pathname.startsWith('/trabajador')) {
+    return <TrabajadorApp />;
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {

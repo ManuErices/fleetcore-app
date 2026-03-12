@@ -739,15 +739,23 @@ function useCatalogo(categoria) {
     load();
   };
 
-  return { items, loading, add, remove };
+  const update = async (id, nombre) => {
+    if (!nombre.trim()) return;
+    await updateDoc(doc(db, 'catalogo_maquinas', id), { nombre: nombre.trim() });
+    await load();
+  };
+
+  return { items, loading, add, remove, update };
 }
 
 // Panel modal para gestionar una categoría del catálogo
 function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
-  const { items, loading, add, remove } = useCatalogo(categoria);
+  const { items, loading, add, remove, update } = useCatalogo(categoria);
   const [nuevo, setNuevo] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const [editVal, setEditVal] = useState('');
 
   const handleAdd = async () => {
     if (!nuevo.trim()) return;
@@ -758,6 +766,21 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
     if (onCreated) onCreated(nuevo.trim());
   };
 
+  const handleEdit = (item) => {
+    setEditId(item.id);
+    setEditVal(item.nombre);
+    setConfirmDel(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editVal.trim()) return;
+    setSaving(true);
+    await update(editId, editVal);
+    setEditId(null);
+    setEditVal('');
+    setSaving(false);
+  };
+
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -765,25 +788,19 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
       <div className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl"
         style={{background:'#fff', border:'1px solid rgba(124,58,237,0.15)'}}>
 
-        {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between"
           style={{background:'linear-gradient(135deg, #1e1b4b, #312e81)'}}>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-widest" style={{color:'rgba(196,181,253,0.6)'}}>
-              Catálogo de máquinas
-            </p>
+            <p className="text-[10px] font-black uppercase tracking-widest" style={{color:'rgba(196,181,253,0.6)'}}>Catálogo</p>
             <h3 className="text-base font-black text-white" style={{letterSpacing:'-0.01em'}}>{titulo}</h3>
           </div>
-          <button onClick={onClose}
-            className="p-1.5 rounded-lg transition-colors"
-            style={{background:'rgba(255,255,255,0.1)'}}>
+          <button onClick={onClose} className="p-1.5 rounded-lg" style={{background:'rgba(255,255,255,0.1)'}}>
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
             </svg>
           </button>
         </div>
 
-        {/* Agregar nuevo */}
         <div className="px-4 py-4 border-b border-slate-100">
           <div className="flex gap-2">
             <input
@@ -793,17 +810,14 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
               onChange={e => setNuevo(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAdd()}
             />
-            <button
-              onClick={handleAdd}
-              disabled={saving || !nuevo.trim()}
-              className="px-4 py-2.5 text-white font-bold text-sm rounded-xl disabled:opacity-40 transition-all"
-              style={{background:'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow:'0 4px 12px rgba(124,58,237,0.3)'}}>
+            <button onClick={handleAdd} disabled={saving || !nuevo.trim()}
+              className="px-4 py-2.5 text-white font-bold text-sm rounded-xl disabled:opacity-40"
+              style={{background:'linear-gradient(135deg, #7c3aed, #4f46e5)'}}>
               {saving ? '...' : '+ Agregar'}
             </button>
           </div>
         </div>
 
-        {/* Lista */}
         <div className="overflow-y-auto" style={{maxHeight:'320px'}}>
           {loading ? (
             <div className="flex items-center justify-center py-8">
@@ -814,31 +828,58 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
             <div className="text-center py-8 text-slate-400 text-sm">
               <p className="text-2xl mb-2">📋</p>
               <p>Sin {titulo.toLowerCase()} registrados</p>
-              <p className="text-xs mt-1">Agrega el primero arriba</p>
             </div>
           ) : (
             <div className="divide-y divide-slate-50">
               {items.map(item => (
-                <div key={item.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
-                  <span className="text-sm font-semibold text-slate-700">{item.nombre}</span>
-                  {confirmDel === item.id ? (
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setConfirmDel(null)}
-                        className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">
-                        No
+                <div key={item.id} className="px-4 py-2.5 hover:bg-slate-50 transition-colors">
+                  {editId === item.id ? (
+                    <div className="flex gap-2 items-center">
+                      <input
+                        autoFocus
+                        className="flex-1 px-3 py-1.5 border border-violet-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-100"
+                        value={editVal}
+                        onChange={e => setEditVal(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(); if (e.key === 'Escape') setEditId(null); }}
+                      />
+                      <button onClick={handleSaveEdit} disabled={saving || !editVal.trim()}
+                        className="px-3 py-1.5 text-xs font-black rounded-lg text-white disabled:opacity-40"
+                        style={{background:'linear-gradient(135deg, #7c3aed, #4f46e5)'}}>
+                        {saving ? '...' : 'Guardar'}
                       </button>
-                      <button onClick={async () => { await remove(item.id); setConfirmDel(null); }}
-                        className="text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-600">
-                        Sí, eliminar
+                      <button onClick={() => setEditId(null)}
+                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-500">
+                        Cancelar
                       </button>
                     </div>
+                  ) : confirmDel === item.id ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-red-500 font-medium">¿Eliminar "{item.nombre}"?</span>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setConfirmDel(null)}
+                          className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">No</button>
+                        <button onClick={async () => { await remove(item.id); setConfirmDel(null); }}
+                          className="text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-600">Sí, eliminar</button>
+                      </div>
+                    </div>
                   ) : (
-                    <button onClick={() => setConfirmDel(item.id)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-red-50 hover:text-red-400 transition-colors">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                      </svg>
-                    </button>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-slate-700">{item.nombre}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => handleEdit(item)} title="Editar"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-violet-50 hover:text-violet-500 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                          </svg>
+                        </button>
+                        <button onClick={() => setConfirmDel(item.id)} title="Eliminar"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:bg-red-50 hover:text-red-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               ))}
@@ -847,8 +888,7 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
         </div>
 
         <div className="px-4 py-3 border-t border-slate-100">
-          <button onClick={onClose}
-            className="w-full py-2.5 font-bold text-sm rounded-xl transition-colors"
+          <button onClick={onClose} className="w-full py-2.5 font-bold text-sm rounded-xl"
             style={{background:'#f1f5f9', color:'#475569'}}>
             Cerrar
           </button>
