@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const CATEGORIAS = [
@@ -248,6 +249,7 @@ function ModalCosto({ isOpen, onClose, onSave, editando }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasCostos() {
+  const { proyectoId } = useFinanzas();
   const [costos, setCostos]                   = useState([]);
   const [loading, setLoading]                 = useState(true);
   const [showModal, setShowModal]             = useState(false);
@@ -371,13 +373,16 @@ export default function FinanzasCostos() {
               <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Créditos, leasings, arriendos y compromisos recurrentes</p>
             </div>
           </div>
-          <button
-            onClick={() => { setEditando(null); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Nuevo Costo
-          </button>
+          <div className="flex items-center gap-2">
+            <ProyectoSelector />
+            <button
+              onClick={() => { setEditando(null); setShowModal(true); }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Nuevo Costo
+            </button>
+          </div>
         </div>
       </div>
 

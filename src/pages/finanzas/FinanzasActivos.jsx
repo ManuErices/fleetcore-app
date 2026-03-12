@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 const TIPOS = [
   { id: "maquinaria",  label: "Maquinaria",  color: "from-orange-500 to-amber-600",  badge: "bg-orange-100 text-orange-700",  dot: "bg-orange-500",  icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
@@ -297,6 +298,7 @@ function PanelDetalle({activo,onClose,onEdit,projects}) {
 }
 
 export default function FinanzasActivos() {
+  const { proyectoId } = useFinanzas();
   const [activos,setActivos]=useState([]);
   const [projects,setProjects]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -333,14 +335,15 @@ export default function FinanzasActivos() {
       financieros.forEach(fa=>{ if(fa.machineId) mapaEnr[fa.machineId]=fa; });
       const merged=maquinas.map(m=>({...m,...(mapaEnr[m.machineId]?{...mapaEnr[m.machineId],id:m.id}:{})}));
       const solos=financieros.filter(fa=>!fa.machineId);
-      setActivos([...merged,...solos]);
+      const todos=[...merged,...solos];
+      setActivos(proyectoId!=="todos" ? todos.filter(a=>a.projectId===proyectoId) : todos);
     } catch(e){console.error(e);}
     try {
       const snapP=await getDocs(collection(db,"projects"));
       setProjects(snapP.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){}
     setLoading(false);
-  },[]);
+  },[proyectoId]);
   useEffect(()=>{cargar();},[cargar]);
 
   const handleSave=async(form)=>{
@@ -419,10 +422,13 @@ export default function FinanzasActivos() {
               <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Maquinaria, vehículos y equipos — valorización y documentos</p>
             </div>
           </div>
-          <button onClick={()=>{setEditando(null);setShowModal(true);}} className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-            Nuevo Activo
-          </button>
+          <div className="flex items-center gap-2">
+            <ProyectoSelector />
+            <button onClick={()=>{setEditando(null);setShowModal(true);}} className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
+              Nuevo Activo
+            </button>
+          </div>
         </div>
       </div>
 

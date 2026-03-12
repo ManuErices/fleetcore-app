@@ -4,8 +4,9 @@ import FinanzasFlujoCaja from "./FinanzasFlujoCaja";
 import FinanzasCostos from "./FinanzasCostos";
 import FinanzasActivos from "./FinanzasActivos";
 import FinanzasProveedores from "./FinanzasProveedores";
-import FinanzasCreditos from "./FinanzasCreditos";
 import FinanzasReportes from "./FinanzasReportes";
+import { FinanzasProvider, NotificacionesBtn } from "./FinanzasContext";
+import NotificacionesDrawer from "./NotificacionesDrawer";
 
 const NAV_ITEMS = [
   {
@@ -48,14 +49,7 @@ const NAV_ITEMS = [
         d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
     ),
   },
-  {
-    id: "creditos",
-    label: "Créditos",
-    icon: (
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-    ),
-  },
+
   {
     id: "reportes",
     label: "Reportes",
@@ -79,20 +73,21 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
       case "costos":       return <FinanzasCostos />;
       case "activos":      return <FinanzasActivos />;
       case "proveedores":  return <FinanzasProveedores />;
-      case "creditos":     return <FinanzasCreditos />;
+
       case "reportes":     return <FinanzasReportes />;
       default:             return <FinanzasDashboard onNavigate={setActiveView} />;
     }
   }
 
   return (
+    <FinanzasProvider>
     <div className="min-h-screen bg-slate-50 flex">
 
       {/* ── Sidebar desktop ── */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 shadow-sm sticky top-0 h-screen">
         {/* Logo */}
-        <div className="px-5 py-4 border-b border-slate-100">
-          <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-16 w-auto object-contain" />
+        <div className="flex items-center justify-center px-4 py-5 border-b border-slate-100">
+          <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-28 w-auto object-contain" />
         </div>
 
         {/* Nav */}
@@ -130,6 +125,7 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
             </div>
           </div>
           <div className="flex gap-2">
+            <NotificacionesBtn />
             <button
               onClick={onBackToSelector}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-600 transition-colors"
@@ -157,13 +153,15 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
           <aside className="absolute left-0 top-0 h-full w-64 bg-white shadow-2xl flex flex-col">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-12 w-auto object-contain" />
-              <button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
-                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+            <div className="px-4 py-5 border-b border-slate-100">
+              <div className="flex items-center justify-between">
+                <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-18 w-auto object-contain" />
+                <button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-lg">
+                  <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
               {NAV_ITEMS.map((item) => {
@@ -213,6 +211,7 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <NotificacionesBtn />
               <button onClick={onBackToSelector} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -233,6 +232,22 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
         </main>
 
       </div>
+
+      {/* Centro de notificaciones */}
+      <NotificacionesDrawer
+        onNavegar={(vista) => {
+          const mapa = {
+            "Dashboard":     "dashboard",
+            "Flujo de Caja": "flujocaja",
+            "Costos":        "costos",
+            "Activos":       "activos",
+            "Proveedores":   "proveedores",
+            "Reportes":      "reportes",
+          };
+          if (mapa[vista]) { setActiveView(mapa[vista]); setSidebarOpen(false); }
+        }}
+      />
     </div>
+    </FinanzasProvider>
   );
 }

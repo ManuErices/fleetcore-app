@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, orderBy
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 function fmt(n) {
@@ -234,9 +235,8 @@ function GraficoFlujo({ meses, datos }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasFlujoCaja() {
+  const { proyectoId: proyectoFiltro, proyectos } = useFinanzas();
   const [mesSeleccionado, setMesSeleccionado] = useState(getMesActual());
-  const [proyectoFiltro, setProyectoFiltro]   = useState("global");
-  const [proyectos, setProyectos]             = useState([]);
   const [loading, setLoading]                 = useState(false);
 
   // Datos
@@ -249,13 +249,6 @@ export default function FinanzasFlujoCaja() {
   const [editando, setEditando]         = useState(null);
   const [tabActivo, setTabActivo]       = useState("resumen"); // resumen | movimientos
   const [deletingId, setDeletingId]     = useState(null);
-
-  // Cargar proyectos
-  useEffect(() => {
-    getDocs(collection(db, "projects")).then(snap => {
-      setProyectos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-  }, []);
 
   // Cargar datos del mes seleccionado
   const cargarDatos = useCallback(async () => {
@@ -270,7 +263,7 @@ export default function FinanzasFlujoCaja() {
         where("fecha", ">=", desde),
         where("fecha", "<=", hasta)
       );
-      if (proyectoFiltro !== "global") {
+      if (proyectoFiltro !== "todos") {
         qIng = query(
           collection(db, "finanzas_ingresos"),
           where("fecha", ">=", desde),
@@ -282,7 +275,7 @@ export default function FinanzasFlujoCaja() {
       const ingData = ingSnap.docs.map(d => ({ id: d.id, fuente: d.data().tipo || "ingreso", ...d.data() }));
 
       // ── Egresos automáticos ──
-      const proyFilter = proyectoFiltro !== "global" ? proyectoFiltro : null;
+      const proyFilter = proyectoFiltro !== "todos" ? proyectoFiltro : null;
 
       const fetchCol = async (colName, fechaField, montoField, labelField) => {
         let q = proyFilter
@@ -398,16 +391,7 @@ export default function FinanzasFlujoCaja() {
               onChange={e => setMesSeleccionado(e.target.value)}
               className="input-modern text-sm px-3 py-2"
             />
-            <select
-              value={proyectoFiltro}
-              onChange={e => setProyectoFiltro(e.target.value)}
-              className="input-modern text-sm px-3 py-2"
-            >
-              <option value="global">🌐 Global</option>
-              {proyectos.map(p => (
-                <option key={p.id} value={p.id}>{p.nombre || p.name || p.id}</option>
-              ))}
-            </select>
+            <ProyectoSelector />
             <button
               onClick={() => { setEditando(null); setShowModal(true); }}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md"

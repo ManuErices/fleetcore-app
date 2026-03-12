@@ -503,7 +503,7 @@ function OperadoresSection() {
   const [catCargoModal, setCatCargoModal] = useState(false);
 
   // Catálogo dinámico de cargos
-  const { items: cargosDB } = useCatalogo('cargo_operador');
+  const { items: cargosDB, load: reloadCargos } = useCatalogo('cargo_operador');
   const CARGOS_TODOS = [...new Set([...CARGOS_LIST, ...cargosDB.map(c=>c.nombre)])].sort();
 
   const load = useCallback(async () => {
@@ -687,7 +687,7 @@ function OperadoresSection() {
         onClose={() => setCatCargoModal(false)}
         categoria="cargo_operador"
         titulo="Cargos de operadores"
-        onCreated={nombre => { setCatCargoModal(false); setForm(f => ({ ...f, cargo: nombre })); }}
+        onCreated={async (nombre) => { await reloadCargos(); setCatCargoModal(false); setForm(f => ({ ...f, cargo: nombre })); }}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Operador" message={`¿Eliminar a "${confirm?.nombre}"?`} />
@@ -736,7 +736,7 @@ function useCatalogo(categoria) {
 
   const remove = async (id) => {
     await deleteDoc(doc(db, 'catalogo_maquinas', id));
-    load();
+    await load();
   };
 
   const update = async (id, nombre) => {
@@ -745,7 +745,7 @@ function useCatalogo(categoria) {
     await load();
   };
 
-  return { items, loading, add, remove, update };
+  return { items, loading, add, remove, update, load };
 }
 
 // Panel modal para gestionar una categoría del catálogo
@@ -952,9 +952,9 @@ function MaquinasSection() {
   const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
 
   // Catálogos dinámicos
-  const { items: tiposDB,       add: addTipo,        remove: removeTipo }        = useCatalogo('tipo');
-  const { items: marcasDB,      add: addMarca,       remove: removeMarca }       = useCatalogo('marca');
-  const { items: propietariosDB,add: addPropietario, remove: removePropietario } = useCatalogo('propietario');
+  const { items: tiposDB,       add: addTipo,        remove: removeTipo,        load: reloadTipos }        = useCatalogo('tipo');
+  const { items: marcasDB,      add: addMarca,       remove: removeMarca,       load: reloadMarcas }       = useCatalogo('marca');
+  const { items: propietariosDB,add: addPropietario, remove: removePropietario, load: reloadPropietarios } = useCatalogo('propietario');
 
   // Combinar estáticos + dinámicos
   const tiposOpciones       = [...tiposDB.map(t => t.nombre)].sort();
@@ -1140,21 +1140,21 @@ function MaquinasSection() {
         onClose={() => setCatModal(null)}
         categoria="tipo"
         titulo="Tipos de máquina"
-        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, type: nombre })); }}
+        onCreated={async (nombre) => { await reloadTipos(); setCatModal(null); setForm(f => ({ ...f, type: nombre })); }}
       />
       <CatalogoModal
         isOpen={catModal === 'marca'}
         onClose={() => setCatModal(null)}
         categoria="marca"
         titulo="Marcas"
-        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, marca: nombre })); }}
+        onCreated={async (nombre) => { await reloadMarcas(); setCatModal(null); setForm(f => ({ ...f, marca: nombre })); }}
       />
       <CatalogoModal
         isOpen={catModal === 'propietario'}
         onClose={() => setCatModal(null)}
         categoria="propietario"
         titulo="Propietarios"
-        onCreated={nombre => { setCatModal(null); setForm(f => ({ ...f, propietario: nombre })); }}
+        onCreated={async (nombre) => { await reloadPropietarios(); setCatModal(null); setForm(f => ({ ...f, propietario: nombre })); }}
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
@@ -1527,7 +1527,7 @@ function ProyectosSection() {
   const [catMandanteModal, setCatMandanteModal] = useState(false);
 
   // Catálogo dinámico de mandantes
-  const { items: mandantesDB } = useCatalogo('mandante');
+  const { items: mandantesDB, load: reloadMandantes } = useCatalogo('mandante');
   const mandantesOpciones = mandantesDB.map(m => m.nombre).sort();
 
   const load = useCallback(async () => {
@@ -1678,7 +1678,7 @@ function ProyectosSection() {
         onClose={() => setCatMandanteModal(false)}
         categoria="mandante"
         titulo="Mandantes"
-        onCreated={nombre => { setCatMandanteModal(false); setForm(f => ({ ...f, mandante: nombre })); }}
+        onCreated={async (nombre) => { await reloadMandantes(); setCatMandanteModal(false); setForm(f => ({ ...f, mandante: nombre })); }}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
