@@ -2373,12 +2373,12 @@ function ReportesSection() {
   );
 }
 
-function ContabilidadSection() {
+function ContabilidadSection({ initialTab = 'asientos' }) {
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [loading,       setLoading]       = useState(true);
-  const [tabInner,      setTabInner]      = useState('asientos');
+  const [tabInner,      setTabInner]      = useState(initialTab);
   const [utm,           setUtm]           = useState(UTM_DEFAULT);
   const [utmInput,      setUtmInput]      = useState(String(UTM_DEFAULT));
   const [filtroMes,     setFiltroMes]     = useState(() => String(new Date().getMonth()+1).padStart(2,'0'));
@@ -2875,4 +2875,7 @@ function ContabilidadSection() {
     </div>
   );
 }
-export { AnexosSection, ImpuestosSection, AsistenciaSection, Organigrama, BandasSection, CentrosCostoSection, OrganizacionSection, ReportesSection, ContabilidadSection };
+function PreviredAvanzadoSection() { return <ContabilidadSection initialTab="previred" />; }
+function ArchivoPagoSection()      { return <ContabilidadSection initialTab="pago" />; }
+
+export { AnexosSection, ImpuestosSection, AsistenciaSection, Organigrama, BandasSection, CentrosCostoSection, OrganizacionSection, ReportesSection, ContabilidadSection, PreviredAvanzadoSection, ArchivoPagoSection };

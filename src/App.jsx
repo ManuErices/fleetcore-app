@@ -22,6 +22,7 @@ import CombustibleModal from "./components/CombustibleModal";
 import CombustiblePage from "./components/CombustiblePage";
 import AdminPanel from "./pages/AdminPanel.jsx";
 import RRHH from "./pages/RRHH.jsx";
+import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import TrabajadorApp from "./pages/TrabajadorApp.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
@@ -136,11 +137,149 @@ function WorkFleetShell({ user, onLogout, onBackToSelector }) {
   );
 }
 
+function RRHHShell({ user, onLogout, onBackToSelector }) {
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center shadow">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <div>
+              <div className="text-sm font-black text-slate-800 leading-tight">Fleet<span className="text-emerald-600">Core</span></div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase leading-tight">El Núcleo de RRHH</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden sm:block text-sm text-slate-500 font-medium">{user?.displayName || user?.email?.split('@')[0]}</span>
+            <button onClick={onBackToSelector} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cambiar aplicación">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+            </button>
+            <button onClick={onLogout} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cerrar sesión">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+      <RRHH />
+    </div>
+  );
+}
+
+function ReportesShell({ user, onLogout, onBackToSelector }) {
+  const [activeView, setActiveView]     = useState('maquinaria');
+  const [userRole,   setUserRole]       = useState(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    getDoc(doc(db, 'users', user.uid))
+      .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'administrativo'); })
+      .catch(() => {});
+  }, [user]);
+
+  const navItems = [
+    { id: 'maquinaria',  label: 'Reporte Maquinaria' },
+    { id: 'combustible', label: 'Reporte Combustible' },
+    ...(userRole === 'administrador' ? [{ id: 'admin', label: 'Administración' }] : []),
+  ];
+  const roleLabel = { administrador: 'Administrador', administrativo: 'Administrativo', operador: 'Operador' }[userRole] || 'Usuario';
+
+  return (
+    <div className="min-h-screen bg-slate-50 relative">
+      <div className="fixed inset-0 bg-grid opacity-30 pointer-events-none" />
+      <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-1 sm:py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
+              <img src="/favicon.svg" alt="Reportes" className="h-14 w-14 object-contain block sm:hidden" />
+              <img src="/logo-header.svg" alt="Reportes" className="h-14 w-auto object-contain hidden sm:block" />
+            </div>
+            <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
+              {user && (
+                <div className="relative">
+                  <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl bg-white hover:bg-slate-50 border border-slate-200 shadow-sm hover:shadow-md transition-all group">
+                    <div className="relative">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-teal-700 to-cyan-700 flex items-center justify-center shadow-md">
+                        <span className="text-white text-xs sm:text-sm font-bold">{user.email?.[0]?.toUpperCase() || 'U'}</span>
+                      </div>
+                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-emerald-500 rounded-full border-2 border-white" />
+                    </div>
+                    <div className="hidden lg:block text-left">
+                      <div className="text-sm font-semibold text-slate-900">{user.email?.split('@')[0]}</div>
+                      <div className="text-xs text-slate-500">{roleLabel}</div>
+                    </div>
+                    <svg className={`w-3 h-3 sm:w-4 sm:h-4 text-slate-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {showUserMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                      <div className="absolute right-0 top-full mt-2 sm:mt-3 w-64 sm:w-72 bg-white rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
+                        <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-50 to-white border-b border-slate-100">
+                          <div className="flex items-center gap-3 sm:gap-4">
+                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-teal-700 to-cyan-700 flex items-center justify-center shadow-lg">
+                              <span className="text-white text-base sm:text-lg font-bold">{user.email?.[0]?.toUpperCase() || 'U'}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-sm sm:text-base text-slate-900 truncate">{user.email?.split('@')[0]}</div>
+                              <div className="text-xs sm:text-sm text-slate-600 truncate">{user.email}</div>
+                              <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full">
+                                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Conectado
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-2 space-y-1">
+                          <button onClick={onBackToSelector} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+                            Cambiar Aplicación
+                          </button>
+                          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-50 rounded-xl transition-colors">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                            Cerrar Sesión
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <nav className="hidden lg:flex items-center gap-3 mt-6 pt-6 border-t border-slate-200/50">
+            {navItems.map(item => (
+              <button key={item.id} onClick={() => setActiveView(item.id)}
+                className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${activeView === item.id ? 'bg-teal-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <div className="lg:hidden flex gap-1 py-2 overflow-x-auto" style={{scrollbarWidth:'none'}}>
+            {navItems.map(item => (
+              <button key={item.id} onClick={() => setActiveView(item.id)}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeView === item.id ? 'bg-teal-600 text-white shadow' : 'text-slate-600 bg-white border border-slate-200'}`}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+      <main className="max-w-[1400px] mx-auto">
+        {activeView === 'maquinaria'  && <ReporteWorkFleet />}
+        {activeView === 'combustible' && <ReporteCombustible />}
+        {activeView === 'admin'       && userRole === 'administrador' && <AdminPanel />}
+      </main>
+    </div>
+  );
+}
+
 function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
-  const [showReporteWorkFleetMenu, setShowReporteWorkFleetMenu] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
@@ -584,106 +723,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                 </>
               )}
             </div>
-            
-            {/* ✅ NUEVO: Menú Reporte WorkFleet */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setShowReporteWorkFleetMenu(!showReporteWorkFleetMenu);
-                  setShowCostsMenu(false);
-                  setShowProductionMenu(false);
-                }}
-                className="flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-              >
-                Reportes WorkFleet
-                <svg className={`w-4 h-4 transition-transform ${showReporteWorkFleetMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
 
-              {showReporteWorkFleetMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowReporteWorkFleetMenu(false)} />
-                  <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
-                    <div className="p-2 space-y-1">
-                      <NavLink
-                        to="/reporte-workfleet"
-                        onClick={() => setShowReporteWorkFleetMenu(false)}
-                        className={({ isActive }) =>
-                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
-                            isActive
-                              ? "bg-gradient-to-r from-teal-50 to-cyan-50 text-teal-700"
-                              : "text-slate-900 hover:bg-gradient-to-r hover:from-teal-50 hover:to-cyan-50"
-                          }`
-                        }
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Reporte Maquinaria
-                      </NavLink>
-
-                      <NavLink
-                        to="/reporte-combustible"
-                        onClick={() => setShowReporteWorkFleetMenu(false)}
-                        className={({ isActive }) =>
-                          `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
-                            isActive
-                              ? "bg-gradient-to-r from-orange-50 to-amber-50 text-orange-700"
-                              : "text-slate-900 hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50"
-                          }`
-                        }
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                        </svg>
-                        Reporte Combustible
-                      </NavLink>
-
-                      {userRole === 'administrador' && (
-                        <>
-                          <div className="h-px bg-slate-100 my-1" />
-                          <NavLink
-                            to="/admin"
-                            onClick={() => setShowReporteWorkFleetMenu(false)}
-                            className={({ isActive }) =>
-                              `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
-                                isActive
-                                  ? "bg-gradient-to-r from-slate-100 to-slate-50 text-slate-900"
-                                  : "text-slate-900 hover:bg-gradient-to-r hover:from-slate-100 hover:to-slate-50"
-                              }`
-                            }
-                          >
-                            <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            Administración
-                          </NavLink>
-                          <NavLink
-                            to="/rrhh"
-                            onClick={() => setShowReporteWorkFleetMenu(false)}
-                            className={({ isActive }) =>
-                              `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${
-                                isActive
-                                  ? "bg-gradient-to-r from-indigo-50 to-violet-50 text-indigo-700"
-                                  : "text-slate-900 hover:bg-gradient-to-r hover:from-indigo-50 hover:to-violet-50"
-                              }`
-                            }
-                          >
-                            <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            Recursos Humanos
-                          </NavLink>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
           </nav>
         </div>
 
@@ -738,22 +778,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector }) {
                   </div>
 
                   {/* Separador */}
-                  <div className="h-px bg-slate-200 my-4" />
-
-                  {/* ✅ NUEVO: Sección Reporte WorkFleet */}
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 px-4 py-2 mb-2">
-                      <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="text-xs font-black text-slate-700 uppercase tracking-wider text-slate-500">WorkFleet</span>
-                    </div>
-                    <MobileNavLink to="/reporte-workfleet" label="Reporte Maquinaria" onClick={() => setShowMobileMenu(false)} />
-                    <MobileNavLink to="/reporte-combustible" label="Reporte Combustible" onClick={() => setShowMobileMenu(false)} />
-                    {userRole === 'administrador' && <MobileNavLink to="/admin" label="⚙ Administración" onClick={() => setShowMobileMenu(false)} />}
-                    {userRole === 'administrador' && <MobileNavLink to="/rrhh" label="👥 Recursos Humanos" onClick={() => setShowMobileMenu(false)} />}
-                  </div>
-
                   {/* Separador */}
                   <div className="h-px bg-slate-200 my-4" />
 
@@ -983,6 +1007,42 @@ export default function App() {
         <InstallPWA />
         <SessionExpiryIndicator />
         <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </>
+    );
+  }
+
+  // Si seleccionó FleetCore RRHH
+  if (selectedApp === 'rrhh') {
+    return (
+      <>
+        <ConnectionStatus />
+        <InstallPWA />
+        <SessionExpiryIndicator />
+        <RRHHShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </>
+    );
+  }
+
+  // Si seleccionó Reportes WorkFleet
+  if (selectedApp === 'reportes') {
+    return (
+      <>
+        <ConnectionStatus />
+        <InstallPWA />
+        <SessionExpiryIndicator />
+        <ReportesShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </>
+    );
+  }
+
+  // Si seleccionó Finanzas
+  if (selectedApp === 'finanzas') {
+    return (
+      <>
+        <ConnectionStatus />
+        <InstallPWA />
+        <SessionExpiryIndicator />
+        <FinanzasApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
       </>
     );
   }
