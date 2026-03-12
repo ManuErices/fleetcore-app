@@ -15,7 +15,7 @@ const getQRUrl = (text, size = 300) =>
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────
 const ROLES = ['administrador', 'operador', 'mandante'];
-const TIPOS_MAQUINA = ['Excavadora', 'Bulldozer', 'Motoniveladora', 'Retroexcavadora', 'Cargador Frontal', 'Grúa', 'Camión', 'Camión de Combustible', 'Otro'];
+const TIPOS_MAQUINA = [];
 
 const TAB_DEFS = [
   { id: 'operadores',  label: 'Operadores',  color: 'blue',   icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -957,7 +957,7 @@ function MaquinasSection() {
   const { items: propietariosDB,add: addPropietario, remove: removePropietario } = useCatalogo('propietario');
 
   // Combinar estáticos + dinámicos
-  const tiposOpciones       = [...new Set([...TIPOS_MAQUINA, ...tiposDB.map(t=>t.nombre)])].sort();
+  const tiposOpciones       = [...tiposDB.map(t => t.nombre)].sort();
   const marcasOpciones      = [...new Set([...marcasDB.map(m=>m.nombre)])].sort();
   const propietariosOpciones= [...new Set([...propietariosDB.map(p=>p.nombre)])].sort();
 
