@@ -688,6 +688,7 @@ function OperadoresSection() {
         categoria="cargo_operador"
         titulo="Cargos de operadores"
         onCreated={async (nombre) => { await reloadCargos(); setCatCargoModal(false); setForm(f => ({ ...f, cargo: nombre })); }}
+        onDeleted={reloadCargos}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Operador" message={`¿Eliminar a "${confirm?.nombre}"?`} />
@@ -749,7 +750,7 @@ function useCatalogo(categoria) {
 }
 
 // Panel modal para gestionar una categoría del catálogo
-function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
+function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated, onDeleted }) {
   const { items, loading, add, remove, update } = useCatalogo(categoria);
   const [nuevo, setNuevo] = useState('');
   const [saving, setSaving] = useState(false);
@@ -858,7 +859,7 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated }) {
                       <div className="flex gap-1.5">
                         <button onClick={() => setConfirmDel(null)}
                           className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">No</button>
-                        <button onClick={async () => { await remove(item.id); setConfirmDel(null); }}
+                        <button onClick={async () => { await remove(item.id); setConfirmDel(null); if (onDeleted) onDeleted(); }}
                           className="text-xs font-bold px-2 py-1 rounded-lg bg-red-100 text-red-600">Sí, eliminar</button>
                       </div>
                     </div>
@@ -1141,6 +1142,7 @@ function MaquinasSection() {
         categoria="tipo"
         titulo="Tipos de máquina"
         onCreated={async (nombre) => { await reloadTipos(); setCatModal(null); setForm(f => ({ ...f, type: nombre })); }}
+        onDeleted={reloadTipos}
       />
       <CatalogoModal
         isOpen={catModal === 'marca'}
@@ -1148,6 +1150,7 @@ function MaquinasSection() {
         categoria="marca"
         titulo="Marcas"
         onCreated={async (nombre) => { await reloadMarcas(); setCatModal(null); setForm(f => ({ ...f, marca: nombre })); }}
+        onDeleted={reloadMarcas}
       />
       <CatalogoModal
         isOpen={catModal === 'propietario'}
@@ -1155,6 +1158,7 @@ function MaquinasSection() {
         categoria="propietario"
         titulo="Propietarios"
         onCreated={async (nombre) => { await reloadPropietarios(); setCatModal(null); setForm(f => ({ ...f, propietario: nombre })); }}
+        onDeleted={reloadPropietarios}
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
@@ -1679,6 +1683,7 @@ function ProyectosSection() {
         categoria="mandante"
         titulo="Mandantes"
         onCreated={async (nombre) => { await reloadMandantes(); setCatMandanteModal(false); setForm(f => ({ ...f, mandante: nombre })); }}
+        onDeleted={reloadMandantes}
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
