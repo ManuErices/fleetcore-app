@@ -1,24 +1,31 @@
+// ============================================================
+// FLEETCORE — APP SELECTOR CON GATES DE PLAN
+// src/pages/AppSelector.jsx
+//
+// Drop-in replacement del AppSelector original.
+// Ahora verifica TANTO el rol del usuario COMO el plan activo.
+// ============================================================
+
 import React, { useState, useEffect } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { usePlan } from "../hooks/usePlan";
+import { getPlan, formatPrice } from "../lib/plans";
 
 export default function AppSelector({ user, onLogout, onSelectApp }) {
   const [userRole, setUserRole] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading,  setLoading]  = useState(true);
+  const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
 
   useEffect(() => {
     const loadUserRole = async () => {
       if (!user) return;
       try {
-        const userDocRef = doc(db, "users", user.uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const role = userData.role || 'operador';
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists()) {
+          const role = snap.data().role || 'operador';
           setUserRole(role);
-          console.log("✅ Rol de usuario cargado:", role);
           if (role === 'operador') {
-            console.log("🔄 Operador detectado - Redirigiendo a WorkFleet...");
             localStorage.setItem('selectedApp', 'workfleet');
             onSelectApp('workfleet');
             return;
@@ -29,8 +36,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           onSelectApp('workfleet');
           return;
         }
-      } catch (error) {
-        console.error("Error cargando rol de usuario:", error);
+      } catch {
         setUserRole('operador');
         localStorage.setItem('selectedApp', 'workfleet');
         onSelectApp('workfleet');
@@ -42,41 +48,27 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
     loadUserRole();
   }, [user, onSelectApp]);
 
-  const canAccessFleetCore = userRole === 'administrador' || userRole === 'administrativo';
-  const canAccessWorkFleet = userRole === 'administrador' || userRole === 'operador';
-  const canAccessRRHH      = userRole === 'administrador' || userRole === 'administrativo';
-  const canAccessReportes  = userRole === 'administrador' || userRole === 'administrativo';
+  // Permisos combinados: rol + plan
+  const canAccessFleetCore = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('fleetcore');
+  const canAccessWorkFleet  = userRole === 'administrador' || userRole === 'operador';
+  const canAccessRRHH       = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('rrhh');
+  const canAccessReportes   = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('reportes');
+  const canAccessFinanzas   = (userRole === 'administrador' || userRole === 'finanzas')       && canAccess('finanzas');
 
-  const handleSelectFleetCore = () => {
-    if (!canAccessFleetCore) { alert('🔒 No tienes permisos para acceder a FleetCore'); return; }
-    localStorage.setItem('selectedApp', 'fleetcore');
-    onSelectApp('fleetcore');
-  };
-  const handleSelectWorkFleet = () => {
-    if (!canAccessWorkFleet) { alert('🔒 No tienes permisos para acceder a WorkFleet'); return; }
-    localStorage.setItem('selectedApp', 'workfleet');
-    onSelectApp('workfleet');
-  };
-  const handleSelectRRHH = () => {
-    if (!canAccessRRHH) { alert('🔒 No tienes permisos para acceder a FleetCore RRHH'); return; }
-    localStorage.setItem('selectedApp', 'rrhh');
-    onSelectApp('rrhh');
-  };
-  const canAccessFinanzas = userRole === 'administrador' || userRole === 'finanzas';
-
-  const handleSelectFinanzas = () => {
-    if (!canAccessFinanzas) { alert('🔒 No tienes permisos para acceder a Finanzas'); return; }
-    localStorage.setItem('selectedApp', 'finanzas');
-    onSelectApp('finanzas');
+  // Razón de bloqueo para mostrar el mensaje correcto
+  const blockReason = (moduleId, roleOk) => {
+    if (!roleOk) return 'role';
+    if (!canAccess(moduleId)) return 'plan';
+    return null;
   };
 
-  const handleSelectReportes = () => {
-    if (!canAccessReportes) { alert('🔒 No tienes permisos para acceder a Reportes'); return; }
-    localStorage.setItem('selectedApp', 'reportes');
-    onSelectApp('reportes');
+  const handleSelect = (appId, hasAccess) => {
+    if (!hasAccess) return;
+    localStorage.setItem('selectedApp', appId);
+    onSelectApp(appId);
   };
 
-  if (loading) {
+  if (loading || planLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center">
         <div className="text-white text-xl">Cargando...</div>
@@ -86,7 +78,6 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
-      {/* Background decorativo */}
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
       <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
@@ -94,6 +85,25 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
       <div className="relative w-full max-w-6xl">
         {/* Header */}
         <div className="text-center mb-5 sm:mb-8 animate-fadeInUp">
+
+          {/* Banner de plan activo */}
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4">
+            <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">Plan</span>
+            <span className="text-sm font-black text-white">{planData.name}</span>
+            {status === 'trial' && (
+              <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 text-xs font-bold rounded-full">Trial</span>
+            )}
+            {!isActive && (
+              <span className="px-2 py-0.5 bg-red-400/20 text-red-300 text-xs font-bold rounded-full">Inactivo</span>
+            )}
+            <button
+              onClick={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              className="ml-1 text-xs text-blue-300 underline hover:text-white transition-colors"
+            >
+              {isActive ? 'Cambiar plan' : 'Activar plan'}
+            </button>
+          </div>
+
           <div className="inline-flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4 sm:mb-6">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg">
               <span className="text-white text-sm font-bold">
@@ -104,11 +114,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               <div className="text-sm font-semibold text-white">{user?.displayName || user?.email?.split('@')[0]}</div>
               <div className="text-xs text-blue-200">{user?.email}</div>
             </div>
-            <button
-              onClick={onLogout}
-              className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors"
-              title="Cerrar sesión"
-            >
+            <button onClick={onLogout} className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors" title="Cerrar sesión">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
@@ -119,22 +125,22 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             Selecciona tu aplicación
           </h1>
           <p className="text-sm sm:text-lg text-blue-200 font-medium">
-            Elige la herramienta que necesitas para tu trabajo
+            Elige la herramienta que necesitas
           </p>
         </div>
 
         {/* Grid de cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
-
-          {/* WorkFleet / Oficina Técnica – Naranja (primera posición, redirige a fleetcore) */}
           <AppCard
-            onClick={handleSelectFleetCore}
+            onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
             canAccess={canAccessFleetCore}
+            blockReason={blockReason('fleetcore', userRole === 'administrador' || userRole === 'administrativo')}
+            requiredPlan="starter"
             glowColor="from-orange-500 to-orange-700"
             borderColor="border-orange-200 hover:border-orange-400"
             logoSrc="/logo-workfleet.png"
             logoAlt="WorkFleet"
-            buttonClass="from-orange-900 to-orange-700 hover:from-orange-800 hover:to-orange-600 active:from-orange-950 active:to-orange-800"
+            buttonClass="from-orange-900 to-orange-700 hover:from-orange-800 hover:to-orange-600"
             buttonLabel="Abrir Oficina Técnica"
             badgeClass="bg-orange-100 text-orange-700"
             badgeLabel="Oficina Técnica"
@@ -146,17 +152,19 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               { icon: "💰", text: "Remuneraciones y costos" },
               { icon: "📑", text: "Órdenes de compra" },
             ]}
+            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
 
-          {/* FleetCore-R RRHH – Verde */}
           <AppCard
-            onClick={handleSelectRRHH}
+            onClick={() => handleSelect('rrhh', canAccessRRHH)}
             canAccess={canAccessRRHH}
+            blockReason={blockReason('rrhh', userRole === 'administrador' || userRole === 'administrativo')}
+            requiredPlan="pro"
             glowColor="from-emerald-500 to-green-700"
             borderColor="border-emerald-200 hover:border-emerald-400"
             logoSrc="/logo-fleetcore-r.png"
             logoAlt="FleetCore RRHH"
-            buttonClass="from-emerald-900 to-green-700 hover:from-emerald-800 hover:to-green-600 active:from-emerald-950 active:to-green-800"
+            buttonClass="from-emerald-900 to-green-700 hover:from-emerald-800 hover:to-green-600"
             buttonLabel="Abrir RRHH"
             badgeClass="bg-emerald-100 text-emerald-700"
             badgeLabel="Recursos Humanos"
@@ -168,20 +176,22 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               { icon: "📅", text: "Asistencia y organización" },
               { icon: "📊", text: "Reportes y contabilidad" },
             ]}
+            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
 
-          {/* FleetCore-F Finanzas – Rojo/Naranja (colores del logo WorkFleet) */}
           <AppCard
-            onClick={handleSelectReportes}
+            onClick={() => handleSelect('reportes', canAccessReportes)}
             canAccess={canAccessReportes}
+            blockReason={blockReason('reportes', userRole === 'administrador' || userRole === 'administrativo')}
+            requiredPlan="pro"
             glowColor="from-red-600 to-orange-700"
             borderColor="border-red-200 hover:border-red-400"
             logoSrc="/wf-logo-movil.svg"
-            logoAlt="WorkFleet Finanzas"
-            buttonClass="from-red-900 to-red-700 hover:from-red-800 hover:to-red-600 active:from-red-950 active:to-red-800"
-            buttonLabel="Abrir Finanzas"
+            logoAlt="Reportes"
+            buttonClass="from-red-900 to-red-700 hover:from-red-800 hover:to-red-600"
+            buttonLabel="Abrir Reportes"
             badgeClass="bg-red-100 text-red-700"
-            badgeLabel="Finanzas"
+            badgeLabel="Finanzas / Reportes"
             features={[
               { icon: "📊", text: "Reporte de maquinaria" },
               { icon: "⛽", text: "Reporte de combustible" },
@@ -190,16 +200,19 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               { icon: "📅", text: "Histórico por período" },
               { icon: "⚙️", text: "Panel de administración" },
             ]}
+            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
-          {/* FleetCore-F Finanzas – Morado */}
+
           <AppCard
-            onClick={handleSelectFinanzas}
+            onClick={() => handleSelect('finanzas', canAccessFinanzas)}
             canAccess={canAccessFinanzas}
+            blockReason={blockReason('finanzas', userRole === 'administrador' || userRole === 'finanzas')}
+            requiredPlan="enterprise"
             glowColor="from-purple-600 to-violet-700"
             borderColor="border-purple-200 hover:border-purple-400"
             logoSrc="/logo-fleetcore-f.png"
             logoAlt="FleetCore Finanzas"
-            buttonClass="from-purple-900 to-violet-700 hover:from-purple-800 hover:to-violet-600 active:from-purple-950 active:to-violet-800"
+            buttonClass="from-purple-900 to-violet-700 hover:from-purple-800 hover:to-violet-600"
             buttonLabel="Abrir Finanzas"
             badgeClass="bg-purple-100 text-purple-700"
             badgeLabel="Finanzas"
@@ -211,12 +224,11 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               { icon: "🏦", text: "Créditos y obligaciones" },
               { icon: "📈", text: "Reportes y análisis financiero" },
             ]}
+            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
-
         </div>
 
-        {/* Footer */}
-        <div className="mt-8 text-center text-blue-200 text-sm animate-fadeInUp stagger-3">
+        <div className="mt-8 text-center text-blue-200 text-sm">
           <p>Puedes cambiar de aplicación en cualquier momento desde el menú de usuario</p>
         </div>
       </div>
@@ -224,70 +236,74 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   );
 }
 
-// ── Card reutilizable ─────────────────────────────────────────────────────────
-function AppCard({
-  onClick, canAccess,
-  glowColor, borderColor,
-  logoSrc, logoAlt,
-  buttonClass, buttonLabel,
-  badgeClass, badgeLabel,
-  features,
-}) {
+// ── AppCard con lógica de bloqueo por plan ─────────────────────
+
+function AppCard({ onClick, canAccess, blockReason, requiredPlan, glowColor, borderColor,
+  logoSrc, logoAlt, buttonClass, buttonLabel, badgeClass, badgeLabel, features, onUpgrade }) {
+
+  const planNames = { starter: 'Starter', pro: 'Pro', enterprise: 'Enterprise' };
+
   return (
-    <div
-      onClick={onClick}
-      className={`group relative ${canAccess ? 'cursor-pointer' : 'cursor-not-allowed'} animate-fadeInUp`}
-    >
-      {/* Glow */}
+    <div onClick={canAccess ? onClick : undefined} className={`group relative ${canAccess ? 'cursor-pointer' : 'cursor-not-allowed'} animate-fadeInUp`}>
       <div className={`absolute inset-0 bg-gradient-to-br ${glowColor} rounded-3xl blur-xl transition-opacity ${canAccess ? 'opacity-50 group-hover:opacity-75' : 'opacity-20'}`} />
 
-      {/* Card */}
-      <div className={`relative bg-white rounded-3xl p-5 sm:p-8 lg:p-10 shadow-2xl border-2 transition-all ${
-        canAccess
-          ? `${borderColor} sm:group-hover:scale-105 sm:group-hover:-translate-y-2 active:scale-98`
-          : 'border-slate-300 opacity-60'
-      }`}>
+      <div className={`relative bg-white rounded-3xl p-5 sm:p-8 shadow-2xl border-2 transition-all ${canAccess ? `${borderColor} sm:group-hover:scale-105 sm:group-hover:-translate-y-2` : 'border-slate-300 opacity-70'}`}>
 
-        {/* Overlay bloqueo */}
+        {/* Overlay de bloqueo */}
         {!canAccess && (
-          <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-[2px] rounded-3xl flex items-center justify-center z-10">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-700 flex items-center justify-center shadow-xl">
-                <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
-              <div className="text-sm font-bold text-slate-700">Acceso Restringido</div>
-              <div className="text-xs text-slate-500 mt-1">Contacta al administrador</div>
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] rounded-3xl flex items-center justify-center z-10">
+            <div className="text-center px-6">
+              {blockReason === 'plan' ? (
+                <>
+                  <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-blue-600 flex items-center justify-center shadow-xl">
+                    <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </div>
+                  <div className="text-sm font-black text-slate-800 mb-1">Requiere plan {planNames[requiredPlan]}</div>
+                  <div className="text-xs text-slate-500 mb-3">Actualiza tu plan para desbloquear este módulo</div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUpgrade(); }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-md"
+                  >
+                    Ver planes →
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-slate-700 flex items-center justify-center shadow-xl">
+                    <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                  <div className="text-sm font-bold text-slate-700">Acceso Restringido</div>
+                  <div className="text-xs text-slate-500 mt-1">Contacta al administrador</div>
+                </>
+              )}
             </div>
           </div>
         )}
 
-        {/* Logo PNG */}
         <div className="mx-auto mb-4 sm:mb-6 flex items-center justify-center">
-          <img
-            src={logoSrc}
-            alt={logoAlt}
-            className="h-24 sm:h-32 lg:h-36 w-auto object-contain drop-shadow-xl"
-          />
+          <img src={logoSrc} alt={logoAlt} className="h-24 sm:h-32 w-auto object-contain drop-shadow-xl" />
         </div>
 
-        {/* Features */}
         <ul className="space-y-2 sm:space-y-3 mb-5 sm:mb-8">
           {features.map((f, i) => (
-            <Feature key={i} icon={f.icon} text={f.text} />
+            <li key={i} className="flex items-center gap-2 sm:gap-3 text-slate-700">
+              <span className="text-xl">{f.icon}</span>
+              <span className="font-medium text-sm sm:text-base">{f.text}</span>
+            </li>
           ))}
         </ul>
 
-        {/* Botón */}
-        <button className={`w-full py-3.5 sm:py-4 bg-gradient-to-r ${buttonClass} text-white font-bold rounded-xl shadow-lg hover:shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2`}>
+        <button className={`w-full py-3.5 sm:py-4 bg-gradient-to-r ${buttonClass} text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2`}>
           <span>{buttonLabel}</span>
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
           </svg>
         </button>
 
-        {/* Badge */}
         <div className="mt-4 text-center">
           <span className={`inline-flex items-center gap-1 px-3 py-1 ${badgeClass} text-xs font-semibold rounded-full`}>
             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -296,17 +312,7 @@ function AppCard({
             {badgeLabel}
           </span>
         </div>
-
       </div>
     </div>
-  );
-}
-
-function Feature({ icon, text }) {
-  return (
-    <li className="flex items-center gap-2 sm:gap-3 text-slate-700">
-      <span className="text-xl sm:text-2xl">{icon}</span>
-      <span className="font-medium text-sm sm:text-base">{text}</span>
-    </li>
   );
 }

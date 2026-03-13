@@ -27,22 +27,67 @@ function diasRestantes(fecha) {
   return Math.ceil((new Date(fecha) - new Date()) / 86400000);
 }
 
+// ─── Utilidad eje ────────────────────────────────────────────────────────────
+function fmtAxis(n) {
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n/1e9).toFixed(1).replace(".",",") + "B";
+  if (a >= 1e6) return (n/1e6).toFixed(1).replace(".",",") + "M";
+  if (a >= 1e3) return (n/1e3).toFixed(0) + "K";
+  return String(Math.round(n));
+}
+
 // ─── Mini bar chart SVG inline ────────────────────────────────────────────────
-function MiniBarChart({ data, height = 110 }) {
+function MiniBarChart({ data, height = 140 }) {
   if (!data?.length) return <div style={{ height }} className="flex items-center justify-center text-slate-300 text-xs">Sin datos</div>;
+
+  const VW    = 620;
+  const PAD_L = 48;
+  const PAD_R = 8;
+  const PAD_T = 10;
+  const PAD_B = 28;
+  const chartW = VW - PAD_L - PAD_R;
+  const chartH = height - PAD_T - PAD_B;
+
   const maxVal = Math.max(...data.map(d => Math.max(d.ingresos || 0, d.egresos || 0)), 1);
-  const W = 100 / data.length;
+  const TICKS  = 3;
+  const ticks  = Array.from({ length: TICKS + 1 }, (_, i) => (maxVal / TICKS) * i);
+
+  const colW = chartW / data.length;
+  const barW = Math.max(colW * 0.3, 5);
+  const gap  = Math.max(colW * 0.05, 2);
+  const toY  = (v) => PAD_T + chartH - ((Math.max(v, 0) / maxVal) * chartH);
+
   return (
-    <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
-      {data.map((d, i) => {
-        const ih = ((d.ingresos || 0) / maxVal) * (height - 18);
-        const eh = ((d.egresos  || 0) / maxVal) * (height - 18);
-        const x  = i * W;
+    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
+      {/* Líneas de referencia */}
+      {ticks.map((t, i) => {
+        const y = PAD_T + chartH - (t / maxVal) * chartH;
         return (
           <g key={i}>
-            <rect x={x + W*0.05} y={height-18-ih} width={W*0.42} height={Math.max(ih,0)} rx="1" fill="#7c3aed" opacity="0.85"/>
-            <rect x={x + W*0.52} y={height-18-eh} width={W*0.42} height={Math.max(eh,0)} rx="1" fill="#f59e0b" opacity="0.75"/>
-            <text x={x+W/2} y={height-4} textAnchor="middle" fontSize="3.8" fill="#94a3b8">{d.label}</text>
+            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
+              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.2 : 0.7} />
+            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
+              {fmtAxis(t)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Barras */}
+      {data.map((d, i) => {
+        const cx = PAD_L + i * colW + colW / 2;
+        const ih = toY(d.ingresos || 0);
+        const eh = toY(d.egresos  || 0);
+        const baseY = PAD_T + chartH;
+        const ihH = baseY - ih;
+        const ehH = baseY - eh;
+        return (
+          <g key={i}>
+            {ihH > 0 && <rect x={cx - barW - gap/2} y={ih} width={barW} height={ihH} rx="2" fill="#6d28d9" opacity="0.85"/>}
+            {ehH > 0 && <rect x={cx + gap/2}        y={eh} width={barW} height={ehH} rx="2" fill="#f59e0b" opacity="0.80"/>}
+            <text x={cx} y={baseY + 16} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
+              {d.label}
+            </text>
           </g>
         );
       })}
@@ -340,7 +385,7 @@ export default function FinanzasDashboard() {
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block opacity-75"/>Egresos</span>
                 </div>
               </div>
-              <MiniBarChart data={data.flujoPorMes} height={120} />
+              <MiniBarChart data={data.flujoPorMes} height={150} />
               {/* Totales bajo el gráfico */}
               <div className="flex gap-4 mt-3 pt-3 border-t border-slate-100">
                 <div><p className="text-xs text-slate-400">Ing. {MESES_SHORT[mes]}</p><p className="text-base font-black text-purple-700">{fmtM(data.ingresosMes)}</p></div>

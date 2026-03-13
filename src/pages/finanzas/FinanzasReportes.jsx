@@ -26,22 +26,82 @@ function parseFecha(f) {
   return isNaN(d) ? null : d;
 }
 
-// ─── Mini bar chart SVG ───────────────────────────────────────────────────────
-function BarChart({ data, height = 120 }) {
-  if (!data?.length) return null;
+// ─── Utilidad: formatear número corto para ejes ───────────────────────────────
+function fmtAxis(n) {
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n/1e9).toFixed(1).replace(".",",") + "B";
+  if (a >= 1e6) return (n/1e6).toFixed(1).replace(".",",") + "M";
+  if (a >= 1e3) return (n/1e3).toFixed(0) + "K";
+  return String(Math.round(n));
+}
+
+// ─── Bar Chart ────────────────────────────────────────────────────────────────
+// data: [{ label, ingresos, egresos }]
+function BarChart({ data, height = 160 }) {
+  if (!data?.length) return <div style={{height}} className="flex items-center justify-center text-slate-400 text-xs">Sin datos</div>;
+
+  const VW = 700;          // ancho lógico del viewBox
+  const PAD_L = 52;        // espacio eje Y
+  const PAD_R = 8;
+  const PAD_T = 12;
+  const PAD_B = 32;        // espacio etiquetas X
+  const chartW = VW - PAD_L - PAD_R;
+  const chartH = height - PAD_T - PAD_B;
+
   const maxVal = Math.max(...data.map(d => Math.max(d.ingresos || 0, d.egresos || 0)), 1);
-  const W = 100 / data.length;
+
+  // 4 líneas de referencia
+  const TICKS = 4;
+  const tickStep = maxVal / TICKS;
+  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => i * tickStep);
+
+  const colW = chartW / data.length;
+  const barW = Math.max(colW * 0.28, 4);
+  const gap  = Math.max(colW * 0.06, 2);
+
+  const toY = (v) => PAD_T + chartH - (Math.max(v, 0) / maxVal) * chartH;
+
   return (
-    <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
-      {data.map((d, i) => {
-        const ih = ((d.ingresos || 0) / maxVal) * (height - 20);
-        const eh = ((d.egresos  || 0) / maxVal) * (height - 20);
-        const x  = i * W;
+    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
+      {/* Líneas de referencia horizontales */}
+      {ticks.map((t, i) => {
+        const y = PAD_T + chartH - (t / maxVal) * chartH;
         return (
           <g key={i}>
-            <rect x={x + W * 0.05} y={height - 20 - ih} width={W * 0.4} height={ih} rx="1" fill="#7c3aed" opacity="0.85" />
-            <rect x={x + W * 0.5}  y={height - 20 - eh} width={W * 0.4} height={eh} rx="1" fill="#f59e0b" opacity="0.75" />
-            <text x={x + W / 2} y={height - 4} textAnchor="middle" fontSize="4" fill="#94a3b8">{d.label}</text>
+            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
+              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.5 : 0.8} />
+            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
+              {fmtAxis(t)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Barras */}
+      {data.map((d, i) => {
+        const cx  = PAD_L + i * colW + colW / 2;
+        const ih  = ((d.ingresos || 0) / maxVal) * chartH;
+        const eh  = ((d.egresos  || 0) / maxVal) * chartH;
+        const iy  = toY(d.ingresos || 0);
+        const ey  = toY(d.egresos  || 0);
+        const baseY = PAD_T + chartH;
+
+        return (
+          <g key={i}>
+            {/* Barra ingresos */}
+            {ih > 0 && (
+              <rect x={cx - barW - gap / 2} y={iy} width={barW} height={ih}
+                rx="2" fill="#6d28d9" opacity="0.85" />
+            )}
+            {/* Barra egresos */}
+            {eh > 0 && (
+              <rect x={cx + gap / 2} y={ey} width={barW} height={eh}
+                rx="2" fill="#f59e0b" opacity="0.80" />
+            )}
+            {/* Etiqueta mes */}
+            <text x={cx} y={baseY + 14} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
+              {d.label}
+            </text>
           </g>
         );
       })}
@@ -49,29 +109,85 @@ function BarChart({ data, height = 120 }) {
   );
 }
 
-// ─── Mini line chart SVG ─────────────────────────────────────────────────────
-function LineChart({ data, height = 80, color = "#7c3aed" }) {
-  if (!data?.length) return null;
+// ─── Line Chart ───────────────────────────────────────────────────────────────
+// data: [{ label, value }]
+function LineChart({ data, height = 110, color = "#7c3aed" }) {
+  if (!data?.length) return <div style={{height}} className="flex items-center justify-center text-slate-400 text-xs">Sin datos</div>;
+
+  const VW = 700;
+  const PAD_L = 52;
+  const PAD_R = 12;
+  const PAD_T = 12;
+  const PAD_B = 28;
+  const chartW = VW - PAD_L - PAD_R;
+  const chartH = height - PAD_T - PAD_B;
+
   const vals = data.map(d => d.value || 0);
   const maxV = Math.max(...vals, 1);
-  const minV = Math.min(...vals.filter(v => v > 0), 0);
+  const minV = Math.min(...vals, 0);
   const range = maxV - minV || 1;
-  const pts = vals.map((v, i) => {
-    const x = (i / (vals.length - 1 || 1)) * 90 + 5;
-    const y = height - 15 - ((v - minV) / range) * (height - 25);
-    return `${x},${y}`;
-  }).join(" ");
+
+  const TICKS = 3;
+  const tickStep = (maxV - minV) / TICKS;
+  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => minV + i * tickStep);
+
+  const toX = (i) => PAD_L + (i / Math.max(data.length - 1, 1)) * chartW;
+  const toY = (v) => PAD_T + chartH - ((v - minV) / range) * chartH;
+
+  const pts = vals.map((v, i) => `${toX(i)},${toY(v)}`).join(" ");
+
+  // Área bajo la curva
+  const areaPath = [
+    `M ${toX(0)},${PAD_T + chartH}`,
+    ...vals.map((v, i) => `L ${toX(i)},${toY(v)}`),
+    `L ${toX(vals.length - 1)},${PAD_T + chartH}`,
+    "Z"
+  ].join(" ");
+
+  const areaId = `area-${color.replace("#","")}`;
+
   return (
-    <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      {vals.map((v, i) => {
-        const x = (i / (vals.length - 1 || 1)) * 90 + 5;
-        const y = height - 15 - ((v - minV) / range) * (height - 25);
-        return <circle key={i} cx={x} cy={y} r="1.5" fill={color} />;
+    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
+      <defs>
+        <linearGradient id={areaId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.01" />
+        </linearGradient>
+      </defs>
+
+      {/* Líneas de referencia */}
+      {ticks.map((t, i) => {
+        const y = toY(t);
+        return (
+          <g key={i}>
+            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
+              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.5 : 0.8} />
+            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
+              {fmtAxis(t)}
+            </text>
+          </g>
+        );
       })}
+
+      {/* Área */}
+      <path d={areaPath} fill={`url(#${areaId})`} />
+
+      {/* Línea */}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2"
+        strokeLinejoin="round" strokeLinecap="round" />
+
+      {/* Puntos y etiquetas */}
       {data.map((d, i) => {
-        const x = (i / (vals.length - 1 || 1)) * 90 + 5;
-        return <text key={i} x={x} y={height - 3} textAnchor="middle" fontSize="4" fill="#94a3b8">{d.label}</text>;
+        const x = toX(i);
+        const y = toY(vals[i]);
+        return (
+          <g key={i}>
+            <circle cx={x} cy={y} r="3" fill="white" stroke={color} strokeWidth="1.8" />
+            <text x={x} y={PAD_T + chartH + 14} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
+              {d.label}
+            </text>
+          </g>
+        );
       })}
     </svg>
   );
@@ -339,7 +455,7 @@ export default function FinanzasReportes() {
 
         {/* Gráfico */}
         <div className="mb-3">
-          <BarChart data={mesesData.map(m => ({ label: m.label, ingresos: m.ingresos, egresos: m.egresos }))} height={130} />
+          <BarChart data={mesesData.map(m => ({ label: m.label, ingresos: m.ingresos, egresos: m.egresos }))} height={170} />
         </div>
         <div className="flex gap-4 justify-center">
           <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-purple-600 opacity-85"/><span className="text-xs text-slate-500">Ingresos</span></div>
@@ -493,7 +609,7 @@ export default function FinanzasReportes() {
         </div>
 
         <div className="mb-4">
-          <LineChart data={proyeccion.map(p => ({ label: p.label, value: p.value }))} height={100} color={proyeccion[0]?.value >= 0 ? "#10b981" : "#ef4444"} />
+          <LineChart data={proyeccion.map(p => ({ label: p.label, value: p.value }))} height={130} color={proyeccion[0]?.value >= 0 ? "#10b981" : "#ef4444"} />
         </div>
 
         <div className="overflow-x-auto">

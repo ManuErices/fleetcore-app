@@ -4,8 +4,9 @@ import FinanzasFlujoCaja from "./FinanzasFlujoCaja";
 import FinanzasCostos from "./FinanzasCostos";
 import FinanzasActivos from "./FinanzasActivos";
 import FinanzasProveedores from "./FinanzasProveedores";
+import FinanzasObras from "./FinanzasObras";
 import FinanzasReportes from "./FinanzasReportes";
-import { FinanzasProvider, NotificacionesBtn } from "./FinanzasContext";
+import { FinanzasProvider, NotificacionesBtn, useFinanzas } from "./FinanzasContext";
 import NotificacionesDrawer from "./NotificacionesDrawer";
 
 const NAV_ITEMS = [
@@ -51,6 +52,14 @@ const NAV_ITEMS = [
   },
 
   {
+    id: "obras",
+    label: "Obras",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+    ),
+  },
+  {
     id: "reportes",
     label: "Reportes",
     icon: (
@@ -60,9 +69,18 @@ const NAV_ITEMS = [
   },
 ];
 
-export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
+function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
   const [activeView, setActiveView] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { alertas } = useFinanzas();
+
+  // Badge para Activos: docs vencidos/por vencer + activos sin datos financieros
+  const badgeActivos = alertas.filter(a =>
+    a.categoria === "activo_doc" || a.categoria === "activo_sin_datos"
+  ).length;
+  const badgeActivosCritico = alertas.filter(a =>
+    a.categoria === "activo_doc" && a.tipo === "danger"
+  ).length > 0;
 
   const currentNav = NAV_ITEMS.find((n) => n.id === activeView);
 
@@ -73,14 +91,13 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
       case "costos":       return <FinanzasCostos />;
       case "activos":      return <FinanzasActivos />;
       case "proveedores":  return <FinanzasProveedores />;
-
+      case "obras":        return <FinanzasObras />;
       case "reportes":     return <FinanzasReportes />;
       default:             return <FinanzasDashboard onNavigate={setActiveView} />;
     }
   }
 
   return (
-    <FinanzasProvider>
     <div className="min-h-screen bg-slate-50 flex">
 
       {/* ── Sidebar desktop ── */}
@@ -94,6 +111,7 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map((item) => {
             const active = activeView === item.id;
+            const showBadge = item.id === "activos" && badgeActivos > 0;
             return (
               <button
                 key={item.id}
@@ -107,7 +125,14 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   {item.icon}
                 </svg>
-                {item.label}
+                <span className="flex-1 text-left">{item.label}</span>
+                {showBadge && (
+                  <span className={`min-w-4 h-4 px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
+                    badgeActivosCritico ? "bg-red-500" : "bg-amber-500"
+                  }`}>
+                    {badgeActivos > 9 ? "9+" : badgeActivos}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -166,6 +191,7 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
             <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
               {NAV_ITEMS.map((item) => {
                 const active = activeView === item.id;
+                const showBadge = item.id === "activos" && badgeActivos > 0;
                 return (
                   <button
                     key={item.id}
@@ -179,7 +205,14 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
                     <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       {item.icon}
                     </svg>
-                    {item.label}
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {showBadge && (
+                      <span className={`min-w-4 h-4 px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
+                        badgeActivosCritico ? "bg-red-500" : "bg-amber-500"
+                      }`}>
+                        {badgeActivos > 9 ? "9+" : badgeActivos}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -242,12 +275,20 @@ export default function FinanzasApp({ user, onLogout, onBackToSelector }) {
             "Costos":        "costos",
             "Activos":       "activos",
             "Proveedores":   "proveedores",
+            "Obras":         "obras",
             "Reportes":      "reportes",
           };
           if (mapa[vista]) { setActiveView(mapa[vista]); setSidebarOpen(false); }
         }}
       />
     </div>
+  );
+}
+
+export default function FinanzasApp(props) {
+  return (
+    <FinanzasProvider>
+      <FinanzasAppInner {...props} />
     </FinanzasProvider>
   );
 }
