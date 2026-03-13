@@ -1,31 +1,32 @@
 // ============================================================
-// FLEETCORE — FIREBASE FUNCTIONS
+// FLEETCORE — FIREBASE FUNCTIONS v7+
 // functions/index.js
 // ============================================================
 
-const functions  = require('firebase-functions');
-const admin      = require('firebase-admin');
-const cors       = require('cors')({ origin: true });
+const { onRequest } = require('firebase-functions/v2/https');
+const admin         = require('firebase-admin');
+const cors          = require('cors')({ origin: true });
 const { MercadoPagoConfig, PreApproval } = require('mercadopago');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// ── Config MercadoPago ────────────────────────────────────────
+// ── Config MercadoPago — lee desde process.env ────────────────
+// Variables se definen en .env (local) o con:
+// firebase functions:secrets:set MP_ACCESS_TOKEN_SANDBOX
 function getMPClient() {
-  const isProd = functions.config().mp?.env === 'production';
+  const isProd = process.env.MP_ENV === 'production';
   const token  = isProd
-    ? functions.config().mp?.access_token_prod
-    : functions.config().mp?.access_token_sandbox;
-  if (!token) throw new Error('MP access token no configurado');
+    ? process.env.MP_ACCESS_TOKEN_PROD
+    : process.env.MP_ACCESS_TOKEN_SANDBOX;
+  if (!token) throw new Error('MP access token no configurado. Revisa las variables de entorno.');
   return new MercadoPagoConfig({ accessToken: token });
 }
 
 // ============================================================
 // POST /createSubscription
-// Body: { planId, userId, userEmail, userName, modules, total }
 // ============================================================
-exports.createSubscription = functions.https.onRequest((req, res) => {
+exports.createSubscription = onRequest((req, res) => {
   cors(req, res, async () => {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
@@ -38,7 +39,7 @@ exports.createSubscription = functions.https.onRequest((req, res) => {
 
       const client      = getMPClient();
       const preApproval = new PreApproval(client);
-      const appUrl      = functions.config().app?.url || 'https://fleetcore.web.app';
+      const appUrl      = process.env.APP_URL || 'https://fleetcore.web.app';
 
       const result = await preApproval.create({
         body: {
@@ -71,7 +72,7 @@ exports.createSubscription = functions.https.onRequest((req, res) => {
       });
 
     } catch (err) {
-      console.error('createSubscription error:', err);
+      console.error('createSubscription error:', err.message);
       return res.status(500).json({ error: err.message });
     }
   });
@@ -80,7 +81,7 @@ exports.createSubscription = functions.https.onRequest((req, res) => {
 // ============================================================
 // POST /webhookMercadoPago
 // ============================================================
-exports.webhookMercadoPago = functions.https.onRequest((req, res) => {
+exports.webhookMercadoPago = onRequest((req, res) => {
   cors(req, res, async () => {
     if (req.method !== 'POST') return res.status(405).end();
 
@@ -128,31 +129,35 @@ exports.webhookMercadoPago = functions.https.onRequest((req, res) => {
 });
 
 // ============================================================
-// Funciones existentes — CNE, tipo de cambio, etc.
+// Funciones existentes — CNE, tipo de cambio
 // ============================================================
 
+const { onRequest: onReq } = require('firebase-functions/v2/https');
 const axios   = require('axios');
 const cheerio = require('cheerio');
 
-exports.getFuelPrices = functions.https.onRequest(async (req, res) => {
+exports.getFuelPrices = onReq(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  if (req.method === 'OPTIONS') { res.set('Access-Control-Allow-Methods', 'GET'); res.status(204).send(''); return; }
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
   try {
-    const response    = await axios.get('https://www.bencinaenlinea.cl');
-    const $           = cheerio.load(response.data);
-    const diesel      = parseFloat($('.precio-diesel').first().text()) || 950;
-    const gasoline93  = parseFloat($('.precio-93').first().text())    || 1100;
-    const gasoline95  = parseFloat($('.precio-95').first().text())    || 1150;
-    const gasoline97  = parseFloat($('.precio-97').first().text())    || 1200;
-    const prices      = { diesel: Math.round(diesel), gasoline93: Math.round(gasoline93), gasoline95: Math.round(gasoline95), gasoline97: Math.round(gasoline97), source: 'cne-scraping', lastUpdated: new Date().toISOString() };
+    const response   = await axios.get('https://www.bencinaenlinea.cl');
+    const $          = cheerio.load(response.data);
+    const prices     = {
+      diesel:     Math.round(parseFloat($('.precio-diesel').first().text()) || 950),
+      gasoline93: Math.round(parseFloat($('.precio-93').first().text())    || 1100),
+      gasoline95: Math.round(parseFloat($('.precio-95').first().text())    || 1150),
+      gasoline97: Math.round(parseFloat($('.precio-97').first().text())    || 1200),
+      source:      'cne-scraping',
+      lastUpdated: new Date().toISOString(),
+    };
     await admin.firestore().collection('settings').doc('currentFuelPrice').set(prices);
     res.json(prices);
   } catch (error) {
-    res.json({ diesel: 950, gasoline93: 1100, gasoline95: 1150, gasoline97: 1200, source: 'fallback', lastUpdated: new Date().toISOString(), error: error.message });
+    res.json({ diesel: 950, gasoline93: 1100, gasoline95: 1150, gasoline97: 1200, source: 'fallback', error: error.message });
   }
 });
 
-exports.getExchangeRate = functions.https.onRequest(async (req, res) => {
+exports.getExchangeRate = onReq(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
     const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD');
@@ -162,14 +167,14 @@ exports.getExchangeRate = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.getInternationalOilPrice = functions.https.onRequest(async (req, res) => {
+exports.getInternationalOilPrice = onReq(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
-    const exchangeResponse = await axios.get('https://api.exchangerate-api.com/v4/latest/USD');
-    const usdToClp         = exchangeResponse.data.rates.CLP;
-    const wtiPrice         = 75;
-    const dieselPrice      = Math.round((wtiPrice / 159) * usdToClp * 2.0);
-    res.json({ diesel: dieselPrice, gasoline93: Math.round(dieselPrice * 1.15), gasoline95: Math.round(dieselPrice * 1.20), gasoline97: Math.round(dieselPrice * 1.25), wtiPrice, usdToClp, source: 'international-estimate', lastUpdated: new Date().toISOString() });
+    const { data }   = await axios.get('https://api.exchangerate-api.com/v4/latest/USD');
+    const usdToClp   = data.rates.CLP;
+    const wtiPrice   = 75;
+    const diesel     = Math.round((wtiPrice / 159) * usdToClp * 2.0);
+    res.json({ diesel, gasoline93: Math.round(diesel * 1.15), gasoline95: Math.round(diesel * 1.20), gasoline97: Math.round(diesel * 1.25), wtiPrice, usdToClp, source: 'international-estimate', lastUpdated: new Date().toISOString() });
   } catch (error) {
     res.json({ diesel: 950, gasoline93: 1100, gasoline95: 1150, gasoline97: 1200, source: 'fallback', error: error.message });
   }
