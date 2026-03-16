@@ -4,8 +4,8 @@ import {
   listMachines, 
   listLogsByRange,
   listFuelLogsByRange 
-} from "../lib/db";
-import { generatePaymentStatusPDF } from "../lib/pdfGenerator";
+} from "../../lib/db";
+import { generatePaymentStatusPDF } from "../../lib/pdfGenerator";
 
 // Obtener el primer y último día del mes
 function getMonthRange(year, month) {

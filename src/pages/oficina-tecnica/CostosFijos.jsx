@@ -3,8 +3,8 @@ import {
   collection, query, orderBy, getDocs,
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import CostosFijosModal from "../components/CostosFijosModal";
+import { db } from "../../lib/firebase";
+import CostosFijosModal from "../../components/CostosFijosModal";
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 const CATEGORIAS = {

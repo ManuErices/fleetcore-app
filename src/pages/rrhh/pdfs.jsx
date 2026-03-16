@@ -1,5 +1,5 @@
-import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT } from './RRHH.shared';
-import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo } from './RRHH.calculo';
+import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT } from './shared';
+import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo } from './calculo';
 
 function generarPDFContrato(contrato, trabajador) {
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';

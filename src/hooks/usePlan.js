@@ -1,15 +1,6 @@
 // ============================================================
 // FLEETCORE — HOOK CENTRAL DE PLAN
 // src/hooks/usePlan.js
-//
-// USO:
-//   const { plan, canAccess, hasFeature, loading } = usePlan();
-//
-//   // Verificar módulo completo
-//   if (!canAccess('rrhh')) return <UpgradePrompt module="rrhh" />;
-//
-//   // Verificar feature granular
-//   if (!hasFeature('reportes_combustible')) return <Locked />;
 // ============================================================
 
 import { useState, useEffect } from 'react';
@@ -22,6 +13,10 @@ import {
   hasFeature as checkFeature,
   MODULES,
 } from '../lib/plans';
+
+// En desarrollo con VITE_DEV_BYPASS=true → todos los módulos activos
+const DEV_SUBSCRIPTION = { planId: 'rrhh,finanzas,fleetcore,workfleet', status: 'authorized' };
+const IS_DEV_BYPASS     = import.meta.env.VITE_DEV_BYPASS === 'true';
 
 export function usePlan() {
   const [subscription, setSubscription] = useState(null);
@@ -38,12 +33,19 @@ export function usePlan() {
 
   useEffect(() => {
     if (!user) return;
-    const ref  = doc(db, 'subscriptions', user.uid);
+
+    // Modo desarrollo: saltar Firestore y activar todo
+    if (IS_DEV_BYPASS) {
+      setSubscription(DEV_SUBSCRIPTION);
+      setLoading(false);
+      return;
+    }
+
+    const ref   = doc(db, 'subscriptions', user.uid);
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
         setSubscription(snap.data());
       } else {
-        // Sin suscripción → trial sin módulos activos
         setSubscription({ planId: '', status: 'trial', trialUntil: null });
       }
       setLoading(false);
@@ -57,15 +59,11 @@ export function usePlan() {
 
   // ── Estado derivado ─────────────────────────────────────
 
-  // planId = módulos separados por coma: "rrhh,fleetcore,workfleet"
-  const planId   = subscription?.planId || '';
-  const status   = subscription?.status || 'trial';
-  const planData = getPlan(planId); // { modules, features }
-
-  // Módulos activos como array: ["rrhh", "fleetcore"]
+  const planId        = subscription?.planId || '';
+  const status        = subscription?.status || 'trial';
+  const planData      = getPlan(planId);
   const activeModules = planId ? planId.split(',').filter(Boolean) : [];
 
-  // Suscripción activa = pagada O en trial válido
   const isActive = (() => {
     if (status === 'authorized') return true;
     if (status === 'trial') {
@@ -74,8 +72,6 @@ export function usePlan() {
     }
     return false;
   })();
-
-  // ── Funciones de verificación ───────────────────────────
 
   const canAccess = (moduleId) => {
     if (!isActive) return false;
@@ -87,7 +83,6 @@ export function usePlan() {
     return checkFeature(planId, featureId);
   };
 
-  // Nombre legible de los módulos activos
   const planName = activeModules.length === 0
     ? 'Sin plan'
     : activeModules.map(id => MODULES[id]?.name || id).join(' + ');
@@ -102,11 +97,10 @@ export function usePlan() {
     isActive,
     loading,
     user,
-
     canAccess,
     hasFeature,
-
     isTrial:     status === 'trial',
     isCancelled: status === 'cancelled' || status === 'paused',
+    isDevBypass: IS_DEV_BYPASS,
   };
 }

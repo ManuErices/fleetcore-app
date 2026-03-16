@@ -3,7 +3,7 @@ import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db } from '../../lib/firebase';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable
@@ -14,7 +14,27 @@ const getQRUrl = (text, size = 300) =>
 // ─────────────────────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────
-const ROLES = ['administrador', 'operador', 'mandante'];
+const ROLES = [
+  { value: 'superadmin',    label: 'Super Admin',          desc: '⚡ Acceso total al sistema. Solo para el propietario.' },
+  { value: 'admin_contrato',label: 'Admin de Contrato',    desc: '🏗️ Acceso completo a Oficina Técnica y AdminPanel.' },
+  { value: 'administrativo',label: 'Administrativo',       desc: '📋 Acceso según módulos asignados.' },
+  { value: 'operador',      label: 'Operador',             desc: '🔧 Solo WorkFleet-M según cargo (maquinaria / surtidor).' },
+  { value: 'mandante',      label: 'Mandante',             desc: '👁️ Solo lectura del Reporte WorkFleet. Sin edición.' },
+  { value: 'trabajador',    label: 'Trabajador',           desc: '👤 Solo Portal Trabajadores (remuneraciones, contratos).' },
+];
+
+const MODULOS = [
+  { value: 'fleetcore', label: 'Oficina Técnica' },
+  { value: 'rrhh',      label: 'Recursos Humanos' },
+  { value: 'finanzas',  label: 'Finanzas' },
+  { value: 'reportes',  label: 'Work Fleet (Reportes)' },
+  { value: 'workfleet_m', label: 'WorkFleet-M' },
+];
+
+const CARGOS_OPERADOR = [
+  { value: 'operador_maquinaria', label: 'Operador de Maquinaria — solo Reporte Maquinaria' },
+  { value: 'surtidor',            label: 'Surtidor — Reporte Maquinaria + Combustible' },
+];
 const TIPOS_MAQUINA = [];
 
 const TAB_DEFS = [
@@ -52,9 +72,12 @@ const TAB_ACTIVE = {
 };
 
 const ROLE_STYLES = {
-  administrador: 'bg-purple-100 text-purple-700 border border-purple-200',
-  operador:      'bg-blue-100 text-blue-700 border border-blue-200',
-  mandante:      'bg-amber-100 text-amber-700 border border-amber-200',
+  superadmin:     'bg-red-100 text-red-700 border border-red-200',
+  admin_contrato: 'bg-purple-100 text-purple-700 border border-purple-200',
+  administrativo: 'bg-blue-100 text-blue-700 border border-blue-200',
+  operador:       'bg-cyan-100 text-cyan-700 border border-cyan-200',
+  mandante:       'bg-amber-100 text-amber-700 border border-amber-200',
+  trabajador:     'bg-emerald-100 text-emerald-700 border border-emerald-200',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -2080,7 +2103,10 @@ function UsuariosSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [qr, setQr] = useState(null);
-  const [form, setForm] = useState({ role: 'operador', nombre: '', rut: '' });
+  const [form, setForm] = useState({
+    role: 'operador', nombre: '', rut: '', password: '',
+    modulos: [], cargo: '',
+  });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -2095,8 +2121,24 @@ function UsuariosSection() {
 
   useEffect(() => { load(); }, [load]);
 
+  const toggleModulo = (val) => {
+    setForm(f => ({
+      ...f,
+      modulos: f.modulos.includes(val)
+        ? f.modulos.filter(m => m !== val)
+        : [...f.modulos, val],
+    }));
+  };
+
   const openEdit = (row) => {
-    setForm({ role: row.role || 'operador', nombre: row.nombre || '', rut: row.rut || '', password: row.password || '' });
+    setForm({
+      role:     row.role     || 'operador',
+      nombre:   row.nombre   || '',
+      rut:      row.rut      || '',
+      password: row.password || '',
+      modulos:  row.modulos  || [],
+      cargo:    row.cargo    || '',
+    });
     setEditId(row.id);
     setModal(true);
   };
@@ -2115,9 +2157,11 @@ function UsuariosSection() {
     setSaving(true);
     try {
       const updates = {
-        role: form.role,
-        nombre: form.nombre.trim(),
-        rut: form.rut.trim(),
+        role:    form.role,
+        nombre:  form.nombre.trim(),
+        rut:     form.rut.trim(),
+        modulos: form.role === 'administrativo' ? form.modulos : [],
+        cargo:   form.role === 'operador' ? form.cargo : '',
         updatedAt: serverTimestamp(),
       };
       if (form.password.trim()) updates.password = form.password.trim();
@@ -2146,9 +2190,29 @@ function UsuariosSection() {
         </div>
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={null} extraAction={QRBtn} emptyText="No hay usuarios registrados"
           columns={[
-            { key: 'email', label: 'Email', render: r => <span className="font-mono text-xs text-slate-600">{r.email || r.id}</span> },
+            { key: 'email',  label: 'Email',  render: r => <span className="font-mono text-xs text-slate-600">{r.email || r.id}</span> },
             { key: 'nombre', label: 'Nombre' },
-            { key: 'role', label: 'Rol', render: r => <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${ROLE_STYLES[r.role] || ROLE_STYLES.operador}`}>{r.role || 'operador'}</span> },
+            { key: 'role',   label: 'Rol',    render: r => (
+              <div className="flex flex-col gap-1">
+                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${ROLE_STYLES[r.role] || ROLE_STYLES.operador}`}>
+                  {ROLES.find(x => x.value === r.role)?.label || r.role || 'operador'}
+                </span>
+                {r.role === 'administrativo' && r.modulos?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {r.modulos.map(m => (
+                      <span key={m} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] rounded font-medium">
+                        {MODULOS.find(x => x.value === m)?.label || m}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {r.role === 'operador' && r.cargo && (
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    {CARGOS_OPERADOR.find(x => x.value === r.cargo)?.label.split(' —')[0] || r.cargo}
+                  </span>
+                )}
+              </div>
+            )},
           ]}
         />
       </SectionCard>
@@ -2162,19 +2226,41 @@ function UsuariosSection() {
             <p className="text-[11px] text-slate-400 mt-1">Se guarda en Firestore para poder generar el QR de acceso. Déjalo vacío si no deseas modificarla.</p>
           </Field>
           <Field label="Rol" required>
-            <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
-              {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+            <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, modulos: [], cargo: '' })}>
+              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </Field>
-          <div className={`p-3 rounded-xl text-xs font-medium ${
-            form.role === 'administrador' ? 'bg-purple-50 text-purple-700 border border-purple-100' :
-            form.role === 'operador'      ? 'bg-blue-50 text-blue-700 border border-blue-100' :
-                                           'bg-amber-50 text-amber-700 border border-amber-100'
-          }`}>
-            {form.role === 'administrador' && '⚡ Acceso completo — puede administrar todo el sistema.'}
-            {form.role === 'operador'      && '🔧 Puede crear y ver reportes de maquinaria y combustible.'}
-            {form.role === 'mandante'      && '👁️ Solo puede ver el Reporte WorkFleet. Sin acceso a edición.'}
+          {/* Descripción del rol */}
+          <div className="p-3 rounded-xl text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200">
+            {ROLES.find(r => r.value === form.role)?.desc || ''}
           </div>
+          {/* Módulos — solo para administrativo */}
+          {form.role === 'administrativo' && (
+            <Field label="Módulos habilitados" required>
+              <div className="space-y-2">
+                {MODULOS.map(m => (
+                  <label key={m.value} className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={form.modulos.includes(m.value)}
+                      onChange={() => toggleModulo(m.value)}
+                      className="w-4 h-4 rounded accent-blue-600"
+                    />
+                    <span className="text-sm font-medium text-slate-700">{m.label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          )}
+          {/* Cargo — solo para operador */}
+          {form.role === 'operador' && (
+            <Field label="Cargo / Tipo de acceso" required>
+              <select className={selectCls} value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })}>
+                <option value="">Selecciona un cargo...</option>
+                {CARGOS_OPERADOR.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </Field>
+          )}
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={true} color="rose" />
         </div>
       </Modal>

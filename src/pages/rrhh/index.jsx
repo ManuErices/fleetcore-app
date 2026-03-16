@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '../lib/firebase';
+import { db } from '../../lib/firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
-import * as Shared from './RRHH.shared';
+import * as Shared from './shared';
 import { DashboardSection, TrabajadoresSection, ContratosSection,
-  RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel } from './RRHH.sections.a';
+  RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel } from './sections.a';
 import { AnexosSection, ImpuestosSection, AsistenciaSection,
   OrganizacionSection, ReportesSection, ContabilidadSection,
-  PreviredAvanzadoSection, ArchivoPagoSection } from './RRHH.sections.b';
+  PreviredAvanzadoSection, ArchivoPagoSection } from './sections.b';
 
 const DIRECT_TABS = [
   { id:'dashboard'   , label:'Dashboard'    },

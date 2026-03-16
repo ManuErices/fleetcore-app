@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db } from '../lib/firebase';
+import { db } from '../../lib/firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
-import * as Shared from './RRHH.shared';
-import * as Calc from './RRHH.calculo';
-import * as PDFs from './RRHH.pdfs';
+import * as Shared from './shared';
+import * as Calc from './calculo';
+import * as PDFs from './pdfs';
 
 const {
   inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,

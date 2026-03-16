@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listActiveProjects, listMachines, listFuelLogsByRange } from "../lib/db";
-import FuelImporter from "../components/FuelImporter";
-import FuelPriceWidget from "../components/FuelPriceWidget";
+import { listActiveProjects, listMachines, listFuelLogsByRange } from "../../lib/db";
+import FuelImporter from "../../components/FuelImporter";
+import FuelPriceWidget from "../../components/FuelPriceWidget";
 
 // Utilidades de fecha (sin cambios)
 function isoToday() {

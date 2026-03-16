@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { listActiveProjects, listEmployees, listMachines, listEmployeeMonthlyData, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment } from "../lib/db";
-import PayrollImporter from "../components/PayrollImporter";
-import EmployeeDetailModal from "../components/EmployeeDetailModal";
+import { listActiveProjects, listEmployees, listMachines, listEmployeeMonthlyData, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment } from "../../lib/db";
+import PayrollImporter from "../../components/PayrollImporter";
+import EmployeeDetailModal from "../../components/EmployeeDetailModal";
 
 export default function Payroll() {
   const [projects, setProjects] = useState([]);
@@ -171,7 +171,7 @@ export default function Payroll() {
     
     (async () => {
       try {
-        const { listEmployeeAssignments } = await import("../lib/db");
+        const { listEmployeeAssignments } = await import("../../lib/db");
         const assigns = await listEmployeeAssignments(selectedProject, selectedYear, selectedMonth);
         
         const assignMap = {};

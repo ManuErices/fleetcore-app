@@ -1,6 +1,6 @@
 import { IMM_2026, IMM_2024, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
   CAUSALES_CON_INDEMNIZACION, TOPE_ANIOS_INDEMNIZACION, TIPOS_PERIODO,
-  UTM_DEFAULT, TRAMOS_IUT } from './RRHH.shared';
+  UTM_DEFAULT, TRAMOS_IUT } from './shared';
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;

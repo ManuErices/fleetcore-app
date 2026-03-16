@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { collection, query, getDocs, orderBy, addDoc, doc, getDoc, deleteDoc, updateDoc } from "firebase/firestore";
-import { db, auth } from "../lib/firebase";
+import { db, auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import CombustibleDetalleModal from "../components/CombustibleDetalleModal";
-import CombustibleModal from "../components/CombustibleModal";
-import { printThermalVoucher } from "../utils/voucherThermalGenerator";
+import CombustibleDetalleModal from "../../components/CombustibleDetalleModal";
+import CombustibleModal from "../../components/CombustibleModal";
+import { printThermalVoucher } from "../../utils/voucherThermalGenerator";
 
 export default function ReporteCombustible() {
   const [reportes, setReportes] = useState([]);

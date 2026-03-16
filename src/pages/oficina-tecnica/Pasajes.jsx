@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { collection, addDoc, getDocs, query, orderBy, updateDoc, doc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, auth, storage } from "../lib/firebase";
+import { db, auth, storage } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
-import SignaturePad from "../components/SignaturePad";
+import SignaturePad from "../../components/SignaturePad";
 import { 
   Chart as ChartJS, 
   CategoryScale, 

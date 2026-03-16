@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listLogsByRange, listFuelLogsByRange, listEmployeeMonthlyData, listMachines } from "../lib/db";
+import { listActiveProjects, listLogsByRange, listFuelLogsByRange, listEmployeeMonthlyData, listMachines } from "../../lib/db";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useFuelPrices } from "../lib/fuelPriceService";
+import { db } from "../../lib/firebase";
+import { useFuelPrices } from "../../lib/fuelPriceService";
 
 // Utilidades de fecha
 function isoToday() {

@@ -5,10 +5,10 @@ import {
   listEmployeeMonthlyData,
   listPurchaseOrders,
   listMachines
-} from "../lib/db";
+} from "../../lib/db";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useFuelPrices } from "../lib/fuelPriceService";
+import { db } from "../../lib/firebase";
+import { useFuelPrices } from "../../lib/fuelPriceService";
 
 // Utilidades de fecha (igual que MonthlyCalendar)
 function isoToday() {

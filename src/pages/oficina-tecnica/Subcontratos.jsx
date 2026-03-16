@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, saveSubcontratos, deleteAllSubcontratos } from "../lib/db";
+import { listActiveProjects, saveSubcontratos, deleteAllSubcontratos } from "../../lib/db";
 import { collection, query, where, getDocs, writeBatch, doc, serverTimestamp } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db } from "../../lib/firebase";
 import * as XLSX from 'xlsx';
 
 // Utilidades de fecha (igual que MonthlyCalendar)

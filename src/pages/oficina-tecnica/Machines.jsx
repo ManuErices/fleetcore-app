@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { listActiveProjects, listMachines, upsertMachine, deleteMachine } from "../lib/db";
-import { useOperatorAssignments } from "../lib/useOperatorAssignments";
-import ExcelImporter from "../components/ExcelImporter";
+import { listActiveProjects, listMachines, upsertMachine, deleteMachine } from "../../lib/db";
+import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
+import ExcelImporter from "../../components/ExcelImporter";
 
 // Tipos de cobro
 const BILLING_TYPES = {

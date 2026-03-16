@@ -7,53 +7,71 @@
 // ============================================================
 
 import React, { useState, useEffect } from "react";
+import { useNavigate } from 'react-router-dom';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { usePlan } from "../hooks/usePlan";
 import { getPlan, formatPrice } from "../lib/plans";
 
 export default function AppSelector({ user, onLogout, onSelectApp }) {
-  const [userRole, setUserRole] = useState(null);
+  const [userRole,    setUserRole]    = useState(null);
   const [loading,  setLoading]  = useState(true);
   const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
+  const navigate = useNavigate();
+
+  const [userModulos, setUserModulos] = useState([]);
+  const [userCargo,   setUserCargo]   = useState('');
 
   useEffect(() => {
-    const loadUserRole = async () => {
+    const loadUser = async () => {
       if (!user) return;
       try {
         const snap = await getDoc(doc(db, 'users', user.uid));
-        if (snap.exists()) {
-          const role = snap.data().role || 'operador';
-          setUserRole(role);
-          if (role === 'operador') {
-            localStorage.setItem('selectedApp', 'workfleet');
-            onSelectApp('workfleet');
-            return;
-          }
-        } else {
-          setUserRole('operador');
+        const data = snap.exists() ? snap.data() : {};
+        const role    = data.role    || 'operador';
+        const modulos = data.modulos || [];
+        const cargo   = data.cargo   || '';
+        setUserRole(role);
+        setUserModulos(modulos);
+        setUserCargo(cargo);
+
+        // Redirección automática según rol
+        if (role === 'mandante') {
           localStorage.setItem('selectedApp', 'workfleet');
           onSelectApp('workfleet');
           return;
         }
+        if (role === 'operador') {
+          localStorage.setItem('selectedApp', 'workfleet-m');
+          onSelectApp('workfleet-m');
+          return;
+        }
+        if (role === 'trabajador') {
+          window.location.href = '/trabajador';
+          return;
+        }
       } catch {
         setUserRole('operador');
-        localStorage.setItem('selectedApp', 'workfleet');
-        onSelectApp('workfleet');
-        return;
       } finally {
         setLoading(false);
       }
     };
-    loadUserRole();
+    loadUser();
   }, [user, onSelectApp]);
 
-  // Permisos combinados: rol + plan
-  const canAccessFleetCore = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('fleetcore');
-  const canAccessWorkFleet  = userRole === 'administrador' || userRole === 'operador';
-  const canAccessRRHH       = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('rrhh');
-  const canAccessReportes   = (userRole === 'administrador' || userRole === 'administrativo') && canAccess('reportes');
-  const canAccessFinanzas   = (userRole === 'administrador' || userRole === 'finanzas')       && canAccess('finanzas');
+  // ── Helpers de permisos ──────────────────────────────────────
+  const isSuperAdmin    = userRole === 'superadmin';
+  const isAdminContrato = userRole === 'admin_contrato';
+  const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
+
+  // Permisos combinados: rol + módulo + plan
+  // admin_contrato: solo WorkFleet (reportes) + WorkFleet-M
+  const canAccessFleetCore  = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('fleetcore')))  && canAccess('fleetcore');
+  const canAccessWorkFleet  = isSuperAdmin || isAdminContrato;
+  const canAccessRRHH       = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('rrhh')))       && canAccess('rrhh');
+  const canAccessReportes   = (isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes'))) && canAccess('reportes');
+  const canAccessFinanzas   = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('finanzas')))   && canAccess('finanzas');
+  const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
 
   // Razón de bloqueo para mostrar el mensaje correcto
   const blockReason = (moduleId, roleOk) => {
@@ -134,7 +152,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           <AppCard
             onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
             canAccess={canAccessFleetCore}
-            blockReason={blockReason('fleetcore', userRole === 'administrador' || userRole === 'administrativo')}
+            blockReason={blockReason('fleetcore', isSuperAdmin || (userRole === 'administrativo' && hasModulo('fleetcore')))}
             requiredPlan="starter"
             glowColor="from-orange-500 to-orange-700"
             borderColor="border-orange-200 hover:border-orange-400"
@@ -158,7 +176,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           <AppCard
             onClick={() => handleSelect('rrhh', canAccessRRHH)}
             canAccess={canAccessRRHH}
-            blockReason={blockReason('rrhh', userRole === 'administrador' || userRole === 'administrativo')}
+            blockReason={blockReason('rrhh', isSuperAdmin || (userRole === 'administrativo' && hasModulo('rrhh')))}
             requiredPlan="pro"
             glowColor="from-emerald-500 to-green-700"
             borderColor="border-emerald-200 hover:border-emerald-400"
@@ -182,7 +200,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           <AppCard
             onClick={() => handleSelect('reportes', canAccessReportes)}
             canAccess={canAccessReportes}
-            blockReason={blockReason('reportes', userRole === 'administrador' || userRole === 'administrativo')}
+            blockReason={blockReason('reportes', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes')))}
             requiredPlan="pro"
             glowColor="from-red-600 to-orange-700"
             borderColor="border-red-200 hover:border-red-400"
@@ -206,7 +224,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           <AppCard
             onClick={() => handleSelect('finanzas', canAccessFinanzas)}
             canAccess={canAccessFinanzas}
-            blockReason={blockReason('finanzas', userRole === 'administrador' || userRole === 'finanzas')}
+            blockReason={blockReason('finanzas', isSuperAdmin || (userRole === 'administrativo' && hasModulo('finanzas')))}
             requiredPlan="enterprise"
             glowColor="from-purple-600 to-violet-700"
             borderColor="border-purple-200 hover:border-purple-400"
@@ -226,6 +244,58 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             ]}
             onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
+        </div>
+
+
+        {/* ── Aplicaciones Móviles ── */}
+        <div className="mt-10 mb-4">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="h-px flex-1 bg-white/20" />
+            <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>
+            <div className="h-px flex-1 bg-white/20" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+            <AppCard
+              onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
+              canAccess={canAccessWorkFleetM}
+              blockReason={null}
+              requiredPlan="starter"
+              glowColor="from-cyan-500/30 to-blue-500/30"
+              borderColor="border-cyan-400/40"
+              logoSrc="/wf-logo.svg"
+              logoAlt="WorkFleet Mobile"
+              badgeClass="bg-cyan-500/20 text-cyan-300 border border-cyan-400/30"
+              badgeLabel="Operadores"
+              features={[
+                { icon: "🚜", text: "Reporte de maquinaria" },
+                { icon: "⛽", text: "Reporte de combustible" },
+                { icon: "📱", text: "Optimizado para móvil" },
+              ]}
+              buttonClass="from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
+              buttonLabel="Abrir WorkFleet-M"
+              onUpgrade={() => {}}
+            />
+            <AppCard
+              onClick={() => { window.location.href = '/trabajador'; }}
+              canAccess={true}
+              blockReason={null}
+              requiredPlan="starter"
+              glowColor="from-emerald-500/30 to-teal-500/30"
+              borderColor="border-emerald-400/40"
+              logoSrc="/logo-fleetcore-r.png"
+              logoAlt="Portal Trabajadores"
+              badgeClass="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
+              badgeLabel="Trabajadores"
+              features={[
+                { icon: "💰", text: "Mis remuneraciones" },
+                { icon: "📄", text: "Contratos y documentos" },
+                { icon: "📅", text: "Asistencia y permisos" },
+              ]}
+              buttonClass="from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
+              buttonLabel="Abrir Portal"
+              onUpgrade={() => {}}
+            />
+          </div>
         </div>
 
         <div className="mt-8 text-center text-blue-200 text-sm">

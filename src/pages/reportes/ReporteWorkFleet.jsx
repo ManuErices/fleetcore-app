@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
-import { db, auth } from "../lib/firebase";
+import { db, auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import ReporteDetalleModal from "../components/ReporteDetalleModal";
+import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
 
 export default function ReporteWorkFleet() {

@@ -1,27 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, NavLink, useNavigate, Navigate } from "react-router-dom";
-import Dashboard from "./pages/Dashboard.jsx";
-import Machines from "./pages/Machines.jsx";
-import Logs from "./pages/Logs.jsx";
-import MonthlyCalendar from "./pages/MonthlyCalendar.jsx";
-import Fuel from "./pages/Fuel.jsx";
-import Payroll from "./pages/Payroll.jsx";
-import PaymentStatus from "./pages/PaymentStatus.jsx";
-import FuelPriceManager from "./pages/FuelPriceManager.jsx";
-import OC from "./pages/OC.jsx";
-import Consolidado from "./pages/Consolidado.jsx";
-import Rendiciones from "./pages/Rendiciones.jsx";
-import Subcontratos from "./pages/Subcontratos.jsx";
-import ReportDetallado from "./pages/ReportDetallado.jsx";
+import Dashboard from "./pages/oficina-tecnica/Dashboard";
+import Machines from "./pages/oficina-tecnica/Machines";
+import Logs from "./pages/oficina-tecnica/Logs";
+import MonthlyCalendar from "./pages/oficina-tecnica/MonthlyCalendar";
+import Fuel from "./pages/oficina-tecnica/Fuel";
+import Payroll from "./pages/oficina-tecnica/Payroll";
+import PaymentStatus from "./pages/oficina-tecnica/PaymentStatus";
+import FuelPriceManager from "./pages/oficina-tecnica/FuelPriceManager";
+import OC from "./pages/oficina-tecnica/OC";
+import Consolidado from "./pages/oficina-tecnica/Consolidado";
+import Rendiciones from "./pages/oficina-tecnica/Rendiciones";
+import Subcontratos from "./pages/oficina-tecnica/Subcontratos";
+import ReportDetallado from "./pages/reportes/ReportDetallado";
 import LoginPage from "./pages/LoginPage.jsx";
 import AppSelector from "./pages/AppSelector.jsx";
-import ReporteWorkFleet from "./pages/ReporteWorkFleet.jsx";
-import Pasajes from "./pages/Pasajes.jsx";
-import ReporteCombustible from "./pages/ReporteCombustible.jsx";
+import ReporteWorkFleet from "./pages/reportes/ReporteWorkFleet";
+import Pasajes from "./pages/oficina-tecnica/Pasajes";
+import ReporteCombustible from "./pages/reportes/ReporteCombustible";
 import CombustibleModal from "./components/CombustibleModal";
-import CombustiblePage from "./components/CombustiblePage";
-import AdminPanel from "./pages/AdminPanel.jsx";
-import RRHH from "./pages/RRHH.jsx";
+import OperadoresApp from "./pages/operadores";
+import AdminPanel from "./pages/reportes/AdminPanel";
+import RRHH from "./pages/rrhh";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import TrabajadorApp from "./pages/TrabajadorApp.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
@@ -37,82 +37,6 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 import PricingPage from "./pages/PricingPage.jsx";
 import PaymentResult from "./pages/PaymentResult.jsx";
 import { usePlan } from "./hooks/usePlan.js";
-
-// ============================================================
-// WorkFleet Shell
-// ============================================================
-function WorkFleetShell({ user, onLogout, onBackToSelector }) {
-  const [view, setView] = useState('menu');
-
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 backdrop-blur-md bg-white/10 border-b border-white/20 shadow-sm">
-        <div className="max-w-[1400px] mx-auto px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {view !== 'menu' && (
-              <button onClick={() => setView('menu')} className="p-2 bg-white/15 hover:bg-white/25 rounded-lg transition-colors mr-1" title="Volver">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            )}
-            <img src="/wf-logo.svg" alt="Work Fleet Logo" className="h-14 w-auto object-contain" />
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onBackToSelector} className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm font-semibold" title="Cambiar aplicación">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <button onClick={onLogout} className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors" title="Cerrar sesión">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
-      <main className="max-w-[1400px] mx-auto">
-        {view === 'menu' && (
-          <div className="flex flex-col items-center justify-center min-h-[70vh] px-4 gap-6">
-            <h1 className="text-2xl font-black text-slate-800 mb-2">¿Qué deseas registrar?</h1>
-            <button onClick={() => setView('maquinaria')} className="w-full max-w-sm bg-white rounded-2xl shadow-lg border-2 border-slate-200 hover:border-purple-400 hover:shadow-xl transition-all p-6 flex items-center gap-5 group">
-              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-700 flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
-                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <div className="text-lg font-black text-slate-900">Reporte Maquinaria</div>
-                <div className="text-sm text-slate-500 mt-0.5">Registro diario de equipos</div>
-              </div>
-              <svg className="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            <button onClick={() => setView('combustible')} className="w-full max-w-sm bg-white rounded-2xl shadow-lg border-2 border-slate-200 hover:border-orange-400 hover:shadow-xl transition-all p-6 flex items-center gap-5 group">
-              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
-                <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <div className="text-lg font-black text-slate-900">Reporte Combustible</div>
-                <div className="text-sm text-slate-500 mt-0.5">Registro de surtidores</div>
-              </div>
-              <svg className="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        )}
-        {view === 'maquinaria'  && <ReportDetallado />}
-        {view === 'combustible' && <CombustiblePage onClose={() => setView('menu')} />}
-      </main>
-    </div>
-  );
-}
 
 // ============================================================
 // RRHH Shell
@@ -167,9 +91,14 @@ function ReportesShell({ user, onLogout, onBackToSelector }) {
   const navItems = [
     { id: 'maquinaria',  label: 'Reporte Maquinaria' },
     { id: 'combustible', label: 'Reporte Combustible' },
-    ...(userRole === 'administrador' ? [{ id: 'admin', label: 'Administración' }] : []),
+    ...(['superadmin','admin_contrato'].includes(userRole) ? [{ id: 'admin', label: 'Administración' }] : []),
   ];
-  const roleLabel = { administrador: 'Administrador', administrativo: 'Administrativo', operador: 'Operador' }[userRole] || 'Usuario';
+  const ROLE_LABELS = {
+    superadmin: 'Super Admin', admin_contrato: 'Admin Contrato',
+    administrativo: 'Administrativo', operador: 'Operador',
+    mandante: 'Mandante', trabajador: 'Trabajador',
+  };
+  const roleLabel = ROLE_LABELS[userRole] || 'Usuario';
 
   return (
     <div className="min-h-screen bg-slate-50 relative">
@@ -253,7 +182,7 @@ function ReportesShell({ user, onLogout, onBackToSelector }) {
       <main className="max-w-[1400px] mx-auto">
         {activeView === 'maquinaria'  && <ReporteWorkFleet />}
         {activeView === 'combustible' && <ReporteCombustible />}
-        {activeView === 'admin'       && userRole === 'administrador' && <AdminPanel />}
+        {activeView === 'admin'       && ['superadmin','admin_contrato'].includes(userRole) && <AdminPanel />}
       </main>
     </div>
   );
@@ -377,7 +306,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             {/* Maquinaria dropdown */}
             <div className="relative">
               <button
-                onClick={() => { if (userRole !== 'mandante') { setShowProductionMenu(!showProductionMenu); setShowCostsMenu(false); }}}
+                onClick={() => { if (!['mandante'].includes(userRole)) { setShowProductionMenu(!showProductionMenu); setShowCostsMenu(false); }}}
                 disabled={userRole === 'mandante'}
                 className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
@@ -385,7 +314,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                 Maquinaria
                 <svg className={`w-4 h-4 transition-transform ${showProductionMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
               </button>
-              {showProductionMenu && userRole !== 'mandante' && (
+              {showProductionMenu && !['mandante'].includes(userRole) && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowProductionMenu(false)} />
                   <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
@@ -411,7 +340,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             {/* Control de Producción dropdown */}
             <div className="relative">
               <button
-                onClick={() => { if (userRole !== 'mandante') { setShowCostsMenu(!showCostsMenu); setShowProductionMenu(false); }}}
+                onClick={() => { if (!['mandante'].includes(userRole)) { setShowCostsMenu(!showCostsMenu); setShowProductionMenu(false); }}}
                 disabled={userRole === 'mandante'}
                 className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
@@ -419,7 +348,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                 Control de Producción y EP
                 <svg className={`w-4 h-4 transition-transform ${showCostsMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
               </button>
-              {showCostsMenu && userRole !== 'mandante' && (
+              {showCostsMenu && !['mandante'].includes(userRole) && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowCostsMenu(false)} />
                   <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
@@ -447,7 +376,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             </div>
 
             <NavTab to="/fuel-price" label="Combustible" locked={userRole === 'mandante'} />
-            {userRole === 'administrador' && <NavTab to="/admin" label="Admin" />}
+            
           </nav>
         </div>
 
@@ -507,7 +436,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
       <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         <Routes>
           <Route path="/reporte-workfleet" element={<ReporteWorkFleet />} />
-          {userRole !== 'mandante' ? (
+          {!['mandante'].includes(userRole) ? (
             <>
               <Route path="/"                    element={<Dashboard />} />
               <Route path="/logs"                element={<Logs />} />
@@ -524,8 +453,8 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
               <Route path="/fuel-price"          element={<FuelPriceManager />} />
               <Route path="/subcontratos"        element={<Subcontratos />} />
               <Route path="/reporte-detallado"   element={<ReportDetallado />} />
-              {userRole === 'administrador' && <Route path="/admin" element={<AdminPanel />} />}
-              {userRole === 'administrador' && <Route path="/rrhh"  element={<RRHH />} />}
+              {['superadmin','admin_contrato'].includes(userRole) && <Route path="/admin" element={<AdminPanel />} />}
+              {['superadmin'].includes(userRole) && <Route path="/rrhh"  element={<RRHH />} />}
             </>
           ) : (
             <Route path="*" element={<Navigate to="/reporte-workfleet" replace />} />
@@ -682,7 +611,18 @@ export default function App() {
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
-        <WorkFleetShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+        <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </>
+    );
+  }
+
+  if (selectedApp === 'workfleet-m') {
+    return (
+      <>
+        <ConnectionStatus />
+        <InstallPWA />
+        <SessionExpiryIndicator />
+        <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
       </>
     );
   }

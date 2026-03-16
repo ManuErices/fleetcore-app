@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { listActiveProjects, listMachines } from "../lib/db";
+import { listActiveProjects, listMachines } from "../../lib/db";
 import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { auth } from "../lib/firebase";
-import Paso2Form from './Paso2Form';
+import { db } from "../../lib/firebase";
+import { auth } from "../../lib/firebase";
+import Paso2Form from '../Paso2Form';
 
 function isoToday() {
   return new Date().toISOString().split('T')[0];

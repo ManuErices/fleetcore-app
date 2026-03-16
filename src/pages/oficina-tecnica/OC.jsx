@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listPurchaseOrders, savePurchaseOrders } from "../lib/db";
-import OCImporter from "../components/OCImporter";
+import { listActiveProjects, listPurchaseOrders, savePurchaseOrders } from "../../lib/db";
+import OCImporter from "../../components/OCImporter";
 
 // Utilidades de fecha (igual que MonthlyCalendar)
 function isoToday() {

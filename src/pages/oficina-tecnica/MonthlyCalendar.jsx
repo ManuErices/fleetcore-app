@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listActiveProjects, listMachines, listLogsByRange } from "../lib/db";
-import { useOperatorAssignments } from "../lib/useOperatorAssignments";
+import { listActiveProjects, listMachines, listLogsByRange } from "../../lib/db";
+import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 
 // Utilidades de fecha (sin cambios)
 function isoToday() {
