@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { db } from '../../lib/firebase';
+import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
@@ -99,6 +100,7 @@ function CancelBtn({ onClose }) {
 // ─── TrabajadorModal ──────────────────────────────────────────────────────────
 
 function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
+  const { empresaId } = useEmpresa();
   const empty = {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
@@ -115,13 +117,13 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   // Cargar cargos desde Firestore al abrir
   useEffect(() => {
     if (!isOpen) return;
-    getDocs(collection(db, 'bandas_salariales'))
+    getDocs(collection(db, 'empresas', empresaId, 'bandas_salariales'))
       .then(snap => {
         const lista = [...new Set(snap.docs.map(d => d.data().cargo).filter(Boolean))].sort();
         setCargos(lista);
       })
       .catch(() => setCargos([]));
-  }, [isOpen]);
+  }, [isOpen, empresaId]);
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
@@ -159,9 +161,9 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
       const telefonoCompleto = form.telefono ? `${form.codigoPais}${form.telefono}` : '';
       const payload = { ...form, telefono: telefonoCompleto, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'trabajadores', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'trabajadores'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -337,18 +339,20 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 // ─── FichaTrabajador ──────────────────────────────────────────────────────────
 
 function FichaTrabajador({ trabajador, onEdit, onClose }) {
+  const { empresaId } = useEmpresa();
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [anexos,        setAnexos]        = useState([]);
   const [loading,       setLoading]       = useState(false);
 
   useEffect(() => {
+    if (!empresaId) return;
     if (!trabajador) return;
     setLoading(true);
     Promise.all([
-      getDocs(query(collection(db, 'contratos'),      orderBy('createdAt', 'desc'))),
-      getDocs(query(collection(db, 'remuneraciones'), orderBy('createdAt', 'desc'))),
-      getDocs(query(collection(db, 'anexos'),         orderBy('createdAt', 'desc'))),
+      getDocs(query(collection(db, 'empresas', empresaId, 'contratos'),      orderBy('createdAt', 'desc'))),
+      getDocs(query(collection(db, 'empresas', empresaId, 'remuneraciones'), orderBy('createdAt', 'desc'))),
+      getDocs(query(collection(db, 'empresas', empresaId, 'anexos'),         orderBy('createdAt', 'desc'))),
     ]).then(([cSnap, rSnap, aSnap]) => {
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => c.trabajadorId === trabajador.id));
       setLiquidaciones(rSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(l => l.trabajadorId === trabajador.id));
@@ -564,6 +568,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
 // ─── ContratoModal ────────────────────────────────────────────────────────────
 
 function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
+  const { empresaId } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
     cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
@@ -586,9 +591,9 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
     try {
       const payload = { ...form, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'contratos', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'contratos', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'contratos'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'contratos'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -683,6 +688,7 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
 // ─── LiquidacionModal ─────────────────────────────────────────────────────────
 
 function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
+  const { empresaId } = useEmpresa();
   const hoy = new Date();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -729,9 +735,9 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     try {
       const payload = { ...form, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'remuneraciones', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'remuneraciones', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'remuneraciones'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'remuneraciones'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -886,6 +892,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 // ─── FiniquitoModal ───────────────────────────────────────────────────────────
 
 function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
+  const { empresaId } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '',
     fechaTermino: new Date().toISOString().split('T')[0],
@@ -927,9 +934,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     try {
       const payload = { ...form, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'finiquitos', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'finiquitos', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'finiquitos'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'finiquitos'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -1057,6 +1064,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
 // ─── AnexoModal ───────────────────────────────────────────────────────────────
 
 function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAnexo, onSaved }) {
+  const { empresaId } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '', tipo: '',
     fechaAnexo: new Date().toISOString().split('T')[0],
@@ -1086,9 +1094,9 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
     try {
       const payload = { ...form, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'anexos', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'anexos', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'anexos'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'anexos'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -1209,6 +1217,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 // ─── HistorialModal ───────────────────────────────────────────────────────────
 
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
+  const { empresaId } = useEmpresa();
   const [tab, setTab] = useState('contratos');
 
   useEffect(() => { setTab('contratos'); }, [trabajador]);
@@ -1384,6 +1393,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
 // ─── AsistenciaModal ──────────────────────────────────────────────────────────
 
 function AsistenciaModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
+  const { empresaId } = useEmpresa();
   const hoy = new Date();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -1431,9 +1441,9 @@ function AsistenciaModal({ isOpen, onClose, editData, trabajadores, contratos, o
     try {
       const payload = { ...form, updatedAt: serverTimestamp() };
       if (editData?.id) {
-        await updateDoc(doc(db, 'asistencia', editData.id), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'asistencia', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'asistencia'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'asistencia'), { ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }

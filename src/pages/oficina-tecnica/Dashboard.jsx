@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import { listActiveProjects, listLogsByRange, listFuelLogsByRange, listEmployeeMonthlyData, listMachines } from "../../lib/db";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFuelPrices } from "../../lib/fuelPriceService";
 
 // Utilidades de fecha
@@ -24,6 +25,7 @@ function getMonthStart() {
 }
 
 export default function DashboardExecutive() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -45,7 +47,7 @@ export default function DashboardExecutive() {
 
   useEffect(() => {
     (async () => {
-      const p = await listActiveProjects();
+      const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
     })();
@@ -64,10 +66,10 @@ export default function DashboardExecutive() {
       const month = fromDate.getMonth() + 1;
 
       const [logs, fuel, employees, machineList] = await Promise.all([
-        listLogsByRange(selectedProject, dateFrom, dateTo),
-        listFuelLogsByRange(selectedProject, dateFrom, dateTo),
-        listEmployeeMonthlyData(selectedProject, year, month),
-        listMachines(selectedProject)
+        listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listEmployeeMonthlyData(empresaId, selectedProject, year, month),
+        listMachines(empresaId, selectedProject)
       ]);
 
       // Rendiciones

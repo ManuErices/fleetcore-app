@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from '../../lib/firebase';
+import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
@@ -22,6 +23,7 @@ const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
 function AnexosSection() {
+  const { empresaId } = useEmpresa();
   const [anexos,       setAnexos]       = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos,    setContratos]    = useState([]);
@@ -38,14 +40,15 @@ function AnexosSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [aSnap, tSnap, cSnap, rSnap, fSnap] = await Promise.all([
-        getDocs(query(collection(db,'anexos'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-        getDocs(collection(db,'remuneraciones')),
-        getDocs(collection(db,'finiquitos')),
+        getDocs(query(collection(db,'empresas',empresaId,'anexos'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(collection(db,'empresas',empresaId,'remuneraciones')),
+        getDocs(collection(db,'empresas',empresaId,'finiquitos')),
       ]);
       setAnexos(aSnap.docs.map(d=>({id:d.id,...d.data()})));
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
@@ -54,7 +57,7 @@ function AnexosSection() {
       setFiniquitos(fSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e) { console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -76,7 +79,7 @@ function AnexosSection() {
   const paginados = filtrados.slice((pagina-1)*POR_PAGINA, pagina*POR_PAGINA);
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'anexos',confirm.id)); load(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'anexos', confirm.id)); load(); }
     catch(e) { alert('Error: '+e.message); }
     setConfirm(null);
   };
@@ -284,6 +287,7 @@ function AnexosSection() {
 }
 
 function ImpuestosSection() {
+  const { empresaId } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -298,19 +302,20 @@ function ImpuestosSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [tSnap, cSnap, rSnap] = await Promise.all([
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-        getDocs(query(collection(db,'remuneraciones'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'remuneraciones'), orderBy('createdAt','desc'))),
       ]);
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
       setLiquidaciones(rSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){ console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -598,6 +603,7 @@ function ImpuestosSection() {
 }
 
 function AsistenciaSection() {
+  const { empresaId } = useEmpresa();
   const now   = new Date();
   const hoy   = { anio: now.getFullYear(), mes: now.getMonth(), dia: now.getDate() };
   const fmt2  = n => String(n).padStart(2,'0');
@@ -620,8 +626,8 @@ function AsistenciaSection() {
   // ── Cargar trabajadores y contratos una sola vez ──
   useEffect(() => {
     Promise.all([
-      getDocs(query(collection(db,'trabajadores'), orderBy('apellidoPaterno'))),
-      getDocs(collection(db,'contratos')),
+      getDocs(query(collection(db,'empresas',empresaId,'trabajadores'), orderBy('apellidoPaterno'))),
+      getDocs(collection(db,'empresas',empresaId,'contratos')),
     ]).then(([tSnap, cSnap]) => {
       setTrabajadores(tSnap.docs.map(d => ({ id:d.id,...d.data() })));
       setContratos(cSnap.docs.map(d => ({ id:d.id,...d.data() })));
@@ -634,7 +640,7 @@ function AsistenciaSection() {
     if (vista !== 'hoy' || loadingBase) return;
     // Escuchar todos los docs del mes actual
     const mesStr = fmt2(hoy.mes + 1);
-    const q = query(collection(db, 'asistencia'));
+    const q = query(collection(db, 'empresas', empresaId, 'asistencia'));
     const unsub = onSnapshot(q, snap => {
       const m = {};
       snap.docs.forEach(d => {
@@ -659,7 +665,7 @@ function AsistenciaSection() {
   // ── Cargar historial cuando se cambia de vista ──
   useEffect(() => {
     if (vista !== 'historial') return;
-    getDocs(query(collection(db,'asistencia'), orderBy('anio','desc')))
+    getDocs(query(collection(db,'empresas',empresaId,'asistencia'), orderBy('anio','desc')))
       .then(snap => setHistorial(snap.docs.map(d => ({ id:d.id,...d.data() }))));
   }, [vista]);
 
@@ -692,7 +698,7 @@ function AsistenciaSection() {
 
   // ── Guardar edición con log de auditoría ──
   async function guardarEdicion({ docId, trabajadorId, dKey, entrada, salida, justificacion, adminEmail }) {
-    const ref  = doc(db, 'asistencia', docId);
+    const ref  = doc(db, 'empresas', empresaId, 'asistencia', docId);
     const snap = await getDoc(ref);
     if (!snap.exists()) return;
     const data = snap.data();
@@ -1202,6 +1208,7 @@ function Organigrama({ trabajadores, contratos, filtroEmpresa }) {
 }
 
 function BandasSection({ trabajadores, contratos, bandas, onReload }) {
+  const { empresaId } = useEmpresa();
   const [form,      setForm]      = useState({ nivel: '', cargo: '', sueldoMin: '', sueldoMax: '', area: '' });
   const [saving,    setSaving]    = useState(false);
   const [editId,    setEditId]    = useState(null);
@@ -1224,9 +1231,9 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
         updatedAt: serverTimestamp(),
       };
       if (editId) {
-        await updateDoc(doc(db, 'bandas_salariales', editId), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'bandas_salariales', editId), payload);
       } else {
-        await addDoc(collection(db, 'bandas_salariales'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'bandas_salariales'), { ...payload, createdAt: serverTimestamp() });
       }
       setForm({ nivel: '', cargo: '', sueldoMin: '', sueldoMax: '', area: '' });
       setEditId(null);
@@ -1241,7 +1248,7 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
   };
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db, 'bandas_salariales', confirm.id)); onReload(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'bandas_salariales', confirm.id)); onReload(); }
     catch(e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
@@ -1391,6 +1398,7 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
 }
 
 function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, onReload }) {
+  const { empresaId } = useEmpresa();
   const [form,    setForm]    = useState({ codigo: '', nombre: '', descripcion: '', presupuesto: '' });
   const [saving,  setSaving]  = useState(false);
   const [editId,  setEditId]  = useState(null);
@@ -1411,9 +1419,9 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
         updatedAt:    serverTimestamp(),
       };
       if (editId) {
-        await updateDoc(doc(db, 'centros_costo', editId), payload);
+        await updateDoc(doc(db, 'empresas', empresaId, 'centros_costo', editId), payload);
       } else {
-        await addDoc(collection(db, 'centros_costo'), { ...payload, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'centros_costo'), { ...payload, createdAt: serverTimestamp() });
       }
       setForm({ codigo: '', nombre: '', descripcion: '', presupuesto: '' });
       setEditId(null);
@@ -1428,7 +1436,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
   };
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db, 'centros_costo', confirm.id)); onReload(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'centros_costo', confirm.id)); onReload(); }
     catch(e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
@@ -1605,6 +1613,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
 }
 
 function OrganizacionSection() {
+  const { empresaId } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -1615,14 +1624,15 @@ function OrganizacionSection() {
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [tSnap, cSnap, rSnap, bSnap, ccSnap] = await Promise.all([
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-        getDocs(query(collection(db,'remuneraciones'), orderBy('createdAt','desc'))),
-        getDocs(query(collection(db,'bandas_salariales'), orderBy('nivel','asc'))),
-        getDocs(collection(db,'centros_costo')),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'remuneraciones'), orderBy('createdAt','desc'))),
+        getDocs(query(collection(db,'empresas',empresaId,'bandas_salariales'), orderBy('nivel','asc'))),
+        getDocs(collection(db,'empresas',empresaId,'centros_costo')),
       ]);
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
@@ -1631,7 +1641,7 @@ function OrganizacionSection() {
       setCentros(ccSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){ console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1726,6 +1736,7 @@ function OrganizacionSection() {
 }
 
 function ReportesSection() {
+  const { empresaId } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -1737,13 +1748,14 @@ function ReportesSection() {
   const [periodoMeses,  setPeriodoMeses]  = useState(6);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [tSnap, cSnap, rSnap, fSnap] = await Promise.all([
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-        getDocs(query(collection(db,'remuneraciones'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'finiquitos')),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'remuneraciones'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'finiquitos')),
       ]);
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
@@ -1751,7 +1763,7 @@ function ReportesSection() {
       setFiniquitos(fSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){ console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2374,6 +2386,7 @@ function ReportesSection() {
 }
 
 function ContabilidadSection({ initialTab = 'asientos' }) {
+  const { empresaId } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -2390,19 +2403,20 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   const [editPlan,      setEditPlan]      = useState(false);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [tSnap, cSnap, rSnap] = await Promise.all([
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
-        getDocs(query(collection(db,'remuneraciones'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'remuneraciones'), orderBy('createdAt','desc'))),
       ]);
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
       setLiquidaciones(rSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){ console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -196,6 +197,7 @@ function LineChart({ data, height = 110, color = "#7c3aed" }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasReportes() {
   const { proyectoId } = useFinanzas();
+  const { empresaId } = useEmpresa();
   const [loading, setLoading]   = useState(true);
   const [anio, setAnio]         = useState(new Date().getFullYear());
   const [rawData, setRawData]   = useState({ ingresos: [], egresos: [], costosFijos: [], proveedores: [] });
@@ -203,12 +205,13 @@ export default function FinanzasReportes() {
   const reportRef = useRef(null);
 
   const cargar = useCallback(async () => {
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     const resultado = { ingresos: [], egresos: [], costosFijos: [], proveedores: [] };
 
     // 1. Ingresos manuales
     try {
-      const snap = await getDocs(collection(db, "finanzas_ingresos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_ingresos"));
       snap.docs.forEach(d => {
         const r = { ...d.data(), id: d.id };
         if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
@@ -218,7 +221,7 @@ export default function FinanzasReportes() {
 
     // 2. Egresos: rendiciones
     try {
-      const snap = await getDocs(collection(db, "rendiciones"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "rendiciones"));
       snap.docs.forEach(d => {
         const r = d.data();
         if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
@@ -233,7 +236,7 @@ export default function FinanzasReportes() {
 
     // 3. Egresos: subcontratos
     try {
-      const snap = await getDocs(collection(db, "subcontratos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "subcontratos"));
       snap.docs.forEach(d => {
         const s = d.data();
         if (proyectoId !== "todos" && s.projectId !== proyectoId) return;
@@ -246,7 +249,7 @@ export default function FinanzasReportes() {
 
     // 4. Egresos: órdenes de compra
     try {
-      const snap = await getDocs(collection(db, "purchaseOrders"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "purchaseOrders"));
       snap.docs.forEach(d => {
         const o = d.data();
         if (proyectoId !== "todos" && o.projectId !== proyectoId) return;
@@ -258,13 +261,13 @@ export default function FinanzasReportes() {
 
     // 5. Costos fijos (globales, no filtrar por proyecto)
     try {
-      const snap = await getDocs(collection(db, "costos_fijos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
       snap.docs.forEach(d => resultado.costosFijos.push({ ...d.data(), id: d.id }));
     } catch (e) {}
 
     setRawData(resultado);
     setLoading(false);
-  }, [proyectoId]);
+  }, [empresaId, proyectoId]);
 
   useEffect(() => { cargar(); }, [cargar]);
 

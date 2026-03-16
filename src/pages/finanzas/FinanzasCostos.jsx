@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -250,6 +251,7 @@ function ModalCosto({ isOpen, onClose, onSave, editando }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasCostos() {
   const { proyectoId } = useFinanzas();
+  const { empresaId } = useEmpresa();
   const [costos, setCostos]                   = useState([]);
   const [loading, setLoading]                 = useState(true);
   const [showModal, setShowModal]             = useState(false);
@@ -263,20 +265,21 @@ export default function FinanzasCostos() {
   const [sortDir, setSortDir]                 = useState("asc");
 
   const cargar = async () => {
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, "costos_fijos"), orderBy("fechaCreacion", "desc")));
+      const snap = await getDocs(query(collection(db, "empresas", empresaId, "costos_fijos"), orderBy("fechaCreacion", "desc")));
       setCostos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);
   };
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => { cargar(); }, [empresaId]);
 
   const handleSave = async (form) => {
     if (editando) {
-      await updateDoc(doc(db, "costos_fijos", editando.id), form);
+      await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", editando.id), form);
     } else {
-      await addDoc(collection(db, "costos_fijos"), { ...form, fechaCreacion: serverTimestamp() });
+      await addDoc(collection(db, "empresas", empresaId, "costos_fijos"), { ...form, fechaCreacion: serverTimestamp() });
     }
     setEditando(null);
     cargar();
@@ -285,14 +288,14 @@ export default function FinanzasCostos() {
   const handleEliminar = async (id) => {
     if (!window.confirm("¿Eliminar este costo? Esta acción no se puede deshacer.")) return;
     setDeletingId(id);
-    await deleteDoc(doc(db, "costos_fijos", id));
+    await deleteDoc(doc(db, "empresas", empresaId, "costos_fijos", id));
     setDeletingId(null);
     if (vistaDetalle?.id === id) setVistaDetalle(null);
     cargar();
   };
 
   const toggleActivo = async (c) => {
-    await updateDoc(doc(db, "costos_fijos", c.id), { activo: !c.activo });
+    await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", c.id), { activo: !c.activo });
     cargar();
   };
 

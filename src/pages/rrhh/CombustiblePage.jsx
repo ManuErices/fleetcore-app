@@ -184,7 +184,6 @@ export default function CombustiblePage({ onClose }) {
   }, [isOpen, machines]);
 
   const cargarEmpresas = async () => {
-    if (!empresaId) return;
     try {
       const empresasRef = collection(db, 'empresas', empresaId, 'empresas_combustible');
       const empresasSnap = await getDocs(empresasRef);

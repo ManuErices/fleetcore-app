@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 
 const FinanzasContext = createContext(null);
 
@@ -27,6 +28,7 @@ function mesKey(fecha) {
 // categoria: "activo_doc" | "costo_fijo" | "proveedor" | "activo_sin_datos" | "ingreso_faltante"
 
 export function FinanzasProvider({ children }) {
+  const { empresaId } = useEmpresa();
   const [proyectos, setProyectos]       = useState([]);
   const [proyectoId, setProyectoId]     = useState("todos");
   const [loadingProyectos, setLoading]  = useState(true);
@@ -36,21 +38,23 @@ export function FinanzasProvider({ children }) {
 
   // Cargar proyectos
   useEffect(() => {
-    getDocs(collection(db, "projects"))
+    if (!empresaId) return;
+    getDocs(collection(db, "empresas", empresaId, "projects"))
       .then(snap => setProyectos(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [empresaId]);
 
   // Calcular alertas globales
   const recalcularAlertas = useCallback(async () => {
+    if (!empresaId) { setLoadingAlertas(false); return; }
     setLoadingAlertas(true);
     const resultado = [];
 
     // ── 1. Documentos vencidos/por vencer en Activos (7 días) ─────────────
     try {
-      const snapFA = await getDocs(collection(db, "finanzas_activos"));
-      const snapM  = await getDocs(collection(db, "machines"));
+      const snapFA = await getDocs(collection(db, "empresas", empresaId, "finanzas_activos"));
+      const snapM  = await getDocs(collection(db, "empresas", empresaId, "machines"));
       const nombresMaq = {};
       snapM.docs.forEach(d => { nombresMaq[d.id] = d.data().name || d.data().patente || d.id; });
 
@@ -95,7 +99,7 @@ export function FinanzasProvider({ children }) {
 
     // ── 2. Costos fijos con día de pago próximo (7 días) ──────────────────
     try {
-      const snap = await getDocs(collection(db, "costos_fijos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
       const hoy = new Date();
       snap.docs.forEach(d => {
         const c = d.data();
@@ -123,7 +127,7 @@ export function FinanzasProvider({ children }) {
 
     // ── 3. Proveedores con pagos pendientes/vencidos ───────────────────────
     try {
-      const snap = await getDocs(collection(db, "finanzas_proveedores"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_proveedores"));
       snap.docs.forEach(d => {
         const p = d.data();
         if (!["Pendiente", "Vencido", "Parcial"].includes(p.estadoPago)) return;
@@ -147,8 +151,8 @@ export function FinanzasProvider({ children }) {
 
     // ── 4. Activos FleetCore sin datos financieros cargados ───────────────
     try {
-      const snapM  = await getDocs(collection(db, "machines"));
-      const snapFA = await getDocs(collection(db, "finanzas_activos"));
+      const snapM  = await getDocs(collection(db, "empresas", empresaId, "machines"));
+      const snapFA = await getDocs(collection(db, "empresas", empresaId, "finanzas_activos"));
       const conDatos = new Set(snapFA.docs.map(d => d.data().machineId).filter(Boolean));
       snapM.docs.forEach(d => {
         const m = d.data();
@@ -169,7 +173,7 @@ export function FinanzasProvider({ children }) {
 
     // ── 5. Meses sin ingresos registrados (últimos 3 meses) ───────────────
     try {
-      const snap = await getDocs(collection(db, "finanzas_ingresos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_ingresos"));
       const mesesConIngreso = new Set(snap.docs.map(d => mesKey(d.data().fecha)).filter(Boolean));
       const hoy = new Date();
       for (let i = 1; i <= 3; i++) {
@@ -201,7 +205,7 @@ export function FinanzasProvider({ children }) {
 
     setAlertas(resultado);
     setLoadingAlertas(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { recalcularAlertas(); }, [recalcularAlertas]);
 

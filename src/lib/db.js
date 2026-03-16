@@ -16,26 +16,33 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 
-const COL = {
-  projects: "projects",
-  machines: "machines",
-  dailyLogs: "dailyLogs",
-  fuelLogs: "fuelLogs",
-  employees: "employees",
-  employeeMonthlyData: "employeeMonthlyData",
-  employeeAssignments: "employeeAssignments",
-  purchaseOrders: "purchaseOrders",
-  rendiciones: "rendiciones",
-  subcontratos: "subcontratos",
-};
+// ─── Multi-tenant: paths bajo /empresas/{empresaId}/ ─────────
+// Las colecciones globales (settings, subscription_intents) NO pasan por aquí
+const EMPRESA_COL = (empresaId, colName) =>
+  collection(db, 'empresas', empresaId, colName);
+
+// Colecciones de empresa
+const COLS = [
+  'projects', 'machines', 'dailyLogs', 'fuelLogs',
+  'employees', 'employeeMonthlyData', 'employeeAssignments',
+  'purchaseOrders', 'rendiciones', 'subcontratos',
+];
+
+// Helper: doc dentro de empresa
+const EMPRESA_DOC = (empresaId, colName, docId) =>
+  doc(db, 'empresas', empresaId, colName, docId);
+
+// ─── Colecciones globales (superadmin only) ───────────────────
+export const globalCol = (colName) => collection(db, colName);
+export const globalDoc = (colName, docId) => doc(db, colName, docId);
 
 // ============================================
 // PROYECTOS
 // ============================================
 
-export async function listActiveProjects() {
+export async function listActiveProjects(empresaId) {
   const q = query(
-    collection(db, COL.projects),
+    EMPRESA_COL(empresaId, 'projects'),
     where("active", "==", true),
     orderBy("name")
   );
@@ -47,9 +54,9 @@ export async function listActiveProjects() {
 // MÁQUINAS
 // ============================================
 
-export async function listMachines(projectId) {
+export async function listMachines(empresaId, projectId) {
   const q = query(
-    collection(db, COL.machines),
+    EMPRESA_COL(empresaId, 'machines'),
     where("projectId", "==", projectId),
     orderBy("code")
   );
@@ -57,20 +64,20 @@ export async function listMachines(projectId) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-export async function upsertMachine(machine) {
+export async function upsertMachine(empresaId, machine) {
   if (!machine.id || machine.id.trim() === "") {
     const { id, ...payload } = machine;
     const dataToSave = { 
       ...payload, 
       createdAt: Timestamp.now() 
     };
-    const ref = await addDoc(collection(db, COL.machines), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'machines'), dataToSave);
     console.log("✅ Máquina creada con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = machine;
   await setDoc(
-    doc(db, COL.machines, id),
+    EMPRESA_DOC(empresaId, 'machines', id),
     { ...rest, updatedAt: Timestamp.now() },
     { merge: true }
   );
@@ -78,23 +85,23 @@ export async function upsertMachine(machine) {
   return id;
 }
 
-export async function deleteMachine(machineId) {
+export async function deleteMachine(empresaId, machineId) {
   if (!machineId || machineId.trim() === "") {
     throw new Error("Machine ID is required for deletion");
   }
-  await deleteDoc(doc(db, COL.machines, machineId));
+  await deleteDoc(EMPRESA_DOC(empresaId, 'machines', machineId));
 }
 
 // ============================================
 // DAILY LOGS (DETALLE FLOTA)
 // ============================================
 
-export async function listLogsByRange(projectId, dateFrom, dateTo) {
+export async function listLogsByRange(empresaId, projectId, dateFrom, dateTo) {
   console.log(`📊 Cargando logs: ${dateFrom} a ${dateTo}`);
   
   try {
     const q = query(
-      collection(db, COL.dailyLogs),
+      EMPRESA_COL(empresaId, 'dailyLogs'),
       where("projectId", "==", projectId)
     );
     
@@ -116,19 +123,19 @@ export async function listLogsByRange(projectId, dateFrom, dateTo) {
   }
 }
 
-export async function upsertDailyLog(log) {
+export async function upsertDailyLog(empresaId, log) {
   if (!log.id || log.id.trim() === "") {
     const { id, ...payload } = log;
     const dataToSave = {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(collection(db, COL.dailyLogs), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'dailyLogs'), dataToSave);
     console.log("✅ Log creado con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = log;
-  await updateDoc(doc(db, COL.dailyLogs, id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'dailyLogs', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -140,12 +147,12 @@ export async function upsertDailyLog(log) {
 // FUEL LOGS (COMBUSTIBLE)
 // ============================================
 
-export async function listFuelLogsByRange(projectId, dateFrom, dateTo) {
+export async function listFuelLogsByRange(empresaId, projectId, dateFrom, dateTo) {
   console.log(`⛽ Cargando recargas de combustible: ${dateFrom} a ${dateTo}`);
   
   try {
     const q = query(
-      collection(db, COL.fuelLogs),
+      EMPRESA_COL(empresaId, 'fuelLogs'),
       where("projectId", "==", projectId)
     );
     
@@ -167,19 +174,19 @@ export async function listFuelLogsByRange(projectId, dateFrom, dateTo) {
   }
 }
 
-export async function upsertFuelLog(fuelLog) {
+export async function upsertFuelLog(empresaId, fuelLog) {
   if (!fuelLog.id || fuelLog.id.trim() === "") {
     const { id, ...payload } = fuelLog;
     const dataToSave = {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(collection(db, COL.fuelLogs), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'fuelLogs'), dataToSave);
     console.log("✅ Recarga creada con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = fuelLog;
-  await updateDoc(doc(db, COL.fuelLogs, id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'fuelLogs', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -187,11 +194,11 @@ export async function upsertFuelLog(fuelLog) {
   return id;
 }
 
-export async function deleteFuelLog(fuelLogId) {
+export async function deleteFuelLog(empresaId, fuelLogId) {
   if (!fuelLogId || fuelLogId.trim() === "") {
     throw new Error("Fuel log ID is required for deletion");
   }
-  await deleteDoc(doc(db, COL.fuelLogs, fuelLogId));
+  await deleteDoc(EMPRESA_DOC(empresaId, 'fuelLogs', fuelLogId));
   console.log("✅ Recarga eliminada con ID:", fuelLogId);
 }
 
@@ -199,12 +206,12 @@ export async function deleteFuelLog(fuelLogId) {
 // EMPLOYEES (EMPLEADOS)
 // ============================================
 
-export async function listEmployees(projectId) {
+export async function listEmployees(empresaId, projectId) {
   console.log(`👥 Cargando empleados del proyecto ${projectId}`);
   
   try {
     const q = query(
-      collection(db, COL.employees),
+      EMPRESA_COL(empresaId, 'employees'),
       where("projectId", "==", projectId)
     );
     
@@ -220,10 +227,10 @@ export async function listEmployees(projectId) {
   }
 }
 
-export async function getEmployeeByRut(projectId, rut) {
+export async function getEmployeeByRut(empresaId, projectId, rut) {
   try {
     const q = query(
-      collection(db, COL.employees),
+      EMPRESA_COL(empresaId, 'employees'),
       where("projectId", "==", projectId),
       where("rut", "==", rut)
     );
@@ -239,19 +246,19 @@ export async function getEmployeeByRut(projectId, rut) {
   }
 }
 
-export async function upsertEmployee(employee) {
+export async function upsertEmployee(empresaId, employee) {
   if (!employee.id || employee.id.trim() === "") {
     const { id, ...payload } = employee;
     const dataToSave = {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(collection(db, COL.employees), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'employees'), dataToSave);
     console.log("✅ Empleado creado con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = employee;
-  await updateDoc(doc(db, COL.employees, id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'employees', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -259,11 +266,11 @@ export async function upsertEmployee(employee) {
   return id;
 }
 
-export async function deleteEmployee(employeeId) {
+export async function deleteEmployee(empresaId, employeeId) {
   if (!employeeId || employeeId.trim() === "") {
     throw new Error("Employee ID is required for deletion");
   }
-  await deleteDoc(doc(db, COL.employees, employeeId));
+  await deleteDoc(EMPRESA_DOC(empresaId, 'employees', employeeId));
   console.log("✅ Empleado eliminado con ID:", employeeId);
 }
 
@@ -271,12 +278,12 @@ export async function deleteEmployee(employeeId) {
 // EMPLOYEE MONTHLY DATA (REMUNERACIONES)
 // ============================================
 
-export async function listEmployeeMonthlyData(projectId, year, month) {
+export async function listEmployeeMonthlyData(empresaId, projectId, year, month) {
   console.log(`📅 Cargando datos mensuales: ${year}-${month}`);
   
   try {
     const q = query(
-      collection(db, COL.employeeMonthlyData),
+      EMPRESA_COL(empresaId, 'employeeMonthlyData'),
       where("projectId", "==", projectId),
       where("year", "==", year),
       where("month", "==", month)
@@ -294,10 +301,10 @@ export async function listEmployeeMonthlyData(projectId, year, month) {
   }
 }
 
-export async function getEmployeeMonthlyData(employeeId, year, month) {
+export async function getEmployeeMonthlyData(empresaId, employeeId, year, month) {
   try {
     const q = query(
-      collection(db, COL.employeeMonthlyData),
+      EMPRESA_COL(empresaId, 'employeeMonthlyData'),
       where("employeeId", "==", employeeId),
       where("year", "==", year),
       where("month", "==", month)
@@ -314,19 +321,19 @@ export async function getEmployeeMonthlyData(employeeId, year, month) {
   }
 }
 
-export async function upsertEmployeeMonthlyData(monthlyData) {
+export async function upsertEmployeeMonthlyData(empresaId, monthlyData) {
   if (!monthlyData.id || monthlyData.id.trim() === "") {
     const { id, ...payload } = monthlyData;
     const dataToSave = {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(collection(db, COL.employeeMonthlyData), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'employeeMonthlyData'), dataToSave);
     console.log("✅ Datos mensuales creados con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = monthlyData;
-  await updateDoc(doc(db, COL.employeeMonthlyData, id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'employeeMonthlyData', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -338,18 +345,18 @@ export async function upsertEmployeeMonthlyData(monthlyData) {
 // EMPLOYEE ASSIGNMENTS (ASIGNACIONES)
 // ============================================
 
-export async function listEmployeeAssignments(projectId, year = null, month = null) {
+export async function listEmployeeAssignments(empresaId, projectId, year = null, month = null) {
   console.log(`🔗 Cargando asignaciones del proyecto ${projectId}`);
   
   try {
     let q = query(
-      collection(db, COL.employeeAssignments),
+      EMPRESA_COL(empresaId, 'employeeAssignments'),
       where("projectId", "==", projectId)
     );
     
     if (year && month) {
       q = query(
-        collection(db, COL.employeeAssignments),
+        EMPRESA_COL(empresaId, 'employeeAssignments'),
         where("projectId", "==", projectId),
         where("year", "==", year),
         where("month", "==", month)
@@ -368,10 +375,10 @@ export async function listEmployeeAssignments(projectId, year = null, month = nu
   }
 }
 
-export async function getEmployeeAssignment(employeeId, year, month) {
+export async function getEmployeeAssignment(empresaId, employeeId, year, month) {
   try {
     const q = query(
-      collection(db, COL.employeeAssignments),
+      EMPRESA_COL(empresaId, 'employeeAssignments'),
       where("employeeId", "==", employeeId),
       where("year", "==", year),
       where("month", "==", month)
@@ -388,19 +395,19 @@ export async function getEmployeeAssignment(employeeId, year, month) {
   }
 }
 
-export async function upsertEmployeeAssignment(assignment) {
+export async function upsertEmployeeAssignment(empresaId, assignment) {
   if (!assignment.id || assignment.id.trim() === "") {
     const { id, ...payload } = assignment;
     const dataToSave = {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(collection(db, COL.employeeAssignments), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'employeeAssignments'), dataToSave);
     console.log("✅ Asignación creada con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = assignment;
-  await updateDoc(doc(db, COL.employeeAssignments, id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'employeeAssignments', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -408,11 +415,11 @@ export async function upsertEmployeeAssignment(assignment) {
   return id;
 }
 
-export async function deleteEmployeeAssignment(assignmentId) {
+export async function deleteEmployeeAssignment(empresaId, assignmentId) {
   if (!assignmentId || assignmentId.trim() === "") {
     throw new Error("Assignment ID is required for deletion");
   }
-  await deleteDoc(doc(db, COL.employeeAssignments, assignmentId));
+  await deleteDoc(EMPRESA_DOC(empresaId, 'employeeAssignments', assignmentId));
   console.log("✅ Asignación eliminada con ID:", assignmentId);
 }
 
@@ -420,10 +427,10 @@ export async function deleteEmployeeAssignment(assignmentId) {
 // PURCHASE ORDERS (ÓRDENES DE COMPRA)
 // ============================================
 
-export async function listPurchaseOrders(projectId) {
+export async function listPurchaseOrders(empresaId, projectId) {
   try {
     const q = query(
-      collection(db, COL.purchaseOrders),
+      EMPRESA_COL(empresaId, 'purchaseOrders'),
       where("projectId", "==", projectId)
     );
     
@@ -444,7 +451,7 @@ export async function listPurchaseOrders(projectId) {
   }
 }
 
-export async function savePurchaseOrders(orders, projectId) {
+export async function savePurchaseOrders(empresaId, orders, projectId) {
   try {
     // Guardar en batches de 500
     const batchSize = 500;
@@ -454,7 +461,7 @@ export async function savePurchaseOrders(orders, projectId) {
       const batchOrders = orders.slice(i, i + batchSize);
       
       batchOrders.forEach(order => {
-        const docRef = doc(collection(db, COL.purchaseOrders));
+        const docRef = doc(EMPRESA_COL(empresaId, 'purchaseOrders'));
         batch.set(docRef, {
           ...order,
           projectId,
@@ -473,30 +480,30 @@ export async function savePurchaseOrders(orders, projectId) {
   }
 }
 
-export async function upsertPurchaseOrder(order) {
+export async function upsertPurchaseOrder(empresaId, order) {
   const orderData = {
     ...order,
     updatedAt: serverTimestamp()
   };
 
   if (order.id) {
-    const ref = doc(db, COL.purchaseOrders, order.id);
+    const ref = EMPRESA_DOC(empresaId, 'purchaseOrders', order.id);
     await updateDoc(ref, orderData);
     return { id: order.id, ...orderData };
   } else {
     orderData.createdAt = serverTimestamp();
-    const ref = await addDoc(collection(db, COL.purchaseOrders), orderData);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'purchaseOrders'), orderData);
     return { id: ref.id, ...orderData };
   }
 }
 
-export async function deletePurchaseOrder(orderId) {
-  await deleteDoc(doc(db, COL.purchaseOrders, orderId));
+export async function deletePurchaseOrder(empresaId, orderId) {
+  await deleteDoc(EMPRESA_DOC(empresaId, 'purchaseOrders', orderId));
 }
 
-export async function deleteAllPurchaseOrders(projectId) {
+export async function deleteAllPurchaseOrders(empresaId, projectId) {
   const q = query(
-    collection(db, COL.purchaseOrders),
+    EMPRESA_COL(empresaId, 'purchaseOrders'),
     where("projectId", "==", projectId)
   );
   
@@ -515,12 +522,12 @@ export async function deleteAllPurchaseOrders(projectId) {
 // RENDICIONES
 // ============================================
 
-export async function listRendiciones(projectId, year, month) {
+export async function listRendiciones(empresaId, projectId, year, month) {
   console.log(`📋 Cargando rendiciones: ${year}-${month}`);
   
   try {
     const q = query(
-      collection(db, COL.rendiciones),
+      EMPRESA_COL(empresaId, 'rendiciones'),
       where("projectId", "==", projectId),
       where("year", "==", year),
       where("month", "==", month)
@@ -547,10 +554,10 @@ export async function listRendiciones(projectId, year, month) {
   }
 }
 
-export async function saveRendiciones(rendiciones, projectId, year, month) {
+export async function saveRendiciones(empresaId, rendiciones, projectId, year, month) {
   try {
     // Primero eliminar las existentes del mismo mes
-    await deleteAllRendiciones(projectId, year, month);
+    await deleteAllRendiciones(empresaId, projectId, year, month);
     
     // Guardar en batches de 500
     const batchSize = 500;
@@ -560,7 +567,7 @@ export async function saveRendiciones(rendiciones, projectId, year, month) {
       const batchItems = rendiciones.slice(i, i + batchSize);
       
       batchItems.forEach(rendicion => {
-        const docRef = doc(collection(db, COL.rendiciones));
+        const docRef = doc(EMPRESA_COL(empresaId, 'rendiciones'));
         batch.set(docRef, {
           ...rendicion,
           projectId,
@@ -581,30 +588,30 @@ export async function saveRendiciones(rendiciones, projectId, year, month) {
   }
 }
 
-export async function upsertRendicion(rendicion) {
+export async function upsertRendicion(empresaId, rendicion) {
   const rendicionData = {
     ...rendicion,
     updatedAt: serverTimestamp()
   };
 
   if (rendicion.id) {
-    const ref = doc(db, COL.rendiciones, rendicion.id);
+    const ref = EMPRESA_DOC(empresaId, 'rendiciones', rendicion.id);
     await updateDoc(ref, rendicionData);
     return { id: rendicion.id, ...rendicionData };
   } else {
     rendicionData.createdAt = serverTimestamp();
-    const ref = await addDoc(collection(db, COL.rendiciones), rendicionData);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'rendiciones'), rendicionData);
     return { id: ref.id, ...rendicionData };
   }
 }
 
-export async function deleteRendicion(rendicionId) {
-  await deleteDoc(doc(db, COL.rendiciones, rendicionId));
+export async function deleteRendicion(empresaId, rendicionId) {
+  await deleteDoc(EMPRESA_DOC(empresaId, 'rendiciones', rendicionId));
 }
 
-export async function deleteAllRendiciones(projectId, year, month) {
+export async function deleteAllRendiciones(empresaId, projectId, year, month) {
   const q = query(
-    collection(db, COL.rendiciones),
+    EMPRESA_COL(empresaId, 'rendiciones'),
     where("projectId", "==", projectId),
     where("year", "==", year),
     where("month", "==", month)
@@ -630,8 +637,8 @@ export async function deleteAllRendiciones(projectId, year, month) {
   console.log(`✅ Rendiciones eliminadas del proyecto/mes`);
 }
 
-export async function getRendicionesStats(projectId, year, month) {
-  const rendiciones = await listRendiciones(projectId, year, month);
+export async function getRendicionesStats(empresaId, projectId, year, month) {
+  const rendiciones = await listRendiciones(empresaId, projectId, year, month);
   
   const stats = {
     total: 0,
@@ -667,12 +674,12 @@ export async function getRendicionesStats(projectId, year, month) {
 // SUBCONTRATOS
 // ============================================
 
-export async function listSubcontratos(projectId, year, month) {
+export async function listSubcontratos(empresaId, projectId, year, month) {
   console.log(`👥 Cargando subcontratos: ${year}-${month}`);
   
   try {
     const q = query(
-      collection(db, COL.subcontratos),
+      EMPRESA_COL(empresaId, 'subcontratos'),
       where("projectId", "==", projectId),
       where("year", "==", year),
       where("month", "==", month)
@@ -699,10 +706,10 @@ export async function listSubcontratos(projectId, year, month) {
   }
 }
 
-export async function saveSubcontratos(subcontratos, projectId, year, month) {
+export async function saveSubcontratos(empresaId, subcontratos, projectId, year, month) {
   try {
     // Primero eliminar los existentes del mismo mes
-    await deleteAllSubcontratos(projectId, year, month);
+    await deleteAllSubcontratos(empresaId, projectId, year, month);
     
     // Guardar en batches de 500
     const batchSize = 500;
@@ -712,7 +719,7 @@ export async function saveSubcontratos(subcontratos, projectId, year, month) {
       const batchItems = subcontratos.slice(i, i + batchSize);
       
       batchItems.forEach(subcontrato => {
-        const docRef = doc(collection(db, COL.subcontratos));
+        const docRef = doc(EMPRESA_COL(empresaId, 'subcontratos'));
         batch.set(docRef, {
           ...subcontrato,
           projectId,
@@ -733,30 +740,30 @@ export async function saveSubcontratos(subcontratos, projectId, year, month) {
   }
 }
 
-export async function upsertSubcontrato(subcontrato) {
+export async function upsertSubcontrato(empresaId, subcontrato) {
   const subcontratoData = {
     ...subcontrato,
     updatedAt: serverTimestamp()
   };
 
   if (subcontrato.id) {
-    const ref = doc(db, COL.subcontratos, subcontrato.id);
+    const ref = EMPRESA_DOC(empresaId, 'subcontratos', subcontrato.id);
     await updateDoc(ref, subcontratoData);
     return { id: subcontrato.id, ...subcontratoData };
   } else {
     subcontratoData.createdAt = serverTimestamp();
-    const ref = await addDoc(collection(db, COL.subcontratos), subcontratoData);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'subcontratos'), subcontratoData);
     return { id: ref.id, ...subcontratoData };
   }
 }
 
-export async function deleteSubcontrato(subcontratoId) {
-  await deleteDoc(doc(db, COL.subcontratos, subcontratoId));
+export async function deleteSubcontrato(empresaId, subcontratoId) {
+  await deleteDoc(EMPRESA_DOC(empresaId, 'subcontratos', subcontratoId));
 }
 
-export async function deleteAllSubcontratos(projectId, year, month) {
+export async function deleteAllSubcontratos(empresaId, projectId, year, month) {
   const q = query(
-    collection(db, COL.subcontratos),
+    EMPRESA_COL(empresaId, 'subcontratos'),
     where("projectId", "==", projectId),
     where("year", "==", year),
     where("month", "==", month)
@@ -782,8 +789,8 @@ export async function deleteAllSubcontratos(projectId, year, month) {
   console.log(`✅ Subcontratos eliminados del proyecto/mes`);
 }
 
-export async function getSubcontratosStats(projectId, year, month) {
-  const subcontratos = await listSubcontratos(projectId, year, month);
+export async function getSubcontratosStats(empresaId, projectId, year, month) {
+  const subcontratos = await listSubcontratos(empresaId, projectId, year, month);
   
   const stats = {
     totalPagado: 0,

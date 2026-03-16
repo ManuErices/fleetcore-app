@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { collection, query, getDocs, orderBy, addDoc, doc, getDoc, deleteDoc, updateDoc } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -10,6 +11,7 @@ import CombustibleModal from "../../components/CombustibleModal";
 import { printThermalVoucher } from "../../utils/voucherThermalGenerator";
 
 export default function ReporteCombustible() {
+  const { empresaId } = useEmpresa();
   const [reportes, setReportes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -70,7 +72,7 @@ export default function ReporteCombustible() {
     const cargarDatos = async () => {
       try {
         // Cargar proyectos
-        const projectsRef = collection(db, 'projects');
+        const projectsRef = collection(db, 'empresas', empresaId, 'projects');
         const projectsSnap = await getDocs(projectsRef);
         const projectsData = projectsSnap.docs.map(doc => ({
           id: doc.id,
@@ -79,7 +81,7 @@ export default function ReporteCombustible() {
         setProjects(projectsData);
 
         // Cargar máquinas
-        const machinesRef = collection(db, 'machines');
+        const machinesRef = collection(db, 'empresas', empresaId, 'machines');
         const machinesSnap = await getDocs(machinesRef);
         const machinesData = machinesSnap.docs.map(doc => ({
           id: doc.id,
@@ -88,7 +90,7 @@ export default function ReporteCombustible() {
         setMachines(machinesData);
 
         // Cargar empleados
-        const empleadosRef = collection(db, 'employees');
+        const empleadosRef = collection(db, 'empresas', empresaId, 'employees');
         const empleadosSnap = await getDocs(empleadosRef);
         const empleadosData = empleadosSnap.docs.map(doc => ({
           id: doc.id,
@@ -97,7 +99,7 @@ export default function ReporteCombustible() {
         setEmpleados(empleadosData);
 
         // Cargar empresas de combustible
-        const empresasRef = collection(db, 'empresas_combustible');
+        const empresasRef = collection(db, 'empresas', empresaId, 'empresas_combustible');
         const empresasSnap = await getDocs(empresasRef);
         const empresasData = empresasSnap.docs.map(doc => ({
           id: doc.id,
@@ -117,7 +119,7 @@ export default function ReporteCombustible() {
     const cargarReportes = async () => {
       setLoading(true);
       try {
-        const reportesRef = collection(db, 'reportes_combustible');
+        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
         const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
         const reportesSnap = await getDocs(q);
         const reportesData = reportesSnap.docs.map(doc => ({
@@ -143,7 +145,7 @@ export default function ReporteCombustible() {
   // Función para recargar reportes después de crear uno nuevo
   const handleRecargarReportes = async () => {
     try {
-      const reportesRef = collection(db, 'reportes_combustible');
+      const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
       const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
       const reportesSnap = await getDocs(q);
       const reportesData = reportesSnap.docs.map(doc => ({
@@ -232,7 +234,7 @@ export default function ReporteCombustible() {
 
     try {
       setLoading(true);
-      await deleteDoc(doc(db, 'reportes_combustible', id));
+      await deleteDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', id));
       
       // Recargar usando la función
       await handleRecargarReportes();
@@ -1290,12 +1292,12 @@ export default function ReporteCombustible() {
           onSave={async (editedData) => {
             try {
               // Guardar los cambios en Firebase
-              const reporteRef = doc(db, 'control_combustible', reporteDetalle.id);
+              const reporteRef = doc(db, 'empresas', empresaId, 'control_combustible', reporteDetalle.id);
               await updateDoc(reporteRef, editedData);
               console.log('Reporte actualizado:', editedData);
               
               // Recargar reportes
-              const reportesRef = collection(db, 'control_combustible');
+              const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
               const reportesSnap = await getDocs(q);
               const reportesData = reportesSnap.docs.map(doc => ({
@@ -1348,7 +1350,7 @@ export default function ReporteCombustible() {
               }
 
               // PIN correcto, proceder con la firma
-              const reporteRef = doc(db, 'control_combustible', reporteDetalle.id);
+              const reporteRef = doc(db, 'empresas', empresaId, 'control_combustible', reporteDetalle.id);
               await updateDoc(reporteRef, {
                 firmado: true,
                 firmaAdmin: {
@@ -1361,7 +1363,7 @@ export default function ReporteCombustible() {
               console.log('Reporte firmado exitosamente');
               
               // Recargar reportes
-              const reportesRef = collection(db, 'control_combustible');
+              const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
               const reportesSnap = await getDocs(q);
               const reportesData = reportesSnap.docs.map(doc => ({

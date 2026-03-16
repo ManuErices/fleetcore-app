@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -116,7 +117,11 @@ export default function FinanzasDashboard() {
   const hoy   = new Date();
   const [mes,  setMes]  = useState(hoy.getMonth());      // 0-11
   const [anio, setAnio] = useState(hoy.getFullYear());
-  const [data, setData] = useState(null);
+  const [data, setData] = useState({
+    ingresosMes: 0, egresosMes: 0, costosFijosMes: 0, activosTotal: 0,
+    flujoPorMes: [], proveedoresTop: [], egresosPorFuente: [], alertas: [],
+  });
+  const { empresaId } = useEmpresa();
   const [loading, setLoading] = useState(true);
 
   const keyActual  = `${anio}-${String(mes + 1).padStart(2, "0")}`;
@@ -131,6 +136,7 @@ export default function FinanzasDashboard() {
   }, [mes, anio]);
 
   const cargar = useCallback(async () => {
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     const resultado = {
       ingresosMes: 0, egresosMes: 0,
@@ -142,7 +148,7 @@ export default function FinanzasDashboard() {
 
     // ── Ingresos manuales ──────────────────────────────────────────────────
     try {
-      const snap = await getDocs(collection(db, "finanzas_ingresos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_ingresos"));
       snap.docs.forEach(d => {
         const r = d.data();
         if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
@@ -157,7 +163,7 @@ export default function FinanzasDashboard() {
 
     // ── Rendiciones ───────────────────────────────────────────────────────
     try {
-      const snap = await getDocs(collection(db, "rendiciones"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "rendiciones"));
       snap.docs.forEach(d => {
         const r = d.data();
         if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
@@ -174,7 +180,7 @@ export default function FinanzasDashboard() {
 
     // ── Subcontratos ──────────────────────────────────────────────────────
     try {
-      const snap = await getDocs(collection(db, "subcontratos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "subcontratos"));
       snap.docs.forEach(d => {
         const s = d.data();
         if (proyectoId !== "todos" && s.projectId !== proyectoId) return;
@@ -192,7 +198,7 @@ export default function FinanzasDashboard() {
 
     // ── Órdenes de compra ─────────────────────────────────────────────────
     try {
-      const snap = await getDocs(collection(db, "purchaseOrders"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "purchaseOrders"));
       snap.docs.forEach(d => {
         const o = d.data();
         if (proyectoId !== "todos" && o.projectId !== proyectoId) return;
@@ -209,7 +215,7 @@ export default function FinanzasDashboard() {
 
     // ── Costos fijos (mensualizado) ───────────────────────────────────────
     try {
-      const snap = await getDocs(collection(db, "costos_fijos"));
+      const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
       snap.docs.forEach(d => {
         const c = d.data();
         if (c.activo === false) return;
@@ -239,11 +245,11 @@ export default function FinanzasDashboard() {
 
     // ── Activos ───────────────────────────────────────────────────────────
     try {
-      const snap = await getDocs(query(collection(db, "machines"), where("empresa", "==", "MPF Ingeniería Civil")));
+      const snap = await getDocs(query(collection(db, "empresas", empresaId, "machines"), where("empresa", "==", "MPF Ingeniería Civil")));
       snap.docs.forEach(d => {
         if (d.data().active !== false) resultado.activosTotal++;
       });
-      const snapFA = await getDocs(collection(db, "finanzas_activos"));
+      const snapFA = await getDocs(collection(db, "empresas", empresaId, "finanzas_activos"));
       // alertas de vencimiento de documentos
       snapFA.docs.forEach(d => {
         const a = d.data();
@@ -301,7 +307,7 @@ export default function FinanzasDashboard() {
 
     setData(resultado);
     setLoading(false);
-  }, [keyActual, ultimos6, mes, anio, proyectoId]);
+  }, [empresaId, keyActual, ultimos6, mes, anio, proyectoId]);
 
   useEffect(() => { cargar(); }, [cargar]);
 

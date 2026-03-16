@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { listActiveProjects, listMachines, listLogsByRange, upsertDailyLog } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 
 function isoToday() {
@@ -23,6 +24,7 @@ function formatDateDisplay(isoDate) {
 }
 
 export default function Logs() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
   const [machines, setMachines] = useState([]);
@@ -41,7 +43,7 @@ export default function Logs() {
 
   useEffect(() => {
     (async () => {
-      const p = await listActiveProjects();
+      const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p[0]) setProjectId(p[0].id);
     })();
@@ -50,10 +52,10 @@ export default function Logs() {
   useEffect(() => {
     if (!projectId) return;
     (async () => {
-      const m = await listMachines(projectId);
+      const m = await listMachines(empresaId, projectId);
       setMachines(m);
 
-      const logs = await listLogsByRange(projectId, date, date);
+      const logs = await listLogsByRange(empresaId, projectId, date, date);
       const byMachine = {};
       for (const l of logs) byMachine[l.machineId] = l;
 
@@ -94,7 +96,7 @@ export default function Logs() {
           downtimeHours: 0, // Siempre 0
           kilometraje: Number(r.kilometraje) || 0,
         };
-        await upsertDailyLog(payload);
+        await upsertDailyLog(empresaId, payload);
       }
       
       setSaved(true);

@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 const TIPOS = [
@@ -73,6 +74,7 @@ function BadgeDoc({fecha,label}) {
 }
 
 function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
+  const { empresaId } = useEmpresa();
   const [form,setForm]=useState(EMPTY);
   const [step,setStep]=useState(1);
   const [saving,setSaving]=useState(false);
@@ -299,6 +301,7 @@ function PanelDetalle({activo,onClose,onEdit,projects}) {
 
 export default function FinanzasActivos() {
   const { proyectoId } = useFinanzas();
+  const { empresaId } = useEmpresa();
   const [activos,setActivos]=useState([]);
   const [projects,setProjects]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -314,9 +317,10 @@ export default function FinanzasActivos() {
   const [sortDir,setSortDir]=useState("asc");
 
   const cargar=useCallback(async()=>{
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     try {
-      const snapM=await getDocs(query(collection(db,"machines"),where("empresa","==","MPF Ingeniería Civil")));
+      const snapM=await getDocs(query(collection(db,"empresas",empresaId,"machines"),where("empresa","==","MPF Ingeniería Civil")));
       const maquinas=snapM.docs.map(d=>({
         id:d.id,machineId:d.id,_source:"machines",
         nombre:d.data().name||"",
@@ -329,7 +333,7 @@ export default function FinanzasActivos() {
         vencPermisoCirculacion:"",vencSeguro:"",vencRevisionTecnica:"",vencSoapCivil:"",
         notasDoc:"",notas:"",
       }));
-      const snapFA=await getDocs(collection(db,"finanzas_activos"));
+      const snapFA=await getDocs(collection(db,"empresas",empresaId,"finanzas_activos"));
       const financieros=snapFA.docs.map(d=>({id:d.id,_source:"finanzas_activos",...d.data()}));
       const mapaEnr={};
       financieros.forEach(fa=>{ if(fa.machineId) mapaEnr[fa.machineId]=fa; });
@@ -339,26 +343,26 @@ export default function FinanzasActivos() {
       setActivos(proyectoId!=="todos" ? todos.filter(a=>a.projectId===proyectoId) : todos);
     } catch(e){console.error(e);}
     try {
-      const snapP=await getDocs(collection(db,"projects"));
+      const snapP=await getDocs(collection(db,"empresas",empresaId,"projects"));
       setProjects(snapP.docs.map(d=>({id:d.id,...d.data()})));
     } catch(e){}
     setLoading(false);
-  },[proyectoId]);
+  },[empresaId, proyectoId]);
   useEffect(()=>{cargar();},[cargar]);
 
   const handleSave=async(form)=>{
     const {id,_source,machineId,...data}=form;
     if(editando){
       if(editando._source==="machines"){
-        const q=query(collection(db,"finanzas_activos"),where("machineId","==",editando.machineId));
+        const q=query(collection(db,"empresas",empresaId,"finanzas_activos"),where("machineId","==",editando.machineId));
         const snap=await getDocs(q);
-        if(!snap.empty) await updateDoc(doc(db,"finanzas_activos",snap.docs[0].id),{...data,machineId:editando.machineId,updatedAt:serverTimestamp()});
-        else await addDoc(collection(db,"finanzas_activos"),{...data,machineId:editando.machineId,createdAt:serverTimestamp()});
+        if(!snap.empty) await updateDoc(doc(db, "empresas", empresaId, "finanzas_activos", snap.docs[0].id),{...data,machineId:editando.machineId,updatedAt:serverTimestamp()});
+        else await addDoc(collection(db,"empresas",empresaId,"finanzas_activos"),{...data,machineId:editando.machineId,createdAt:serverTimestamp()});
       } else {
-        await updateDoc(doc(db,"finanzas_activos",editando.id),{...data,updatedAt:serverTimestamp()});
+        await updateDoc(doc(db, "empresas", empresaId, "finanzas_activos", editando.id),{...data,updatedAt:serverTimestamp()});
       }
     } else {
-      await addDoc(collection(db,"finanzas_activos"),{...data,createdAt:serverTimestamp()});
+      await addDoc(collection(db,"empresas",empresaId,"finanzas_activos"),{...data,createdAt:serverTimestamp()});
     }
     setEditando(null); await cargar();
   };
@@ -367,11 +371,11 @@ export default function FinanzasActivos() {
     if(!window.confirm("¿Eliminar este activo?")) return;
     setDeletingId(a.id);
     if(a._source==="finanzas_activos"){
-      await deleteDoc(doc(db,"finanzas_activos",a.id));
+      await deleteDoc(doc(db, "empresas", empresaId, "finanzas_activos", a.id));
     } else {
-      const q=query(collection(db,"finanzas_activos"),where("machineId","==",a.machineId));
+      const q=query(collection(db,"empresas",empresaId,"finanzas_activos"),where("machineId","==",a.machineId));
       const snap=await getDocs(q);
-      if(!snap.empty) await deleteDoc(doc(db,"finanzas_activos",snap.docs[0].id));
+      if(!snap.empty) await deleteDoc(doc(db, "empresas", empresaId, "finanzas_activos", snap.docs[0].id));
     }
     setDeletingId(null); if(detalle?.id===a.id) setDetalle(null); await cargar();
   };

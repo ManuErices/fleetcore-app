@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { useEmpresa } from '../../lib/useEmpresa';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable
@@ -46,6 +47,7 @@ const TAB_DEFS = [
   { id: 'proyectos',   label: 'Proyectos',   color: 'indigo', icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
   { id: 'estaciones',  label: 'Est. Combustible', color: 'cyan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z' },
   { id: 'usuarios',    label: 'Usuarios',    color: 'rose',   icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
+  { id: 'empresas_registro', label: 'Empresas Registradas', color: 'violet', icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' },
 ];
 
 const GRADIENTS = {
@@ -58,6 +60,7 @@ const GRADIENTS = {
   rose:   'from-rose-600 to-pink-600',
   cyan:   'from-cyan-500 to-teal-600',
   slate:  'from-slate-700 to-slate-800',
+  violet: 'from-violet-600 to-purple-600',
 };
 
 const TAB_ACTIVE = {
@@ -513,6 +516,7 @@ function fmtRut(raw) {
 }
 
 function OperadoresSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -532,7 +536,7 @@ function OperadoresSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'employees'), orderBy('nombre')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'employees'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -570,15 +574,15 @@ function OperadoresSection() {
       const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
       const nombreCompleto = [form.nombres, form.apellidoPaterno, form.apellidoMaterno].filter(Boolean).map(s=>s.trim()).join(' ');
       const p = { nombres: form.nombres.trim(), apellidoPaterno: form.apellidoPaterno.trim(), apellidoMaterno: form.apellidoMaterno.trim(), nombre: nombreCompleto, rut: rutNorm, cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'employees', editId), p);
-      else await addDoc(collection(db, 'employees'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'employees', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'employees'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'employees', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'employees', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -736,7 +740,7 @@ function useCatalogo(categoria) {
     setLoading(true);
     try {
       const snap = await getDocs(query(
-        collection(db, 'catalogo_maquinas'),
+        collection(db, 'empresas', empresaId, 'catalogo_maquinas'),
         orderBy('nombre')
       ));
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -749,7 +753,7 @@ function useCatalogo(categoria) {
 
   const add = async (nombre) => {
     if (!nombre.trim()) return;
-    await addDoc(collection(db, 'catalogo_maquinas'), {
+    await addDoc(collection(db, 'empresas', empresaId, 'catalogo_maquinas'), {
       nombre: nombre.trim(),
       categoria,
       createdAt: serverTimestamp(),
@@ -759,13 +763,13 @@ function useCatalogo(categoria) {
   };
 
   const remove = async (id) => {
-    await deleteDoc(doc(db, 'catalogo_maquinas', id));
+    await deleteDoc(doc(db, 'empresas', empresaId, 'catalogo_maquinas', id));
     await load();
   };
 
   const update = async (id, nombre) => {
     if (!nombre.trim()) return;
-    await updateDoc(doc(db, 'catalogo_maquinas', id), { nombre: nombre.trim() });
+    await updateDoc(doc(db, 'empresas', empresaId, 'catalogo_maquinas', id), { nombre: nombre.trim() });
     await load();
   };
 
@@ -964,6 +968,7 @@ function fmtPatente(raw) {
   return nums ? letras + '-' + nums : letras;
 }
 function MaquinasSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -991,7 +996,7 @@ function MaquinasSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'machines'), orderBy('name')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'machines'), orderBy('name')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -1007,15 +1012,15 @@ function MaquinasSection() {
     setSaving(true);
     try {
       const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), empresa: form.empresa, propietario: form.propietario.trim(), updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'machines', editId), p);
-      else await addDoc(collection(db, 'machines'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'machines', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'machines'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'machines', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'machines', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1200,6 +1205,7 @@ const TIPO_STYLES = {
 const TIPO_LABELS = { efectiva: 'Efectiva', no_efectiva: 'No Efectiva', mantencion: 'Mantención' };
 
 function ActividadesSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -1211,7 +1217,7 @@ function ActividadesSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'actividades_disponibles'), orderBy('nombre')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'actividades_disponibles'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); setData([]); }
     setLoading(false);
@@ -1250,8 +1256,8 @@ function ActividadesSection() {
         tiposMaquina: form.tiposMaquina,  // [] = aplica a todos los tipos
         updatedAt: serverTimestamp(),
       };
-      if (editId) await updateDoc(doc(db, 'actividades_disponibles', editId), p);
-      else await addDoc(collection(db, 'actividades_disponibles'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'actividades_disponibles', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'actividades_disponibles'), { ...p, createdAt: serverTimestamp() });
       setModal(false);
       load();
     } catch (e) { alert('Error al guardar: ' + e.message); }
@@ -1259,7 +1265,7 @@ function ActividadesSection() {
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'actividades_disponibles', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'actividades_disponibles', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1342,6 +1348,7 @@ function ActividadesSection() {
 // SECCIÓN: SURTIDORES
 // ─────────────────────────────────────────────────────────────
 function SurtidoresSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -1353,7 +1360,7 @@ function SurtidoresSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'equipos_surtidores'));
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores'));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -1368,15 +1375,15 @@ function SurtidoresSection() {
     setSaving(true);
     try {
       const p = { nombre: form.nombre.trim(), patente: form.patente.trim().toUpperCase(), capacidad: form.capacidad, tipo: form.tipo.trim(), updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'equipos_surtidores', editId), p);
-      else await addDoc(collection(db, 'equipos_surtidores'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'equipos_surtidores', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'equipos_surtidores'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'equipos_surtidores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'equipos_surtidores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1415,6 +1422,7 @@ function SurtidoresSection() {
 // SECCIÓN: EMPRESAS
 // ─────────────────────────────────────────────────────────────
 function EmpresasSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -1426,7 +1434,7 @@ function EmpresasSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas_combustible'), orderBy('nombre')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'empresas_combustible'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -1441,15 +1449,15 @@ function EmpresasSection() {
     setSaving(true);
     try {
       const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), giro: form.giro.trim(), contacto: form.contacto.trim(), updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'empresas_combustible', editId), p);
-      else await addDoc(collection(db, 'empresas_combustible'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'empresas_combustible', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'empresas_combustible'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas_combustible', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'empresas_combustible', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1544,6 +1552,7 @@ function fmtCodigoProyecto(raw) {
   return prefix + nums;
 }
 function ProyectosSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -1560,7 +1569,7 @@ function ProyectosSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'projects'), orderBy('name')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -1575,15 +1584,15 @@ function ProyectosSection() {
     setSaving(true);
     try {
       const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'projects', editId), p);
-      else await addDoc(collection(db, 'projects'), { ...p, createdAt: serverTimestamp() });
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'projects', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'projects', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'projects', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1729,6 +1738,7 @@ const MARCA_BADGE = {
 };
 
 function EstacionesSection() {
+  const { empresaId } = useEmpresa();
   const [data, setData]               = useState([]);
   const [loading, setLoading]         = useState(true);
   const [modal, setModal]             = useState(false);
@@ -1745,8 +1755,8 @@ function EstacionesSection() {
     setLoading(true);
     try {
       const [estSnap, projSnap] = await Promise.all([
-        getDocs(query(collection(db, 'estaciones_combustible'), orderBy('nombre'))),
-        getDocs(query(collection(db, 'projects'), orderBy('name'))),
+        getDocs(query(collection(db, 'empresas', empresaId, 'estaciones_combustible'), orderBy('nombre'))),
+        getDocs(query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name'))),
       ]);
       setData(estSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setProjects(projSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -1790,9 +1800,9 @@ function EstacionesSection() {
         updatedAt: serverTimestamp(),
       };
       if (editId) {
-        await updateDoc(doc(db, 'estaciones_combustible', editId), p);
+        await updateDoc(doc(db, 'empresas', empresaId, 'estaciones_combustible', editId), p);
       } else {
-        await addDoc(collection(db, 'estaciones_combustible'), { ...p, obras: [], createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'empresas', empresaId, 'estaciones_combustible'), { ...p, obras: [], createdAt: serverTimestamp() });
       }
       setModal(false);
       load();
@@ -1802,7 +1812,7 @@ function EstacionesSection() {
 
   const del = async () => {
     try {
-      await deleteDoc(doc(db, 'estaciones_combustible', confirm.id));
+      await deleteDoc(doc(db, 'empresas', empresaId, 'estaciones_combustible', confirm.id));
       load();
     } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
@@ -1813,7 +1823,7 @@ function EstacionesSection() {
     const nuevas = add
       ? [...new Set([...obras, obraId])]
       : obras.filter(o => o !== obraId);
-    await updateDoc(doc(db, 'estaciones_combustible', estacion.id), { obras: nuevas });
+    await updateDoc(doc(db, 'empresas', empresaId, 'estaciones_combustible', estacion.id), { obras: nuevas });
     setData(prev => prev.map(e => e.id === estacion.id ? { ...e, obras: nuevas } : e));
     if (asignModal && asignModal.id === estacion.id) {
       setAsignModal(prev => ({ ...prev, obras: nuevas }));
@@ -2098,6 +2108,177 @@ function EstacionesSection() {
   );
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// EMPRESAS REGISTRADAS (solo superadmin)
+// ─────────────────────────────────────────────────────────────
+const ESTADO_EMPRESA = {
+  pendiente: { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700 border border-amber-200' },
+  activo:    { label: 'Activo',     cls: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
+  suspendido:{ label: 'Suspendido', cls: 'bg-red-100 text-red-700 border border-red-200' },
+  trial:     { label: 'Trial',      cls: 'bg-blue-100 text-blue-700 border border-blue-200' },
+};
+
+function EmpresasRegistradasSection() {
+  const [empresas, setEmpresas] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [saving,   setSaving]   = useState(null);
+  const [filtro,   setFiltro]   = useState('pendiente');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const snap = await getDocs(collection(db, 'empresas'));
+      setEmpresas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch { setEmpresas([]); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const activar = async (empresa) => {
+    if (!window.confirm(`¿Activar la empresa "${empresa.nombre}"?`)) return;
+    setSaving(empresa.id);
+    try {
+      await updateDoc(doc(db, 'empresas', empresa.id), {
+        estado:     'activo',
+        activadoEn: serverTimestamp(),
+      });
+      await load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(null);
+  };
+
+  const suspender = async (empresa) => {
+    if (!window.confirm(`¿Suspender la empresa "${empresa.nombre}"?`)) return;
+    setSaving(empresa.id);
+    try {
+      await updateDoc(doc(db, 'empresas', empresa.id), { estado: 'suspendido' });
+      await load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(null);
+  };
+
+  const cambiarPlan = async (empresa, nuevoPlan) => {
+    setSaving(empresa.id);
+    try {
+      await updateDoc(doc(db, 'empresas', empresa.id), { plan: nuevoPlan });
+      await load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(null);
+  };
+
+  const PLANES = ['trial', 'starter', 'pro', 'enterprise'];
+
+  const filtradas = filtro === 'todas'
+    ? empresas
+    : empresas.filter(e => e.estado === filtro);
+
+  const pendientes = empresas.filter(e => e.estado === 'pendiente').length;
+
+  return (
+    <>
+      <SectionCard
+        title="Empresas Registradas"
+        subtitle="Gestión de empresas clientes del sistema"
+        count={empresas.length}
+        color="violet"
+        icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>}
+      >
+        {/* Alerta pendientes */}
+        {pendientes > 0 && (
+          <div className="mb-4 flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <p className="text-sm text-amber-700 font-semibold">{pendientes} empresa{pendientes > 1 ? 's' : ''} pendiente{pendientes > 1 ? 's' : ''} de activación</p>
+          </div>
+        )}
+
+        {/* Filtros */}
+        <div className="flex gap-2 mb-4 flex-wrap">
+          {['pendiente', 'activo', 'trial', 'suspendido', 'todas'].map(f => (
+            <button key={f} onClick={() => setFiltro(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filtro === f ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+              {f !== 'todas' && <span className="ml-1 opacity-70">({empresas.filter(e => e.estado === f).length})</span>}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-slate-400">Cargando...</div>
+        ) : filtradas.length === 0 ? (
+          <div className="py-8 text-center text-slate-400">No hay empresas en este estado</div>
+        ) : (
+          <div className="space-y-3">
+            {filtradas.map(emp => (
+              <div key={emp.id} className="border border-slate-200 rounded-2xl overflow-hidden hover:border-slate-300 transition-all">
+                {/* Cabecera empresa */}
+                <div className="p-4 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-black text-slate-900 text-sm">{emp.nombre}</span>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${(ESTADO_EMPRESA[emp.estado] || ESTADO_EMPRESA.pendiente).cls}`}>
+                        {(ESTADO_EMPRESA[emp.estado] || ESTADO_EMPRESA.pendiente).label}
+                      </span>
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                        {emp.plan || 'trial'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">RUT: {emp.rut} · {emp.adminEmail}</p>
+                    {emp.direccion && <p className="text-xs text-slate-400 mt-0.5">{emp.direccion}</p>}
+                    {emp.contacto && <p className="text-xs text-slate-400">Contacto: {emp.contacto} {emp.telefono && `· ${emp.telefono}`}</p>}
+                    <p className="text-[10px] text-slate-300 mt-1">ID: {emp.id}</p>
+                  </div>
+
+                  {/* Acciones */}
+                  <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    {emp.estado === 'pendiente' && (
+                      <button onClick={() => activar(emp)} disabled={saving === emp.id}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-all disabled:opacity-50 flex items-center gap-1">
+                        {saving === emp.id ? '...' : '✓ Activar'}
+                      </button>
+                    )}
+                    {emp.estado === 'activo' && (
+                      <button onClick={() => suspender(emp)} disabled={saving === emp.id}
+                        className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg border border-red-200 transition-all disabled:opacity-50">
+                        {saving === emp.id ? '...' : 'Suspender'}
+                      </button>
+                    )}
+                    {emp.estado === 'suspendido' && (
+                      <button onClick={() => activar(emp)} disabled={saving === emp.id}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 text-xs font-bold rounded-lg border border-emerald-200 transition-all disabled:opacity-50">
+                        {saving === emp.id ? '...' : 'Reactivar'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Plan selector */}
+                <div className="px-4 pb-3 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-medium">Plan:</span>
+                  <div className="flex gap-1">
+                    {PLANES.map(p => (
+                      <button key={p} onClick={() => cambiarPlan(emp, p)} disabled={saving === emp.id}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${emp.plan === p ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  {emp.creadoEn && (
+                    <span className="text-[10px] text-slate-300 ml-auto">
+                      {emp.creadoEn.toDate ? emp.creadoEn.toDate().toLocaleDateString('es-CL') : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+    </>
+  );
+}
+
 function UsuariosSection() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2273,8 +2454,15 @@ function UsuariosSection() {
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
 export default function AdminPanel() {
+  const { empresaId } = useEmpresa();
   const [activeTab, setActiveTab] = useState('operadores');
-  const active = TAB_DEFS.find(t => t.id === activeTab);
+  const { empresa } = useEmpresa();
+  // Tab empresas_registro solo visible para superadmin
+  // (AdminPanel también es accesible para admin_contrato pero sin esta tab)
+  const tabsVisibles = TAB_DEFS.filter(t =>
+    t.id !== 'empresas_registro' || empresa?.plan === 'superadmin'
+  );
+  const active = tabsVisibles.find(t => t.id === activeTab) || tabsVisibles[0];
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -2299,7 +2487,7 @@ export default function AdminPanel() {
         {/* Tabs dentro del header negro */}
         <div className="max-w-7xl mx-auto px-2 sm:px-6">
           <div className="flex gap-1 overflow-x-auto scrollbar-none">
-            {TAB_DEFS.map(tab => {
+            {tabsVisibles.map(tab => {
               const isActive = activeTab === tab.id;
               const grad = GRADIENTS[tab.color];
               return (
@@ -2332,7 +2520,8 @@ export default function AdminPanel() {
         {activeTab === 'empresas'    && <EmpresasSection />}
         {activeTab === 'proyectos'   && <ProyectosSection />}
         {activeTab === 'estaciones'  && <EstacionesSection />}
-        {activeTab === 'usuarios'    && <UsuariosSection />}
+        {activeTab === 'usuarios'              && <UsuariosSection />}
+        {activeTab === 'empresas_registro'        && <EmpresasRegistradasSection />}
       </div>
     </div>
   );

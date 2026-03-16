@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { listActiveProjects, listEmployees, listMachines, listEmployeeMonthlyData, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import PayrollImporter from "../../components/PayrollImporter";
 import EmployeeDetailModal from "../../components/EmployeeDetailModal";
 
 export default function Payroll() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [employees, setEmployees] = useState([]);
@@ -22,7 +24,7 @@ export default function Payroll() {
   useEffect(() => {
     (async () => {
       try {
-        const p = await listActiveProjects();
+        const p = await listActiveProjects(empresaId);
         setProjects(p);
         if (p.length > 0 && !selectedProject) {
           setSelectedProject(p[0].id);
@@ -39,9 +41,9 @@ export default function Payroll() {
     setIsLoading(true);
     try {
       const [emp, mach, monthly] = await Promise.all([
-        listEmployees(selectedProject),
-        listMachines(selectedProject),
-        listEmployeeMonthlyData(selectedProject, selectedYear, selectedMonth)
+        listEmployees(empresaId, selectedProject),
+        listMachines(empresaId, selectedProject),
+        listEmployeeMonthlyData(empresaId, selectedProject, selectedYear, selectedMonth)
       ]);
       
       setEmployees(emp);
@@ -93,10 +95,10 @@ export default function Payroll() {
 
   const handleAssignMachine = async (employeeId, machineId) => {
     try {
-      const existing = await getEmployeeAssignment(employeeId, selectedYear, selectedMonth);
+      const existing = await getEmployeeAssignment(empresaId, employeeId, selectedYear, selectedMonth);
       
       if (existing) {
-        await upsertEmployeeAssignment({
+        await upsertEmployeeAssignment(empresaId, {
           id: existing.id,
           projectId: selectedProject,
           employeeId: employeeId,
@@ -105,7 +107,7 @@ export default function Payroll() {
           month: selectedMonth
         });
       } else {
-        await upsertEmployeeAssignment({
+        await upsertEmployeeAssignment(empresaId, {
           projectId: selectedProject,
           employeeId: employeeId,
           machineId: machineId || null,
@@ -148,7 +150,7 @@ export default function Payroll() {
         monthlyDataToSave.id = employee.monthlyDataId;
       }
 
-      await upsertEmployeeMonthlyData(monthlyDataToSave);
+      await upsertEmployeeMonthlyData(empresaId, monthlyDataToSave);
       
       // Recargar datos
       await loadData();

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { listActiveProjects, saveSubcontratos, deleteAllSubcontratos } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, query, where, getDocs, writeBatch, doc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import * as XLSX from 'xlsx';
@@ -23,6 +24,7 @@ function getDaysDiff(start, end) {
 }
 
 export default function Subcontratos() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -55,7 +57,7 @@ export default function Subcontratos() {
   useEffect(() => {
     (async () => {
       try {
-        const p = await listActiveProjects();
+        const p = await listActiveProjects(empresaId);
         setProjects(p);
         if (p.length > 0) setSelectedProject(p[0].id);
       } catch (err) {

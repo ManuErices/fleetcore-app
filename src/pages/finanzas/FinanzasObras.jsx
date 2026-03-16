@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 const MESES_FULL  = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -185,6 +186,7 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasObras() {
   const hoy = new Date();
+  const { empresaId } = useEmpresa();
   const [mes,  setMes]  = useState(hoy.getMonth());
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [proyectos, setProyectos] = useState([]);
@@ -202,10 +204,11 @@ export default function FinanzasObras() {
   }), [mes, anio]);
 
   const cargar = useCallback(async () => {
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     try {
       // Proyectos
-      const snapP = await getDocs(collection(db,"projects"));
+      const snapP = await getDocs(collection(db,"empresas",empresaId,"projects"));
       const listaP = snapP.docs.map(d => ({id:d.id,...d.data()}));
       setProyectos(listaP);
 
@@ -221,7 +224,7 @@ export default function FinanzasObras() {
       const get = (pid) => { if (!acum[pid]) acum[pid]=init(); return acum[pid]; };
 
       // Ingresos
-      const snapI = await getDocs(collection(db,"finanzas_ingresos"));
+      const snapI = await getDocs(collection(db,"empresas",empresaId,"finanzas_ingresos"));
       snapI.docs.forEach(d => {
         const r=d.data(); if(!r.projectId) return;
         const a=get(r.projectId); const k=mesKey(r.fecha);
@@ -231,7 +234,7 @@ export default function FinanzasObras() {
       });
 
       // Rendiciones
-      const snapR = await getDocs(collection(db,"rendiciones"));
+      const snapR = await getDocs(collection(db,"empresas",empresaId,"rendiciones"));
       snapR.docs.forEach(d => {
         const r=d.data(); if(!r.projectId) return;
         const a=get(r.projectId); const k=mesKey(r.fechaEmision||r.fechaAprobacion);
@@ -242,7 +245,7 @@ export default function FinanzasObras() {
       });
 
       // Órdenes de compra
-      const snapOC = await getDocs(collection(db,"purchaseOrders"));
+      const snapOC = await getDocs(collection(db,"empresas",empresaId,"purchaseOrders"));
       snapOC.docs.forEach(d => {
         const o=d.data(); if(!o.projectId) return;
         const a=get(o.projectId); const k=mesKey(o.fecha);
@@ -253,7 +256,7 @@ export default function FinanzasObras() {
       });
 
       // Subcontratos
-      const snapS = await getDocs(collection(db,"subcontratos"));
+      const snapS = await getDocs(collection(db,"empresas",empresaId,"subcontratos"));
       snapS.docs.forEach(d => {
         const s=d.data(); if(!s.projectId) return;
         const a=get(s.projectId);
@@ -267,7 +270,7 @@ export default function FinanzasObras() {
       setRawData(acum);
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
-  }, [keyActual, ultimos6]);
+  }, [empresaId, keyActual, ultimos6]);
 
   useEffect(() => { cargar(); }, [cargar]);
 

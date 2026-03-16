@@ -25,6 +25,7 @@ import RRHH from "./pages/rrhh";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import TrabajadorApp from "./pages/TrabajadorApp.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
+import { EmpresaProvider } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
@@ -607,62 +608,62 @@ export default function App() {
 
   if (selectedApp === 'workfleet') {
     return (
-      <>
+      <EmpresaProvider user={user}>
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
         <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </>
+      </EmpresaProvider>
     );
   }
 
   if (selectedApp === 'workfleet-m') {
     return (
-      <>
+      <EmpresaProvider user={user}>
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
         <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </>
+      </EmpresaProvider>
     );
   }
 
   if (selectedApp === 'rrhh') {
     return (
-      <>
+      <EmpresaProvider user={user}>
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
         <RRHHShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </>
+      </EmpresaProvider>
     );
   }
 
   if (selectedApp === 'reportes') {
     return (
-      <>
+      <EmpresaProvider user={user}>
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
         <ReportesShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </>
+      </EmpresaProvider>
     );
   }
 
   if (selectedApp === 'finanzas') {
     return (
-      <>
+      <EmpresaProvider user={user}>
         <ConnectionStatus />
         <InstallPWA />
         <SessionExpiryIndicator />
         <FinanzasApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </>
+      </EmpresaProvider>
     );
   }
 
   // FleetCore principal
   return (
-    <>
+    <EmpresaProvider user={user}>
       <ConnectionStatus />
       <InstallPWA />
       <SessionExpiryIndicator />
@@ -673,6 +674,6 @@ export default function App() {
         onBackToSelector={handleBackToSelector}
         onGoToPricing={handleGoToPricing}
       />
-    </>
+    </EmpresaProvider>
   );
 }

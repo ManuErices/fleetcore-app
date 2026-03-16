@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -9,6 +10,7 @@ import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
 
 export default function ReporteWorkFleet() {
+  const { empresaId } = useEmpresa();
   const [reportes, setReportes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -70,10 +72,11 @@ export default function ReporteWorkFleet() {
 
   // Cargar projects y machines
   useEffect(() => {
+    if (!empresaId) return;
     const cargarDatos = async () => {
       try {
         // Cargar proyectos
-        const projectsRef = collection(db, 'projects');
+        const projectsRef = collection(db, 'empresas', empresaId, 'projects');
         const projectsSnap = await getDocs(projectsRef);
         const projectsData = projectsSnap.docs.map(doc => ({
           id: doc.id,
@@ -82,7 +85,7 @@ export default function ReporteWorkFleet() {
         setProjects(projectsData);
 
         // Cargar máquinas
-        const machinesRef = collection(db, 'machines');
+        const machinesRef = collection(db, 'empresas', empresaId, 'machines');
         const machinesSnap = await getDocs(machinesRef);
         const machinesData = machinesSnap.docs.map(doc => ({
           id: doc.id,
@@ -91,7 +94,7 @@ export default function ReporteWorkFleet() {
         setMachines(machinesData);
 
         // Cargar empleados
-        const empleadosRef = collection(db, 'employees');
+        const empleadosRef = collection(db, 'empresas', empresaId, 'employees');
         const empleadosSnap = await getDocs(empleadosRef);
         const empleadosData = empleadosSnap.docs.map(doc => ({
           id: doc.id,
@@ -104,14 +107,15 @@ export default function ReporteWorkFleet() {
     };
 
     cargarDatos();
-  }, []);
+  }, [empresaId]);
 
   // Cargar reportes desde Firebase
   useEffect(() => {
+    if (!empresaId) return;
     const cargarReportes = async () => {
       setLoading(true);
       try {
-        const reportesRef = collection(db, 'reportes_detallados');
+        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
         const q = query(reportesRef, orderBy('fecha', 'desc'));
         const querySnapshot = await getDocs(q);
         
@@ -134,12 +138,12 @@ export default function ReporteWorkFleet() {
     };
 
     cargarReportes();
-  }, []);
+  }, [empresaId]);
 
   const handleEliminarReporte = async (id) => {
     if (!window.confirm('¿Estás seguro de eliminar este reporte? Esta acción no se puede deshacer.')) return;
     try {
-      await deleteDoc(doc(db, 'reportes_detallados', id));
+      await deleteDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id));
       setReportes(prev => prev.filter(r => r.id !== id));
     } catch (err) {
       alert('Error al eliminar: ' + err.message);
@@ -1152,7 +1156,7 @@ export default function ReporteWorkFleet() {
                 .filter(p => p === 1 || p === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) || Math.abs(p - paginaActual) <= 1)
                 .reduce((acc, p, i, arr) => { if (i > 0 && arr[i-1] !== p - 1) acc.push('...'); acc.push(p); return acc; }, [])
                 .map((p, i) => p === '...'
-                  ? <span key={i} className="px-2 text-slate-400 text-xs">…</span>
+                  ? <span key={`ellipsis-${i}`} className="px-2 text-slate-400 text-xs">…</span>
                   : <button key={p} onClick={() => setPaginaActual(p)}
                       className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
                     >{p}</button>
@@ -1348,12 +1352,12 @@ export default function ReporteWorkFleet() {
           onSave={async (editedData) => {
             try {
               // Aquí implementarás la lógica para guardar los cambios en Firebase
-              const reporteRef = doc(db, 'reportes_detallados', reporteDetalle.id);
+              const reporteRef = doc(db, 'empresas', empresaId, 'reportes_detallados', reporteDetalle.id);
               await updateDoc(reporteRef, editedData);
               console.log('Reporte actualizado:', editedData);
               
               // Recargar reportes
-              const reportesRef = collection(db, 'reportes_detallados');
+              const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
               const querySnapshot = await getDocs(q);
               const reportesData = querySnapshot.docs.map(doc => ({
@@ -1404,7 +1408,7 @@ export default function ReporteWorkFleet() {
               }
 
               // PIN correcto, proceder con la firma
-              const reporteRef = doc(db, 'reportes_detallados', reporteDetalle.id);
+              const reporteRef = doc(db, 'empresas', empresaId, 'reportes_detallados', reporteDetalle.id);
               await updateDoc(reporteRef, {
                 firmado: true,
                 firmaAdmin: {
@@ -1417,7 +1421,7 @@ export default function ReporteWorkFleet() {
               console.log('Reporte firmado exitosamente');
               
               // Recargar reportes
-              const reportesRef = collection(db, 'reportes_detallados');
+              const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
               const querySnapshot = await getDocs(q);
               const reportesData = querySnapshot.docs.map(doc => ({
@@ -1663,10 +1667,10 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
     for (const fila of filas.filter((_, i) => seleccionadas.has(i))) {
       try {
         const patente = fila.machinePatente || 'XX';
-        const countSnap = await getDocs(collection(db, 'reportes_detallados'));
+        const countSnap = await getDocs(collection(db, 'empresas', empresaId, 'reportes_detallados'));
         const num = (countSnap.size + 1).toString().padStart(3, '0');
         const numeroReporte = `${patente}-${num}`;
-        await addDoc(collection(db, 'reportes_detallados'), {
+        await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
           numeroReporte, folioExterno: fila.folioExterno, fecha: fila.fecha,
           projectId: fila.projectId, projectName: fila.projectName,
           machineId: fila.machineId, machinePatente: fila.machinePatente, machineCode: fila.machineCode,
@@ -1750,7 +1754,7 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
                   </thead>
                   <tbody>
                     {filas.map((f, i) => (
-                      <tr key={i} onClick={() => toggleFila(i)} className={`border-t border-slate-100 cursor-pointer transition-colors ${seleccionadas.has(i) ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-slate-50 opacity-40'}`}>
+                      <tr key={`fila-import-${i}`} onClick={() => toggleFila(i)} className={`border-t border-slate-100 cursor-pointer transition-colors ${seleccionadas.has(i) ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-slate-50 opacity-40'}`}>
                         <td className="px-3 py-2 text-center"><input type="checkbox" checked={seleccionadas.has(i)} onChange={() => toggleFila(i)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded"/></td>
                         <td className="px-3 py-2 font-mono font-bold text-slate-600">{f.folioExterno||'—'}</td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{f.fecha}</td>
@@ -1793,7 +1797,7 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
               {resultado.errores.length > 0 && (
                 <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
                   <p className="font-bold text-red-700 mb-2">{resultado.errores.length} errores:</p>
-                  {resultado.errores.map((e, i) => <p key={i} className="text-xs text-red-600">• {e}</p>)}
+                  {resultado.errores.map((e, i) => <p key={`error-${i}`} className="text-xs text-red-600">• {e}</p>)}
                 </div>
               )}
             </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, googleProvider } from "../lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import jsQR from "jsqr";
 
@@ -62,42 +62,71 @@ export default function LoginPage() {
   const handleRegister = async (userData) => {
     setLoading(true);
     try {
-      const { email, password, nombre, rut } = userData;
-      
-      // Crear usuario en Firebase Auth
+      const { email, password, nombre, rut, empresa } = userData;
+
+      // 1. Crear usuario en Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      
-      // Actualizar perfil con nombre
-      await updateProfile(user, {
-        displayName: nombre
+
+      await updateProfile(user, { displayName: nombre });
+
+      // 2. Generar empresaId único a partir del RUT empresa (limpio) + timestamp
+      const rutLimpio = (empresa.rut || '').replace(/[^0-9kK]/gi, '').toLowerCase();
+      const empresaId = `emp-${rutLimpio}-${Date.now().toString(36)}`;
+
+      // 3. Crear documento de empresa con estado 'pendiente'
+      await setDoc(doc(db, 'empresas', empresaId), {
+        nombre:        empresa.razonSocial,
+        rut:           empresa.rut,
+        direccion:     empresa.direccion,
+        contacto:      empresa.contacto,
+        telefono:      empresa.telefono || '',
+        adminEmail:    email,
+        adminNombre:   nombre,
+        plan:          'trial',
+        estado:        'pendiente',   // superadmin debe activar
+        trialDias:     14,
+        creadoEn:      serverTimestamp(),
+        activadoEn:    null,
       });
-      
-      // Guardar datos adicionales en Firestore (password en texto plano para QR)
-      await setDoc(doc(db, "users", user.uid), {
-        email: email,
-        password: password,
-        nombre: nombre,
-        rut: rut,
-        createdAt: new Date().toISOString(),
-        role: 'operador' // Rol por defecto
+
+      // 4. Crear usuario en /users raíz con empresaId y rol admin_contrato
+      await setDoc(doc(db, 'users', user.uid), {
+        email,
+        nombre,
+        rut,
+        empresaId,
+        role:      'admin_contrato',
+        modulos:   [],
+        cargo:     '',
+        createdAt: serverTimestamp(),
       });
-      
+
+      // 5. También crear usuario dentro de la empresa
+      await setDoc(doc(db, 'empresas', empresaId, 'users', user.uid), {
+        email,
+        nombre,
+        rut,
+        empresaId,
+        role:      'admin_contrato',
+        modulos:   [],
+        cargo:     '',
+        createdAt: serverTimestamp(),
+      });
+
       setShowRegister(false);
-      console.log("✅ Cuenta creada exitosamente");
-      alert("✅ Cuenta creada exitosamente. Ahora puedes iniciar sesión.");
+      alert(
+        "✅ Cuenta creada exitosamente.\n\n" +
+        "Tu empresa quedó registrada con estado PENDIENTE.\n" +
+        "Recibirás un email cuando tu cuenta sea activada (plazo máximo 24 horas).\n\n" +
+        "Durante el período de prueba (14 días) tendrás acceso a todas las funciones."
+      );
     } catch (err) {
       console.error("Error al crear cuenta:", err);
       let errorMessage = "Error al crear cuenta";
-      
-      if (err.code === 'auth/email-already-in-use') {
-        errorMessage = "Este email ya está registrado";
-      } else if (err.code === 'auth/weak-password') {
-        errorMessage = "La contraseña debe tener al menos 6 caracteres";
-      } else if (err.code === 'auth/invalid-email') {
-        errorMessage = "Email inválido";
-      }
-      
+      if (err.code === "auth/email-already-in-use") errorMessage = "Este email ya está registrado";
+      else if (err.code === "auth/weak-password")   errorMessage = "La contraseña debe tener al menos 6 caracteres";
+      else if (err.code === "auth/invalid-email")   errorMessage = "Email inválido";
       alert(errorMessage);
     } finally {
       setLoading(false);
@@ -383,12 +412,22 @@ function EmailLoginModal({ onLogin, onClose, loading }) {
 // Componente Register Modal
 function RegisterModal({ onRegister, onClose, loading }) {
   const [formData, setFormData] = useState({
-    email: '',
-    password: '',
+    // Datos del usuario administrador
+    nombre:        '',
+    rut:           '',
+    email:         '',
+    password:      '',
     confirmPassword: '',
-    nombre: '',
-    rut: ''
+    // Datos de la empresa
+    empresa: {
+      razonSocial: '',
+      rut:         '',
+      direccion:   '',
+      contacto:    '',
+      telefono:    '',
+    },
   });
+  const [step, setStep] = useState(1); // 1: datos personales, 2: datos empresa
   const [error, setError] = useState('');
 
   const formatRut = (value) => {
@@ -441,182 +480,183 @@ function RegisterModal({ onRegister, onClose, loading }) {
     return dv === calculatedDv;
   };
 
+  const setEmpresa = (field, value) =>
+    setFormData(f => ({ ...f, empresa: { ...f.empresa, [field]: value } }));
+
+  const handleNext = (e) => {
+    e.preventDefault();
+    setError('');
+    if (!formData.nombre.trim())        { setError('El nombre es obligatorio'); return; }
+    if (!formData.rut.trim())           { setError('El RUT personal es obligatorio'); return; }
+    if (!validateRut(formData.rut))     { setError('RUT personal inválido'); return; }
+    if (!formData.email.trim())         { setError('El email es obligatorio'); return; }
+    if (formData.password.length < 6)   { setError('La contraseña debe tener al menos 6 caracteres'); return; }
+    if (formData.password !== formData.confirmPassword) { setError('Las contraseñas no coinciden'); return; }
+    setStep(2);
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
-
-    // Validaciones
-    if (!formData.nombre.trim()) {
-      setError('El nombre es obligatorio');
-      return;
-    }
-
-    if (!formData.rut.trim()) {
-      setError('El RUT es obligatorio');
-      return;
-    }
-
-    if (!validateRut(formData.rut)) {
-      setError('RUT inválido');
-      return;
-    }
-
-    if (!formData.email.trim()) {
-      setError('El email es obligatorio');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres');
-      return;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Las contraseñas no coinciden');
-      return;
-    }
-
+    if (!formData.empresa.razonSocial.trim()) { setError('La razón social es obligatoria'); return; }
+    if (!formData.empresa.rut.trim())         { setError('El RUT de empresa es obligatorio'); return; }
+    if (!validateRut(formData.empresa.rut))   { setError('RUT de empresa inválido'); return; }
+    if (!formData.empresa.direccion.trim())   { setError('La dirección es obligatoria'); return; }
+    if (!formData.empresa.contacto.trim())    { setError('El nombre de contacto es obligatorio'); return; }
     onRegister(formData);
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
-      <div className="max-w-md w-full bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden animate-scaleIn">
+      <div className="max-w-md w-full bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden animate-scaleIn max-h-[95dvh] overflow-y-auto">
+
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-3 sm:p-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-4 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-2">
+            {step === 2 && (
+              <button type="button" onClick={() => setStep(1)}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors mr-1">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            )}
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
             </svg>
-            <h3 className="font-black text-base sm:text-lg">Crear Cuenta</h3>
+            <div>
+              <h3 className="font-black text-base">Registrar Empresa</h3>
+              <p className="text-xs text-white/70">Paso {step} de 2 — {step === 1 ? 'Tu cuenta' : 'Datos de empresa'}</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors"
-          >
-            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
-          {/* Nombre */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Nombre Completo <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.nombre}
-              onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-              placeholder="Nombre Apellido"
-              className="input-modern w-full"
-              required
-            />
-          </div>
+        {/* Indicador de pasos */}
+        <div className="flex gap-2 px-4 pt-4">
+          <div className={`h-1 flex-1 rounded-full transition-colors ${step >= 1 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+          <div className={`h-1 flex-1 rounded-full transition-colors ${step >= 2 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+        </div>
 
-          {/* RUT */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              RUT <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.rut}
-              onChange={handleRutChange}
-              placeholder="12.345.678-9"
-              className="input-modern w-full"
-              maxLength={12}
-              required
-            />
-          </div>
+        {/* ── PASO 1: Datos del administrador ── */}
+        {step === 1 && (
+          <form onSubmit={handleNext} className="p-4 sm:p-6 space-y-4">
+            <p className="text-xs text-slate-500 font-medium">Estos serán tus datos de acceso como administrador de la cuenta.</p>
 
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Email <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="usuario@ejemplo.cl"
-              className="input-modern w-full"
-              required
-            />
-          </div>
-
-          {/* Contraseña */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Contraseña <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              placeholder="Mínimo 6 caracteres"
-              className="input-modern w-full"
-              minLength={6}
-              required
-            />
-          </div>
-
-          {/* Confirmar Contraseña */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Confirmar Contraseña <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              value={formData.confirmPassword}
-              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-              placeholder="Repite la contraseña"
-              className="input-modern w-full"
-              minLength={6}
-              required
-            />
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-3">
-              <div className="text-sm font-bold text-red-700">{error}</div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre Completo <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.nombre}
+                onChange={e => setFormData({ ...formData, nombre: e.target.value })}
+                placeholder="Nombre Apellido" className="input-modern w-full" />
             </div>
-          )}
 
-          {/* Botones */}
-          <div className="flex gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-3 px-4 bg-slate-100 text-slate-700 font-bold text-sm rounded-xl hover:bg-slate-200 transition-all"
-              disabled={loading}
-            >
-              Cancelar
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">RUT Personal <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.rut} onChange={handleRutChange}
+                placeholder="12.345.678-9" className="input-modern w-full" maxLength={12} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Email <span className="text-red-500">*</span></label>
+              <input type="email" value={formData.email}
+                onChange={e => setFormData({ ...formData, email: e.target.value })}
+                placeholder="tu@empresa.cl" className="input-modern w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Contraseña <span className="text-red-500">*</span></label>
+              <input type="password" value={formData.password}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Mínimo 6 caracteres" className="input-modern w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Confirmar Contraseña <span className="text-red-500">*</span></label>
+              <input type="password" value={formData.confirmPassword}
+                onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
+                placeholder="Repite la contraseña" className="input-modern w-full" />
+            </div>
+
+            {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
+
+            <button type="submit"
+              className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2">
+              Continuar
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-sm rounded-xl hover:from-emerald-700 hover:to-teal-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+          </form>
+        )}
+
+        {/* ── PASO 2: Datos de la empresa ── */}
+        {step === 2 && (
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
+            <p className="text-xs text-slate-500 font-medium">Ingresa los datos de tu empresa. Podrás editarlos después desde la configuración.</p>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Razón Social <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.empresa.razonSocial}
+                onChange={e => setEmpresa('razonSocial', e.target.value)}
+                placeholder="Constructora Ejemplo SpA" className="input-modern w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">RUT Empresa <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.empresa.rut}
+                onChange={e => setEmpresa('rut', formatRut(e.target.value))}
+                placeholder="76.543.210-K" className="input-modern w-full" maxLength={12} />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Dirección <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.empresa.direccion}
+                onChange={e => setEmpresa('direccion', e.target.value)}
+                placeholder="Av. Ejemplo 123, Santiago" className="input-modern w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nombre de Contacto <span className="text-red-500">*</span></label>
+              <input type="text" value={formData.empresa.contacto}
+                onChange={e => setEmpresa('contacto', e.target.value)}
+                placeholder="Nombre de quien gestiona la cuenta" className="input-modern w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Teléfono</label>
+              <input type="tel" value={formData.empresa.telefono}
+                onChange={e => setEmpresa('telefono', e.target.value)}
+                placeholder="+56 9 1234 5678" className="input-modern w-full" />
+            </div>
+
+            {/* Aviso período de prueba */}
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <p className="text-xs text-blue-700 font-medium">
+                🎉 <strong>14 días gratis</strong> — Sin tarjeta de crédito. Tu cuenta quedará activa tras revisión (máx. 24 horas).
+              </p>
+            </div>
+
+            {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
+
+            <button type="submit" disabled={loading}
+              className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-60">
               {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="spinner w-4 h-4 border-white" />
-                  Creando...
-                </span>
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Creando cuenta...</>
               ) : (
-                'Crear Cuenta'
+                <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Crear cuenta</>
               )}
             </button>
-          </div>
-        </form>
+          </form>
+        )}
+
       </div>
     </div>
   );
 }
-
 // Componente QR Login Modal
 function QRLoginModal({ onScan, onClose }) {
   const [scanning, setScanning] = useState(true);

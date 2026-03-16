@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { listActiveProjects, listMachines } from "../../lib/db";
 import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
 import Paso2Form from '../Paso2Form';
 
@@ -10,6 +11,7 @@ function isoToday() {
 }
 
 export default function ReportDetallado({ onClose } = {}) {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
@@ -56,6 +58,7 @@ export default function ReportDetallado({ onClose } = {}) {
 
   // ✅ NUEVO: Validar en tiempo real
   useEffect(() => {
+    if (!empresaId) return;
     const errors = {
       cargaCombustible: '',
       horometro: '',
@@ -129,7 +132,7 @@ export default function ReportDetallado({ onClose } = {}) {
       console.log(`✅ Identificador de máquina: "${machineIdentifier}"`);
 
       // Buscar el último reporte de ESTA máquina específica
-      const reportesRef = collection(db, 'reportes_detallados');
+      const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
       const q = query(
         reportesRef,
         where('machineId', '==', machine.id)
@@ -178,7 +181,7 @@ export default function ReportDetallado({ onClose } = {}) {
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -261,7 +264,7 @@ export default function ReportDetallado({ onClose } = {}) {
 
     const loadPreviousReport = async () => {
       try {
-        const reportesRef = collection(db, 'reportes_detallados');
+        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
         const q = query(
           reportesRef,
           where('projectId', '==', selectedProject),
@@ -454,7 +457,7 @@ export default function ReportDetallado({ onClose } = {}) {
     // ── Validación 2: No permitir duplicado misma máquina mismo día ─
     try {
       const dupQ = query(
-        collection(db, 'reportes_detallados'),
+        collection(db, 'empresas', empresaId, 'reportes_detallados'),
         where('machineId', '==', formData.machineId),
         where('fecha', '==', formData.fecha)
       );
@@ -490,7 +493,7 @@ export default function ReportDetallado({ onClose } = {}) {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await addDoc(collection(db, 'reportes_detallados'), {
+      await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
         projectId: selectedProject,
         ...formData,
         createdAt: serverTimestamp()

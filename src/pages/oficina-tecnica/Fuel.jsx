@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { listActiveProjects, listMachines, listFuelLogsByRange } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import FuelImporter from "../../components/FuelImporter";
 import FuelPriceWidget from "../../components/FuelPriceWidget";
 
@@ -39,6 +40,7 @@ function getDaysDiff(start, end) {
 }
 
 export default function Fuel() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [dateFrom, setDateFrom] = useState(addDays(isoToday(), -6));
@@ -53,7 +55,7 @@ export default function Fuel() {
   useEffect(() => {
     (async () => {
       try {
-        const p = await listActiveProjects();
+        const p = await listActiveProjects(empresaId);
         setProjects(p);
         if (p.length > 0 && !selectedProject) {
           setSelectedProject(p[0].id);
@@ -85,10 +87,10 @@ export default function Fuel() {
     (async () => {
       setIsLoading(true);
       try {
-        const m = await listMachines(selectedProject);
+        const m = await listMachines(empresaId, selectedProject);
         if (active) setMachines(m.filter(x => x.active !== false));
 
-        const logs = await listFuelLogsByRange(selectedProject, dateFrom, dateTo);
+        const logs = await listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo);
         if (active) setFuelLogs(logs);
       } catch (err) {
         console.error("Error cargando datos:", err);
@@ -167,7 +169,7 @@ export default function Fuel() {
     if (selectedProject && dateFrom && dateTo) {
       setIsLoading(true);
       try {
-        const logs = await listFuelLogsByRange(selectedProject, dateFrom, dateTo);
+        const logs = await listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo);
         setFuelLogs(logs);
       } catch (err) {
         console.error("Error recargando datos:", err);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { listActiveProjects, listMachines } from "../../lib/db";
 import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
@@ -10,6 +11,7 @@ function isoToday() {
 }
 
 export default function ReportDetallado({ onClose } = {}) {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
@@ -173,12 +175,13 @@ export default function ReportDetallado({ onClose } = {}) {
   };
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
-      const p = await listActiveProjects();
+      const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -246,7 +249,7 @@ export default function ReportDetallado({ onClose } = {}) {
   useEffect(() => {
     if (!selectedProject) return;
     (async () => {
-      const m = await listMachines(selectedProject);
+      const m = await listMachines(empresaId, selectedProject);
       console.log("🚜 Máquinas cargadas del proyecto:", m.length);
       console.log("📋 Detalles de máquinas:", m);
       m.forEach(machine => {

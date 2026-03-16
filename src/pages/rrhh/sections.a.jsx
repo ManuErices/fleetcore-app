@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from '../../lib/firebase';
+import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getAuth, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from 'firebase/auth';
 import * as Shared from './shared';
@@ -23,6 +24,7 @@ const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
 function DashboardSection() {
+  const { empresaId } = useEmpresa();
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
   const [mesRef,  setMesRef]  = useState(() => {
@@ -31,13 +33,14 @@ function DashboardSection() {
   });
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [tSnap, cSnap, rSnap, fSnap] = await Promise.all([
-        getDocs(collection(db, 'trabajadores')),
-        getDocs(collection(db, 'contratos')),
-        getDocs(collection(db, 'remuneraciones')),
-        getDocs(collection(db, 'finiquitos')),
+        getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
+        getDocs(collection(db, 'empresas', empresaId, 'contratos')),
+        getDocs(collection(db, 'empresas', empresaId, 'remuneraciones')),
+        getDocs(collection(db, 'empresas', empresaId, 'finiquitos')),
       ]);
       const trabajadores   = tSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const contratos      = cSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -46,7 +49,7 @@ function DashboardSection() {
       setData({ trabajadores, contratos, remuneraciones, finiquitos });
     } catch(e) { console.error(e); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -450,6 +453,7 @@ function DashboardSection() {
 }
 
 function TrabajadoresSection() {
+  const { empresaId } = useEmpresa();
   const [data,    setData]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal,   setModal]   = useState(false);
@@ -464,13 +468,14 @@ function TrabajadoresSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db,'trabajadores'), orderBy('apellidoPaterno')));
+      const snap = await getDocs(query(collection(db,'empresas',empresaId,'trabajadores'), orderBy('apellidoPaterno')));
       setData(snap.docs.map(d => ({ id:d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -478,7 +483,7 @@ function TrabajadoresSection() {
   const openEdit = (row) => { setEditData(row);  setModal(true); setFicha(null); };
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'trabajadores',confirm.id)); load(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id)); load(); }
     catch(e) { alert('Error: '+e.message); }
     setConfirm(null);
   };
@@ -670,6 +675,7 @@ function TrabajadoresSection() {
 
 function ContratosSection() {
   const [contratos,    setContratos]   = useState([]);
+  const { empresaId } = useEmpresa();
   const [trabajadores, setTrabajadores]= useState([]);
   const [loading,      setLoading]     = useState(true);
   const [modal,        setModal]       = useState(false);
@@ -682,17 +688,18 @@ function ContratosSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [cSnap, tSnap] = await Promise.all([
-        getDocs(query(collection(db,'contratos'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'trabajadores')),
+        getDocs(query(collection(db,'empresas',empresaId,'contratos'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
       ]);
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch { setContratos([]); setTrabajadores([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -700,7 +707,7 @@ function ContratosSection() {
   const openEdit = (row) => { setEditData(row);  setModal(true); };
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'contratos',confirm.id)); load(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'contratos', confirm.id)); load(); }
     catch(e) { alert('Error: '+e.message); }
     setConfirm(null);
   };
@@ -947,6 +954,7 @@ function ContratosSection() {
 }
 
 function RemuneracionesSection() {
+  const { empresaId } = useEmpresa();
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
@@ -962,19 +970,20 @@ function RemuneracionesSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [lSnap, tSnap, cSnap] = await Promise.all([
-        getDocs(query(collection(db,'remuneraciones'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'remuneraciones'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
       ]);
       setLiquidaciones(lSnap.docs.map(d=>({id:d.id,...d.data()})));
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch { setLiquidaciones([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -982,7 +991,7 @@ function RemuneracionesSection() {
   const openEdit = (row) => { setEditData(row);   setModal(true); };
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'remuneraciones',confirm.id)); load(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'remuneraciones', confirm.id)); load(); }
     catch(e) { alert('Error: '+e.message); }
     setConfirm(null);
   };
@@ -1255,6 +1264,7 @@ function RemuneracionesSection() {
 }
 
 function FiniquitosSection() {
+  const { empresaId } = useEmpresa();
   const [finiquitos,   setFiniquitos]   = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos,    setContratos]    = useState([]);
@@ -1269,24 +1279,25 @@ function FiniquitosSection() {
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [fSnap, tSnap, cSnap] = await Promise.all([
-        getDocs(query(collection(db,'finiquitos'), orderBy('createdAt','desc'))),
-        getDocs(collection(db,'trabajadores')),
-        getDocs(collection(db,'contratos')),
+        getDocs(query(collection(db,'empresas',empresaId,'finiquitos'), orderBy('createdAt','desc'))),
+        getDocs(collection(db,'empresas',empresaId,'trabajadores')),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
       ]);
       setFiniquitos(fSnap.docs.map(d=>({id:d.id,...d.data()})));
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch { setFiniquitos([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleDelete = async () => {
-    try { await deleteDoc(doc(db,'finiquitos',confirm.id)); load(); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'finiquitos', confirm.id)); load(); }
     catch(e) { alert('Error: '+e.message); }
     setConfirm(null);
   };
@@ -1501,6 +1512,7 @@ function FiniquitosSection() {
 // PANEL PORTAL TRABAJADORES — Crear cuentas Firebase Auth
 // ═══════════════════════════════════════════════════════
 function PortalTrabajadoresPanel({ trabajadores }) {
+  const { empresaId } = useEmpresa();
   const [resultados, setResultados] = useState([]); // [{ nombre, rut, email, estado: 'ok'|'existe'|'error', msg }]
   const [procesando,  setProcesando]  = useState(false);
   const [progreso,    setProgreso]    = useState(0);
@@ -1570,10 +1582,10 @@ function PortalTrabajadoresPanel({ trabajadores }) {
         const uid  = cred.user.uid;
 
         // 1. Vincular uid al documento del trabajador
-        await updateDoc(doc(db, 'trabajadores', t.id), { portalUid: uid, portalEmail: email });
+        await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', t.id), { portalUid: uid, portalEmail: email });
         // 2. Escribir índice uid→firestoreId para que el portal pueda leer el perfil
         //    (las reglas no permiten query sobre toda la colección desde el trabajador)
-        await setDoc(doc(db, 'trabajadores_portal', uid), {
+        await setDoc(doc(db, 'empresas', empresaId, 'trabajadores_portal', uid), {
           trabajadorDocId: t.id,
           rut: t.rut || '',
           email,

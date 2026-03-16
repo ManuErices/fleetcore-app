@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ function getWeekColumns() {
 
 // ─── Modal: Nueva / Editar Cuenta ──────────────────────────────────────────
 function ModalCuenta({ onSave, onClose, editando }) {
+  const { empresaId } = useEmpresa();
   const [form, setForm] = useState(editando || {
     categoria: "EGRESOS", nombre: "", subcategoria: "OPERACIONAL",
     detalle: "", proyectoId: "", cliente: "", presupuestoMensual: "",
@@ -488,6 +490,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function FinanzasFlujoCaja() {
   const { proyectoId } = useFinanzas();
+  const { empresaId } = useEmpresa();
   const weekColumns = useMemo(() => getWeekColumns(), []);
   const tableRef = useRef(null);
 
@@ -508,31 +511,6 @@ export default function FinanzasFlujoCaja() {
   const [dragOverKey,     setDragOverKey]     = useState(null);
   const [showExportMenu,  setShowExportMenu]  = useState(false);
   const [exportando,      setExportando]      = useState(null); // null | "excel" | "pdf"
-
-  // ── Firebase ───────────────────────────────────────────────────────────────
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [snapC, snapP, snapPaid, snapNotas, snapCfg] = await Promise.all([
-        getDocs(collection(db, "flujo_cuentas")),
-        getDocs(collection(db, "flujo_pagos")),
-        getDocs(collection(db, "flujo_pagados")),
-        getDocs(collection(db, "flujo_notas")),
-        getDocs(collection(db, "flujo_config")),
-      ]);
-      const cuentasList = snapC.docs.map(d => ({ id: d.id, ...d.data() }));
-      setCuentas(cuentasList);
-      const pMap = {}; snapP.docs.forEach(d => { pMap[d.id] = d.data().valor || 0; });
-      // Autorrelleno recurrentes — en memoria, no persiste a Firebase
-      const weeksSnap = getWeekColumns();
-      const filledMap = applyRecurrentes(cuentasList, pMap, weeksSnap);
-      setPayments(filledMap || pMap);
-      const paidMap = {}; snapPaid.docs.forEach(d => { paidMap[d.id] = true; }); setPaymentsPaid(paidMap);
-      const notaMap = {}; snapNotas.docs.forEach(d => { notaMap[d.id] = d.data().texto || ""; }); setPaymentNotas(notaMap);
-      snapCfg.docs.forEach(d => { if (d.id === "saldo_banco") setSaldoBanco(d.data().valor || 0); });
-    } catch(e) { console.error(e); }
-    finally { setLoading(false); }
-  }, []);
 
   // ── Autorrelleno de recurrentes ────────────────────────────────────────────
   // Se ejecuta cuando hay cuentas o payments listos
@@ -565,27 +543,53 @@ export default function FinanzasFlujoCaja() {
     return changed ? filled : null;
   }, []);
 
+  // ── Firebase ───────────────────────────────────────────────────────────────
+  const cargar = useCallback(async () => {
+    if (!empresaId) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const [snapC, snapP, snapPaid, snapNotas, snapCfg] = await Promise.all([
+        getDocs(collection(db, "empresas", empresaId, "flujo_cuentas")),
+        getDocs(collection(db, "empresas", empresaId, "flujo_pagos")),
+        getDocs(collection(db, "empresas", empresaId, "flujo_pagados")),
+        getDocs(collection(db, "empresas", empresaId, "flujo_notas")),
+        getDocs(collection(db, "empresas", empresaId, "flujo_config")),
+      ]);
+      const cuentasList = snapC.docs.map(d => ({ id: d.id, ...d.data() }));
+      setCuentas(cuentasList);
+      const pMap = {}; snapP.docs.forEach(d => { pMap[d.id] = d.data().valor || 0; });
+      // Autorrelleno recurrentes — en memoria, no persiste a Firebase
+      const weeksSnap = getWeekColumns();
+      const filledMap = applyRecurrentes(cuentasList, pMap, weeksSnap);
+      setPayments(filledMap || pMap);
+      const paidMap = {}; snapPaid.docs.forEach(d => { paidMap[d.id] = true; }); setPaymentsPaid(paidMap);
+      const notaMap = {}; snapNotas.docs.forEach(d => { notaMap[d.id] = d.data().texto || ""; }); setPaymentNotas(notaMap);
+      snapCfg.docs.forEach(d => { if (d.id === "saldo_banco") setSaldoBanco(d.data().valor || 0); });
+    } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [empresaId, applyRecurrentes]);
+
   useEffect(() => { cargar(); }, [cargar]);
 
   const handlePayment = useCallback(async (key, valor) => {
     setPayments(prev => ({ ...prev, [key]: valor }));
-    try { await setDoc(doc(db, "flujo_pagos", key), { valor, updatedAt: new Date().toISOString() }); } catch(e) {}
-  }, []);
+    try { await setDoc(doc(db, "empresas", empresaId, "flujo_pagos", key), { valor, updatedAt: new Date().toISOString() }); } catch(e) {}
+  }, [empresaId]);
 
   const handleTogglePaid = useCallback(async (key) => {
     const nuevo = !paymentsPaid[key];
     setPaymentsPaid(prev => ({ ...prev, [key]: nuevo }));
     try {
-      if (nuevo) await setDoc(doc(db, "flujo_pagados", key), { paidAt: new Date().toISOString() });
-      else await deleteDoc(doc(db, "flujo_pagados", key));
+      if (nuevo) await setDoc(doc(db, "empresas", empresaId, "flujo_pagados", key), { paidAt: new Date().toISOString() });
+      else await deleteDoc(doc(db, "empresas", empresaId, "flujo_pagados", key));
     } catch(e) {}
   }, [paymentsPaid]);
 
   const handleNota = useCallback(async (key, texto) => {
     setPaymentNotas(prev => ({ ...prev, [key]: texto }));
     try {
-      if (texto) await setDoc(doc(db, "flujo_notas", key), { texto, updatedAt: new Date().toISOString() });
-      else await deleteDoc(doc(db, "flujo_notas", key));
+      if (texto) await setDoc(doc(db, "empresas", empresaId, "flujo_notas", key), { texto, updatedAt: new Date().toISOString() });
+      else await deleteDoc(doc(db, "empresas", empresaId, "flujo_notas", key));
     } catch(e) {}
   }, []);
 
@@ -617,10 +621,10 @@ export default function FinanzasFlujoCaja() {
     }
     try {
       await Promise.all([
-        setDoc(doc(db, "flujo_pagos", targetKey), { valor, updatedAt: new Date().toISOString() }),
-        setDoc(doc(db, "flujo_pagos", sourceKey), { valor: 0, updatedAt: new Date().toISOString() }),
-        ...(paymentNotas[sourceKey] ? [setDoc(doc(db, "flujo_notas", targetKey), { texto: paymentNotas[sourceKey] }), deleteDoc(doc(db, "flujo_notas", sourceKey))] : []),
-        ...(paymentsPaid[sourceKey] ? [setDoc(doc(db, "flujo_pagados", targetKey), { paidAt: new Date().toISOString() }), deleteDoc(doc(db, "flujo_pagados", sourceKey))] : []),
+        setDoc(doc(db, "empresas", empresaId, "flujo_pagos", targetKey), { valor, updatedAt: new Date().toISOString() }),
+        setDoc(doc(db, "empresas", empresaId, "flujo_pagos", sourceKey), { valor: 0, updatedAt: new Date().toISOString() }),
+        ...(paymentNotas[sourceKey] ? [setDoc(doc(db, "empresas", empresaId, "flujo_notas", targetKey), { texto: paymentNotas[sourceKey] }), deleteDoc(doc(db, "empresas", empresaId, "flujo_notas", sourceKey))] : []),
+        ...(paymentsPaid[sourceKey] ? [setDoc(doc(db, "empresas", empresaId, "flujo_pagados", targetKey), { paidAt: new Date().toISOString() }), deleteDoc(doc(db, "empresas", empresaId, "flujo_pagados", sourceKey))] : []),
       ]);
     } catch(e) {}
     setDraggedPayment(null); setDragOverKey(null);
@@ -632,10 +636,10 @@ export default function FinanzasFlujoCaja() {
   const handleSaveCuenta = useCallback(async (form) => {
     try {
       if (editandoCuenta) {
-        await updateDoc(doc(db, "flujo_cuentas", editandoCuenta.id), form);
+        await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", editandoCuenta.id), form);
         setCuentas(prev => prev.map(c => c.id === editandoCuenta.id ? { ...c, ...form } : c));
       } else {
-        const ref = await addDoc(collection(db, "flujo_cuentas"), { ...form, creadoEn: new Date().toISOString() });
+        const ref = await addDoc(collection(db, "empresas", empresaId, "flujo_cuentas"), { ...form, creadoEn: new Date().toISOString() });
         setCuentas(prev => [...prev, { id: ref.id, ...form }]);
       }
     } catch(e) {}
@@ -652,12 +656,12 @@ export default function FinanzasFlujoCaja() {
 
   const handleDeleteCuenta = useCallback(async (id) => {
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
-    try { await deleteDoc(doc(db, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
+    try { await deleteDoc(doc(db, "empresas", empresaId, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
   }, []);
 
   const handleSaldoBanco = useCallback(async (val) => {
     setSaldoBanco(val); setShowModalSaldo(false);
-    try { await setDoc(doc(db, "flujo_config", "saldo_banco"), { valor: val }); } catch(e) {}
+    try { await setDoc(doc(db, "empresas", empresaId, "flujo_config", "saldo_banco"), { valor: val }); } catch(e) {}
   }, []);
 
   // ── Cálculos ───────────────────────────────────────────────────────────────

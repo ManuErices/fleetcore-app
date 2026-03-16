@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { listActiveProjects, listPurchaseOrders, savePurchaseOrders } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import OCImporter from "../../components/OCImporter";
 
 // Utilidades de fecha (igual que MonthlyCalendar)
@@ -21,6 +22,7 @@ function getDaysDiff(start, end) {
 }
 
 export default function OC() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -45,7 +47,7 @@ export default function OC() {
   useEffect(() => {
     (async () => {
       try {
-        const p = await listActiveProjects();
+        const p = await listActiveProjects(empresaId);
         setProjects(p);
         if (p.length > 0) setSelectedProject(p[0].id);
       } catch (err) {
@@ -75,7 +77,7 @@ export default function OC() {
     setError(null);
     
     try {
-      const orders = await listPurchaseOrders(selectedProject);
+      const orders = await listPurchaseOrders(empresaId, selectedProject);
       
       // Filtrar por rango de fechas
       const filteredOrders = orders.filter(order => {

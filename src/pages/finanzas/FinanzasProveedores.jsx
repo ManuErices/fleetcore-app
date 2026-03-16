@@ -4,6 +4,7 @@ import {
   doc, serverTimestamp, query, orderBy
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -225,6 +226,7 @@ export default function FinanzasProveedores() {
   const { proyectoId } = useFinanzas();
   const [loading, setLoading]         = useState(true);
   const [projects, setProjects]       = useState([]);
+  const { empresaId } = useEmpresa();
   const [proveedores, setProveedores] = useState([]); // agrupados
   const [detalle, setDetalle]         = useState(null);
   const [showModal, setShowModal]     = useState(false);
@@ -236,12 +238,13 @@ export default function FinanzasProveedores() {
   const [activeTab, setActiveTab]     = useState("proveedores"); // proveedores | transacciones
 
   const cargar = useCallback(async () => {
+    if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     const txs = []; // todas las transacciones normalizadas
 
     try {
       // 1. Rendiciones
-      const snapR = await getDocs(collection(db, "rendiciones"));
+      const snapR = await getDocs(collection(db, "empresas", empresaId, "rendiciones"));
       snapR.docs.forEach(d => {
         const r = d.data();
         const proveedor = normalizar(r.proveedor);
@@ -263,7 +266,7 @@ export default function FinanzasProveedores() {
 
     try {
       // 2. Subcontratos
-      const snapS = await getDocs(collection(db, "subcontratos"));
+      const snapS = await getDocs(collection(db, "empresas", empresaId, "subcontratos"));
       snapS.docs.forEach(d => {
         const s = d.data();
         const proveedor = normalizar(s.razonSocialSubcontratista);
@@ -285,7 +288,7 @@ export default function FinanzasProveedores() {
 
     try {
       // 3. Órdenes de compra
-      const snapOC = await getDocs(collection(db, "purchaseOrders"));
+      const snapOC = await getDocs(collection(db, "empresas", empresaId, "purchaseOrders"));
       snapOC.docs.forEach(d => {
         const o = d.data();
         const proveedor = normalizar(o.proveedor);
@@ -308,7 +311,7 @@ export default function FinanzasProveedores() {
 
     try {
       // 4. Manuales
-      const snapM = await getDocs(query(collection(db, "finanzas_proveedores"), orderBy("createdAt", "desc")));
+      const snapM = await getDocs(query(collection(db, "empresas", empresaId, "finanzas_proveedores"), orderBy("createdAt", "desc")));
       snapM.docs.forEach(d => {
         const m = d.data();
         const proveedor = normalizar(m.razonSocial);
@@ -354,21 +357,21 @@ export default function FinanzasProveedores() {
 
     setProveedores(Object.values(mapaProveedores));
     setLoading(false);
-  }, [proyectoId]);
+  }, [empresaId, proyectoId]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
   useEffect(() => {
     try {
-      getDocs(collection(db, "projects")).then(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+      getDocs(collection(db, "empresas", empresaId, "projects")).then(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     } catch (e) {}
   }, []);
 
   const handleSaveManual = async (form) => {
     if (editando) {
-      await updateDoc(doc(db, "finanzas_proveedores", editando.id), { ...form, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, "empresas", empresaId, "finanzas_proveedores", editando.id), { ...form, updatedAt: serverTimestamp() });
     } else {
-      await addDoc(collection(db, "finanzas_proveedores"), { ...form, createdAt: serverTimestamp() });
+      await addDoc(collection(db, "empresas", empresaId, "finanzas_proveedores"), { ...form, createdAt: serverTimestamp() });
     }
     setEditando(null);
     await cargar();
@@ -378,7 +381,7 @@ export default function FinanzasProveedores() {
 
   const handleDeleteManual = async (id) => {
     if (!window.confirm("¿Eliminar este registro manual?")) return;
-    await deleteDoc(doc(db, "finanzas_proveedores", id));
+    await deleteDoc(doc(db, "empresas", empresaId, "finanzas_proveedores", id));
     await cargar();
     setDetalle(null);
   };

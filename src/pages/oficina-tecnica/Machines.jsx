@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { listActiveProjects, listMachines, upsertMachine, deleteMachine } from "../../lib/db";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 import ExcelImporter from "../../components/ExcelImporter";
 
@@ -45,6 +46,7 @@ const empty = (projectId = "") => ({
 });
 
 export default function Machines() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
   const [machines, setMachines] = useState([]);
@@ -58,7 +60,7 @@ export default function Machines() {
 
   useEffect(() => {
     (async () => {
-      const p = await listActiveProjects();
+      const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p[0]) setProjectId(p[0].id);
     })();
@@ -118,7 +120,7 @@ export default function Machines() {
         active: form.active !== false
       };
       
-      await upsertMachine(payload);
+      await upsertMachine(empresaId, payload);
       setForm(empty(projectId));
       setShowForm(false);
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -151,7 +153,7 @@ export default function Machines() {
     }
     if (!confirm("¿Eliminar equipo permanentemente?")) return;
     try {
-      await deleteMachine(id);
+      await deleteMachine(empresaId, id);
       await refresh(projectId);
     } catch (error) {
       alert("Error al eliminar: " + error.message);
