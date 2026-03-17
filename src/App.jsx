@@ -39,6 +39,7 @@ import PricingPage from "./pages/PricingPage.jsx";
 import PaymentResult from "./pages/PaymentResult.jsx";
 import { usePlan } from "./hooks/usePlan.js";
 import EmpresaSetup from "./pages/EmpresaSetup.jsx";
+import InviteAccept from "./pages/InviteAccept.jsx";
 
 // ============================================================
 // RRHH Shell
@@ -528,6 +529,12 @@ export default function App() {
     return <TrabajadorApp />;
   }
 
+  // Invitaciones: interceptar /invite/:token antes de todo
+  const inviteMatch = window.location.pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
+  if (inviteMatch) {
+    return <InviteAccept token={inviteMatch[1]} />;
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -587,17 +594,6 @@ export default function App() {
   }
 
   if (!user) return <LoginPage />;
-
-  // Usuario sin empresa asignada → mostrar onboarding
-  if (needsSetup) {
-    return (
-      <EmpresaSetup
-        user={user}
-        onComplete={() => { setNeedsSetup(false); window.location.reload(); }}
-        onLogout={handleLogout}
-      />
-    );
-  }
 
   // Usuario sin empresa asignada → mostrar onboarding
   if (needsSetup) {

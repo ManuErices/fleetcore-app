@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect } from "react";
 import SuperAdminPanel from "./SuperAdminPanel.jsx";
+import InviteUserPanel from "./InviteUserPanel.jsx";
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
@@ -16,7 +17,9 @@ import { getPlan, formatPrice } from "../lib/plans";
 
 export default function AppSelector({ user, onLogout, onSelectApp }) {
   const [userRole,    setUserRole]    = useState(null);
+  const [empresaId,   setEmpresaId]   = useState(null);
   const [showSuperAdmin, setShowSuperAdmin] = useState(false);
+  const [showInvite,      setShowInvite]      = useState(false);
   const [loading,  setLoading]  = useState(true);
   const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
   const navigate = useNavigate();
@@ -99,6 +102,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   return (
     <>
     {showSuperAdmin && <SuperAdminPanel onClose={() => setShowSuperAdmin(false)} />}
+    {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} />}
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
@@ -143,6 +147,15 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               title="Panel de administración"
             >
               🛡️ Admin
+            </button>
+          )}
+          {(userRole === 'admin_contrato' || userRole === 'superadmin') && (
+            <button
+              onClick={() => setShowInvite(true)}
+              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 rounded-xl text-xs font-black text-emerald-200 hover:text-white transition-all"
+              title="Invitar usuarios"
+            >
+              👥 Invitar
             </button>
           )}
           <button onClick={onLogout} className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors" title="Cerrar sesión">

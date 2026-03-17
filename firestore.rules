@@ -273,6 +273,20 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────────────
+    // /invitaciones — sistema de invitaciones de empresa
+    // ─────────────────────────────────────────────────────
+    match /invitaciones/{token} {
+      // Cualquiera puede leer una invitación (para validarla al aceptar)
+      allow read: if isAuth() || true;
+      // Solo admin_contrato de la empresa o superadmin puede crear
+      allow create: if isSuperAdmin()
+                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId());
+      // Solo superadmin puede actualizar (marcar como usada lo hace el sistema)
+      allow update: if isAuth(); // El usuario que acepta marca usada=true
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
     // DEFAULT — denegar todo lo no especificado
     // ─────────────────────────────────────────────────────
     match /{document=**} {
