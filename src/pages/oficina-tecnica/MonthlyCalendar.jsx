@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { listActiveProjects, listMachines, listLogsByRange } from "../../lib/db";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 
@@ -38,6 +39,7 @@ function getDaysDiff(start, end) {
 }
 
 export default function MonthlyCalendar() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [dateFrom, setDateFrom] = useState(addDays(isoToday(), -6));
@@ -56,9 +58,10 @@ export default function MonthlyCalendar() {
   );
 
   useEffect(() => {
+    if (!empresaId) return;
     let active = true;
     
-    listActiveProjects()
+    listActiveProjects(empresaId)
       .then(p => {
         if (active) {
           setProjects(p);
@@ -71,7 +74,7 @@ export default function MonthlyCalendar() {
       });
     
     return () => { active = false; };
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -91,8 +94,8 @@ export default function MonthlyCalendar() {
     setIsLoading(true);
 
     Promise.all([
-      listMachines(selectedProject),
-      listLogsByRange(selectedProject, dateFrom, dateTo)
+      listMachines(empresaId, selectedProject),
+      listLogsByRange(empresaId, selectedProject, dateFrom, dateTo)
     ])
       .then(([machinesData, logsData]) => {
         if (active) {

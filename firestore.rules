@@ -85,7 +85,11 @@ service cloud.firestore {
     match /empresas/{empresaId} {
       allow read:  if isSuperAdmin()
                    || (isAuth() && userEmpresaId() == empresaId);
-      allow write: if isSuperAdmin();
+      // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún)
+      allow create: if isSuperAdmin()
+                    || (isAuth() && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+                        || (isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('empresaId', null) == null));
+      allow update, delete: if isSuperAdmin();
 
       // ── USUARIOS DE LA EMPRESA ──────────────────────────
       match /users/{uid} {
@@ -222,10 +226,50 @@ service cloud.firestore {
     // Necesario porque AppSelector y useEmpresa leen de aquí
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read:  if isSuperAdmin()
-                   || (isAuth() && request.auth.uid == uid);
-      allow write: if isSuperAdmin()
-                   || (isAuth() && request.auth.uid == uid);
+      allow read:   if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid);
+      allow create: if isAuth() && request.auth.uid == uid;  // Registro inicial — sin rol aún
+      allow update: if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid);
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /subscriptions — usePlan hook lee/escucha el plan activo
+    // Cada usuario solo accede a su propio documento
+    // Solo superadmin puede crear/modificar suscripciones
+    // ─────────────────────────────────────────────────────
+    match /subscriptions/{uid} {
+      allow read:    if isAuth() && request.auth.uid == uid;
+      allow create:  if isAuth() && request.auth.uid == uid;  // Al registrarse crea su doc
+      allow update, delete: if isSuperAdmin();                // Solo superadmin modifica/elimina
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /subscriptions — usePlan hook lee/escucha el plan activo
+    // Cada usuario solo accede a su propio documento
+    // Solo superadmin puede crear/modificar suscripciones
+    // ─────────────────────────────────────────────────────
+    match /subscriptions/{uid} {
+      allow read:           if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
+      allow create:         if isAuth() && request.auth.uid == uid;  // Al registrarse crea su doc
+      allow update, delete: if isSuperAdmin();                       // Solo superadmin modifica/elimina
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Precios combustible — lectura pública, escritura solo auth
+    // ─────────────────────────────────────────────────────
+    match /fuelPrices/{docId} {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() || isAdminContrato();
+    }
+    match /fuelPriceHistory/{docId} {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() || isAdminContrato();
+    }
+    match /fuelPriceCache/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
     }
 
     // ─────────────────────────────────────────────────────

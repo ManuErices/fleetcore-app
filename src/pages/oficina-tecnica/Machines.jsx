@@ -18,30 +18,29 @@ const empty = (projectId = "") => ({
   name: "",
   type: "",
   ownership: "OWN",
-  
-  // Nuevos campos para importación Excel
   patente: "",
   marca: "",
   modelo: "",
-  
+  // Campos AdminPanel
+  empresa: "",
+  propietario: "",
+  // Campos FinanzasActivos
+  valorCompra: "", valorLibros: "", fechaCompra: "",
+  vidaUtilAnios: "", depreciacionAnual: "", moneda: "CLP",
+  vencPermisoCirculacion: "", vencSeguro: "",
+  vencRevisionTecnica: "", vencSoapCivil: "",
+  notasDoc: "", notas: "",
   // Tipo de cobro
   billingType: BILLING_TYPES.HOURLY,
-  
-  // Para cobro por hora (HOURLY)
   minimumMonthlyHours: 110,
   internalRateProductive: 0,
   internalRateStandby: 0,
   clientRateProductive: 0,
   clientRateStandby: 0,
-  
-  // Para cobro por día fijo (DAILY_FIXED)
   internalRatePerDay: 0,
   clientRatePerDay: 0,
-  
-  // Para cobro mensual fijo (MONTHLY_FIXED)
   internalRateMonthly: 0,
   clientRateMonthly: 0,
-  
   active: true,
 });
 
@@ -59,29 +58,30 @@ export default function Machines() {
   const { operatorsByMachine } = useOperatorAssignments(projectId);
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
       const p = await listActiveProjects(empresaId);
       setProjects(p);
-      if (p[0]) setProjectId(p[0].id);
+      setProjectId("all"); // Mostrar todas por defecto
     })();
-  }, []);
+  }, [empresaId]);
 
   const refresh = async (pid) => {
-    if (!pid) return;
-    const m = await listMachines(pid);
+    if (!empresaId) return;
+    const m = await listMachines(empresaId, pid || null);
     setMachines(m);
   };
 
   useEffect(() => {
-    if (!projectId) return;
     setForm(empty(projectId));
     setShowForm(false);
-    refresh(projectId);
+    // "all" = sin filtro de proyecto, mostrar todas las máquinas de la empresa
+    refresh(projectId === "all" ? null : projectId || null);
   }, [projectId]);
 
   const onSave = async () => {
-    if (!projectId) {
-      alert("Error: No hay proyecto seleccionado");
+    if (!projectId || projectId === "all") {
+      alert("Selecciona un proyecto específico antes de crear un equipo");
       return;
     }
     
@@ -96,27 +96,37 @@ export default function Machines() {
         ...form, 
         projectId,
         billingType: form.billingType || BILLING_TYPES.HOURLY,
-        
-        // Nuevos campos
         patente: form.patente || "",
         marca: form.marca || "",
         modelo: form.modelo || "",
-        
-        // Para cobro por hora
+        // Campos AdminPanel
+        empresa:     form.empresa     || "",
+        propietario: form.propietario || "",
+        // Campos FinanzasActivos (financieros — opcionales)
+        valorCompra:           form.valorCompra           || "",
+        valorLibros:           form.valorLibros           || "",
+        fechaCompra:           form.fechaCompra           || "",
+        vidaUtilAnios:         form.vidaUtilAnios         || "",
+        depreciacionAnual:     form.depreciacionAnual     || "",
+        moneda:                form.moneda                || "CLP",
+        vencPermisoCirculacion: form.vencPermisoCirculacion || "",
+        vencSeguro:            form.vencSeguro            || "",
+        vencRevisionTecnica:   form.vencRevisionTecnica   || "",
+        vencSoapCivil:         form.vencSoapCivil         || "",
+        notasDoc:              form.notasDoc              || "",
+        notas:                 form.notas                 || "",
+        // Cobro por hora
         minimumMonthlyHours: Number(form.minimumMonthlyHours) || 110,
         internalRateProductive: Number(form.internalRateProductive) || 0,
         internalRateStandby: Number(form.internalRateStandby) || 0,
         clientRateProductive: Number(form.clientRateProductive) || 0,
         clientRateStandby: Number(form.clientRateStandby) || 0,
-        
-        // Para cobro por día
+        // Cobro por día
         internalRatePerDay: Number(form.internalRatePerDay) || 0,
         clientRatePerDay: Number(form.clientRatePerDay) || 0,
-        
-        // Para cobro mensual
+        // Cobro mensual
         internalRateMonthly: Number(form.internalRateMonthly) || 0,
         clientRateMonthly: Number(form.clientRateMonthly) || 0,
-        
         active: form.active !== false
       };
       
@@ -198,6 +208,7 @@ export default function Machines() {
               onChange={(e) => setProjectId(e.target.value)}
               className="input-modern"
             >
+              <option value="all">Todos los proyectos</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
 

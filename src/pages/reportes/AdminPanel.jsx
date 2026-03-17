@@ -521,7 +521,7 @@ function OperadoresSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false });
+  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', telefono: '', area: '', fechaIngreso: '', estado: 'activo', afp: '', prevision: '', nacionalidad: '' });
   const [cargoCustom, setCargoCustom] = useState('');
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -536,7 +536,7 @@ function OperadoresSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'employees'), orderBy('nombre')));
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
@@ -573,16 +573,37 @@ function OperadoresSection() {
     try {
       const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
       const nombreCompleto = [form.nombres, form.apellidoPaterno, form.apellidoMaterno].filter(Boolean).map(s=>s.trim()).join(' ');
-      const p = { nombres: form.nombres.trim(), apellidoPaterno: form.apellidoPaterno.trim(), apellidoMaterno: form.apellidoMaterno.trim(), nombre: nombreCompleto, rut: rutNorm, cargo: cargoFinal, empresa: form.empresa.trim(), esSurtidor: form.esSurtidor, updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'employees', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'employees'), { ...p, createdAt: serverTimestamp() });
+      const p = {
+        // Campos WorkFleet
+        nombres: form.nombres.trim(),
+        apellidoPaterno: form.apellidoPaterno.trim(),
+        apellidoMaterno: form.apellidoMaterno.trim(),
+        nombre: nombreCompleto,
+        rut: rutNorm,
+        cargo: cargoFinal,
+        empresa: form.empresa.trim(),
+        esSurtidor: form.esSurtidor,
+        tipo: form.esSurtidor ? 'GASTO_GENERAL' : 'OPERADOR',
+        // Campos RRHH (opcionales — se completan desde RRHH)
+        email:          form.email        || '',
+        telefono:       form.telefono     || '',
+        area:           form.area         || '',
+        fechaIngreso:   form.fechaIngreso  || '',
+        estado:         form.estado        || 'activo',
+        afp:            form.afp           || '',
+        prevision:      form.prevision     || '',
+        nacionalidad:   form.nacionalidad  || '',
+        updatedAt: serverTimestamp(),
+      };
+      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editId), p);
+      else await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas', empresaId, 'employees', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try { await deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -733,10 +754,12 @@ function OperadoresSection() {
 
 // Hook para cargar una categoría del catálogo
 function useCatalogo(categoria) {
+  const { empresaId } = useEmpresa();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(
@@ -747,12 +770,12 @@ function useCatalogo(categoria) {
       setItems(all.filter(x => x.categoria === categoria));
     } catch { setItems([]); }
     setLoading(false);
-  }, [categoria]);
+  }, [categoria, empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
   const add = async (nombre) => {
-    if (!nombre.trim()) return;
+    if (!nombre.trim() || !empresaId) return;
     await addDoc(collection(db, 'empresas', empresaId, 'catalogo_maquinas'), {
       nombre: nombre.trim(),
       categoria,
@@ -763,12 +786,13 @@ function useCatalogo(categoria) {
   };
 
   const remove = async (id) => {
+    if (!empresaId) return;
     await deleteDoc(doc(db, 'empresas', empresaId, 'catalogo_maquinas', id));
     await load();
   };
 
   const update = async (id, nombre) => {
-    if (!nombre.trim()) return;
+    if (!nombre.trim() || !empresaId) return;
     await updateDoc(doc(db, 'empresas', empresaId, 'catalogo_maquinas', id), { nombre: nombre.trim() });
     await load();
   };
@@ -974,7 +998,7 @@ function MaquinasSection() {
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [qr, setQr] = useState(null);
-  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' });
+  const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '', ownership: 'OWN', active: true, projectId: null, billingType: 'hourly', valorCompra: '', valorLibros: '', fechaCompra: '', vidaUtilAnios: '', moneda: 'CLP', vencPermisoCirculacion: '', vencSeguro: '', vencRevisionTecnica: '', vencSoapCivil: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [busquedaMaq, setBusquedaMaq] = useState('');
@@ -1011,7 +1035,32 @@ function MaquinasSection() {
   const save = async () => {
     setSaving(true);
     try {
-      const p = { name: form.name.trim(), code: form.code.trim(), patente: form.patente.trim().toUpperCase(), type: form.type, marca: form.marca.trim(), modelo: form.modelo.trim(), empresa: form.empresa, propietario: form.propietario.trim(), updatedAt: serverTimestamp() };
+      const p = {
+        name:        form.name.trim(),
+        code:        form.code.trim(),
+        patente:     form.patente.trim().toUpperCase(),
+        type:        form.type,
+        marca:       form.marca.trim(),
+        modelo:      form.modelo.trim(),
+        empresa:     form.empresa,
+        propietario: form.propietario.trim(),
+        // Campos Machines.jsx
+        ownership:   form.ownership   || "OWN",
+        active:      form.active      !== false,
+        projectId:   form.projectId   || null,
+        billingType: form.billingType || "hourly",
+        // Campos FinanzasActivos (financieros)
+        valorCompra:            form.valorCompra            || "",
+        valorLibros:            form.valorLibros            || "",
+        fechaCompra:            form.fechaCompra            || "",
+        vidaUtilAnios:          form.vidaUtilAnios          || "",
+        moneda:                 form.moneda                 || "CLP",
+        vencPermisoCirculacion: form.vencPermisoCirculacion || "",
+        vencSeguro:             form.vencSeguro             || "",
+        vencRevisionTecnica:    form.vencRevisionTecnica    || "",
+        vencSoapCivil:          form.vencSoapCivil          || "",
+        updatedAt: serverTimestamp(),
+      };
       if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'machines', editId), p);
       else await addDoc(collection(db, 'empresas', empresaId, 'machines'), { ...p, createdAt: serverTimestamp() });
       setModal(false); load();

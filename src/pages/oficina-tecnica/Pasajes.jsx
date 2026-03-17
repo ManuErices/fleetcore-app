@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, addDoc, getDocs, query, orderBy, updateDoc, doc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, auth, storage } from "../../lib/firebase";
@@ -32,6 +33,7 @@ ChartJS.register(
 );
 
 export default function PasajesNuevo() {
+  const { empresaId } = useEmpresa();
   const [solicitudes, setSolicitudes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -80,13 +82,14 @@ export default function PasajesNuevo() {
   // Cargar datos
   useEffect(() => {
     cargarDatos();
-  }, []);
+  }, [empresaId]);
 
   const cargarDatos = async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       // Cargar proyectos
-      const projectsRef = collection(db, 'projects');
+      const projectsRef = collection(db, 'empresas', empresaId, 'projects');
       const projectsSnap = await getDocs(projectsRef);
       const projectsData = projectsSnap.docs.map(doc => ({
         id: doc.id,
@@ -95,7 +98,7 @@ export default function PasajesNuevo() {
       setProjects(projectsData);
 
       // Cargar solicitudes de pasajes
-      const solicitudesRef = collection(db, 'solicitudes_pasajes');
+      const solicitudesRef = collection(db, 'empresas', empresaId, 'solicitudes_pasajes');
       const q = query(solicitudesRef, orderBy('fechaCreacion', 'desc'));
       const solicitudesSnap = await getDocs(q);
       const solicitudesData = solicitudesSnap.docs.map(doc => ({
@@ -195,7 +198,7 @@ export default function PasajesNuevo() {
         montoTotal: 0
       };
 
-      await addDoc(collection(db, 'solicitudes_pasajes'), solicitud);
+      await addDoc(collection(db, 'empresas', empresaId, 'solicitudes_pasajes'), solicitud);
 
       alert(`✓ Solicitud ${numeroSolicitud} creada exitosamente con ${excelData.length} pasajes`);
       

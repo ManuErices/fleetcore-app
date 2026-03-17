@@ -109,6 +109,8 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     empresa: '', area: '', cargo: '', fechaIngreso: '',
     afp: '', prevision: 'FONASA', isapre: '',
     estado: 'activo', observaciones: '',
+    // Campos WorkFleet
+    tipo: 'OPERADOR', esSurtidor: false, projectId: null,
   };
   const [form,    setForm]    = useState(empty);
   const [saving,  setSaving]  = useState(false);
@@ -159,7 +161,15 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     setSaving(true);
     try {
       const telefonoCompleto = form.telefono ? `${form.codigoPais}${form.telefono}` : '';
-      const payload = { ...form, telefono: telefonoCompleto, updatedAt: serverTimestamp() };
+      const payload = {
+        ...form,
+        telefono:    telefonoCompleto,
+        // Campos compatibles con WorkFleet/Payroll
+        tipo:        form.tipo        || 'OPERADOR',
+        esSurtidor:  form.esSurtidor  || false,
+        projectId:   form.projectId   || null,
+        updatedAt:   serverTimestamp(),
+      };
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
       } else {

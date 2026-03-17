@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { 
   listActiveProjects, 
   listFuelLogsByRange,
@@ -29,6 +30,7 @@ function getDaysDiff(start, end) {
 }
 
 export default function Consolidado() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -61,16 +63,17 @@ export default function Consolidado() {
   });
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
       try {
-        const p = await listActiveProjects();
+        const p = await listActiveProjects(empresaId);
         setProjects(p);
         if (p.length > 0) setSelectedProject(p[0].id);
       } catch (err) {
         console.error("Error cargando proyectos:", err);
       }
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -102,15 +105,15 @@ export default function Consolidado() {
 
       // Cargar datos base en paralelo (sin logs de flota)
       const [fuel, employees, orders, machineList] = await Promise.all([
-        listFuelLogsByRange(selectedProject, dateFrom, dateTo),
-        listEmployeeMonthlyData(selectedProject, employeeYear, employeeMonth),
-        listPurchaseOrders(selectedProject),
-        listMachines(selectedProject)
+        listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listEmployeeMonthlyData(empresaId, selectedProject, employeeYear, employeeMonth),
+        listPurchaseOrders(empresaId, selectedProject),
+        listMachines(empresaId, selectedProject)
       ]);
 
       // Cargar rendiciones y filtrar por fechaEmision
       const rendicionesSnap = await getDocs(
-        query(collection(db, 'rendiciones'), where("projectId", "==", selectedProject))
+        query(collection(db, 'empresas', empresaId, 'rendiciones'), where("projectId", "==", selectedProject))
       );
       const allRendiciones = rendicionesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const rend = allRendiciones.filter(r => {
@@ -120,7 +123,7 @@ export default function Consolidado() {
 
       // Cargar subcontratos y filtrar por fechaEP
       const subcontratosSnap = await getDocs(
-        query(collection(db, 'subcontratos'), where("projectId", "==", selectedProject))
+        query(collection(db, 'empresas', empresaId, 'subcontratos'), where("projectId", "==", selectedProject))
       );
       const allSubcontratos = subcontratosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const subcont = allSubcontratos.filter(s => {

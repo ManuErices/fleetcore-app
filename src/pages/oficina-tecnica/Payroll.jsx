@@ -22,6 +22,7 @@ export default function Payroll() {
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
       try {
         const p = await listActiveProjects(empresaId);
@@ -33,10 +34,10 @@ export default function Payroll() {
         console.error("Error cargando proyectos:", err);
       }
     })();
-  }, []);
+  }, [empresaId]);
 
   const loadData = async () => {
-    if (!selectedProject) return;
+    if (!empresaId || !selectedProject) return;
     
     setIsLoading(true);
     try {

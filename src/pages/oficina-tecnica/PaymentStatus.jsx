@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useEmpresa } from "../../lib/useEmpresa";
 import { 
   listActiveProjects, 
   listMachines, 
@@ -27,6 +28,7 @@ function getMonthRange(year, month) {
 }
 
 export default function PaymentStatus() {
+  const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
@@ -48,12 +50,13 @@ export default function PaymentStatus() {
   const [showReimbursableForm, setShowReimbursableForm] = useState(false);
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
-      const p = await listActiveProjects();
+      const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p[0]) setProjectId(p[0].id);
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -66,9 +69,9 @@ export default function PaymentStatus() {
       const range = getMonthRange(year, month);
       
       const [m, l, f] = await Promise.all([
-        listMachines(projectId),
-        listLogsByRange(projectId, range.from, range.to),
-        listFuelLogsByRange(projectId, range.from, range.to)
+        listMachines(empresaId, projectId),
+        listLogsByRange(empresaId, projectId, range.from, range.to),
+        listFuelLogsByRange(empresaId, projectId, range.from, range.to)
       ]);
 
       setMachines(m);

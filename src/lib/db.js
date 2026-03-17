@@ -24,7 +24,7 @@ const EMPRESA_COL = (empresaId, colName) =>
 // Colecciones de empresa
 const COLS = [
   'projects', 'machines', 'dailyLogs', 'fuelLogs',
-  'employees', 'employeeMonthlyData', 'employeeAssignments',
+  'trabajadores', 'employeeMonthlyData', 'employeeAssignments',
   'purchaseOrders', 'rendiciones', 'subcontratos',
 ];
 
@@ -55,11 +55,11 @@ export async function listActiveProjects(empresaId) {
 // ============================================
 
 export async function listMachines(empresaId, projectId) {
-  const q = query(
-    EMPRESA_COL(empresaId, 'machines'),
-    where("projectId", "==", projectId),
-    orderBy("code")
-  );
+  if (!empresaId) return [];
+  const col = EMPRESA_COL(empresaId, 'machines');
+  const q = (projectId !== undefined && projectId !== null)
+    ? query(col, where("projectId", "==", projectId), orderBy("code"))
+    : query(col, orderBy("code"));
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
@@ -207,22 +207,19 @@ export async function deleteFuelLog(empresaId, fuelLogId) {
 // ============================================
 
 export async function listEmployees(empresaId, projectId) {
-  console.log(`👥 Cargando empleados del proyecto ${projectId}`);
-  
+  console.log(`👥 Cargando trabajadores${projectId ? ` del proyecto ${projectId}` : ''}`);
+  if (!empresaId) return [];
   try {
-    const q = query(
-      EMPRESA_COL(empresaId, 'employees'),
-      where("projectId", "==", projectId)
-    );
-    
+    const col = EMPRESA_COL(empresaId, 'trabajadores');
+    const q = (projectId !== undefined && projectId !== null)
+      ? query(col, where("projectId", "==", projectId))
+      : col;
     const snap = await getDocs(q);
     const employees = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    
-    console.log(`✅ ${employees.length} empleados cargados`);
+    console.log(`✅ ${employees.length} trabajadores cargados`);
     return employees;
-    
   } catch (error) {
-    console.error("❌ Error al cargar empleados:", error);
+    console.error("❌ Error al cargar trabajadores:", error);
     throw error;
   }
 }
@@ -230,7 +227,7 @@ export async function listEmployees(empresaId, projectId) {
 export async function getEmployeeByRut(empresaId, projectId, rut) {
   try {
     const q = query(
-      EMPRESA_COL(empresaId, 'employees'),
+      EMPRESA_COL(empresaId, 'trabajadores'),
       where("projectId", "==", projectId),
       where("rut", "==", rut)
     );
@@ -253,12 +250,12 @@ export async function upsertEmployee(empresaId, employee) {
       ...payload,
       createdAt: Timestamp.now()
     };
-    const ref = await addDoc(EMPRESA_COL(empresaId, 'employees'), dataToSave);
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'trabajadores'), dataToSave);
     console.log("✅ Empleado creado con ID:", ref.id);
     return ref.id;
   }
   const { id, ...rest } = employee;
-  await updateDoc(EMPRESA_DOC(empresaId, 'employees', id), {
+  await updateDoc(EMPRESA_DOC(empresaId, 'trabajadores', id), {
     ...rest,
     updatedAt: Timestamp.now(),
   });
@@ -270,7 +267,7 @@ export async function deleteEmployee(empresaId, employeeId) {
   if (!employeeId || employeeId.trim() === "") {
     throw new Error("Employee ID is required for deletion");
   }
-  await deleteDoc(EMPRESA_DOC(empresaId, 'employees', employeeId));
+  await deleteDoc(EMPRESA_DOC(empresaId, 'trabajadores', employeeId));
   console.log("✅ Empleado eliminado con ID:", employeeId);
 }
 
@@ -280,14 +277,12 @@ export async function deleteEmployee(empresaId, employeeId) {
 
 export async function listEmployeeMonthlyData(empresaId, projectId, year, month) {
   console.log(`📅 Cargando datos mensuales: ${year}-${month}`);
-  
+  if (!empresaId || year === undefined || month === undefined) return [];
   try {
-    const q = query(
-      EMPRESA_COL(empresaId, 'employeeMonthlyData'),
-      where("projectId", "==", projectId),
-      where("year", "==", year),
-      where("month", "==", month)
-    );
+    const col = EMPRESA_COL(empresaId, 'employeeMonthlyData');
+    const q = (projectId !== undefined && projectId !== null)
+      ? query(col, where("projectId", "==", projectId), where("year", "==", year), where("month", "==", month))
+      : query(col, where("year", "==", year), where("month", "==", month));
     
     const snap = await getDocs(q);
     const monthlyData = snap.docs.map((d) => ({ id: d.id, ...d.data() }));

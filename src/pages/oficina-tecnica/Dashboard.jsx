@@ -46,12 +46,13 @@ export default function DashboardExecutive() {
   const { prices: fuelPrices } = useFuelPrices(true);
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
       const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -59,6 +60,7 @@ export default function DashboardExecutive() {
   }, [selectedProject, dateFrom, dateTo]);
 
   const loadData = async () => {
+    if (!empresaId || !selectedProject) return;
     setIsLoading(true);
     try {
       const fromDate = new Date(dateFrom);
@@ -73,17 +75,17 @@ export default function DashboardExecutive() {
       ]);
 
       // Rendiciones
-      const rendSnap = await getDocs(query(collection(db, 'rendiciones'), where("projectId", "==", selectedProject)));
+      const rendSnap = await getDocs(query(collection(db, 'empresas', empresaId, 'rendiciones'), where("projectId", "==", selectedProject)));
       const allRend = rendSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const filtRend = allRend.filter(r => r.fechaEmision >= dateFrom && r.fechaEmision <= dateTo);
 
       // Subcontratos
-      const subSnap = await getDocs(query(collection(db, 'subcontratos'), where("projectId", "==", selectedProject)));
+      const subSnap = await getDocs(query(collection(db, 'empresas', empresaId, 'subcontratos'), where("projectId", "==", selectedProject)));
       const allSub = subSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const filtSub = allSub.filter(s => s.fechaEP >= dateFrom && s.fechaEP <= dateTo);
 
       // OCs
-      const ocSnap = await getDocs(query(collection(db, 'ordenes_compra'), where("projectId", "==", selectedProject)));
+      const ocSnap = await getDocs(query(collection(db, 'empresas', empresaId, 'purchaseOrders'), where("projectId", "==", selectedProject)));
       const allOc = ocSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const filtOc = allOc.filter(o => o.fecha >= dateFrom && o.fecha <= dateTo);
 

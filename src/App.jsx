@@ -38,6 +38,7 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 import PricingPage from "./pages/PricingPage.jsx";
 import PaymentResult from "./pages/PaymentResult.jsx";
 import { usePlan } from "./hooks/usePlan.js";
+import EmpresaSetup from "./pages/EmpresaSetup.jsx";
 
 // ============================================================
 // RRHH Shell
@@ -520,6 +521,7 @@ export default function App() {
   const [user,        setUser]        = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
+  const [needsSetup,  setNeedsSetup]  = useState(false);
 
   // Portal trabajadores: interceptar /trabajador antes de todo
   if (window.location.pathname.startsWith('/trabajador')) {
@@ -527,13 +529,24 @@ export default function App() {
   }
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      setLoading(false);
       if (currentUser) {
+        // Check if user has an empresa assigned
+        try {
+          const snap = await getDoc(doc(db, 'users', currentUser.uid));
+          if (!snap.exists() || !snap.data().empresaId) {
+            setNeedsSetup(true);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          // If we can't read, let the normal flow handle it
+        }
         const savedApp = localStorage.getItem('selectedApp');
         setSelectedApp(savedApp);
       }
+      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -574,6 +587,28 @@ export default function App() {
   }
 
   if (!user) return <LoginPage />;
+
+  // Usuario sin empresa asignada → mostrar onboarding
+  if (needsSetup) {
+    return (
+      <EmpresaSetup
+        user={user}
+        onComplete={() => { setNeedsSetup(false); window.location.reload(); }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // Usuario sin empresa asignada → mostrar onboarding
+  if (needsSetup) {
+    return (
+      <EmpresaSetup
+        user={user}
+        onComplete={() => { setNeedsSetup(false); window.location.reload(); }}
+        onLogout={handleLogout}
+      />
+    );
+  }
 
   // ── NUEVO: resultado de pago de MercadoPago ───────────────
   if (window.location.pathname === '/payment-result') {
