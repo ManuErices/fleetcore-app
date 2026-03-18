@@ -247,9 +247,9 @@ export default function ReportDetallado({ onClose } = {}) {
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!empresaId || !selectedProject) return;
     (async () => {
-      const m = await listMachines(selectedProject);
+      const m = await listMachines(empresaId, selectedProject);
       console.log("🚜 Máquinas cargadas del proyecto:", m.length);
       console.log("📋 Detalles de máquinas:", m);
       m.forEach(machine => {
@@ -260,7 +260,7 @@ export default function ReportDetallado({ onClose } = {}) {
   }, [selectedProject]);
 
   useEffect(() => {
-    if (!formData.machineId || !selectedProject) return;
+    if (!empresaId || !formData.machineId || !selectedProject) return;
 
     const loadPreviousReport = async () => {
       try {
