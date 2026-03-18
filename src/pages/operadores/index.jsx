@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import ReportDetallado from './ReportDetallado';
+import ReportDetallado from '../reportes/ReportDetallado';
 import CombustiblePage from '../../components/CombustiblePage';
 
 function getSaludo() {
