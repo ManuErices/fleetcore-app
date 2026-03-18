@@ -1123,7 +1123,7 @@ export default function ReporteWorkFleet() {
                         )}
                       </td>
                       <td className="px-3 py-3 text-center">
-                        {userRole === 'administrador' && !reporte.firmado && (
+                        {(userRole === 'superadmin' || userRole === 'admin_contrato') && !reporte.firmado && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleEliminarReporte(reporte.id); }}
                             className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition-all border border-red-200"
@@ -1408,11 +1408,16 @@ export default function ReporteWorkFleet() {
               }
 
               // PIN correcto, proceder con la firma
+              // ✅ FIX: obtener nombre del usuario actual desde Firestore
+              const nombreAdmin = userData.nombre || userData.nombreCompleto || 
+                                  userData.name || currentUser.displayName || 
+                                  currentUser.email || 'Administrador';
+
               const reporteRef = doc(db, 'empresas', empresaId, 'reportes_detallados', reporteDetalle.id);
               await updateDoc(reporteRef, {
                 firmado: true,
                 firmaAdmin: {
-                  nombre: signatureData.adminName,
+                  nombre: nombreAdmin,
                   timestamp: signatureData.timestamp,
                   userId: currentUser.uid
                 }
@@ -1435,7 +1440,7 @@ export default function ReporteWorkFleet() {
                 ...reporteDetalle,
                 firmado: true,
                 firmaAdmin: {
-                  nombre: signatureData.adminName,
+                  nombre: nombreAdmin,
                   timestamp: signatureData.timestamp,
                   userId: currentUser.uid
                 }

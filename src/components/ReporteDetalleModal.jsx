@@ -5,13 +5,13 @@ export default function ReporteDetalleModal({
   onClose, 
   projectName, 
   machineInfo, 
-  userRole = 'operador', // 'administrador' o 'operador'
+  userRole = 'operador', // 'superadmin', 'admin_contrato', 'operador', etc.
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
   if (!reporte) return null;
 
-  const isAdmin = userRole === 'administrador';
+  const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({ ...reporte });
   const [showSignModal, setShowSignModal] = useState(false);
