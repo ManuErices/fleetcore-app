@@ -524,18 +524,19 @@ export default function App() {
   const [selectedApp, setSelectedApp] = useState(null);
   const [needsSetup,  setNeedsSetup]  = useState(false);
 
-  // Portal trabajadores: interceptar /trabajador antes de todo
-  if (window.location.pathname.startsWith('/trabajador')) {
-    return <TrabajadorApp />;
-  }
-
-  // Invitaciones: interceptar /invite/:token antes de todo
-  const inviteMatch = window.location.pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
-  if (inviteMatch) {
-    return <InviteAccept token={inviteMatch[1]} />;
-  }
+  // ✅ FIX: interceptaciones ANTES del useEffect pero usando variables,
+  // no returns condicionales que violan reglas de hooks
+  const pathname = window.location.pathname;
+  const isTrabajadorRoute = pathname.startsWith('/trabajador');
+  const inviteMatch = pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
+  const inviteToken = inviteMatch ? inviteMatch[1] : null;
 
   useEffect(() => {
+    // Si es ruta especial no necesitamos cargar auth
+    if (isTrabajadorRoute || inviteToken) {
+      setLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -578,6 +579,10 @@ export default function App() {
     localStorage.setItem('selectedApp', 'pricing');
     setSelectedApp('pricing');
   };
+
+  // ✅ Rutas especiales — retornar aquí es seguro porque todos los hooks ya corrieron
+  if (isTrabajadorRoute) return <TrabajadorApp />;
+  if (inviteToken) return <InviteAccept token={inviteToken} />;
 
   if (loading) {
     return (
