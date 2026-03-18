@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import InviteUserPanel from "../InviteUserPanel";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useEmpresa } from '../../lib/useEmpresa';
 
 // ─────────────────────────────────────────────────────────────
@@ -2354,6 +2356,9 @@ function EmpresasRegistradasSection() {
 }
 
 function UsuariosSection() {
+  const { empresaId, empresa } = useEmpresa();
+  const [showInvite, setShowInvite] = useState(false);
+  const [userRole, setUserRole] = useState('');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -2375,6 +2380,19 @@ function UsuariosSection() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Leer rol del usuario actual para mostrar botón invitar
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const userDoc = snap.docs.find(d => d.id === user.uid);
+        if (userDoc) setUserRole(userDoc.data().role || '');
+      } catch {}
+    });
+    return () => unsub();
+  }, []);
 
   const toggleModulo = (val) => {
     setForm(f => ({
@@ -2434,11 +2452,36 @@ function UsuariosSection() {
     </button>
   );
 
+  const canInvite = userRole === 'superadmin' || userRole === 'admin_contrato';
+
   return (
     <>
+      {/* Modal de invitaciones */}
+      {showInvite && (
+        <InviteUserPanel
+          empresaId={empresaId}
+          onClose={() => setShowInvite(false)}
+        />
+      )}
+
       <SectionCard title="Usuarios" subtitle="Gestión de accesos y roles del sistema" count={data.length} color="rose"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
       >
+        {/* Botón invitar usuario */}
+        {canInvite && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowInvite(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
+              Invitar usuario
+            </button>
+          </div>
+        )}
+
         <div className="mb-4 flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
           <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           <p className="text-xs text-blue-600">El <strong>QR</strong> contiene email y contraseña en formato JSON para login directo. Solo disponible para cuentas creadas con email/password (no Google).</p>

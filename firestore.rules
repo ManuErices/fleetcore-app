@@ -236,24 +236,11 @@ service cloud.firestore {
 
     // ─────────────────────────────────────────────────────
     // /subscriptions — usePlan hook lee/escucha el plan activo
-    // Cada usuario solo accede a su propio documento
-    // Solo superadmin puede crear/modificar suscripciones
-    // ─────────────────────────────────────────────────────
-    match /subscriptions/{uid} {
-      allow read:    if isAuth() && request.auth.uid == uid;
-      allow create:  if isAuth() && request.auth.uid == uid;  // Al registrarse crea su doc
-      allow update, delete: if isSuperAdmin();                // Solo superadmin modifica/elimina
-    }
-
-    // ─────────────────────────────────────────────────────
-    // /subscriptions — usePlan hook lee/escucha el plan activo
-    // Cada usuario solo accede a su propio documento
-    // Solo superadmin puede crear/modificar suscripciones
     // ─────────────────────────────────────────────────────
     match /subscriptions/{uid} {
       allow read:           if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
-      allow create:         if isAuth() && request.auth.uid == uid;  // Al registrarse crea su doc
-      allow update, delete: if isSuperAdmin();                       // Solo superadmin modifica/elimina
+      allow create:         if isAuth() && request.auth.uid == uid;
+      allow update, delete: if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
@@ -277,13 +264,15 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /invitaciones/{token} {
       // Cualquiera puede leer una invitación (para validarla al aceptar)
-      allow read: if isAuth() || true;
-      // Solo admin_contrato de la empresa o superadmin puede crear
+      allow read: if true;
+      // superadmin puede crear cualquier invitación
+      // admin_contrato puede crear invitaciones solo para su empresa
       allow create: if isSuperAdmin()
                     || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId());
-      // Solo superadmin puede actualizar (marcar como usada lo hace el sistema)
-      allow update: if isAuth(); // El usuario que acepta marca usada=true
-      allow delete: if isSuperAdmin();
+      // Cualquier usuario autenticado puede marcar una invitación como usada (al aceptarla)
+      allow update: if isAuth();
+      // Solo admins pueden revocar
+      allow delete: if isAnyAdmin();
     }
 
     // ─────────────────────────────────────────────────────
