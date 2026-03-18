@@ -247,17 +247,15 @@ export default function ReportDetallado({ onClose } = {}) {
   }, []);
 
   useEffect(() => {
-    if (!empresaId || !selectedProject) return;
+    if (!empresaId) return;
     (async () => {
-      const m = await listMachines(empresaId, selectedProject);
-      console.log("🚜 Máquinas cargadas del proyecto:", m.length);
-      console.log("📋 Detalles de máquinas:", m);
-      m.forEach(machine => {
-        console.log(`  - ${machine.code}: qrCode="${machine.qrCode}", id="${machine.id}"`);
-      });
+      // Cargar TODAS las máquinas de la empresa (sin filtrar por proyecto)
+      // para que el QR scanner las encuentre independiente del proyecto asignado
+      const m = await listMachines(empresaId, null);
+      console.log("🚜 Máquinas cargadas:", m.length);
       setMachines(m);
     })();
-  }, [selectedProject]);
+  }, [empresaId, selectedProject]);
 
   useEffect(() => {
     if (!empresaId || !formData.machineId || !selectedProject) return;
