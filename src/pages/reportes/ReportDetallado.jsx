@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { listActiveProjects, listMachines } from "../../lib/db";
+import { listMachines } from "../../lib/db";
 import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -11,7 +11,7 @@ function isoToday() {
 }
 
 export default function ReportDetallado({ onClose } = {}) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
@@ -123,7 +123,7 @@ export default function ReportDetallado({ onClose } = {}) {
   // Función para generar número de reporte automático basado en la máquina
   const generateReportNumber = async (machine) => {
     try {
-      if (!machine) return '';
+      if (!machine || !empresaId) return '';
 
       console.log("🔍 generateReportNumber recibió máquina:", machine);
 
@@ -176,75 +176,77 @@ export default function ReportDetallado({ onClose } = {}) {
   };
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
-      const p = await listActiveProjects();
+      // ✅ FIX: Traer todos los proyectos sin filtrar por "active"
+      // listActiveProjects filtraba por active==true y los proyectos no tenian ese campo
+      const snap = await getDocs(
+        query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name'))
+      );
+      const p = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      console.log("\u{1F4CB} Proyectos cargados:", p.length, p);
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
     })();
   }, [empresaId]);
 
   useEffect(() => {
+    if (!empresaId) return; // ✅ FIX: esperar a que useEmpresa resuelva el empresaId
+    
     const loadUserData = async () => {
       const user = auth.currentUser;
-      if (user) {
-        try {
-          const userDocRef = doc(db, "users", user.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          let userName = '';
-          let userRut = '';
-          
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            
-            console.log("🔍 Datos del usuario en Firestore:", userData);
-            
-            userName = userData.nombre || 
-                      userData.nombreCompleto || 
-                      userData.name || 
-                      userData.fullName ||
-                      user.displayName || 
-                      '';
-            
-            userRut = userData.rut || 
-                     userData.RUT || 
-                     userData.dni || 
-                     '';
-            
-            console.log("✅ Nombre extraído:", userName);
-            console.log("✅ RUT extraído:", userRut);
-          } else {
-            console.log("⚠️ No existe documento de usuario en Firestore, usando datos de Auth");
-            userName = user.displayName || user.email?.split('@')[0] || '';
-          }
+      if (!user) return;
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
 
-          // No generamos número de reporte aquí, se generará cuando seleccione máquina
-          setFormData(prev => ({
-            ...prev,
-            operador: userName,
-            rut: userRut,
-            userId: user.uid,
-            numeroReporte: '' // Vacío hasta que seleccione máquina
-          }));
-          
-          console.log("✅ Datos de usuario cargados:", { userName, userRut });
-        } catch (error) {
-          console.error("Error cargando datos del usuario:", error);
-          const userName = user.displayName || user.email?.split('@')[0] || '';
-          
-          setFormData(prev => ({
-            ...prev,
-            operador: userName,
-            rut: '',
-            userId: user.uid,
-            numeroReporte: ''
-          }));
+        let userName = '';
+        let userRut = '';
+
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          console.log("🔍 Datos del usuario en Firestore:", userData);
+          console.log("📋 Campos disponibles:", Object.keys(userData));
+
+          userName = userData.nombre ||
+                     userData.nombreCompleto ||
+                     userData.name ||
+                     userData.fullName ||
+                     user.displayName ||
+                     '';
+
+          // ✅ FIX: buscar rut en todas las variantes posibles
+          userRut = userData.rut || userData.RUT || userData.Rut ||
+                    userData.dni || userData.DNI || '';
+
+          console.log("✅ Nombre:", userName, "| RUT:", userRut);
+        } else {
+          console.warn("⚠️ No existe documento de usuario en Firestore");
+          userName = user.displayName || user.email?.split('@')[0] || '';
         }
+
+        setFormData(prev => ({
+          ...prev,
+          operador: userName,
+          rut: userRut,
+          userId: user.uid,
+          numeroReporte: ''
+        }));
+      } catch (error) {
+        console.error("Error cargando datos del usuario:", error);
+        const fallback = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || '';
+        setFormData(prev => ({
+          ...prev,
+          operador: fallback,
+          rut: '',
+          userId: auth.currentUser?.uid || '',
+          numeroReporte: ''
+        }));
       }
     };
 
     loadUserData();
-  }, []);
+  }, [empresaId]); // ✅ FIX: dependencia en empresaId para re-ejecutar cuando esté disponible
 
   useEffect(() => {
     if (!empresaId) return;
@@ -440,6 +442,7 @@ export default function ReportDetallado({ onClose } = {}) {
   const handleNextStep = async (e) => {
     e.preventDefault();
     
+    if (!empresaId) return;
     if (!selectedProject || !formData.machineId) {
       alert("❌ Selecciona proyecto y máquina");
       return;
@@ -489,6 +492,7 @@ export default function ReportDetallado({ onClose } = {}) {
 
   const handleFinalSubmit = async (e) => {
     e.preventDefault();
+    if (!empresaId) return;
     setIsLoading(true);
     try {
       await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
@@ -598,6 +602,10 @@ export default function ReportDetallado({ onClose } = {}) {
     if (machine) {
       // Generar número de reporte basado en esta máquina
       const reportNumber = await generateReportNumber(machine);
+
+      // Si la máquina tiene projectId, usarlo; si no, usar el primer proyecto disponible
+      const projectToUse = machine.projectId || selectedProject || (projects.length > 0 ? projects[0].id : '');
+      if (projectToUse && !selectedProject) setSelectedProject(projectToUse);
       
       setFormData({ 
         ...formData, 
@@ -923,6 +931,7 @@ export default function ReportDetallado({ onClose } = {}) {
           onSubmit={handleFinalSubmit}
           isLoading={isLoading}
           selectedMachine={selectedMachine}
+          empresaId={empresaId}
         />
       )}
 

@@ -418,7 +418,7 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
   );
 }
 
-export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine }) {
+export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isLoading, selectedMachine, empresaId }) {
 
   // ── Actividades dinámicas desde Firebase ──────────────────────
   const [actividadesDB, setActividadesDB] = useState([]);
@@ -426,7 +426,9 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'actividades_disponibles'), orderBy('nombre')));
+        if (!empresaId) return;
+        // ✅ FIX: ruta correcta bajo /empresas/{empresaId}/actividades_disponibles
+        const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'actividades_disponibles'), orderBy('nombre')));
         setActividadesDB(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (e) {
         console.warn('No se pudo cargar actividades_disponibles:', e);
@@ -434,7 +436,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         setActividadesLoading(false);
       }
     })();
-  }, []);
+  }, [empresaId]); // ✅ FIX: re-ejecutar cuando empresaId esté disponible
 
   const getOpciones = (tipoRegistro) => {
     const machineType = selectedMachine?.type || '';

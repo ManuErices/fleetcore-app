@@ -36,7 +36,19 @@ const CARGOS_OPERADOR = [
   { value: 'operador_maquinaria', label: 'Operador de Maquinaria — solo Reporte Maquinaria' },
   { value: 'surtidor',            label: 'Surtidor — Reporte Maquinaria + Combustible' },
 ];
-const TIPOS_MAQUINA = [];
+const TIPOS_MAQUINA = [
+  'CAMIONETA',
+  'CAMION COMBUSTIBLE',
+  'EXCAVADORA',
+  'BULLDOZER',
+  'MARTILLO HIDRAULICO',
+  'CARGADOR FRONTAL',
+  'MOTONIVELADORA',
+  'RETROEXCAVADORA',
+  'COMPACTADOR',
+  'GRUA',
+  'OTRO',
+];
 
 const TAB_DEFS = [
   { id: 'operadores',  label: 'Operadores',  color: 'blue',   icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -1262,6 +1274,9 @@ function ActividadesSection() {
   const [form, setForm] = useState({ nombre: '', tipo: 'efectiva', descripcion: '', tiposMaquina: [] });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  // ✅ FIX: leer tipos de máquina desde el catálogo dinámico en lugar de constante hardcodeada
+  const { items: tiposDB } = useCatalogo('tipo');
+  const tiposMaquinaOpciones = tiposDB.map(t => t.nombre).sort();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1298,6 +1313,7 @@ function ActividadesSection() {
   const save = async () => {
     setSaving(true);
     try {
+      if (!form.nombre.trim()) { alert('El nombre es requerido'); setSaving(false); return; }
       const p = {
         nombre: form.nombre.trim(),
         tipo: form.tipo,
@@ -1347,6 +1363,10 @@ function ActividadesSection() {
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Actividad' : 'Nueva Actividad'} color="green">
         <div className="space-y-4">
          
+          <Field label="Nombre" required>
+            <input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: Excavación, Traslado de material..." maxLength={80} />
+          </Field>
+
           <Field label="Tipo de Registro" required>
             <select className={selectCls} value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}>
               <option value="efectiva">Actividad Efectiva</option>
@@ -1357,8 +1377,13 @@ function ActividadesSection() {
 
           <Field label="Aplica a tipos de máquina">
             <p className="text-xs text-slate-400 mb-2">Sin selección = aplica a <strong>todas</strong> las máquinas</p>
+            {tiposMaquinaOpciones.length === 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                No hay tipos de máquina registrados. Agrégalos desde la pestaña <strong>Máquinas</strong>.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2">
-              {TIPOS_MAQUINA.map(tipo => {
+              {tiposMaquinaOpciones.map(tipo => {
                 const selected = form.tiposMaquina.includes(tipo);
                 return (
                   <button
