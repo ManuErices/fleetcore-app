@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import ReportDetallado from './ReportDetallado';
-import CombustiblePage from './CombustiblePage';
+import ReportDetallado from '../reportes/ReportDetallado';
+import CombustiblePage from '../reportes/CombustiblePage';
 
 function getSaludo() {
   const h = new Date().getHours();

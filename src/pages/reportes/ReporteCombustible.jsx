@@ -90,7 +90,7 @@ export default function ReporteCombustible() {
         setMachines(machinesData);
 
         // Cargar empleados
-        const empleadosRef = collection(db, 'empresas', empresaId, 'employees');
+        const empleadosRef = collection(db, 'empresas', empresaId, 'trabajadores');
         const empleadosSnap = await getDocs(empleadosRef);
         const empleadosData = empleadosSnap.docs.map(doc => ({
           id: doc.id,
@@ -111,8 +111,8 @@ export default function ReporteCombustible() {
       }
     };
 
-    cargarDatos();
-  }, []);
+    if (empresaId) cargarDatos();
+  }, [empresaId]);
 
   // Cargar reportes
   useEffect(() => {
@@ -139,8 +139,8 @@ export default function ReporteCombustible() {
       }
     };
 
-    cargarReportes();
-  }, [userRole]);
+    if (empresaId) cargarReportes();
+  }, [empresaId, userRole]);
 
   // Función para recargar reportes después de crear uno nuevo
   const handleRecargarReportes = async () => {
