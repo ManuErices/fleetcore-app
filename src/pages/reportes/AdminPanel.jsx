@@ -2376,6 +2376,9 @@ function UsuariosSection() {
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  const [empresasDisponibles, setEmpresasDisponibles] = useState([]);
+  const [formEmpresaId, setFormEmpresaId] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -2386,6 +2389,24 @@ function UsuariosSection() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Cargar empresas disponibles para el selector
+  useEffect(() => {
+    if (!empresaId) return;
+    (async () => {
+      try {
+        if (userRole === 'superadmin') {
+          const snap = await getDocs(collection(db, 'empresas'));
+          setEmpresasDisponibles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } else {
+          // admin_contrato solo ve su empresa
+          const snap = await getDocs(query(collection(db, 'empresas')));
+          const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setEmpresasDisponibles(todas.filter(e => e.id === empresaId));
+        }
+      } catch {}
+    })();
+  }, [empresaId, userRole]);
 
   // Leer rol del usuario actual para mostrar botón invitar
   useEffect(() => {
@@ -2418,6 +2439,7 @@ function UsuariosSection() {
       modulos:  row.modulos  || [],
       cargo:    row.cargo    || '',
     });
+    setFormEmpresaId(row.empresaId || empresaId || '');
     setEditId(row.id);
     setModal(true);
   };
@@ -2441,7 +2463,7 @@ function UsuariosSection() {
         rut:       form.rut.trim(),
         modulos:   form.role === 'administrativo' ? form.modulos : [],
         cargo:     form.role === 'operador' ? form.cargo : '',
-        empresaId, // ✅ siempre asignar la empresa al editar
+        empresaId: formEmpresaId || empresaId, // ✅ empresa seleccionada o la actual
         updatedAt: serverTimestamp(),
       };
       if (form.password.trim()) updates.password = form.password.trim();
@@ -2625,6 +2647,15 @@ function UsuariosSection() {
       <Modal isOpen={modal} onClose={() => setModal(false)} title="Editar Usuario" color="rose">
         <div className="space-y-4">
           <Field label="Nombre Completo"><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Nombre del usuario" /></Field>
+          <Field label="Empresa asignada" required>
+            <select className={selectCls} value={formEmpresaId} onChange={e => setFormEmpresaId(e.target.value)}>
+              <option value="">— Sin empresa asignada —</option>
+              {empresasDisponibles.map(e => (
+                <option key={e.id} value={e.id}>{e.nombre || e.id}</option>
+              ))}
+            </select>
+            {!formEmpresaId && <p className="text-[11px] text-red-500 mt-1">⚠ Sin empresa el usuario no podrá acceder al sistema</p>}
+          </Field>
           <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 12.345.678-9" /></Field>
           <Field label="Contraseña para QR">
             <input className={inputCls} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Contraseña del usuario (para generar QR)" />
