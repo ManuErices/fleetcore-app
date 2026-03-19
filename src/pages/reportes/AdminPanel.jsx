@@ -2436,11 +2436,12 @@ function UsuariosSection() {
     setSaving(true);
     try {
       const updates = {
-        role:    form.role,
-        nombre:  form.nombre.trim(),
-        rut:     form.rut.trim(),
-        modulos: form.role === 'administrativo' ? form.modulos : [],
-        cargo:   form.role === 'operador' ? form.cargo : '',
+        role:      form.role,
+        nombre:    form.nombre.trim(),
+        rut:       form.rut.trim(),
+        modulos:   form.role === 'administrativo' ? form.modulos : [],
+        cargo:     form.role === 'operador' ? form.cargo : '',
+        empresaId, // ✅ siempre asignar la empresa al editar
         updatedAt: serverTimestamp(),
       };
       if (form.password.trim()) updates.password = form.password.trim();
