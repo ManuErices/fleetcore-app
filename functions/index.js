@@ -190,7 +190,7 @@ exports.createUser = onRequest((req, res) => {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
-      const { email, password, nombre, rut, role, empresaId, modulos, cargo, callerUid } = req.body;
+      const { email, password, nombre, rut, role, empresaId, modulos, cargo, callerUid, savePassword } = req.body;
 
       if (!email || !password || !role || !empresaId || !callerUid) {
         return res.status(400).json({ error: 'Faltan campos requeridos: email, password, role, empresaId, callerUid' });
@@ -212,7 +212,7 @@ exports.createUser = onRequest((req, res) => {
       });
 
       // Crear documento en /users/{uid}
-      await db.collection('users').doc(userRecord.uid).set({
+      const userData = {
         email,
         nombre:    nombre || '',
         rut:       rut    || '',
@@ -222,7 +222,10 @@ exports.createUser = onRequest((req, res) => {
         cargo:     cargo   || '',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      };
+      // Guardar contraseña para generación de QR de acceso rápido
+      if (savePassword && password) userData.password = password;
+      await db.collection('users').doc(userRecord.uid).set(userData);
 
       return res.status(200).json({ success: true, uid: userRecord.uid });
 

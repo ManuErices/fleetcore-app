@@ -2491,7 +2491,8 @@ function UsuariosSection() {
         body: JSON.stringify({
           ...formNuevoUsuario,
           empresaId,
-          callerUid
+          callerUid,
+          savePassword: true // ✅ guardar contraseña en Firestore para QR
         })
       });
       const data = await res.json();
