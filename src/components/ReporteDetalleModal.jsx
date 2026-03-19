@@ -5,13 +5,13 @@ export default function ReporteDetalleModal({
   onClose, 
   projectName, 
   machineInfo, 
-  userRole = 'operador', // 'superadmin', 'admin_contrato', 'operador', etc.
+  userRole = 'operador', // 'administrador' o 'operador'
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
   if (!reporte) return null;
 
-  const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
+  const isAdmin = userRole === 'administrador';
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState({ ...reporte });
   const [showSignModal, setShowSignModal] = useState(false);
@@ -310,7 +310,7 @@ export default function ReporteDetalleModal({
               <div className="space-y-3">
                 <DataField label="Patente" value={machineInfo?.patente || '-'} />
                 <DataField label="Código" value={machineInfo?.code || '-'} />
-                <DataField label="Nombre" value={machineInfo?.name || '-'} />
+                <DataField label="Nombre" value={machineInfo?.name || [machineInfo?.marca, machineInfo?.modelo].filter(Boolean).join(' ') || '-'} />
                 <DataField label="Tipo" value={machineInfo?.type || '-'} />
               </div>
             </div>

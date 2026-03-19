@@ -13,6 +13,8 @@ function isoToday() {
 export default function ReportDetallado({ onClose } = {}) {
   const { empresaId, empresa } = useEmpresa();
   const [projects, setProjects] = useState([]);
+  const [operadoresDisponibles, setOperadoresDisponibles] = useState([]);
+  const [userRole, setUserRole] = useState('operador');
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -174,6 +176,24 @@ export default function ReportDetallado({ onClose } = {}) {
       return 'ERROR-001';
     }
   };
+
+  // Cargar rol del usuario y operadores disponibles
+  useEffect(() => {
+    if (!empresaId) return;
+    (async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) return;
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          setUserRole(userDoc.data().role || 'operador');
+        }
+        // Cargar operadores de la empresa
+        const snap = await getDocs(collection(db, 'empresas', empresaId, 'trabajadores'));
+        setOperadoresDisponibles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error('Error cargando operadores:', e); }
+    })();
+  }, [empresaId]);
 
   useEffect(() => {
     if (!empresaId) return;
@@ -752,32 +772,74 @@ export default function ReportDetallado({ onClose } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
-                    Nombre Completo
-                    <span className="ml-2 text-[10px] text-emerald-600">(Desde tu perfil)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.operador}
-                    readOnly
-                    className="input-modern w-full text-sm sm:text-base bg-slate-100 cursor-not-allowed font-semibold"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
-                    RUT
-                    <span className="ml-2 text-[10px] text-emerald-600">(Desde tu perfil)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.rut}
-                    readOnly
-                    className="input-modern w-full text-sm sm:text-base bg-slate-100 cursor-not-allowed font-semibold"
-                    required
-                  />
-                </div>
+                {/* Admin puede seleccionar operador manualmente */}
+                {(userRole === 'superadmin' || userRole === 'admin_contrato') ? (
+                  <>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
+                        Seleccionar Operador
+                        <span className="ml-2 text-[10px] text-purple-600">(Selección manual)</span>
+                      </label>
+                      <select
+                        className="input-modern w-full text-sm sm:text-base"
+                        value={formData.userId || ''}
+                        onChange={(e) => {
+                          const op = operadoresDisponibles.find(o => o.id === e.target.value);
+                          if (op) {
+                            setFormData(prev => ({
+                              ...prev,
+                              operador: op.nombre || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' '),
+                              rut: op.rut || '',
+                              userId: op.id
+                            }));
+                          }
+                        }}
+                      >
+                        <option value="">— Seleccione operador —</option>
+                        {operadoresDisponibles.map(op => (
+                          <option key={op.id} value={op.id}>
+                            {op.nombre || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' ')} {op.rut ? `· ${op.rut}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {formData.operador && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                        <div className="text-sm font-bold text-emerald-800">{formData.operador}</div>
+                        {formData.rut && <div className="text-xs text-emerald-600 mt-0.5">RUT: {formData.rut}</div>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
+                        Nombre Completo
+                        <span className="ml-2 text-[10px] text-emerald-600">(Desde tu perfil)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.operador}
+                        readOnly
+                        className="input-modern w-full text-sm sm:text-base bg-slate-100 cursor-not-allowed font-semibold"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
+                        RUT
+                        <span className="ml-2 text-[10px] text-emerald-600">(Desde tu perfil)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.rut}
+                        readOnly
+                        className="input-modern w-full text-sm sm:text-base bg-slate-100 cursor-not-allowed font-semibold"
+                        required
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </Section>
 
