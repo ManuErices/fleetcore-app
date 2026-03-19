@@ -2,8 +2,8 @@
 // Optimizado para funcionar offline a 4000m
 // v1.0.1 - Fix: manejo de errores en fetch para no bloquear instalación PWA
 
-const CACHE_NAME = 'mpf-maquinaria-v1.0.1';
-const RUNTIME_CACHE = 'mpf-runtime-v1';
+const CACHE_NAME = 'mpf-maquinaria-v1.0.2';
+const RUNTIME_CACHE = 'mpf-runtime-v2';
 
 const CRITICAL_ASSETS = [
   '/',
@@ -211,4 +211,4 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(clients.openWindow('/'));
 });
 
-console.log('[SW] FleetCore Service Worker v1.0.1 cargado ✅');
+console.log('[SW] FleetCore Service Worker v1.0.2 cargado ✅');

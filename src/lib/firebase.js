@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence, enableMultiTabIndexedDbPersistence } from "firebase/firestore";
+import { initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -15,41 +15,24 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // ============================================
-// IMPORTANTE: Crear db PERO NO EXPORTAR AÚN
-// ============================================
-const firestoreInstance = getFirestore(app);
-
-// ============================================
-// HABILITAR OFFLINE INMEDIATAMENTE
+// FIRESTORE CON PERSISTENCIA OFFLINE (API moderna)
 // ============================================
 let offlineEnabled = false;
 
-// Intentar habilitar persistencia (single-tab primero)
-enableIndexedDbPersistence(firestoreInstance)
-  .then(() => {
-    console.log("✅ MODO OFFLINE HABILITADO (single-tab)");
-    console.log("📱 Los datos se guardarán localmente y se sincronizarán cuando haya internet");
-    offlineEnabled = true;
-  })
-  .catch((err) => {
-    if (err.code === 'failed-precondition') {
-      // Múltiples tabs abiertas, intentar multi-tab
-      console.warn("⚠️ Múltiples pestañas detectadas, intentando modo multi-tab...");
-      
-      enableMultiTabIndexedDbPersistence(firestoreInstance)
-        .then(() => {
-          console.log("✅ MODO OFFLINE HABILITADO (multi-tab)");
-          offlineEnabled = true;
-        })
-        .catch((multiTabErr) => {
-          console.error("❌ Error en modo multi-tab:", multiTabErr);
-        });
-    } else if (err.code === 'unimplemented') {
-      console.error("❌ Este navegador no soporta persistencia offline");
-    } else {
-      console.error("❌ Error habilitando offline:", err);
-    }
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
   });
+  offlineEnabled = true;
+  console.log("✅ MODO OFFLINE HABILITADO (multi-tab)");
+  console.log("📱 Los datos se guardarán localmente y se sincronizarán cuando haya internet");
+} catch (err) {
+  console.error("❌ Error habilitando offline:", err);
+  firestoreInstance = getFirestore(app);
+}
 
 // ============================================
 // AHORA SÍ EXPORTAR

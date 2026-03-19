@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import InviteUserPanel from "../InviteUserPanel";
+import InviteUserPanel from '../InviteUserPanel';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy,
@@ -2358,7 +2358,13 @@ function EmpresasRegistradasSection() {
 function UsuariosSection() {
   const { empresaId, empresa } = useEmpresa();
   const [showInvite, setShowInvite] = useState(false);
+  const [showCrearUsuario, setShowCrearUsuario] = useState(false);
   const [userRole, setUserRole] = useState('');
+  const [creandoUsuario, setCreandoUsuario] = useState(false);
+  const [formNuevoUsuario, setFormNuevoUsuario] = useState({
+    email: '', password: '', nombre: '', rut: '',
+    role: 'operador', modulos: [], cargo: ''
+  });
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -2454,6 +2460,54 @@ function UsuariosSection() {
 
   const canInvite = userRole === 'superadmin' || userRole === 'admin_contrato';
 
+  const formatRutInput = (value) => {
+    let clean = value.replace(/[^0-9kK]/g, '');
+    if (clean.length === 0) return '';
+    const dv = clean.slice(-1).toUpperCase();
+    const body = clean.slice(0, -1);
+    if (body.length === 0) return dv;
+    const bodyFormatted = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return `${bodyFormatted}-${dv}`;
+  };
+
+  const handleCrearUsuario = async () => {
+    if (!formNuevoUsuario.email || !formNuevoUsuario.password || !formNuevoUsuario.role) {
+      alert('Email, contraseña y rol son obligatorios');
+      return;
+    }
+    if (formNuevoUsuario.password.length < 6) {
+      alert('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    setCreandoUsuario(true);
+    try {
+      const { auth } = await import('../../lib/firebase');
+      const callerUid = auth.currentUser?.uid;
+      if (!callerUid) throw new Error('No hay usuario autenticado');
+
+      const res = await fetch('https://us-central1-mpf-maquinaria.cloudfunctions.net/createUser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formNuevoUsuario,
+          empresaId,
+          callerUid
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al crear usuario');
+
+      alert(`✅ Usuario creado exitosamente\nEmail: ${formNuevoUsuario.email}`);
+      setShowCrearUsuario(false);
+      setFormNuevoUsuario({ email: '', password: '', nombre: '', rut: '', role: 'operador', modulos: [], cargo: '' });
+      load(); // recargar lista de usuarios
+    } catch (e) {
+      alert('❌ ' + e.message);
+    } finally {
+      setCreandoUsuario(false);
+    }
+  };
+
   return (
     <>
       {/* Modal de invitaciones */}
@@ -2467,9 +2521,18 @@ function UsuariosSection() {
       <SectionCard title="Usuarios" subtitle="Gestión de accesos y roles del sistema" count={data.length} color="rose"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
       >
-        {/* Botón invitar usuario */}
+        {/* Botones crear e invitar usuario */}
         {canInvite && (
-          <div className="mb-4">
+          <div className="mb-4 flex gap-2">
+            <button
+              onClick={() => setShowCrearUsuario(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Crear usuario
+            </button>
             <button
               onClick={() => setShowInvite(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
@@ -2479,6 +2542,48 @@ function UsuariosSection() {
               </svg>
               Invitar usuario
             </button>
+          </div>
+        )}
+
+        {/* Modal Crear Usuario */}
+        {showCrearUsuario && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-black text-slate-800">Crear nuevo usuario</h3>
+                <button onClick={() => setShowCrearUsuario(false)} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-all">✕</button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre completo</label>
+                  <input className={inputCls} value={formNuevoUsuario.nombre} onChange={e => setFormNuevoUsuario(f => ({...f, nombre: e.target.value}))} placeholder="Juan Pérez" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">RUT</label>
+                  <input className={inputCls} value={formNuevoUsuario.rut} onChange={e => setFormNuevoUsuario(f => ({...f, rut: formatRutInput(e.target.value)}))} placeholder="12.345.678-9" maxLength={12} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email *</label>
+                  <input className={inputCls} type="email" value={formNuevoUsuario.email} onChange={e => setFormNuevoUsuario(f => ({...f, email: e.target.value}))} placeholder="usuario@empresa.cl" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Contraseña *</label>
+                  <input className={inputCls} type="password" value={formNuevoUsuario.password} onChange={e => setFormNuevoUsuario(f => ({...f, password: e.target.value}))} placeholder="Mínimo 6 caracteres" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Rol *</label>
+                  <select className={selectCls} value={formNuevoUsuario.role} onChange={e => setFormNuevoUsuario(f => ({...f, role: e.target.value}))}>
+                    {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setShowCrearUsuario(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+                <button onClick={handleCrearUsuario} disabled={creandoUsuario} className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-black disabled:opacity-50">
+                  {creandoUsuario ? 'Creando...' : 'Crear usuario'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

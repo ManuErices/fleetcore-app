@@ -179,3 +179,66 @@ exports.getInternationalOilPrice = onReq(async (req, res) => {
     res.json({ diesel: 950, gasoline93: 1100, gasoline95: 1150, gasoline97: 1200, source: 'fallback', error: error.message });
   }
 });
+
+// ============================================================
+// POST /createUser
+// Crea un usuario en Firebase Auth y su doc en /users/{uid}
+// Solo puede ser llamado por superadmin o admin_contrato
+// ============================================================
+exports.createUser = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { email, password, nombre, rut, role, empresaId, modulos, cargo, callerUid } = req.body;
+
+      if (!email || !password || !role || !empresaId || !callerUid) {
+        return res.status(400).json({ error: 'Faltan campos requeridos: email, password, role, empresaId, callerUid' });
+      }
+
+      // Verificar que quien llama tiene permiso (superadmin o admin_contrato de esa empresa)
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) return res.status(403).json({ error: 'Usuario no autorizado' });
+      const callerData = callerDoc.data();
+      const isSuper = callerData.role === 'superadmin';
+      const isAdmin = callerData.role === 'admin_contrato' && callerData.empresaId === empresaId;
+      if (!isSuper && !isAdmin) return res.status(403).json({ error: 'Sin permisos para crear usuarios' });
+
+      // Crear usuario en Firebase Auth
+      const userRecord = await admin.auth().createUser({
+        email,
+        password,
+        displayName: nombre || email.split('@')[0],
+      });
+
+      // Crear documento en /users/{uid}
+      await db.collection('users').doc(userRecord.uid).set({
+        email,
+        nombre:    nombre || '',
+        rut:       rut    || '',
+        role,
+        empresaId,
+        modulos:   modulos || [],
+        cargo:     cargo   || '',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return res.status(200).json({ success: true, uid: userRecord.uid });
+
+    } catch (err) {
+      console.error('createUser error:', err.message);
+      // Traducir errores comunes de Auth
+      if (err.code === 'auth/email-already-exists') {
+        return res.status(400).json({ error: 'Este email ya tiene una cuenta registrada' });
+      }
+      if (err.code === 'auth/invalid-email') {
+        return res.status(400).json({ error: 'Email inválido' });
+      }
+      if (err.code === 'auth/weak-password') {
+        return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+      }
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});

@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { db, auth } from "../lib/firebase";
 import {
-  doc, getDoc, updateDoc, setDoc, serverTimestamp,
+  doc, getDoc, updateDoc, setDoc, serverTimestamp, getDocFromServer,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -49,7 +49,9 @@ export default function InviteAccept({ token }) {
     if (!token) { setStep("invalid"); return; }
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "invitaciones", token));
+        // ✅ FIX: leer SIEMPRE del servidor, no del caché offline
+        // El caché de Firestore puede tener guardado un error de permisos anterior
+        const snap = await getDocFromServer(doc(db, "invitaciones", token));
         if (!snap.exists()) { setStep("invalid"); return; }
 
         const data = snap.data();
@@ -60,7 +62,7 @@ export default function InviteAccept({ token }) {
         }
 
         // Cargar datos de empresa
-        const empSnap = await getDoc(doc(db, "empresas", data.empresaId));
+        const empSnap = await getDocFromServer(doc(db, "empresas", data.empresaId));
         if (!empSnap.exists()) { setStep("invalid"); return; }
 
         setInvData(data);
