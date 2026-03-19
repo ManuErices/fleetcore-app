@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReportDetallado from '../reportes/ReportDetallado';
 import CombustiblePage from '../../components/CombustiblePage';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 function getSaludo() {
   const h = new Date().getHours();
@@ -30,9 +32,43 @@ function SubHeader({ titulo, onBack, accent }) {
 }
 
 export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
-  const [vista, setVista] = useState('menu');
+  const [vista, setVista] = useState('loading');
+  const [esSurtidor, setEsSurtidor] = useState(false);
   const nombre = user?.displayName || user?.email?.split('@')[0] || 'Operador';
   const inicial = nombre.charAt(0).toUpperCase();
+
+  // ✅ Verificar si el operador es surtidor para mostrar menú o ir directo
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists()) {
+          const data = snap.data();
+          // Buscar esSurtidor en el doc de usuario O en trabajadores
+          if (data.esSurtidor === true || data.cargo === 'surtidor') {
+            setEsSurtidor(true);
+            setVista('menu');
+          } else {
+            // No es surtidor → ir directo a maquinaria
+            setVista('maquinaria');
+          }
+        } else {
+          setVista('maquinaria');
+        }
+      } catch {
+        setVista('maquinaria');
+      }
+    })();
+  }, [user]);
+
+  if (vista === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0A0E1A' }}>
+        <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (vista === 'maquinaria') {
     return (
@@ -159,8 +195,8 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
           </div>
         </button>
 
-        {/* Combustible */}
-        <button onClick={() => setVista('combustible')}
+        {/* Combustible — solo surtidores */}
+        {esSurtidor && <button onClick={() => setVista('combustible')}
           className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-95 relative"
           style={{ background: 'linear-gradient(135deg, rgba(251,146,60,0.15) 0%, rgba(245,158,11,0.08) 100%)', border: '1.5px solid rgba(251,146,60,0.3)' }}>
           <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
@@ -186,7 +222,7 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </div>
-        </button>
+        </button>}
 
       </div>
 
