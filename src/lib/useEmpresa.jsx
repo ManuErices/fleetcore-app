@@ -48,6 +48,7 @@ export function EmpresaProvider({ user, children }) {
         const userSnap = await getDoc(doc(db, 'users', user.uid));
         if (!userSnap.exists()) {
           setError('Usuario no encontrado en el sistema.');
+          setLoading(false);
           return;
         }
 
@@ -55,7 +56,7 @@ export function EmpresaProvider({ user, children }) {
 
         // superadmin usa su propio empresaId (si tiene) o el primero disponible
         if (userData.role === 'superadmin') {
-          const eid = userData.empresaId || null;
+          const eid = userData.empresaId?.trim() || null;
           if (eid) {
             const empresaSnap = await getDoc(doc(db, 'empresas', eid));
             setEmpresaId(eid);
@@ -73,21 +74,19 @@ export function EmpresaProvider({ user, children }) {
           return;
         }
 
-        const eid = userData.empresaId;
+        const eid = userData.empresaId?.trim(); // ✅ FIX: trim() elimina espacios accidentales
         if (!eid) {
           setError('Este usuario no tiene empresa asignada. Contacta al administrador.');
+          setLoading(false);
           return;
         }
 
         // 2. Leer datos de la empresa
+        // ✅ FIX: aunque el documento raíz no exista, el empresaId es válido
+        // (puede tener subcolecciones sin documento raíz)
         const empresaSnap = await getDoc(doc(db, 'empresas', eid));
-        if (!empresaSnap.exists()) {
-          setError('Empresa no encontrada. Contacta al soporte.');
-          return;
-        }
-
         setEmpresaId(eid);
-        setEmpresa({ id: eid, ...empresaSnap.data() });
+        setEmpresa({ id: eid, ...(empresaSnap.exists() ? empresaSnap.data() : { nombre: 'Empresa' }) });
       } catch (err) {
         console.error('Error cargando empresa:', err);
         setError('Error al cargar datos de empresa.');

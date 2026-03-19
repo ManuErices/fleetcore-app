@@ -271,13 +271,17 @@ export default function ReportDetallado({ onClose } = {}) {
   useEffect(() => {
     if (!empresaId) return;
     (async () => {
-      // Cargar TODAS las máquinas de la empresa (sin filtrar por proyecto)
-      // para que el QR scanner las encuentre independiente del proyecto asignado
-      const m = await listMachines(empresaId, null);
-      console.log("🚜 Máquinas cargadas:", m.length);
-      setMachines(m);
+      try {
+        // ✅ Cargar máquinas sin orderBy para evitar error de índice faltante
+        const snap = await getDocs(collection(db, 'empresas', empresaId, 'machines'));
+        const m = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        console.log("🚜 Máquinas cargadas:", m.length, "para empresa:", empresaId);
+        setMachines(m);
+      } catch (e) {
+        console.error("❌ Error cargando máquinas:", e.message);
+      }
     })();
-  }, [empresaId, selectedProject]);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!empresaId || !formData.machineId || !selectedProject) return;

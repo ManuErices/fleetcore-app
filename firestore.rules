@@ -190,7 +190,7 @@ service cloud.firestore {
       // ── RESTO DE COLECCIONES DE EMPRESA ──────────────────
       // Acceso completo para admins y roles operativos de la empresa
       match /projects/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /machines/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /machines/{docId}              { allow read: if isAuth(); allow write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /dailyLogs/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelLogs/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /employees/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
