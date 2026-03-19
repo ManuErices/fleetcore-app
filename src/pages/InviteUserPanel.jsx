@@ -52,14 +52,25 @@ export default function InviteUserPanel({ empresaId, onClose }) {
     if (!empresaId) return;
     setLoading(true);
     try {
+      // ✅ FIX: sin orderBy para evitar requerir índice compuesto — ordenar en cliente
       const snap = await getDocs(query(
         collection(db, "invitaciones"),
-        where("empresaId", "==", empresaId),
-        orderBy("creadaEn", "desc")
+        where("empresaId", "==", empresaId)
       ));
-      setInvitaciones(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (e) { console.error(e); }
-    setLoading(false);
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Ordenar por creadaEn descendente en el cliente
+      lista.sort((a, b) => {
+        const ta = a.creadaEn?.seconds || 0;
+        const tb = b.creadaEn?.seconds || 0;
+        return tb - ta;
+      });
+      setInvitaciones(lista);
+    } catch (e) {
+      console.error('Error cargando invitaciones:', e);
+      setInvitaciones([]);
+    } finally {
+      setLoading(false);
+    }
   }, [empresaId]);
 
   useEffect(() => { cargar(); }, [cargar]);

@@ -39,6 +39,8 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
         setUserRole(role);
         setUserModulos(modulos);
         setUserCargo(cargo);
+        // ✅ FIX: cargar empresaId para pasarlo a InviteUserPanel
+        if (data.empresaId) setEmpresaId(data.empresaId);
 
         // Redirección automática según rol
         if (role === 'mandante') {
