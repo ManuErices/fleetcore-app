@@ -71,11 +71,12 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
   // Permisos combinados: rol + módulo + plan
   // admin_contrato: solo WorkFleet (reportes) + WorkFleet-M
-  const canAccessFleetCore  = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('fleetcore')))  && canAccess('fleetcore');
+  // ✅ FIX: superadmin nunca bloqueado por plan — bypassa canAccess()
+  const canAccessFleetCore  = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
   const canAccessWorkFleet  = isSuperAdmin || isAdminContrato;
-  const canAccessRRHH       = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('rrhh')))       && canAccess('rrhh');
-  const canAccessReportes   = (isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes'))) && canAccess('reportes');
-  const canAccessFinanzas   = (isSuperAdmin || (userRole === 'administrativo' && hasModulo('finanzas')))   && canAccess('finanzas');
+  const canAccessRRHH       = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
+  const canAccessReportes   = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
+  const canAccessFinanzas   = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
   const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
 
   // Razón de bloqueo para mostrar el mensaje correcto

@@ -232,9 +232,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       const snap = await getDocs(collection(db, 'empresas', empresaId, 'estaciones_combustible'));
       const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // Mostrar solo las asignadas a esta obra (o sin obras = sin restriccion)
-      const filtradas = todas.filter(e =>
-        !e.obras || e.obras.length === 0 || (e.obras || []).includes(projectId)
-      );
+      const filtradas = todas.filter(e => {
+        // ✅ FIX: garantizar que obras siempre sea array antes de llamar includes
+        const obras = Array.isArray(e.obras) ? e.obras : [];
+        return obras.length === 0 || obras.includes(projectId);
+      });
       setEstacionesLocal(filtradas);
     } catch (e) {
       console.error('Error cargando estaciones:', e);
@@ -1684,6 +1686,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         projects={projects}
         machines={machinesLocal?.length ? machinesLocal : (machines || [])}
         empleados={empleados || []}
+        empresaId={empresaId}
       />
 
     </div>

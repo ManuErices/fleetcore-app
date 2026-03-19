@@ -8,7 +8,7 @@ import { printThermalVoucher } from '../utils/voucherThermalGenerator';
  * Muestra todos los vouchers de entrega generados HOY por el repartidor logueado.
  * Permite reimprimir cualquiera de ellos.
  */
-export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, repartidorNombre, userRole = 'operador', projects = [], machines = [], empleados = [] }) {
+export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, repartidorNombre, userRole = 'operador', projects = [], machines = [], empleados = [], empresaId }) {
   const [reportes, setReportes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [imprimiendoId, setImprimiendoId] = useState(null);
@@ -16,19 +16,20 @@ export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, rep
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
   const cargar = useCallback(async () => {
-    if (!repartidorId && !repartidorNombre) return;
+    if (!empresaId) return;
+    if (!empresaId || (!repartidorId && !repartidorNombre)) return;
     setLoading(true);
     try {
       // Query simple — filtramos por tipo en cliente para evitar índices compuestos
       const snap = await getDocs(
         query(
-          collection(db, 'reportes_combustible'),
+          collection(db, 'empresas', empresaId, 'reportes_combustible'),
           where('tipo', '==', 'entrega')
         )
       );
       const hoy = today;
       const todos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const esAdmin = userRole === 'administrador';
+      const esAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
       const filtrados = todos.filter(r => {
         // Fecha en múltiples lugares posibles (datosControl se hace spread al nivel raíz)
         const fechaReporte = r.fecha

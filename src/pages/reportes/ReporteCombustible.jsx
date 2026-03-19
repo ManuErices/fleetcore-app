@@ -986,11 +986,12 @@ export default function ReporteCombustible() {
         isOpen={showCombustibleModal}
         onClose={() => {
           setShowCombustibleModal(false);
-          handleRecargarReportes(); // Recargar reportes al cerrar
+          handleRecargarReportes();
         }}
         projects={projects}
         machines={machines}
         empleados={empleados}
+        empresaId={empresaId}
       />
 
       {/* Modal de Detalle del Reporte de Combustible */}
