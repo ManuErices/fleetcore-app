@@ -14,8 +14,8 @@ function getSaludo() {
 function SubHeader({ titulo, onBack, accent }) {
   return (
     <header
-      className="sticky top-0 z-40 flex items-center gap-3 px-4 py-3 border-b border-white/10"
-      style={{ background: 'rgba(10,14,26,0.92)', backdropFilter: 'blur(16px)' }}
+      className="sticky top-0 z-40 flex items-center gap-3 px-4 py-3 border-b border-slate-200 bg-white"
+      style={{}}
     >
       <button
         onClick={onBack}
@@ -26,7 +26,7 @@ function SubHeader({ titulo, onBack, accent }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span className="font-black text-white text-sm tracking-wide">{titulo}</span>
+      <span className="font-black text-slate-800 text-sm tracking-wide">{titulo}</span>
     </header>
   );
 }
@@ -72,7 +72,7 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
 
   if (vista === 'maquinaria') {
     return (
-      <div className="min-h-screen" style={{ background: '#0A0E1A' }}>
+      <div className="min-h-screen bg-white">
         <SubHeader titulo="Reporte Maquinaria" onBack={() => setVista('menu')} accent="#818CF8" />
         <ReportDetallado onClose={() => setVista('menu')} />
       </div>
@@ -81,7 +81,7 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
 
   if (vista === 'combustible') {
     return (
-      <div className="min-h-screen" style={{ background: '#0A0E1A' }}>
+      <div className="min-h-screen bg-white">
         <SubHeader titulo="Reporte Combustible" onBack={() => setVista('menu')} accent="#FB923C" />
         <CombustiblePage onClose={() => setVista('menu')} />
       </div>
