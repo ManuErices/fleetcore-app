@@ -266,12 +266,24 @@ export default function ReporteCombustible() {
     const project = projects.find(p => p.id === reporte.projectId);
     const machineId = reporte.datosEntrega?.machineId;
     const operadorId = reporte.datosEntrega?.operadorId;
-    const empresaId = reporte.datosEntrega?.empresa;
+    // ✅ FIX: definir machineInfo y operadorInfo que faltaban
+    const machineInfo = machines.find(m => m.id === machineId) || {
+      patente: reporte.datosEntrega?.machinePatente || reporte.machinePatente || '',
+      code: reporte.datosEntrega?.machineCode || '',
+      type: reporte.datosEntrega?.machineType || '',
+      nombre: reporte.datosEntrega?.machineName || reporte.machineName || '',
+      name: reporte.datosEntrega?.machineName || reporte.machineName || ''
+    };
+    const operadorInfo = empleados.find(e => e.id === operadorId) || {
+      nombre: reporte.datosEntrega?.operadorExterno?.nombre || reporte.operadorNombre || '',
+      rut: reporte.datosEntrega?.operadorExterno?.rut || reporte.operadorRut || ''
+    };
+    const empresaIdLocal = reporte.datosEntrega?.empresa;
     // empresa puede ser un nombre string (nuevo) o un ID de Firebase (legado)
-    const empresaInfoFirebase = empresas.find(e => e.id === empresaId);
+    const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
     const empresaInfo = empresaInfoFirebase
       ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaInfoFirebase.rut || '' }
-      : empresaId ? { nombre: empresaId, rut: '' } : null;
+      : empresaIdLocal ? { nombre: empresaIdLocal, rut: '' } : null;
     const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
       nombre: reporte.repartidorNombre || '',
       rut: reporte.repartidorRut || ''

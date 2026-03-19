@@ -6,7 +6,7 @@ import VoucherGenerator from './VoucherGenerator';
 import VoucherHistorialDia from './VoucherHistorialDia';
 import SignaturePad from "./SignaturePad";
 
-export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados }) {
+export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados, empresaId }) {
   const [paso, setPaso] = useState(1); // 1: Control, 2: Tipo (Entrada/Entrega), 3: Formulario
   const [tipoReporte, setTipoReporte] = useState(''); // 'entrada' o 'entrega'
   const [loading, setLoading] = useState(false);
@@ -15,7 +15,10 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserData, setCurrentUserData] = useState(null);
   const [userRole, setUserRole] = useState('operador');
+  // ✅ FIX: roles reales del sistema
+  const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
   const [surtidoresPersonas, setSurtidoresPersonas] = useState([]); // empleados disponibles para admin
+  const [equiposSurtidores, setEquiposSurtidores] = useState([]); // equipos de la colección equipos_surtidores
   const [repartidorSeleccionado, setRepartidorSeleccionado] = useState(null); // empleado elegido por admin
 
 
@@ -160,31 +163,55 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
     }
   }, [currentUser, isOpen]);
 
-  // Cargar lista de empleados para selector de admin
+  // Cargar surtidores: usar el prop empleados si está disponible, sino consultar Firestore
   useEffect(() => {
-    if (isOpen && userRole === 'administrador') {
-      (async () => {
-        try {
-          const snap = await getDocs(collection(db, 'employees'));
-          const lista = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(e => e.esSurtidor === true);
-          setSurtidoresPersonas(lista);
-        } catch (e) { console.error('Error cargando empleados:', e); }
-      })();
+    if (!isOpen) return;
+    // Si ya tenemos empleados del prop, filtrar directamente
+    if (empleados && empleados.length > 0) {
+      console.log('👥 Total empleados recibidos:', empleados.length);
+      console.log('🔍 Surtidores (esSurtidor=true):', empleados.filter(e => e.esSurtidor === true).map(e => e.nombre));
+      const lista = empleados.filter(e => e.esSurtidor === true);
+      setSurtidoresPersonas(lista);
+      return;
     }
-  }, [isOpen, userRole]);
+    // Si no hay prop, consultar Firestore
+    if (!empresaId) return;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'empresas', empresaId, 'trabajadores'));
+        const lista = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(e => e.esSurtidor === true);
+        setSurtidoresPersonas(lista);
+      } catch (e) { console.error('Error cargando surtidores:', e); }
+    })();
+  }, [isOpen, empresaId, empleados]);
 
-  // Inicializar listas locales cuando el modal se abre
+  // Inicializar machinesLocal cuando cambian las machines del prop
   useEffect(() => {
     if (isOpen) {
       setMachinesLocal(machines || []);
-      // Cargar empresas desde Firebase o usar vacío
       cargarEmpresas();
     }
   }, [isOpen, machines]);
 
+  // Cargar equipos_surtidores — useEffect separado para reaccionar cuando empresaId llegue
+  useEffect(() => {
+    if (!isOpen || !empresaId) return;
+    (async () => {
+      try {
+        console.log('🚛 Cargando equipos_surtidores para empresa:', empresaId);
+        const snap = await getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores'));
+        const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        console.log('🚛 Equipos encontrados:', lista.length, lista.map(e => e.nombre || e.name));
+        setEquiposSurtidores(lista);
+      } catch (e) { console.error('Error cargando equipos_surtidores:', e); }
+    })();
+  }, [isOpen, empresaId]);
+
   const cargarEmpresas = async () => {
     try {
-      const empresasRef = collection(db, 'empresas_combustible');
+      if (!empresaId) return;
+      // ✅ FIX: ruta correcta bajo empresa
+      const empresasRef = collection(db, 'empresas', empresaId, 'empresas_combustible');
       const empresasSnap = await getDocs(empresasRef);
       const empresasData = empresasSnap.docs.map(doc => ({
         id: doc.id,
@@ -201,7 +228,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const cargarEstaciones = async (projectId) => {
     if (!projectId) { setEstacionesLocal([]); return; }
     try {
-      const snap = await getDocs(collection(db, 'estaciones_combustible'));
+      // ✅ FIX: ruta correcta bajo empresa
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'estaciones_combustible'));
       const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // Mostrar solo las asignadas a esta obra (o sin obras = sin restriccion)
       const filtradas = todas.filter(e =>
@@ -257,9 +285,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       setLoadingEquipo(true);
       console.log('💾 Guardando en Firebase...');
       
-      const docRef = await addDoc(collection(db, 'machines'), {
+      // ✅ FIX: guardar en equipos_surtidores de la empresa
+      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'equipos_surtidores'), {
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
         code: nuevoEquipoSurtidor.patente.toUpperCase(),
+        nombre: nuevoEquipoSurtidor.nombre,
         name: nuevoEquipoSurtidor.nombre,
         tipo: nuevoEquipoSurtidor.tipo || 'Equipo Surtidor',
         marca: nuevoEquipoSurtidor.marca || '',
@@ -283,6 +313,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       console.log('📋 Agregando a lista local:', nuevoEquipo);
       setMachinesLocal([...machinesLocal, nuevoEquipo]);
       
+      // ✅ FIX: agregar al estado equiposSurtidores también
+      setEquiposSurtidores(prev => [...prev, { id: docRef.id, ...nuevoEquipoSurtidor, nombre: nuevoEquipoSurtidor.nombre, patente: nuevoEquipoSurtidor.patente.toUpperCase() }]);
       console.log('🎯 Autoseleccionando equipo:', docRef.id);
       setDatosControl({...datosControl, equipoSurtidorId: docRef.id});
       
@@ -315,7 +347,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
     try {
       setLoading(true);
-      const docRef = await addDoc(collection(db, 'empresas_combustible'), {
+      // ✅ FIX: ruta correcta bajo empresa
+      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'empresas_combustible'), {
         nombre: nuevaEmpresa.nombre,
         rut: nuevaEmpresa.rut,
         fechaCreacion: new Date().toISOString()
@@ -394,10 +427,10 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         ...datosControl,
         fechaCreacion: new Date().toISOString(),
         creadoPor: currentUser?.email || 'unknown',
-        repartidorNombre: userRole === 'administrador'
+        repartidorNombre: isAdmin
           ? (repartidorSeleccionado?.nombre || repartidorSeleccionado?.name || '')
           : (currentUserData?.nombre || ''),
-        repartidorRut: userRole === 'administrador'
+        repartidorRut: isAdmin
           ? (repartidorSeleccionado?.rut || '')
           : (currentUserData?.rut || '')
       };
@@ -424,7 +457,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         dataToSave.fechaFirma = new Date().toISOString();
       }
 
-      await addDoc(collection(db, 'reportes_combustible'), dataToSave);
+      // ✅ FIX: ruta correcta bajo empresa
+      await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
 
       console.log('✅ Reporte guardado en Firebase');
       console.log('📝 Tipo de reporte:', tipoReporte);
@@ -438,7 +472,9 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       
       // NUEVO: Obtener información del repartidor y equipo surtidor
       const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
-      const equipoSurtidorInfo = machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
+      // ✅ FIX: buscar en equiposSurtidores (AdminPanel) primero, luego en machinesLocal
+      const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
+                                || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
       
       console.log('📊 Información recopilada:', {
         projectInfo,
@@ -612,7 +648,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
                     </label>
 
-                    {userRole === 'administrador' ? (
+                    {isAdmin ? (
                       // Admin: selector manual de empleado
                       <div>
                         <select
@@ -677,7 +713,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                       Equipo Surtidor (Camión/Mochila)
-                      {userRole !== 'administrador' 
+                      {!isAdmin 
                     }
                     </label>
                     <div className="flex gap-2">
@@ -687,18 +723,17 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                       >
                         <option value="">Seleccione equipo surtidor</option>
-                        {machinesLocal.filter(m => 
-                          m.name?.toLowerCase().includes('combustible') || 
-                          m.name?.toLowerCase().includes('camión') ||
-                          m.name?.toLowerCase().includes('mochila') ||
-                          m.categoria === 'surtidor_combustible'
-                        ).map(m => (
+                        {/* ✅ FIX: usar solo equipos_surtidores del AdminPanel */}
+                        {equiposSurtidores.map(m => (
                           <option key={m.id} value={m.id}>
-                            {m.patente || m.code} - {m.name}
+                            {m.patente || m.code} - {m.nombre || m.name}
                           </option>
                         ))}
+                        {equiposSurtidores.length === 0 && (
+                          <option disabled value="">Sin equipos registrados en Admin</option>
+                        )}
                       </select>
-                      {userRole === 'administrador' && (
+                      {isAdmin && (
                         <button
                           type="button"
                           onClick={() => setShowModalEquipoSurtidor(true)}
@@ -841,7 +876,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Origen
-                    {userRole !== 'administrador'
+                    {!isAdmin
                   }
                   </label>
                   <div className="flex gap-2">
@@ -868,7 +903,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                           ))
                       }
                     </select>
-                    {userRole === 'administrador' && (
+                    {isAdmin && (
                       <button
                         type="button"
                         onClick={() => setShowModalEmpresa(true)}
@@ -1055,7 +1090,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Empresa
-                    {userRole !== 'administrador'
+                    {!isAdmin
                   }
                   </label>
                   <div className="flex gap-2">

@@ -748,7 +748,7 @@ export default function ReporteWorkFleet() {
       ];
     });
 
-    doc.autoTable({
+    autoTable(doc, {
       head: [[
         'Obra',
         'Fecha',
