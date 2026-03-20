@@ -214,9 +214,14 @@ export default function ReporteCombustible() {
         cantidad = r.datosEntrega.cantidadLitros || 0;
       }
       
+      const empresaIdLocal = r.datosEntrega?.empresa;
+      const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
+      const empresaNombre = empresaInfoFirebase?.nombre || empresaIdLocal || '';
+
       return {
         ...r,
         projectName: project?.name || r.projectId || '',
+        empresaNombre,
         machinePatente: machine?.patente || '',
         machineName: machine?.name || '',
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
@@ -327,8 +332,7 @@ export default function ReporteCombustible() {
     }
 
     const datosExcel = reportesFiltrados.map(r => ({
-      'Código Obra': r.projectId,
-      'Obra': r.projectName,
+      'Empresa': r.empresaNombre || '',
       'Fecha': r.fecha,
       'N° Reporte': r.numeroReporte,
       'Cod/Patente': r.machinePatente,
@@ -600,7 +604,7 @@ export default function ReporteCombustible() {
     const tableData = reportesFiltrados.map(r => [
       r.fecha,
       r.numeroReporte,
-      r.projectName,
+      r.empresaNombre || '-',
       r.machinePatente,
       r.surtidorNombre,
       r.operadorNombre,
@@ -609,7 +613,7 @@ export default function ReporteCombustible() {
     ]);
 
     autoTable(doc, {
-      head: [['Fecha', 'N° Reporte', 'Obra', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
+      head: [['Fecha', 'N° Reporte', 'Empresa', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
       body: tableData,
       startY: 30,
       theme: 'grid',
@@ -806,7 +810,7 @@ export default function ReporteCombustible() {
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Tipo</th>
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
-                  <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Obra</th>
+                  <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Empresa</th>
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Máquina</th>
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Repartidor</th>
                   <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Operador</th>
@@ -872,7 +876,7 @@ export default function ReporteCombustible() {
                         </div>
                       </td>
                       <td className="px-3 py-3 text-sm text-slate-700">
-                        {reporte.projectName}
+                        {reporte.empresaNombre || '-'}
                       </td>
                       <td className="px-3 py-3 text-sm text-slate-700">
                         {reporte.machinePatente ? `${reporte.machinePatente} - ${reporte.machineName}` : (reporte.tipo === 'entrada' ? 'N/A' : '-')}

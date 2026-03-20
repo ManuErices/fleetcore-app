@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import InviteUserPanel from '../InviteUserPanel';
+import InviteUserPanel from "../InviteUserPanel";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy,
@@ -170,7 +170,7 @@ function ConfirmDialog({ isOpen, onClose, onConfirm, title, message }) {
 // ─────────────────────────────────────────────────────────────
 // QR CARD
 // ─────────────────────────────────────────────────────────────
-function QRCard({ isOpen, onClose, title, qrText, code = '', patente = '' }) {
+function QRCard({ isOpen, onClose, title, subtitulo = '', headerLabel, qrText, code = '', patente = '' }) {
   const [qrReady, setQrReady] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [building, setBuilding] = useState(false);
@@ -210,7 +210,7 @@ function QRCard({ isOpen, onClose, title, qrText, code = '', patente = '' }) {
 
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 40px -apple-system, system-ui, Arial';
-      ctx.fillText(title || qrText, PAD, 102);
+      ctx.fillText(headerLabel || title || qrText, PAD, 102);
 
       // Línea separadora
       ctx.strokeStyle = '#1e293b';
@@ -337,7 +337,8 @@ function QRCard({ isOpen, onClose, title, qrText, code = '', patente = '' }) {
         <div className="px-5 py-4 flex items-center justify-between border-b border-slate-700">
           <div>
             <p className="text-[11px] text-orange-400 uppercase tracking-widest font-bold">Código QR · Máquina</p>
-            <h3 className="text-base font-black text-white truncate mt-0.5">{title}</h3>
+            <h3 className="text-base font-black text-white truncate mt-0.5">{subtitulo || title}</h3>
+            {subtitulo && <p className="text-xs text-slate-400 font-mono mt-0.5">{title}</p>}
           </div>
           <button onClick={onClose} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg flex items-center justify-center transition-colors ml-3 flex-shrink-0">
             <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -1044,7 +1045,7 @@ function MaquinasSection() {
 
   const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' }); setEditId(null); setModal(true); };
   const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '', empresa: row.empresa || '', propietario: row.propietario || '' }); setEditId(row.id); setModal(true); };
-  const openQR = (row) => setQr({ title: row.code || row.patente, qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
+  const openQR = (row) => setQr({ title: row.code || row.patente, subtitulo: [row.marca, row.modelo].filter(Boolean).join(' ') || row.name || row.code || '', headerLabel: [row.marca, row.modelo].filter(Boolean).join(' ') || row.name || row.code || '', qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
 
   const save = async () => {
     setSaving(true);
@@ -1252,7 +1253,7 @@ function MaquinasSection() {
         onDeleted={reloadPropietarios}
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
-      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
+      <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} subtitulo={qr?.subtitulo} headerLabel={qr?.headerLabel} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
     </>
   );
 }
@@ -2358,13 +2359,7 @@ function EmpresasRegistradasSection() {
 function UsuariosSection() {
   const { empresaId, empresa } = useEmpresa();
   const [showInvite, setShowInvite] = useState(false);
-  const [showCrearUsuario, setShowCrearUsuario] = useState(false);
   const [userRole, setUserRole] = useState('');
-  const [creandoUsuario, setCreandoUsuario] = useState(false);
-  const [formNuevoUsuario, setFormNuevoUsuario] = useState({
-    email: '', password: '', nombre: '', rut: '',
-    role: 'operador', modulos: [], cargo: ''
-  });
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -2376,9 +2371,6 @@ function UsuariosSection() {
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const [empresasDisponibles, setEmpresasDisponibles] = useState([]);
-  const [formEmpresaId, setFormEmpresaId] = useState('');
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -2389,24 +2381,6 @@ function UsuariosSection() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  // Cargar empresas disponibles para el selector
-  useEffect(() => {
-    if (!empresaId) return;
-    (async () => {
-      try {
-        if (userRole === 'superadmin') {
-          const snap = await getDocs(collection(db, 'empresas'));
-          setEmpresasDisponibles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-        } else {
-          // admin_contrato solo ve su empresa
-          const snap = await getDocs(query(collection(db, 'empresas')));
-          const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          setEmpresasDisponibles(todas.filter(e => e.id === empresaId));
-        }
-      } catch {}
-    })();
-  }, [empresaId, userRole]);
 
   // Leer rol del usuario actual para mostrar botón invitar
   useEffect(() => {
@@ -2439,7 +2413,6 @@ function UsuariosSection() {
       modulos:  row.modulos  || [],
       cargo:    row.cargo    || '',
     });
-    setFormEmpresaId(row.empresaId || empresaId || '');
     setEditId(row.id);
     setModal(true);
   };
@@ -2458,12 +2431,11 @@ function UsuariosSection() {
     setSaving(true);
     try {
       const updates = {
-        role:      form.role,
-        nombre:    form.nombre.trim(),
-        rut:       form.rut.trim(),
-        modulos:   form.role === 'administrativo' ? form.modulos : [],
-        cargo:     form.role === 'operador' ? form.cargo : '',
-        empresaId: formEmpresaId || empresaId, // ✅ empresa seleccionada o la actual
+        role:    form.role,
+        nombre:  form.nombre.trim(),
+        rut:     form.rut.trim(),
+        modulos: form.role === 'administrativo' ? form.modulos : [],
+        cargo:   form.role === 'operador' ? form.cargo : '',
         updatedAt: serverTimestamp(),
       };
       if (form.password.trim()) updates.password = form.password.trim();
@@ -2483,55 +2455,6 @@ function UsuariosSection() {
 
   const canInvite = userRole === 'superadmin' || userRole === 'admin_contrato';
 
-  const formatRutInput = (value) => {
-    let clean = value.replace(/[^0-9kK]/g, '');
-    if (clean.length === 0) return '';
-    const dv = clean.slice(-1).toUpperCase();
-    const body = clean.slice(0, -1);
-    if (body.length === 0) return dv;
-    const bodyFormatted = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-    return `${bodyFormatted}-${dv}`;
-  };
-
-  const handleCrearUsuario = async () => {
-    if (!formNuevoUsuario.email || !formNuevoUsuario.password || !formNuevoUsuario.role) {
-      alert('Email, contraseña y rol son obligatorios');
-      return;
-    }
-    if (formNuevoUsuario.password.length < 6) {
-      alert('La contraseña debe tener al menos 6 caracteres');
-      return;
-    }
-    setCreandoUsuario(true);
-    try {
-      const { auth } = await import('../../lib/firebase');
-      const callerUid = auth.currentUser?.uid;
-      if (!callerUid) throw new Error('No hay usuario autenticado');
-
-      const res = await fetch('https://us-central1-mpf-maquinaria.cloudfunctions.net/createUser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formNuevoUsuario,
-          empresaId,
-          callerUid,
-          savePassword: true // ✅ guardar contraseña en Firestore para QR
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al crear usuario');
-
-      alert(`✅ Usuario creado exitosamente\nEmail: ${formNuevoUsuario.email}`);
-      setShowCrearUsuario(false);
-      setFormNuevoUsuario({ email: '', password: '', nombre: '', rut: '', role: 'operador', modulos: [], cargo: '' });
-      load(); // recargar lista de usuarios
-    } catch (e) {
-      alert('❌ ' + e.message);
-    } finally {
-      setCreandoUsuario(false);
-    }
-  };
-
   return (
     <>
       {/* Modal de invitaciones */}
@@ -2545,18 +2468,9 @@ function UsuariosSection() {
       <SectionCard title="Usuarios" subtitle="Gestión de accesos y roles del sistema" count={data.length} color="rose"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
       >
-        {/* Botones crear e invitar usuario */}
+        {/* Botón invitar usuario */}
         {canInvite && (
-          <div className="mb-4 flex gap-2">
-            <button
-              onClick={() => setShowCrearUsuario(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Crear usuario
-            </button>
+          <div className="mb-4">
             <button
               onClick={() => setShowInvite(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm rounded-xl transition-all shadow-sm"
@@ -2566,48 +2480,6 @@ function UsuariosSection() {
               </svg>
               Invitar usuario
             </button>
-          </div>
-        )}
-
-        {/* Modal Crear Usuario */}
-        {showCrearUsuario && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-black text-slate-800">Crear nuevo usuario</h3>
-                <button onClick={() => setShowCrearUsuario(false)} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-all">✕</button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Nombre completo</label>
-                  <input className={inputCls} value={formNuevoUsuario.nombre} onChange={e => setFormNuevoUsuario(f => ({...f, nombre: e.target.value}))} placeholder="Juan Pérez" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">RUT</label>
-                  <input className={inputCls} value={formNuevoUsuario.rut} onChange={e => setFormNuevoUsuario(f => ({...f, rut: formatRutInput(e.target.value)}))} placeholder="12.345.678-9" maxLength={12} />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email *</label>
-                  <input className={inputCls} type="email" value={formNuevoUsuario.email} onChange={e => setFormNuevoUsuario(f => ({...f, email: e.target.value}))} placeholder="usuario@empresa.cl" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Contraseña *</label>
-                  <input className={inputCls} type="password" value={formNuevoUsuario.password} onChange={e => setFormNuevoUsuario(f => ({...f, password: e.target.value}))} placeholder="Mínimo 6 caracteres" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Rol *</label>
-                  <select className={selectCls} value={formNuevoUsuario.role} onChange={e => setFormNuevoUsuario(f => ({...f, role: e.target.value}))}>
-                    {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button onClick={() => setShowCrearUsuario(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
-                <button onClick={handleCrearUsuario} disabled={creandoUsuario} className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-black disabled:opacity-50">
-                  {creandoUsuario ? 'Creando...' : 'Crear usuario'}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -2647,15 +2519,6 @@ function UsuariosSection() {
       <Modal isOpen={modal} onClose={() => setModal(false)} title="Editar Usuario" color="rose">
         <div className="space-y-4">
           <Field label="Nombre Completo"><input className={inputCls} value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Nombre del usuario" /></Field>
-          <Field label="Empresa asignada" required>
-            <select className={selectCls} value={formEmpresaId} onChange={e => setFormEmpresaId(e.target.value)}>
-              <option value="">— Sin empresa asignada —</option>
-              {empresasDisponibles.map(e => (
-                <option key={e.id} value={e.id}>{e.nombre || e.id}</option>
-              ))}
-            </select>
-            {!formEmpresaId && <p className="text-[11px] text-red-500 mt-1">⚠ Sin empresa el usuario no podrá acceder al sistema</p>}
-          </Field>
           <Field label="RUT"><input className={inputCls} value={form.rut} onChange={e => setForm({ ...form, rut: e.target.value })} placeholder="Ej: 12.345.678-9" /></Field>
           <Field label="Contraseña para QR">
             <input className={inputCls} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Contraseña del usuario (para generar QR)" />

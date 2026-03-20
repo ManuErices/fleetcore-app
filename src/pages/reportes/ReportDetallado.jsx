@@ -45,7 +45,7 @@ export default function ReportDetallado({ onClose } = {}) {
     kilometrajeInicial: '',
     kilometrajeFinal: '',
     estadoMaquina: 'operativa',
-    observaciones: '',
+
     // Parte 2
     actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
     tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
@@ -55,7 +55,9 @@ export default function ReportDetallado({ onClose } = {}) {
       colacion: { horaInicio: '13:00', horaFin: '14:00' }
     },
     tieneMantenciones: false,
-    mantenciones: []
+    mantenciones: [],
+    lugarTrabajo: '',
+    observaciones: ''
   });
 
   // ✅ NUEVO: Validar en tiempo real
@@ -572,7 +574,8 @@ export default function ReportDetallado({ onClose } = {}) {
         kilometrajeInicial: '',
         kilometrajeFinal: '',
         estadoMaquina: 'operativa',
-        observaciones: ''
+        observaciones: '',
+        lugarTrabajo: ''
       });
       
       setCurrentStep(1);
@@ -967,6 +970,17 @@ export default function ReportDetallado({ onClose } = {}) {
               <div className="space-y-3 sm:space-y-4">
     
                 
+                <div>
+                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">Lugar de trabajo</label>
+                  <input
+                    type="text"
+                    value={formData.lugarTrabajo}
+                    onChange={(e) => setFormData({ ...formData, lugarTrabajo: e.target.value })}
+                    className="input-modern w-full text-sm sm:text-base"
+                    placeholder="Ej: Sector Norte, Frente 3..."
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">Observaciones</label>
                   <textarea

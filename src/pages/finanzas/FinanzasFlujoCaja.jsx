@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc } from "firebase/firestore";
+import { onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc, query, orderBy, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
@@ -11,8 +11,50 @@ import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 // ─── Utilidades ─────────────────────────────────────────────────────────────
 const MESES      = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const MESES_FULL = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-const SUBCATS_EGRESO  = ["REMUNERACIONES","AUTOMOTRIZ","OPERACIONAL","FINANCIERO","ADMINISTRATIVO","OTRO"];
-const SUBCATS_INGRESO = ["VENTAS","CONTRATOS","ANTICIPOS","OTRO"];
+// Subcategorías por defecto (solo si Firestore está vacío)
+const SUBCATS_EGRESO_DEFAULT  = ["REMUNERACIONES","AUTOMOTRIZ","OPERACIONAL","FINANCIERO","ADMINISTRATIVO","OTRO"];
+const SUBCATS_INGRESO_DEFAULT = ["VENTAS","CONTRATOS","ANTICIPOS","OTRO"];
+
+// Hook para cargar/gestionar subcategorías desde Firestore
+function useSubcategorias(empresaId) {
+  const [subcatsEgreso,  setSubcatsEgreso]  = useState(SUBCATS_EGRESO_DEFAULT);
+  const [subcatsIngreso, setSubcatsIngreso] = useState(SUBCATS_INGRESO_DEFAULT);
+
+  useEffect(() => {
+    if (!empresaId) return;
+    const ref = doc(db, 'empresas', empresaId, 'flujo_config', 'subcategorias');
+    const unsub = onSnapshot(ref, snap => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.egreso?.length)  setSubcatsEgreso(data.egreso);
+        if (data.ingreso?.length) setSubcatsIngreso(data.ingreso);
+      }
+    });
+    return unsub;
+  }, [empresaId]);
+
+  const agregarSubcat = async (tipo, nombre) => {
+    const val = nombre.trim().toUpperCase();
+    if (!val) return;
+    const ref = doc(db, 'empresas', empresaId, 'flujo_config', 'subcategorias');
+    const snap = await getDoc(ref);
+    const actual = snap.exists() ? snap.data() : { egreso: SUBCATS_EGRESO_DEFAULT, ingreso: SUBCATS_INGRESO_DEFAULT };
+    const lista = actual[tipo] || [];
+    if (lista.includes(val)) return;
+    await setDoc(ref, { ...actual, [tipo]: [...lista, val] }, { merge: true });
+  };
+
+  const eliminarSubcat = async (tipo, nombre) => {
+    const ref = doc(db, 'empresas', empresaId, 'flujo_config', 'subcategorias');
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return;
+    const actual = snap.data();
+    const lista = (actual[tipo] || []).filter(s => s !== nombre);
+    await setDoc(ref, { ...actual, [tipo]: lista }, { merge: true });
+  };
+
+  return { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat };
+}
 
 // Color de acento por subcategoría — solo borde izquierdo, muy sutil
 const SUBCAT_ACCENT = {
@@ -87,13 +129,44 @@ function getWeekColumns() {
 // ─── Modal: Nueva / Editar Cuenta ──────────────────────────────────────────
 function ModalCuenta({ onSave, onClose, editando }) {
   const { empresaId } = useEmpresa();
+  const { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat } = useSubcategorias(empresaId);
   const [form, setForm] = useState(editando || {
     categoria: "EGRESOS", nombre: "", subcategoria: "OPERACIONAL",
     detalle: "", proyectoId: "", cliente: "", presupuestoMensual: "",
     recurrente: false, frecuenciaRecurrente: "mensual", montoRecurrente: "",
   });
+  const [nuevaSubcat, setNuevaSubcat] = useState("");
+  const [agregandoSubcat, setAgregandoSubcat] = useState(false);
+  const [gestionandoSubcat, setGestionandoSubcat] = useState(false);
+  const [editandoSubcat, setEditandoSubcat] = useState(null);
+  const [valorEditSubcat, setValorEditSubcat] = useState("");
   const isIngreso = form.categoria === "INGRESOS";
-  const subcats = isIngreso ? SUBCATS_INGRESO : SUBCATS_EGRESO;
+  const subcats = isIngreso ? subcatsIngreso : subcatsEgreso;
+
+  const handleAgregarSubcat = async () => {
+    if (!nuevaSubcat.trim()) return;
+    await agregarSubcat(isIngreso ? "ingreso" : "egreso", nuevaSubcat);
+    setForm(f => ({...f, subcategoria: nuevaSubcat.trim().toUpperCase()}));
+    setNuevaSubcat("");
+    setAgregandoSubcat(false);
+  };
+
+  const handleEliminarSubcat = async (nombre) => {
+    if (!window.confirm(`¿Eliminar subcategoría "${nombre}"?`)) return;
+    await eliminarSubcat(isIngreso ? "ingreso" : "egreso", nombre);
+    if (form.subcategoria === nombre) setForm(f => ({...f, subcategoria: subcats.find(s => s !== nombre) || ""}));
+  };
+
+  const handleGuardarEditSubcat = async (nombreOriginal) => {
+    const nuevoNombre = valorEditSubcat.trim().toUpperCase();
+    if (!nuevoNombre || nuevoNombre === nombreOriginal) { setEditandoSubcat(null); return; }
+    const tipo = isIngreso ? "ingreso" : "egreso";
+    // Agregar el nuevo y eliminar el viejo
+    await agregarSubcat(tipo, nuevoNombre);
+    await eliminarSubcat(tipo, nombreOriginal);
+    if (form.subcategoria === nombreOriginal) setForm(f => ({...f, subcategoria: nuevoNombre}));
+    setEditandoSubcat(null);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
@@ -134,7 +207,84 @@ function ModalCuenta({ onSave, onClose, editando }) {
           </div>
           {/* Subcategoría */}
           <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Subcategoría</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Subcategoría</label>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { setAgregandoSubcat(v => !v); setGestionandoSubcat(false); }}
+                  className="text-[10px] font-bold text-purple-600 hover:text-purple-700 flex items-center gap-1 transition-colors">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                  Nueva
+                </button>
+                <span className="text-slate-300">|</span>
+                <button type="button" onClick={() => { setGestionandoSubcat(v => !v); setAgregandoSubcat(false); }}
+                  className="text-[10px] font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 transition-colors">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                  Gestionar
+                </button>
+              </div>
+            </div>
+
+            {/* Agregar nueva */}
+            {agregandoSubcat && (
+              <div className="flex gap-2 mb-2">
+                <input value={nuevaSubcat} onChange={e => setNuevaSubcat(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === 'Enter' && handleAgregarSubcat()}
+                  placeholder="Ej: SUBCONTRATO"
+                  className="flex-1 px-3 py-2 border border-purple-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-100 uppercase" />
+                <button onClick={handleAgregarSubcat}
+                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl transition-colors">
+                  Agregar
+                </button>
+                <button onClick={() => { setAgregandoSubcat(false); setNuevaSubcat(""); }}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-colors">
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Gestionar existentes */}
+            {gestionandoSubcat && (
+              <div className="mb-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  {isIngreso ? "Subcategorías de ingreso" : "Subcategorías de egreso"}
+                </p>
+                {subcats.map(s => (
+                  <div key={s} className="flex items-center justify-between gap-2">
+                    {editandoSubcat === s ? (
+                      <>
+                        <input
+                          value={valorEditSubcat}
+                          onChange={e => setValorEditSubcat(e.target.value.toUpperCase())}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleGuardarEditSubcat(s);
+                            if (e.key === 'Escape') setEditandoSubcat(null);
+                          }}
+                          className="flex-1 px-2 py-1 border border-purple-300 rounded-lg text-xs font-medium focus:outline-none uppercase"
+                          autoFocus
+                        />
+                        <button onClick={() => handleGuardarEditSubcat(s)}
+                          className="px-2 py-1 bg-purple-600 text-white text-[10px] font-bold rounded-lg">✓</button>
+                        <button onClick={() => setEditandoSubcat(null)}
+                          className="px-2 py-1 bg-slate-200 text-slate-600 text-[10px] font-bold rounded-lg">✕</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-xs font-semibold text-slate-700">{s}</span>
+                        <button onClick={() => { setEditandoSubcat(s); setValorEditSubcat(s); }}
+                          className="p-1 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Editar">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        </button>
+                        <button onClick={() => handleEliminarSubcat(s)}
+                          className="p-1 hover:bg-red-100 text-red-500 rounded-lg transition-colors" title="Eliminar">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <select value={form.subcategoria} onChange={e => setForm(f => ({...f, subcategoria: e.target.value}))}
               className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 bg-white transition-all">
               {subcats.map(s => <option key={s}>{s}</option>)}
@@ -491,6 +641,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
 export default function FinanzasFlujoCaja() {
   const { proyectoId } = useFinanzas();
   const { empresaId } = useEmpresa();
+  const { subcatsEgreso, subcatsIngreso, eliminarSubcat } = useSubcategorias(empresaId);
   const weekColumns = useMemo(() => getWeekColumns(), []);
   const tableRef = useRef(null);
 
@@ -676,7 +827,7 @@ export default function FinanzasFlujoCaja() {
 
   const ingresos = useMemo(() => cuentasFiltradas.filter(c => c.categoria === "INGRESOS"), [cuentasFiltradas]);
   const egresos  = useMemo(() => cuentasFiltradas.filter(c => c.categoria === "EGRESOS"),  [cuentasFiltradas]);
-  const subcatsEgreso = useMemo(() => [...new Set(egresos.map(c => c.subcategoria).filter(Boolean))], [egresos]);
+  const subcatsEgresoActivas = useMemo(() => [...new Set(egresos.map(c => c.subcategoria).filter(Boolean))], [egresos]);
 
   function weekTotal(weekKey, lista) {
     return lista.reduce((s, c) => s + (payments[`${c.id}-${weekKey}`] || 0), 0);
@@ -1132,7 +1283,7 @@ export default function FinanzasFlujoCaja() {
                 </td>
               </tr>
 
-              {!collapsed["EGRESOS"] && subcatsEgreso.map(subcat => {
+              {!collapsed["EGRESOS"] && subcatsEgresoActivas.map(subcat => {
                 const cuentasSubcat = egresos.filter(c => c.subcategoria === subcat);
                 const totSubcat = weekColumns.reduce((s, w) => s + weekTotal(w.key, cuentasSubcat), 0);
                 const accent = subAccent(subcat);
