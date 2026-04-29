@@ -34,6 +34,7 @@ function SubHeader({ titulo, onBack, accent }) {
 export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
   const [vista, setVista] = useState('loading');
   const [esSurtidor, setEsSurtidor] = useState(false);
+  const [esSuperAdmin, setEsSuperAdmin] = useState(false);
   const nombre = user?.displayName || user?.email?.split('@')[0] || 'Operador';
   const inicial = nombre.charAt(0).toUpperCase();
 
@@ -46,7 +47,10 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
         if (snap.exists()) {
           const data = snap.data();
           // Buscar esSurtidor en el doc de usuario O en trabajadores
-          if (data.esSurtidor === true || data.cargo === 'surtidor') {
+          if (data.role === 'superadmin') {
+            setEsSuperAdmin(true);
+            setVista('menu');
+          } else if (data.esSurtidor === true || data.cargo === 'surtidor') {
             setEsSurtidor(true);
             setVista('menu');
           } else {
@@ -102,7 +106,7 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
         <svg className="absolute inset-0 w-full h-full opacity-[0.04]" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="0.5"/>
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="0.5" />
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
@@ -195,8 +199,8 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
           </div>
         </button>
 
-        {/* Combustible — solo surtidores */}
-        {esSurtidor && <button onClick={() => setVista('combustible')}
+        {/* Combustible — surtidores y superadmin */}
+        {(esSurtidor || esSuperAdmin) && <button onClick={() => setVista('combustible')}
           className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-95 relative"
           style={{ background: 'linear-gradient(135deg, rgba(251,146,60,0.15) 0%, rgba(245,158,11,0.08) 100%)', border: '1.5px solid rgba(251,146,60,0.3)' }}>
           <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"

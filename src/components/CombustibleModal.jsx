@@ -5,6 +5,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import VoucherGenerator from './VoucherGenerator';
 import VoucherHistorialDia from './VoucherHistorialDia';
 import SignaturePad from "./SignaturePad";
+import { getNextGuiaNumber } from '../utils/voucherThermalGenerator';
 
 export default function CombustibleModal({ isOpen, onClose, projects, machines, empleados, empresaId }) {
   const [paso, setPaso] = useState(1); // 1: Control, 2: Tipo (Entrada/Entrega), 3: Formulario
@@ -25,7 +26,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [lastReportData, setLastReportData] = useState(null);
   const [showHistorial, setShowHistorial] = useState(false);
-  
+
   // Estados para las firmas
   const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
   const [firmaReceptor, setFirmaReceptor] = useState(null); // Para ENTREGA
@@ -36,11 +37,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const [operadorExterno, setOperadorExterno] = useState({ nombre: '', rut: '' });
   const [maquinaExterna, setMaquinaExterna] = useState({ patente: '', tipo: '', modelo: '' });
   const [showModalFirmaReceptor, setShowModalFirmaReceptor] = useState(false);
-  
+
   // Estados para modales de creación rápida
   const [showModalEquipoSurtidor, setShowModalEquipoSurtidor] = useState(false);
   const [showModalEmpresa, setShowModalEmpresa] = useState(false);
-  
+
   // Datos temporales para crear nuevos registros
   const [nuevoEquipoSurtidor, setNuevoEquipoSurtidor] = useState({
     patente: '',
@@ -49,28 +50,48 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
     marca: '',
     modelo: ''
   });
-  
+
   const [nuevaEmpresa, setNuevaEmpresa] = useState({
     nombre: '',
     rut: ''
   });
-  
+
   // Listas locales que se actualizan cuando agregamos nuevos items
   const [machinesLocal, setMachinesLocal] = useState([]);
   const [empresasLocal, setEmpresasLocal] = useState([]);
   const [estacionesLocal, setEstacionesLocal] = useState([]);
-  // Detecta si la empresa seleccionada tiene registros internos (operadores/máquinas)
+
+  // Normaliza nombre de empresa para comparación fuzzy (sin tildes, minúsculas, sin espacios extra)
+  const normEmp = (s) => (s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quita tildes: é→e, ó→o
+    .replace(/\s+/g, ' ').trim();
+
+  // Dos empresas hacen match si una contiene a la otra (normalizado)
+  // Ej: "MPF Ingeniería Civil" ↔ "MPF INGENIERIA CIVIL SPA" → ✅
+  const empresasMatch = (a, b) => {
+    if (!a || !b) return false;
+    const na = normEmp(a), nb = normEmp(b);
+    return na === nb || na.includes(nb) || nb.includes(na);
+  };
+
+  // Resuelve el ID/nombre seleccionado al nombre de la empresa
+  const resolverNombreEmpresa = (empresaIdONombre) => {
+    if (!empresaIdONombre) return null;
+    const doc = empresasLocal.find(e => e.id === empresaIdONombre);
+    return doc ? doc.nombre : empresaIdONombre;
+  };
+
   const EMPRESAS_SISTEMA = ['LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor', 'MPF Ingeniería Civil'];
-  const esEmpresaInterna = (empresaNombre) => {
-    if (!empresaNombre) return false;
-    // Tiene registros internos si hay operadores o máquinas con esa empresa
-    const tieneOps = (empleados || []).some(e => e.empresa === empresaNombre);
-    const tieneMaq = (machines || []).some(m => m.empresa === empresaNombre);
+  const esEmpresaInterna = (empresaIdONombre) => {
+    if (!empresaIdONombre) return false;
+    const nombreBuscar = resolverNombreEmpresa(empresaIdONombre);
+    const tieneOps = (empleados || []).some(e => empresasMatch(e.empresa, nombreBuscar));
+    const tieneMaq = (machines || []).some(m => empresasMatch(m.empresa, nombreBuscar));
     return tieneOps || tieneMaq;
   };
   // Alias para compatibilidad con código existente
   const esMPF = esEmpresaInterna;
-  
+
   // Datos del formulario - Página 1 (Control de Combustible)
   const [datosControl, setDatosControl] = useState({
     projectId: '',
@@ -115,7 +136,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         try {
           console.log('🔍 Buscando usuario en Firebase:', currentUser.uid);
           console.log('📧 Email:', currentUser.email);
-          
+
           // Cargar todos los usuarios
           const usersRef = collection(db, 'users');
           const usersSnap = await getDocs(usersRef);
@@ -123,24 +144,24 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
             id: doc.id,
             ...doc.data()
           }));
-          
+
           console.log('📋 Usuarios disponibles:', usersData);
-          
+
           // Buscar por UID (preferido)
           let userData = usersData.find(u => u.id === currentUser.uid);
-          
+
           // Si no encuentra por UID, buscar por email
           if (!userData) {
-            userData = usersData.find(u => 
+            userData = usersData.find(u =>
               u.email?.toLowerCase() === currentUser.email?.toLowerCase()
             );
           }
-          
+
           if (userData) {
             console.log('✅ Usuario encontrado:', userData);
             setCurrentUserData(userData);
             setUserRole(userData.role || 'operador');
-            
+
             // Autocompletar repartidorId cuando se abre el modal
             if (isOpen && !datosControl.repartidorId) {
               setDatosControl(prev => ({
@@ -157,7 +178,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         }
       }
     };
-    
+
     if (isOpen) {
       cargarDatosUsuario();
     }
@@ -277,7 +298,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
   const handleCrearEquipoSurtidor = async () => {
     console.log('🚀 Iniciando creación de equipo surtidor');
     console.log('📝 Datos:', nuevoEquipoSurtidor);
-    
+
     if (!nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre) {
       alert("Patente y Nombre son obligatorios");
       return;
@@ -286,7 +307,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
     try {
       setLoadingEquipo(true);
       console.log('💾 Guardando en Firebase...');
-      
+
       // ✅ FIX: guardar en equipos_surtidores de la empresa
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'equipos_surtidores'), {
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
@@ -314,12 +335,12 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
       console.log('📋 Agregando a lista local:', nuevoEquipo);
       setMachinesLocal([...machinesLocal, nuevoEquipo]);
-      
+
       // ✅ FIX: agregar al estado equiposSurtidores también
       setEquiposSurtidores(prev => [...prev, { id: docRef.id, ...nuevoEquipoSurtidor, nombre: nuevoEquipoSurtidor.nombre, patente: nuevoEquipoSurtidor.patente.toUpperCase() }]);
       console.log('🎯 Autoseleccionando equipo:', docRef.id);
-      setDatosControl({...datosControl, equipoSurtidorId: docRef.id});
-      
+      setDatosControl({ ...datosControl, equipoSurtidorId: docRef.id });
+
       setShowModalEquipoSurtidor(false);
       setNuevoEquipoSurtidor({
         patente: '',
@@ -328,7 +349,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         marca: '',
         modelo: ''
       });
-      
+
       console.log('🎉 Equipo surtidor creado exitosamente');
       alert("✓ Equipo surtidor creado y seleccionado exitosamente");
     } catch (error) {
@@ -363,7 +384,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       };
 
       setEmpresasLocal([...empresasLocal, nuevaEmp]);
-      setDatosEntrega({...datosEntrega, empresa: docRef.id});
+      setDatosEntrega({ ...datosEntrega, empresa: docRef.id });
       setShowModalEmpresa(false);
       setNuevaEmpresa({
         nombre: '',
@@ -423,9 +444,13 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
       const fecha = new Date();
       const numeroReporte = `COMB-${tipoReporte.toUpperCase()}-${fecha.getFullYear()}${(fecha.getMonth() + 1).toString().padStart(2, '0')}${fecha.getDate().toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
 
+      // Obtener el número correlativo ANTES de guardar
+      const numeroGuia = await getNextGuiaNumber(empresaId);
+
       const dataToSave = {
         tipo: tipoReporte,
         numeroReporte,
+        numeroGuia,
         ...datosControl,
         fechaCreacion: new Date().toISOString(),
         creadoPor: currentUser?.email || 'unknown',
@@ -459,79 +484,89 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
         dataToSave.fechaFirma = new Date().toISOString();
       }
 
-      // ✅ FIX: ruta correcta bajo empresa
-      await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
+      // ✅ FIX: capturar el ID del reporte para guardarlo en el voucher
+      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
+      const nuevoReporteId = docRef.id;
 
       console.log('✅ Reporte guardado en Firebase');
       console.log('📝 Tipo de reporte:', tipoReporte);
 
       if (tipoReporte === 'entrega') {
-      console.log('🎯 Es una entrega, preparando modal de voucher...');
-      const projectInfo = projects?.find(p => p.id === datosControl.projectId);
-      const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
-      const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
-      const empresaInfo = { nombre: datosEntrega.empresa }; // empresa guardada como nombre
-      
-      // NUEVO: Obtener información del repartidor y equipo surtidor
-      const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
-      // ✅ FIX: buscar en equiposSurtidores (AdminPanel) primero, luego en machinesLocal
-      const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
-                                || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
-      
-      console.log('📊 Información recopilada:', {
-        projectInfo,
-        machineInfo,
-        operadorInfo,
-        empresaInfo,
-        repartidorInfo,
-        equipoSurtidorInfo
-      });
-      
-      setLastReportData({
-        reportData: {
-          ...dataToSave,
-          numeroReporte,
-          fecha: datosControl.fecha,
-          cantidadLitros: datosEntrega.cantidadLitros,
-          horometroOdometro: datosEntrega.horometroOdometro,
-          firmaReceptor,
-          firmaRepartidor
-        },
-        projectName: projectInfo?.nombre || 'N/A',
-        machineInfo: {
-          patente: machineInfo?.patente || '',
-          codigo: machineInfo?.codigo || '',
-          nombre: machineInfo?.nombre || '',
-          type: machineInfo?.type || '',      // Tipo de máquina para "Tipo Maquina"
-          code: machineInfo?.code || ''        // Código para "Maquina"
-        },
-        operadorInfo: {
-          nombre: operadorInfo?.nombre || '',
-          rut: operadorInfo?.rut || ''
-        },
-        empresaInfo: empresaInfo ? {
-          nombre: empresaInfo.nombre || '',
-          rut: empresaInfo.rut || ''
-        } : null,
-        repartidorInfo: {
-          nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
-          rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
-        },
-        equipoSurtidorInfo: equipoSurtidorInfo ? {
-          nombre: equipoSurtidorInfo.nombre || '',
-          patente: equipoSurtidorInfo.patente || '',
-          tipo: equipoSurtidorInfo.tipo || ''
-        } : null
-      });
-      
-      console.log('💾 lastReportData guardado:', lastReportData);
-      console.log('🎭 Mostrando modal de voucher...');
-      setShowVoucherModal(true);
-      resetForm();
-    } else {
-      alert(`Reporte de Entrada registrado exitosamente: ${numeroReporte}`);
-      handleClose();
-    }
+        console.log('🎯 Es una entrega, preparando modal de voucher...');
+        const projectInfo = projects?.find(p => p.id === datosControl.projectId);
+        const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
+        const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
+        const empresaIdSeleccionada = datosEntrega.empresa; // esto es el ID de Firestore
+        const empresaDoc = empresasLocal.find(e => e.id === empresaIdSeleccionada);
+        // Si no se encontró por ID, podría ser un nombre directo (legacy)
+        const empresaInfo = empresaDoc
+          ? { nombre: empresaDoc.nombre || '', rut: empresaDoc.rut || '' }
+          : empresaIdSeleccionada
+            ? { nombre: empresaIdSeleccionada, rut: '' }
+            : null;
+        console.log('🏢 empresaInfo para voucher:', empresaInfo);
+
+        // NUEVO: Obtener información del repartidor y equipo surtidor
+        const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
+        // ✅ FIX: buscar en equiposSurtidores (AdminPanel) primero, luego en machinesLocal
+        const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
+          || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
+
+        console.log('📊 Información recopilada:', {
+          projectInfo,
+          machineInfo,
+          operadorInfo,
+          empresaInfo,
+          repartidorInfo,
+          equipoSurtidorInfo
+        });
+
+        setLastReportData({
+          reportData: {
+            ...dataToSave,
+            numeroReporte,
+            fecha: datosControl.fecha,
+            cantidadLitros: datosEntrega.cantidadLitros,
+            horometroOdometro: datosEntrega.horometroOdometro,
+            firmaReceptor,
+            firmaRepartidor
+          },
+          reporteId: nuevoReporteId,
+          projectName: projectInfo?.nombre || 'N/A',
+          machineInfo: {
+            patente: machineInfo?.patente || '',
+            codigo: machineInfo?.codigo || '',
+            nombre: machineInfo?.nombre || '',
+            type: machineInfo?.type || '',
+            code: machineInfo?.code || ''
+          },
+          operadorInfo: {
+            nombre: operadorInfo?.nombre || '',
+            rut: operadorInfo?.rut || ''
+          },
+          empresaInfo: empresaInfo ? {
+            nombre: empresaInfo.nombre || '',
+            rut: empresaInfo.rut || ''
+          } : null,
+          repartidorInfo: {
+            nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
+            rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
+          },
+          equipoSurtidorInfo: equipoSurtidorInfo ? {
+            nombre: equipoSurtidorInfo.nombre || '',
+            patente: equipoSurtidorInfo.patente || '',
+            tipo: equipoSurtidorInfo.tipo || ''
+          } : null
+        });
+
+        console.log('💾 lastReportData guardado:', lastReportData);
+        console.log('🎭 Mostrando modal de voucher...');
+        setShowVoucherModal(true);
+        resetForm();
+      } else {
+        alert(`Reporte de Entrada registrado exitosamente: ${numeroReporte}`);
+        handleClose();
+      }
     } catch (error) {
       console.error("Error guardando reporte:", error);
       alert("Error al guardar el reporte");
@@ -616,7 +651,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <select
                     required
                     value={datosControl.projectId}
-                    onChange={(e) => { setDatosControl({...datosControl, projectId: e.target.value, origen: ''}); cargarEstaciones(e.target.value); }}
+                    onChange={(e) => { setDatosControl({ ...datosControl, projectId: e.target.value, origen: '' }); cargarEstaciones(e.target.value); }}
                     className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
                   >
                     <option value="">Seleccione obra</option>
@@ -634,7 +669,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="date"
                     required
                     value={datosControl.fecha}
-                    onChange={(e) => setDatosControl({...datosControl, fecha: e.target.value})}
+                    onChange={(e) => setDatosControl({ ...datosControl, fecha: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
                     max={new Date().toISOString().split('T')[0]}
                   />
@@ -643,7 +678,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
 
               <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
                 <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -715,13 +750,13 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                       Equipo Surtidor (Camión/Mochila)
-                      {!isAdmin 
-                    }
+                      {!isAdmin
+                      }
                     </label>
                     <div className="flex gap-2">
                       <select
                         value={datosControl.equipoSurtidorId}
-                        onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
+                        onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
                         className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                       >
                         <option value="">Seleccione equipo surtidor</option>
@@ -761,7 +796,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold rounded-xl transition-all text-sm"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                   </svg>
                   Ver Vouchers del Día
                 </button>
@@ -865,7 +900,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <select
                     required
                     value={datosEntrada.tipoOrigen}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, tipoOrigen: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, tipoOrigen: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                   >
                     <option value="">Seleccione tipo</option>
@@ -879,12 +914,12 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Origen
                     {!isAdmin
-                  }
+                    }
                   </label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrada.origen}
-                      onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
+                      onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
                       className="flex-1 px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                     >
                       <option value="">
@@ -894,15 +929,15 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       </option>
                       {datosEntrada.tipoOrigen === 'estacion'
                         ? estacionesLocal.map(est => (
-                            <option key={est.id} value={est.id}>
-                              {(est.marca ? est.marca + ' - ' : '') + est.nombre + (est.ciudad ? ' (' + est.ciudad + ')' : '')}
-                            </option>
-                          ))
+                          <option key={est.id} value={est.id}>
+                            {(est.marca ? est.marca + ' - ' : '') + est.nombre + (est.ciudad ? ' (' + est.ciudad + ')' : '')}
+                          </option>
+                        ))
                         : empresasLocal.map(emp => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.nombre + (emp.rut ? ' - ' + emp.rut : '')}
-                            </option>
-                          ))
+                          <option key={emp.id} value={emp.id}>
+                            {emp.nombre + (emp.rut ? ' - ' + emp.rut : '')}
+                          </option>
+                        ))
                       }
                     </select>
                     {isAdmin && (
@@ -921,11 +956,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 {/* Número de Documento (Guía o Vale según tipo) */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
-                    {datosEntrada.tipoOrigen === 'estacion' 
-                      ? 'N° de Guía' 
-                      : datosEntrada.tipoOrigen === 'estanque' 
-                      ? 'N° de Vale' 
-                      : 'N° de Documento'} <span className="text-red-500">*</span>
+                    {datosEntrada.tipoOrigen === 'estacion'
+                      ? 'N° de Guía'
+                      : datosEntrada.tipoOrigen === 'estanque'
+                        ? 'N° de Vale'
+                        : 'N° de Documento'} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -933,14 +968,14 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     min="1"
                     step="1"
                     value={datosEntrada.numeroDocumento}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value.replace(/[^0-9]/g, '')})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, numeroDocumento: e.target.value.replace(/[^0-9]/g, '') })}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                     placeholder={
-                      datosEntrada.tipoOrigen === 'estacion' 
-                        ? 'Ej: 12345' 
+                      datosEntrada.tipoOrigen === 'estacion'
+                        ? 'Ej: 12345'
                         : datosEntrada.tipoOrigen === 'estanque'
-                        ? 'Ej: 001'
-                        : 'Número de documento'
+                          ? 'Ej: 001'
+                          : 'Número de documento'
                     }
                   />
                 </div>
@@ -954,7 +989,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     type="date"
                     required
                     value={datosEntrada.fechaDocumento}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, fechaDocumento: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, fechaDocumento: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                   />
                 </div>
@@ -970,7 +1005,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     min="0"
                     step="0.01"
                     value={datosEntrada.cantidad}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, cantidad: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, cantidad: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500"
                     placeholder="Ej: 5000"
                   />
@@ -1007,7 +1042,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   </label>
                   <textarea
                     value={datosEntrada.observaciones}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, observaciones: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, observaciones: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px]"
                     placeholder="Notas adicionales..."
                   />
@@ -1019,13 +1054,13 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <label className="block text-sm font-bold text-slate-700 mb-3">
                   Firma del Repartidor de Combustible <span className="text-red-500">*</span>
                 </label>
-                
+
                 {firmaRepartidor ? (
                   <div className="relative">
                     <div className="border-2 border-green-500 rounded-xl p-4 bg-green-50">
-                      <img 
-                        src={firmaRepartidor} 
-                        alt="Firma del repartidor" 
+                      <img
+                        src={firmaRepartidor}
+                        alt="Firma del repartidor"
                         className="max-h-32 mx-auto"
                       />
                       <div className="flex justify-center gap-2 mt-3">
@@ -1093,13 +1128,13 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Empresa
                     {!isAdmin
-                  }
+                    }
                   </label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrega.empresa}
                       onChange={(e) => {
-                        setDatosEntrega({...datosEntrega, empresa: e.target.value, operadorId: '', machineId: ''});
+                        setDatosEntrega({ ...datosEntrega, empresa: e.target.value, operadorId: '', machineId: '' });
                         setOperadorExterno({ nombre: '', rut: '' });
                         setMaquinaExterna({ patente: '', tipo: '', modelo: '' });
                         setSearchOperador('');
@@ -1108,14 +1143,16 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     >
                       <option value="">Seleccione empresa</option>
-                      {EMPRESAS_SISTEMA.map(emp => (
-                        <option key={emp} value={emp}>{emp}</option>
+                      {empresasLocal.map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                       ))}
                     </select>
                   </div>
                   {datosEntrega.empresa && (() => {
-                    const nOps  = (empleados||[]).filter(e => e.empresa === datosEntrega.empresa).length;
-                    const nMaq  = (machines||[]).filter(m => m.empresa === datosEntrega.empresa).length;
+                    const empDoc = empresasLocal.find(e => e.id === datosEntrega.empresa);
+                    const nombreEmpresa = empDoc ? empDoc.nombre : datosEntrega.empresa;
+                    const nOps = (empleados || []).filter(e => e.empresa === nombreEmpresa).length;
+                    const nMaq = (machines || []).filter(m => m.empresa === nombreEmpresa).length;
                     return (nOps > 0 || nMaq > 0) ? (
                       <p className="text-xs text-blue-500 mt-1.5 font-medium">
                         {nOps} operador{nOps !== 1 ? 'es' : ''} · {nMaq} máquina{nMaq !== 1 ? 's' : ''} registradas
@@ -1135,7 +1172,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="date"
                     value={datosEntrega.fecha}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, fecha: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, fecha: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     max={new Date().toISOString().split('T')[0]}
                   />
@@ -1151,11 +1188,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <>
                       <div className="relative mb-2">
                         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                         </svg>
                         <input type="text" placeholder="Buscar operador..." value={searchOperador}
                           onChange={e => setSearchOperador(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       </div>
                       {datosEntrega.operadorId && (() => {
                         const sel = empleados.find(e => e.id === datosEntrega.operadorId);
@@ -1168,9 +1205,9 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.nombre}</div>
                               <div className="text-xs text-slate-500">{sel.rut || 'Sin RUT'}</div>
                             </div>
-                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, operadorId: ''}); setSearchOperador(''); }}
+                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: '' }); setSearchOperador(''); }}
                               className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           </div>
                         ) : null;
@@ -1178,13 +1215,17 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                       {!datosEntrega.operadorId && (
                         <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
                           {(empleados || [])
-                            .filter(emp => !datosEntrega.empresa || emp.empresa === datosEntrega.empresa)
+                            .filter(emp => {
+                              if (!datosEntrega.empresa) return true;
+                              const nombreEmpresa = resolverNombreEmpresa(datosEntrega.empresa);
+                              return empresasMatch(emp.empresa, nombreEmpresa);
+                            })
                             .filter(emp => !searchOperador ||
                               emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
                               emp.rut?.includes(searchOperador))
                             .map(emp => (
                               <button key={emp.id} type="button"
-                                onClick={() => { setDatosEntrega({...datosEntrega, operadorId: emp.id}); setSearchOperador(''); }}
+                                onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: emp.id }); setSearchOperador(''); }}
                                 className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
                                 <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">
                                   {emp.nombre?.charAt(0).toUpperCase()}
@@ -1202,12 +1243,12 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <div className="space-y-2">
                       <input type="text" placeholder="Nombre completo *"
                         value={operadorExterno.nombre}
-                        onChange={e => setOperadorExterno({...operadorExterno, nombre: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setOperadorExterno({ ...operadorExterno, nombre: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="RUT (ej: 12.345.678-9)"
                         value={operadorExterno.rut}
-                        onChange={e => setOperadorExterno({...operadorExterno, rut: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setOperadorExterno({ ...operadorExterno, rut: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                     </div>
                   ) : (
                     <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
@@ -1226,11 +1267,11 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <>
                       <div className="relative mb-2">
                         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                         </svg>
                         <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
                           onChange={e => setSearchMaquina(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       </div>
                       {datosEntrega.machineId && (() => {
                         const sel = (machinesLocal || machines || []).find(m => m.id === datosEntrega.machineId);
@@ -1238,16 +1279,16 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                           <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
                             <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
                               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.patente || sel.code}</div>
                               <div className="text-xs text-slate-500 truncate">{sel.name}</div>
                             </div>
-                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, machineId: ''}); setSearchMaquina(''); }}
+                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: '' }); setSearchMaquina(''); }}
                               className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           </div>
                         ) : null;
@@ -1256,18 +1297,22 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                         <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
                           {(machines || [])
                             .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
-                            .filter(m => !datosEntrega.empresa || m.empresa === datosEntrega.empresa)
+                            .filter(m => {
+                              if (!datosEntrega.empresa) return true;
+                              const nombreEmpresa = resolverNombreEmpresa(datosEntrega.empresa);
+                              return empresasMatch(m.empresa, nombreEmpresa);
+                            })
                             .filter(m => !searchMaquina ||
                               m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
                               m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
                               m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
                             .map(m => (
                               <button key={m.id} type="button"
-                                onClick={() => { setDatosEntrega({...datosEntrega, machineId: m.id}); setSearchMaquina(''); }}
+                                onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: m.id }); setSearchMaquina(''); }}
                                 className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
                                 <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
                                   <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
                                   </svg>
                                 </div>
                                 <div className="min-w-0">
@@ -1283,16 +1328,16 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     <div className="space-y-2">
                       <input type="text" placeholder="Patente *"
                         value={maquinaExterna.patente}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, patente: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
                         value={maquinaExterna.tipo}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, tipo: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="Modelo (ej: Caterpillar 320)"
                         value={maquinaExterna.modelo}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, modelo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, modelo: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                     </div>
                   ) : (
                     <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
@@ -1310,7 +1355,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     min="0"
                     step="0.1"
                     value={datosEntrega.horometroOdometro}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, horometroOdometro: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, horometroOdometro: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     placeholder="Ej: 1234.5"
                   />
@@ -1326,7 +1371,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                     min="0"
                     step="0.01"
                     value={datosEntrega.cantidadLitros}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, cantidadLitros: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, cantidadLitros: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                     placeholder="Ej: 150.50"
                   />
@@ -1338,7 +1383,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   </label>
                   <textarea
                     value={datosEntrega.observaciones}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, observaciones: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, observaciones: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px]"
                     placeholder="Notas adicionales..."
                   />
@@ -1350,13 +1395,13 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <label className="block text-sm font-bold text-slate-700 mb-3">
                   Firma del Receptor de Combustible <span className="text-red-500">*</span>
                 </label>
-                
+
                 {firmaReceptor ? (
                   <div className="relative">
                     <div className="border-2 border-blue-500 rounded-xl p-4 bg-blue-50">
-                      <img 
-                        src={firmaReceptor} 
-                        alt="Firma del receptor" 
+                      <img
+                        src={firmaReceptor}
+                        alt="Firma del receptor"
                         className="max-h-32 mx-auto"
                       />
                       <div className="flex justify-center gap-2 mt-3">
@@ -1430,7 +1475,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.patente}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase()})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase() })}
                     className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                     placeholder="Ej: AABB01"
                   />
@@ -1442,7 +1487,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.nombre}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, nombre: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, nombre: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                     placeholder="Ej: Camión Combustible"
                   />
@@ -1454,7 +1499,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.tipo}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, tipo: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, tipo: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                     placeholder="Ej: Camión, Mochila"
                   />
@@ -1466,7 +1511,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.marca}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, marca: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, marca: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                     placeholder="Ej: Mercedes Benz"
                   />
@@ -1478,7 +1523,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.modelo}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, modelo: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, modelo: e.target.value })}
                     className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
                     placeholder="Ej: Actros 2644"
                   />
@@ -1529,7 +1574,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <input
                   type="text"
                   value={nuevaEmpresa.nombre}
-                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, nombre: e.target.value})}
+                  onChange={(e) => setNuevaEmpresa({ ...nuevaEmpresa, nombre: e.target.value })}
                   className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                   placeholder="Ej: Constructora ABC Ltda."
                 />
@@ -1541,7 +1586,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 <input
                   type="text"
                   value={nuevaEmpresa.rut}
-                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, rut: e.target.value})}
+                  onChange={(e) => setNuevaEmpresa({ ...nuevaEmpresa, rut: e.target.value })}
                   className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
                   placeholder="Ej: 76.123.456-7"
                 />
@@ -1593,7 +1638,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
+              <SignaturePad
                 label=""
                 color="green"
                 onSave={(signatureData) => {
@@ -1602,19 +1647,19 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
                 }}
               />
               {showVoucherModal && lastReportData && (
-              <VoucherGenerator
-                reportData={lastReportData.reportData}
-                projectName={lastReportData.projectName}
-                machineInfo={lastReportData.machineInfo}
-                operadorInfo={lastReportData.operadorInfo}
-                empresaInfo={lastReportData.empresaInfo}
-                onClose={() => {
-                  setShowVoucherModal(false);
-                  setLastReportData(null);
-                  onClose();
-                }}
-            />
-          )}
+                <VoucherGenerator
+                  reportData={lastReportData.reportData}
+                  projectName={lastReportData.projectName}
+                  machineInfo={lastReportData.machineInfo}
+                  operadorInfo={lastReportData.operadorInfo}
+                  empresaInfo={lastReportData.empresaInfo}
+                  onClose={() => {
+                    setShowVoucherModal(false);
+                    setLastReportData(null);
+                    onClose();
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1641,7 +1686,7 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
+              <SignaturePad
                 label=""
                 color="blue"
                 onSave={(signatureData) => {
@@ -1664,6 +1709,8 @@ export default function CombustibleModal({ isOpen, onClose, projects, machines, 
           empresaInfo={lastReportData.empresaInfo}
           repartidorInfo={lastReportData.repartidorInfo}
           equipoSurtidorInfo={lastReportData.equipoSurtidorInfo}
+          reporteId={lastReportData.reporteId}
+          empresaId={empresaId}
           onClose={() => {
             setShowVoucherModal(false);
             setLastReportData(null);

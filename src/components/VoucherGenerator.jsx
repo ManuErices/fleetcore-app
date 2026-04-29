@@ -7,7 +7,7 @@ import { db } from '../lib/firebase';
  * Componente para generar e imprimir voucher térmico de entrega de combustible
  * Optimizado para impresoras térmicas de 58mm
  */
-export default function VoucherGenerator({ 
+export default function VoucherGenerator({
   reportData,
   projectName,
   machineInfo,
@@ -16,25 +16,32 @@ export default function VoucherGenerator({
   repartidorInfo,
   equipoSurtidorInfo,
   reporteId,
-  onClose 
+  empresaId,
+  onClose
 }) {
   const [printing, setPrinting] = React.useState(false);
-  const [numeroGuia, setNumeroGuia] = React.useState(null);
+  const [numeroGuia, setNumeroGuia] = React.useState(reportData?.numeroGuia || null);
 
-  // Obtener número de guía al cargar el componente
+  // Si el reporte ya tiene número de guía, mostrarlo. Si no, se generará al imprimir.
   React.useEffect(() => {
-    const fetchNumeroGuia = async () => {
-      const nextNumber = await getNextGuiaNumber();
-      setNumeroGuia(nextNumber);
-      console.log('📋 Número de guía asignado:', nextNumber);
-    };
-    fetchNumeroGuia();
-  }, []);
+    if (reportData?.numeroGuia) {
+      setNumeroGuia(reportData.numeroGuia);
+      console.log('📋 Número de guía existente:', reportData.numeroGuia);
+    }
+  }, [reportData?.numeroGuia]);
 
   const handlePrintVoucher = async () => {
     try {
       setPrinting(true);
-      
+
+      // Generar número de guía SOLO al momento de imprimir, si no hay uno ya
+      let guiaNum = numeroGuia;
+      if (!guiaNum) {
+        guiaNum = await getNextGuiaNumber(empresaId);
+        setNumeroGuia(guiaNum);
+        console.log('📋 Número de guía generado al imprimir:', guiaNum);
+      }
+
       // Imprimir voucher térmico con número correlativo
       printThermalVoucher({
         reportData,
@@ -44,24 +51,27 @@ export default function VoucherGenerator({
         empresaInfo,
         repartidorInfo,
         equipoSurtidorInfo,
-        numeroGuiaCorrelativo: numeroGuia
+        numeroGuiaCorrelativo: guiaNum
       });
 
-      // Guardar numeroGuia en el reporte de Firebase
-      if (reporteId && numeroGuia) {
+      // Guardar numeroGuia en el reporte de Firebase con la ruta CORRECTA
+      if (reporteId && guiaNum && empresaId) {
         try {
-          await updateDoc(doc(db, 'reportes_combustible', reporteId), {
-            numeroGuia: numeroGuia
+          await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', reporteId), {
+            numeroGuia: guiaNum
           });
-          console.log('✅ numeroGuia guardado en reporte:', reporteId);
+          console.log('✅ numeroGuia guardado en reporte:', reporteId, '→', guiaNum);
         } catch (err) {
           console.error('⚠️ No se pudo guardar numeroGuia:', err);
         }
+      } else {
+        console.warn('⚠️ Falta reporteId o empresaId para guardar numeroGuia:', { reporteId, empresaId, guiaNum });
       }
 
-      alert(`✅ Voucher N° ${numeroGuia.toString().padStart(3, '0')} enviado a impresión`);
+      // Opcional: mostrar un toast o mensaje en la UI en lugar de un alert
+      // alert(`✅ Voucher N° ${guiaNum.toString().padStart(3, '0')} enviado a impresión`);
       setPrinting(false);
-      
+
     } catch (error) {
       console.error('Error imprimiendo voucher:', error);
       alert('❌ Error al imprimir el voucher: ' + error.message);
@@ -71,7 +81,7 @@ export default function VoucherGenerator({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col" style={{maxHeight:"95dvh"}}>
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col" style={{ maxHeight: "95dvh" }}>
         {/* Header */}
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 rounded-t-3xl sm:rounded-t-2xl">
           <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-3"></div>

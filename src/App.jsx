@@ -80,21 +80,21 @@ function RRHHShell({ user, onLogout, onBackToSelector }) {
 // Reportes Shell
 // ============================================================
 function ReportesShell({ user, onLogout, onBackToSelector }) {
-  const [activeView,   setActiveView]   = useState('maquinaria');
-  const [userRole,     setUserRole]     = useState(null);
+  const [activeView, setActiveView] = useState('combustible');
+  const [userRole, setUserRole] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     getDoc(doc(db, 'users', user.uid))
       .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'administrativo'); })
-      .catch(() => {});
+      .catch(() => { });
   }, [user]);
 
   const navItems = [
-    { id: 'maquinaria',  label: 'Reporte Maquinaria' },
     { id: 'combustible', label: 'Reporte Combustible' },
-    ...(['superadmin','admin_contrato'].includes(userRole) ? [{ id: 'admin', label: 'Administración' }] : []),
+    { id: 'maquinaria', label: 'Reporte Maquinaria' },
+    ...(['superadmin', 'admin_contrato'].includes(userRole) ? [{ id: 'admin', label: 'Administración' }] : []),
   ];
   const ROLE_LABELS = {
     superadmin: 'Super Admin', admin_contrato: 'Admin Contrato',
@@ -172,7 +172,7 @@ function ReportesShell({ user, onLogout, onBackToSelector }) {
               </button>
             ))}
           </nav>
-          <div className="lg:hidden flex gap-1 py-2 overflow-x-auto" style={{scrollbarWidth:'none'}}>
+          <div className="lg:hidden flex gap-1 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => setActiveView(item.id)}
                 className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeView === item.id ? 'bg-teal-600 text-white shadow' : 'text-slate-600 bg-white border border-slate-200'}`}>
@@ -183,9 +183,9 @@ function ReportesShell({ user, onLogout, onBackToSelector }) {
         </div>
       </header>
       <main className="max-w-[1400px] mx-auto">
-        {activeView === 'maquinaria'  && <ReporteWorkFleet />}
         {activeView === 'combustible' && <ReporteCombustible />}
-        {activeView === 'admin'       && ['superadmin','admin_contrato'].includes(userRole) && <AdminPanel />}
+        {activeView === 'maquinaria' && <ReporteWorkFleet />}
+        {activeView === 'admin' && ['superadmin', 'admin_contrato'].includes(userRole) && <AdminPanel />}
       </main>
     </div>
   );
@@ -195,12 +195,12 @@ function ReportesShell({ user, onLogout, onBackToSelector }) {
 // Shell principal (FleetCore)
 // ============================================================
 function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing }) {
-  const [showUserMenu,       setShowUserMenu]       = useState(false);
-  const [showCostsMenu,      setShowCostsMenu]      = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
-  const [showAdminMenu,      setShowAdminMenu]      = useState(false);
-  const [showMobileMenu,     setShowMobileMenu]     = useState(false);
-  const [userRole,           setUserRole]           = useState('operador');
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [userRole, setUserRole] = useState('operador');
 
   // NUEVO: datos del plan activo
   const { planData, status, isActive } = usePlan();
@@ -209,7 +209,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
     if (!user) return;
     getDoc(doc(db, 'users', user.uid))
       .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'operador'); })
-      .catch(() => {});
+      .catch(() => { });
   }, [user]);
 
   return (
@@ -309,7 +309,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             {/* Maquinaria dropdown */}
             <div className="relative">
               <button
-                onClick={() => { if (!['mandante'].includes(userRole)) { setShowProductionMenu(!showProductionMenu); setShowCostsMenu(false); }}}
+                onClick={() => { if (!['mandante'].includes(userRole)) { setShowProductionMenu(!showProductionMenu); setShowCostsMenu(false); } }}
                 disabled={userRole === 'mandante'}
                 className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
@@ -323,10 +323,10 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                   <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
                     <div className="p-2 space-y-1">
                       {[
-                        { to: "/machines",  label: "Equipos",        colors: "from-blue-50 to-cyan-50 text-blue-700",     icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
-                        { to: "/logs",      label: "Diario de Obra", colors: "from-green-50 to-emerald-50 text-green-700", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
-                        { to: "/calendar",  label: "Calendario",     colors: "from-purple-50 to-pink-50 text-purple-700",  icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
-                        { to: "/fuel",      label: "Combustible",    colors: "from-orange-50 to-amber-50 text-orange-700", icon: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
+                        { to: "/machines", label: "Equipos", colors: "from-blue-50 to-cyan-50 text-blue-700", icon: "M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" },
+                        { to: "/logs", label: "Diario de Obra", colors: "from-green-50 to-emerald-50 text-green-700", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+                        { to: "/calendar", label: "Calendario", colors: "from-purple-50 to-pink-50 text-purple-700", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+                        { to: "/fuel", label: "Combustible", colors: "from-orange-50 to-amber-50 text-orange-700", icon: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
                       ].map(item => (
                         <NavLink key={item.to} to={item.to} onClick={() => setShowProductionMenu(false)}
                           className={({ isActive }) => `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${isActive ? `bg-gradient-to-r ${item.colors}` : `text-slate-900 hover:bg-gradient-to-r hover:${item.colors}`}`}>
@@ -343,7 +343,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             {/* Control de Producción dropdown */}
             <div className="relative">
               <button
-                onClick={() => { if (!['mandante'].includes(userRole)) { setShowCostsMenu(!showCostsMenu); setShowProductionMenu(false); }}}
+                onClick={() => { if (!['mandante'].includes(userRole)) { setShowCostsMenu(!showCostsMenu); setShowProductionMenu(false); } }}
                 disabled={userRole === 'mandante'}
                 className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
               >
@@ -357,14 +357,14 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                   <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
                     <div className="p-2 space-y-1">
                       {[
-                        { to: "/payroll",          label: "Registro Diario",       colors: "from-emerald-50 to-teal-50 text-emerald-700",   icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
-                        { to: "/reporte-workfleet", label: "Equipos y Servicios",  colors: "from-blue-50 to-cyan-50 text-blue-700",          icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
-                        { to: "/consolidado",       label: "Detalle Flota",        colors: "from-indigo-50 to-blue-50 text-indigo-700",      icon: "M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" },
-                        { to: "/payment-status",    label: "Estado de Pago",       colors: "from-violet-50 to-purple-50 text-violet-700",    icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
-                        { to: "/rendiciones",       label: "Rendiciones",          colors: "from-amber-50 to-yellow-50 text-amber-700",      icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
-                        { to: "/pasajes",           label: "Pasajes",              colors: "from-sky-50 to-blue-50 text-sky-700",            icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
-                        { to: "/subcontratos",      label: "Subcontratos",         colors: "from-teal-50 to-cyan-50 text-teal-700",          icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
-                        { to: "/oc",                label: "Órdenes de Compra",    colors: "from-rose-50 to-pink-50 text-rose-700",          icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+                        { to: "/payroll", label: "Registro Diario", colors: "from-emerald-50 to-teal-50 text-emerald-700", icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
+                        { to: "/reporte-workfleet", label: "Equipos y Servicios", colors: "from-blue-50 to-cyan-50 text-blue-700", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
+                        { to: "/consolidado", label: "Detalle Flota", colors: "from-indigo-50 to-blue-50 text-indigo-700", icon: "M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" },
+                        { to: "/payment-status", label: "Estado de Pago", colors: "from-violet-50 to-purple-50 text-violet-700", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
+                        { to: "/rendiciones", label: "Rendiciones", colors: "from-amber-50 to-yellow-50 text-amber-700", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
+                        { to: "/pasajes", label: "Pasajes", colors: "from-sky-50 to-blue-50 text-sky-700", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
+                        { to: "/subcontratos", label: "Subcontratos", colors: "from-teal-50 to-cyan-50 text-teal-700", icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
+                        { to: "/oc", label: "Órdenes de Compra", colors: "from-rose-50 to-pink-50 text-rose-700", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
                       ].map(item => (
                         <NavLink key={item.to} to={item.to} onClick={() => setShowCostsMenu(false)}
                           className={({ isActive }) => `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${isActive ? `bg-gradient-to-r ${item.colors}` : `text-slate-900 hover:bg-gradient-to-r hover:${item.colors}`}`}>
@@ -379,7 +379,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             </div>
 
             <NavTab to="/fuel-price" label="Combustible" locked={userRole === 'mandante'} />
-            
+
           </nav>
         </div>
 
@@ -388,7 +388,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
           <>
             <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
             <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{background:'linear-gradient(135deg,#2A3F5F 0%,#0F1C2E 100%)'}}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{ background: 'linear-gradient(135deg,#2A3F5F 0%,#0F1C2E 100%)' }}>
                 <div className="flex items-center gap-3">
                   <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
                   <h2 className="text-base font-black text-white">Menú</h2>
@@ -403,22 +403,22 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                 <MobileNavLink to="/" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
                 <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Producción</div>
-                <MobileNavLink to="/machines"           label="Equipos"             onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/logs"               label="Diario de Obra"      onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/calendar"           label="Calendario"          onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fuel"               label="Combustible"         onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/reporte-detallado"  label="Reporte Detallado"   onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/machines" label="Equipos" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/logs" label="Diario de Obra" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/calendar" label="Calendario" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/fuel" label="Combustible" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/reporte-detallado" label="Reporte Detallado" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
                 <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Costos</div>
-                <MobileNavLink to="/payroll"            label="Remuneraciones"      onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/payment-status"     label="Estados de Pago"     onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/rendiciones"        label="Rendiciones"         onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/subcontratos"       label="Subcontratos"        onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/oc"                 label="Órdenes de Compra"   onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/consolidado"        label="Consolidado Total"   onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/payroll" label="Remuneraciones" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/payment-status" label="Estados de Pago" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/rendiciones" label="Rendiciones" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/subcontratos" label="Subcontratos" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/oc" label="Órdenes de Compra" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/consolidado" label="Consolidado Total" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
                 <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Configuración</div>
-                <MobileNavLink to="/fuel-price"         label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
+                <MobileNavLink to="/fuel-price" label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
                 {/* NUEVO: link a pricing en mobile */}
                 <button
@@ -441,23 +441,23 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
           <Route path="/reporte-workfleet" element={<ReporteWorkFleet />} />
           {!['mandante'].includes(userRole) ? (
             <>
-              <Route path="/"                    element={<Dashboard />} />
-              <Route path="/logs"                element={<Logs />} />
-              <Route path="/calendar"            element={<MonthlyCalendar />} />
-              <Route path="/fuel"                element={<Fuel />} />
-              <Route path="/payroll"             element={<Payroll />} />
-              <Route path="/oc"                  element={<OC />} />
-              <Route path="/consolidado"         element={<Consolidado />} />
-              <Route path="/machines"            element={<Machines />} />
-              <Route path="/rendiciones"         element={<Rendiciones />} />
-              <Route path="/pasajes"             element={<Pasajes />} />
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/logs" element={<Logs />} />
+              <Route path="/calendar" element={<MonthlyCalendar />} />
+              <Route path="/fuel" element={<Fuel />} />
+              <Route path="/payroll" element={<Payroll />} />
+              <Route path="/oc" element={<OC />} />
+              <Route path="/consolidado" element={<Consolidado />} />
+              <Route path="/machines" element={<Machines />} />
+              <Route path="/rendiciones" element={<Rendiciones />} />
+              <Route path="/pasajes" element={<Pasajes />} />
               <Route path="/reporte-combustible" element={<ReporteCombustible />} />
-              <Route path="/payment-status"      element={<PaymentStatus />} />
-              <Route path="/fuel-price"          element={<FuelPriceManager />} />
-              <Route path="/subcontratos"        element={<Subcontratos />} />
-              <Route path="/reporte-detallado"   element={<ReportDetallado />} />
-              {['superadmin','admin_contrato'].includes(userRole) && <Route path="/admin" element={<AdminPanel />} />}
-              {['superadmin'].includes(userRole) && <Route path="/rrhh"  element={<RRHH />} />}
+              <Route path="/payment-status" element={<PaymentStatus />} />
+              <Route path="/fuel-price" element={<FuelPriceManager />} />
+              <Route path="/subcontratos" element={<Subcontratos />} />
+              <Route path="/reporte-detallado" element={<ReportDetallado />} />
+              {['superadmin', 'admin_contrato'].includes(userRole) && <Route path="/admin" element={<AdminPanel />} />}
+              {['superadmin'].includes(userRole) && <Route path="/rrhh" element={<RRHH />} />}
             </>
           ) : (
             <Route path="*" element={<Navigate to="/reporte-workfleet" replace />} />
@@ -519,10 +519,10 @@ function MobileNavLink({ to, label, onClick }) {
 // App root
 // ============================================================
 export default function App() {
-  const [user,        setUser]        = useState(null);
-  const [loading,     setLoading]     = useState(true);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
-  const [needsSetup,  setNeedsSetup]  = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   // ✅ FIX: interceptaciones ANTES del useEffect pero usando variables,
   // no returns condicionales que violan reglas de hooks

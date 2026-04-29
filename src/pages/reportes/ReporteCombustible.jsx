@@ -8,7 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import CombustibleDetalleModal from "../../components/CombustibleDetalleModal";
 import CombustibleModal from "../../components/CombustibleModal";
-import { printThermalVoucher } from "../../utils/voucherThermalGenerator";
+import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 
 export default function ReporteCombustible() {
   const { empresaId } = useEmpresa();
@@ -25,7 +25,7 @@ export default function ReporteCombustible() {
   const ITEMS_POR_PAGINA = 10;
   const [reporteDetalle, setReporteDetalle] = useState(null);
   const [empresas, setEmpresas] = useState([]);
-  
+
   // Filtros
   const [filtros, setFiltros] = useState({
     fechaInicio: '',
@@ -47,7 +47,7 @@ export default function ReporteCombustible() {
         try {
           const userDocRef = doc(db, 'users', user.uid);
           const userDoc = await getDoc(userDocRef);
-          
+
           if (userDoc.exists()) {
             const userData = userDoc.data();
             setUserRole(userData.role || 'operador');
@@ -126,12 +126,14 @@ export default function ReporteCombustible() {
           id: doc.id,
           ...doc.data()
         }));
+        console.log("reportes data:", reportesData);
+
         setReportes(reportesData);
 
         // Extraer surtidores únicos
         const surtidoresUnicos = [...new Set(reportesData.map(r => r.repartidorId).filter(Boolean))];
         setSurtidores(surtidoresUnicos);
-        
+
         setLoading(false);
       } catch (error) {
         console.error("Error cargando reportes:", error);
@@ -201,11 +203,11 @@ export default function ReporteCombustible() {
     return resultado.map(r => {
       const project = projects.find(p => p.id === r.projectId);
       const repartidor = empleados.find(e => e.id === r.repartidorId);
-      
+
       let machine = null;
       let operador = null;
       let cantidad = 0;
-      
+
       if (r.tipo === 'entrada' && r.datosEntrada) {
         cantidad = r.datosEntrada.cantidad || 0;
       } else if (r.tipo === 'entrega' && r.datosEntrega) {
@@ -213,7 +215,7 @@ export default function ReporteCombustible() {
         operador = empleados.find(e => e.id === r.datosEntrega.operadorId);
         cantidad = r.datosEntrega.cantidadLitros || 0;
       }
-      
+
       const empresaIdLocal = r.datosEntrega?.empresa;
       const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
       const empresaNombre = empresaInfoFirebase?.nombre || empresaIdLocal || '';
@@ -232,7 +234,7 @@ export default function ReporteCombustible() {
         tipo: r.tipo || 'entrada'
       };
     });
-  }, [filtros, reportes, projects, machines, empleados]);
+  }, [filtros, reportes, projects, machines, empleados, empresas]);
 
   const handleEliminar = async (id) => {
     if (!window.confirm("¿Estás seguro de eliminar este reporte?")) return;
@@ -240,10 +242,10 @@ export default function ReporteCombustible() {
     try {
       setLoading(true);
       await deleteDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', id));
-      
+
       // Recargar usando la función
       await handleRecargarReportes();
-      
+
       alert("Reporte eliminado");
       setLoading(false);
     } catch (error) {
@@ -254,7 +256,7 @@ export default function ReporteCombustible() {
   };
 
   const toggleReporteSeleccionado = (id) => {
-    setReportesSeleccionados(prev => 
+    setReportesSeleccionados(prev =>
       prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
     );
   };
@@ -267,11 +269,10 @@ export default function ReporteCombustible() {
     }
   };
 
-  const handleReimprimirVoucher = (reporte) => {
+  const handleReimprimirVoucher = async (reporte) => {
     const project = projects.find(p => p.id === reporte.projectId);
     const machineId = reporte.datosEntrega?.machineId;
     const operadorId = reporte.datosEntrega?.operadorId;
-    // ✅ FIX: definir machineInfo y operadorInfo que faltaban
     const machineInfo = machines.find(m => m.id === machineId) || {
       patente: reporte.datosEntrega?.machinePatente || reporte.machinePatente || '',
       code: reporte.datosEntrega?.machineCode || '',
@@ -284,15 +285,32 @@ export default function ReporteCombustible() {
       rut: reporte.datosEntrega?.operadorExterno?.rut || reporte.operadorRut || ''
     };
     const empresaIdLocal = reporte.datosEntrega?.empresa;
-    // empresa puede ser un nombre string (nuevo) o un ID de Firebase (legado)
+    // empresa puede ser ID de Firebase o nombre string directo
     const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
+    // RUT: buscar en Firebase primero, luego en el campo guardado en el reporte
+    const empresaRut = empresaInfoFirebase?.rut
+      || reporte.datosEntrega?.empresaRut
+      || reporte.empresaRut
+      || '';
     const empresaInfo = empresaInfoFirebase
-      ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaInfoFirebase.rut || '' }
-      : empresaIdLocal ? { nombre: empresaIdLocal, rut: '' } : null;
+      ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaRut }
+      : empresaIdLocal
+        ? { nombre: empresaIdLocal, rut: empresaRut }
+        : null;
     const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
       nombre: reporte.repartidorNombre || '',
       rut: reporte.repartidorRut || ''
     };
+
+    // ✅ Número de guía: reusar el guardado en el reporte, NO generar uno nuevo
+    let numeroGuia = reporte.numeroGuia || null;
+    if (!numeroGuia) {
+      // Solo generar si el reporte nunca tuvo número
+      numeroGuia = await getNextGuiaNumber();
+      try {
+        await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', reporte.id), { numeroGuia });
+      } catch (_) { /* no bloquear la impresión si falla */ }
+    }
 
     printThermalVoucher({
       reportData: {
@@ -319,7 +337,7 @@ export default function ReporteCombustible() {
         nombre: repartidorInfo.nombre || '',
         rut: repartidorInfo.rut || ''
       },
-      numeroGuiaCorrelativo: reporte.numeroGuia || null
+      numeroGuiaCorrelativo: numeroGuia
     });
   };
 
@@ -350,7 +368,7 @@ export default function ReporteCombustible() {
     const ws = XLSX.utils.json_to_sheet(datosExcel);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Reportes Combustible');
-    
+
     XLSX.writeFile(wb, `Reportes_Combustible_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
@@ -591,7 +609,7 @@ export default function ReporteCombustible() {
     }
 
     const doc = new jsPDF('landscape');
-    
+
     // Header
     doc.setFillColor(249, 115, 22); // Orange-500
     doc.rect(0, 0, 297, 25, 'F');
@@ -599,7 +617,7 @@ export default function ReporteCombustible() {
     doc.setFontSize(18);
     doc.setFont(undefined, 'bold');
     doc.text('REPORTES DE COMBUSTIBLE', 148.5, 15, { align: 'center' });
-    
+
     // Tabla
     const tableData = reportesFiltrados.map(r => [
       r.fecha,
@@ -662,7 +680,7 @@ export default function ReporteCombustible() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
                 </svg>
-                Reporte Combustible
+                Crear Reporte
               </button>
             </div>
           </div>
@@ -680,7 +698,7 @@ export default function ReporteCombustible() {
               <input
                 type="date"
                 value={filtros.fechaInicio}
-                onChange={(e) => { setFiltros({...filtros, fechaInicio: e.target.value}); setPaginaActual(1); }}
+                onChange={(e) => { setFiltros({ ...filtros, fechaInicio: e.target.value }); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -689,7 +707,7 @@ export default function ReporteCombustible() {
               <input
                 type="date"
                 value={filtros.fechaFin}
-                onChange={(e) => { setFiltros({...filtros, fechaFin: e.target.value}); setPaginaActual(1); }}
+                onChange={(e) => { setFiltros({ ...filtros, fechaFin: e.target.value }); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               />
             </div>
@@ -697,7 +715,7 @@ export default function ReporteCombustible() {
               <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
               <select
                 value={filtros.proyecto}
-                onChange={(e) => { setFiltros({...filtros, proyecto: e.target.value}); setPaginaActual(1); }}
+                onChange={(e) => { setFiltros({ ...filtros, proyecto: e.target.value }); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               >
                 <option value="">Todos</option>
@@ -710,7 +728,7 @@ export default function ReporteCombustible() {
               <label className="block text-sm font-bold text-slate-700 mb-2">Máquina</label>
               <select
                 value={filtros.maquina}
-                onChange={(e) => { setFiltros({...filtros, maquina: e.target.value}); setPaginaActual(1); }}
+                onChange={(e) => { setFiltros({ ...filtros, maquina: e.target.value }); setPaginaActual(1); }}
                 className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
               >
                 <option value="">Todas</option>
@@ -764,19 +782,17 @@ export default function ReporteCombustible() {
                 Entrada
               </span>
               <button
-                onClick={() => { setFiltros({...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega'}); setPaginaActual(1); }}
-                className={`relative w-16 h-8 rounded-full transition-all duration-300 focus:outline-none shadow-inner ${
-                  filtros.tipo === 'entrega'
-                    ? 'bg-gradient-to-r from-orange-500 to-amber-500'
-                    : filtros.tipo === 'entrada'
+                onClick={() => { setFiltros({ ...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega' }); setPaginaActual(1); }}
+                className={`relative w-16 h-8 rounded-full transition-all duration-300 focus:outline-none shadow-inner ${filtros.tipo === 'entrega'
+                  ? 'bg-gradient-to-r from-orange-500 to-amber-500'
+                  : filtros.tipo === 'entrada'
                     ? 'bg-gradient-to-r from-blue-500 to-indigo-500'
                     : 'bg-slate-300'
-                }`}
+                  }`}
                 title={filtros.tipo === 'entrega' ? 'Ver Entradas' : 'Ver Salidas'}
               >
-                <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${
-                  filtros.tipo === 'entrega' ? 'left-9' : 'left-1'
-                }`} />
+                <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${filtros.tipo === 'entrega' ? 'left-9' : 'left-1'
+                  }`} />
               </button>
               <span className={`text-sm font-bold transition-colors ${filtros.tipo === 'entrega' ? 'text-orange-600' : 'text-slate-400'}`}>
                 Salida
@@ -852,18 +868,17 @@ export default function ReporteCombustible() {
                         />
                       </td>
                       <td className="px-3 py-3 text-sm text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                          reporte.tipo === 'entrada' 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-blue-100 text-blue-700'
-                        }`}>
+                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${reporte.tipo === 'entrada'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-blue-100 text-blue-700'
+                          }`}>
                           {reporte.tipo === 'entrada' ? '⬇️ ENTRADA' : '➡️ SALIDA'}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-sm font-semibold text-slate-900">
                         {reporte.fecha ? new Date(reporte.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '-'}
                       </td>
-                      <td 
+                      <td
                         onClick={() => setReporteDetalle(reporte)}
                         className="px-3 py-3 text-sm font-bold text-orange-600 hover:text-orange-800 hover:bg-orange-50 cursor-pointer transition-all"
                         title="Click para ver detalle"
@@ -888,8 +903,8 @@ export default function ReporteCombustible() {
                         {reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}
                       </td>
                       <td className="px-3 py-3 text-sm text-center text-slate-700">
-                        {reporte.tipo === 'entrega' && reporte.datosEntrega?.horometroOdometro 
-                          ? reporte.datosEntrega.horometroOdometro 
+                        {reporte.tipo === 'entrega' && reporte.datosEntrega?.horometroOdometro
+                          ? reporte.datosEntrega.horometroOdometro
                           : '-'}
                       </td>
                       <td className="px-3 py-3 text-sm text-center font-bold text-orange-600">
@@ -964,15 +979,15 @@ export default function ReporteCombustible() {
                 {Array.from({ length: Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) }, (_, i) => i + 1)
                   .filter(p => p === 1 || p === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) || Math.abs(p - paginaActual) <= 1)
                   .reduce((acc, p, i, arr) => {
-                    if (i > 0 && arr[i-1] !== p - 1) acc.push('...');
+                    if (i > 0 && arr[i - 1] !== p - 1) acc.push('...');
                     acc.push(p);
                     return acc;
                   }, [])
                   .map((p, i) => p === '...'
                     ? <span key={i} className="px-2 text-slate-400 text-xs">…</span>
                     : <button key={p} onClick={() => setPaginaActual(p)}
-                        className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-orange-600 text-white shadow' : 'bg-orange-50 hover:bg-orange-100 text-orange-700'}`}
-                      >{p}</button>
+                      className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-orange-600 text-white shadow' : 'bg-orange-50 hover:bg-orange-100 text-orange-700'}`}
+                    >{p}</button>
                   )}
                 <button
                   onClick={() => setPaginaActual(p => Math.min(Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA), p + 1))}
@@ -986,7 +1001,7 @@ export default function ReporteCombustible() {
       </div>
 
       {/* Modal de Combustible */}
-      <CombustibleModal 
+      <CombustibleModal
         isOpen={showCombustibleModal}
         onClose={() => {
           setShowCombustibleModal(false);
@@ -1046,8 +1061,8 @@ export default function ReporteCombustible() {
         const promSalida = cntEntregas > 0 ? litrosEntregas / cntEntregas : 0;
         const promEntrada = cntEntradas > 0 ? litrosEntradas / cntEntradas : 0;
         const balanceStock = litrosEntradas - litrosEntregas;
-        const topMaquinas = Object.entries(porMaquina).sort((a,b)=>b[1].litros-a[1].litros).slice(0,5);
-        const topOperadores = Object.entries(porOperador).sort((a,b)=>b[1].litros-a[1].litros).slice(0,4);
+        const topMaquinas = Object.entries(porMaquina).sort((a, b) => b[1].litros - a[1].litros).slice(0, 5);
+        const topOperadores = Object.entries(porOperador).sort((a, b) => b[1].litros - a[1].litros).slice(0, 4);
         const fechasOrdenadas = Object.keys(porFecha).sort().slice(-7);
         const maxBarLitros = Math.max(...fechasOrdenadas.map(f => porFecha[f].entradas + porFecha[f].salidas), 1);
         const statusColor = pctFirmados >= 80 ? '#10b981' : pctFirmados >= 50 ? '#f59e0b' : '#ef4444';
@@ -1060,14 +1075,16 @@ export default function ReporteCombustible() {
           const dash = (pct / 100) * circ;
           return (
             <div className="flex flex-col items-center gap-1">
-              <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
-                <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={bg} strokeWidth={stroke}/>
-                <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+              <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={bg} strokeWidth={stroke} />
+                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
                   strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-                  style={{transition:'stroke-dasharray 0.6s ease'}}/>
-                <text x={size/2} y={size/2+1} textAnchor="middle" dominantBaseline="middle"
-                  style={{transform:'rotate(90deg)',transformOrigin:`${size/2}px ${size/2}px`,
-                  fontSize:'13px',fontWeight:'800',fill:'#1e293b'}}>
+                  style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+                <text x={size / 2} y={size / 2 + 1} textAnchor="middle" dominantBaseline="middle"
+                  style={{
+                    transform: 'rotate(90deg)', transformOrigin: `${size / 2}px ${size / 2}px`,
+                    fontSize: '13px', fontWeight: '800', fill: '#1e293b'
+                  }}>
                   {pct}%
                 </text>
               </svg>
@@ -1082,12 +1099,12 @@ export default function ReporteCombustible() {
             {/* ── Header ── */}
             <div className="rounded-2xl overflow-hidden shadow-xl border border-orange-100">
               <div className="px-6 py-4 flex items-center justify-between"
-                style={{background:'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)'}}>
+                style={{ background: 'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)' }}>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                    style={{background:'linear-gradient(135deg,#ea580c,#f97316)'}}>
+                    style={{ background: 'linear-gradient(135deg,#ea580c,#f97316)' }}>
                     <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                   </div>
                   <div>
@@ -1107,21 +1124,21 @@ export default function ReporteCombustible() {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Total litros */}
                   <div className="rounded-2xl p-5 text-white relative overflow-hidden col-span-2 lg:col-span-1"
-                    style={{background:'linear-gradient(135deg,#ea580c 0%,#c2410c 100%)'}}>
+                    style={{ background: 'linear-gradient(135deg,#ea580c 0%,#c2410c 100%)' }}>
                     <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full opacity-20"
-                      style={{background:'rgba(255,255,255,0.3)'}}/>
+                      style={{ background: 'rgba(255,255,255,0.3)' }} />
                     <div className="text-xs font-bold uppercase tracking-widest text-orange-200 mb-2">Total Combustible</div>
                     <div className="text-4xl font-black tracking-tight">{totalLitros.toLocaleString('es-CL')}</div>
                     <div className="text-orange-200 text-sm font-semibold mt-0.5">litros gestionados</div>
                     <div className="mt-3 pt-3 border-t border-orange-400/40 flex justify-between text-xs text-orange-200">
                       <span>{totalReportes} reportes</span>
-                      <span>≈ {(totalLitros/totalReportes).toFixed(0)} L/rep</span>
+                      <span>≈ {(totalLitros / totalReportes).toFixed(0)} L/rep</span>
                     </div>
                   </div>
 
                   {/* Balance stock */}
                   <div className={`rounded-2xl p-5 relative overflow-hidden ${balancePositivo ? 'bg-emerald-900' : 'bg-red-900'}`}>
-                    <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-10 bg-white"/>
+                    <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-10 bg-white" />
                     <div className={`text-xs font-bold uppercase tracking-widest mb-2 ${balancePositivo ? 'text-emerald-300' : 'text-red-300'}`}>Balance Stock</div>
                     <div className={`text-3xl font-black ${balancePositivo ? 'text-emerald-400' : 'text-red-400'}`}>
                       {balancePositivo ? '+' : ''}{balanceStock.toLocaleString('es-CL')}
@@ -1145,7 +1162,7 @@ export default function ReporteCombustible() {
                   {/* Tasa validación */}
                   <div className="rounded-2xl p-5 bg-white border border-slate-200 shadow-sm flex flex-col items-center justify-center">
                     <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Tasa Validación</div>
-                    <Donut pct={pctFirmados} color={statusColor} size={76} stroke={9}/>
+                    <Donut pct={pctFirmados} color={statusColor} size={76} stroke={9} />
                     <div className="mt-2 text-xs text-slate-400">{firmados}/{totalReportes} firmados</div>
                   </div>
                 </div>
@@ -1157,17 +1174,17 @@ export default function ReporteCombustible() {
                   <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
                     <div className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Distribución por Tipo</div>
                     <div className="flex items-center justify-around">
-                      <Donut pct={pctEntradas} color="#f59e0b" size={90} stroke={11} label="Entradas" sublabel={`${litrosEntradas.toLocaleString('es-CL')} L`}/>
+                      <Donut pct={pctEntradas} color="#f59e0b" size={90} stroke={11} label="Entradas" sublabel={`${litrosEntradas.toLocaleString('es-CL')} L`} />
                       <div className="flex flex-col items-center gap-1">
                         <div className="text-2xl font-black text-slate-300">vs</div>
                         <div className="text-xs text-slate-400">{cntEntradas}e · {cntEntregas}s</div>
                       </div>
-                      <Donut pct={pctSalidas} color="#ea580c" size={90} stroke={11} label="Salidas" sublabel={`${litrosEntregas.toLocaleString('es-CL')} L`}/>
+                      <Donut pct={pctSalidas} color="#ea580c" size={90} stroke={11} label="Salidas" sublabel={`${litrosEntregas.toLocaleString('es-CL')} L`} />
                     </div>
                     {/* Mini barra stacked */}
                     <div className="mt-4 h-2 rounded-full overflow-hidden flex">
-                      <div className="bg-amber-400 transition-all" style={{width:`${pctEntradas}%`}}/>
-                      <div className="bg-orange-500 transition-all" style={{width:`${pctSalidas}%`}}/>
+                      <div className="bg-amber-400 transition-all" style={{ width: `${pctEntradas}%` }} />
+                      <div className="bg-orange-500 transition-all" style={{ width: `${pctSalidas}%` }} />
                     </div>
                     <div className="flex justify-between mt-1 text-xs text-slate-400">
                       <span>⬇ Entradas {pctEntradas}%</span>
@@ -1189,11 +1206,11 @@ export default function ReporteCombustible() {
                           const label = fecha.slice(5); // MM-DD
                           return (
                             <div key={fecha} className="flex-1 flex flex-col items-center gap-0.5" title={`${fecha}: ${total.toFixed(0)} L`}>
-                              <div className="w-full flex flex-col justify-end rounded-t-lg overflow-hidden" style={{height:'96px'}}>
-                                <div className="w-full bg-orange-500 rounded-t-sm transition-all" style={{height:`${hSalidas}%`}}/>
-                                <div className="w-full bg-amber-400 transition-all" style={{height:`${hEntradas}%`}}/>
+                              <div className="w-full flex flex-col justify-end rounded-t-lg overflow-hidden" style={{ height: '96px' }}>
+                                <div className="w-full bg-orange-500 rounded-t-sm transition-all" style={{ height: `${hSalidas}%` }} />
+                                <div className="w-full bg-amber-400 transition-all" style={{ height: `${hEntradas}%` }} />
                               </div>
-                              <span className="text-slate-400 text-center leading-none" style={{fontSize:'9px'}}>{label}</span>
+                              <span className="text-slate-400 text-center leading-none" style={{ fontSize: '9px' }}>{label}</span>
                             </div>
                           );
                         })}
@@ -1202,8 +1219,8 @@ export default function ReporteCombustible() {
                       <div className="h-28 flex items-center justify-center text-slate-300 text-sm">Sin datos de fechas</div>
                     )}
                     <div className="flex gap-4 mt-3 text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-amber-400 inline-block"/>Entradas</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-orange-500 inline-block"/>Salidas</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-amber-400 inline-block" />Entradas</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm bg-orange-500 inline-block" />Salidas</span>
                     </div>
                   </div>
                 </div>
@@ -1228,7 +1245,7 @@ export default function ReporteCombustible() {
                           return (
                             <div key={nombre} className="flex items-center gap-3">
                               <div className={`w-6 h-6 rounded-lg bg-gradient-to-br ${gradients[i]} flex items-center justify-center flex-shrink-0`}>
-                                <span className="text-white text-xs font-black">{i+1}</span>
+                                <span className="text-white text-xs font-black">{i + 1}</span>
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex justify-between items-center mb-1">
@@ -1236,7 +1253,7 @@ export default function ReporteCombustible() {
                                   <span className="text-xs font-bold text-slate-500 ml-2 flex-shrink-0">{data.litros.toLocaleString('es-CL')} L</span>
                                 </div>
                                 <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className={`h-full bg-gradient-to-r ${gradients[i]} rounded-full transition-all`} style={{width:`${pct}%`}}/>
+                                  <div className={`h-full bg-gradient-to-r ${gradients[i]} rounded-full transition-all`} style={{ width: `${pct}%` }} />
                                 </div>
                               </div>
                               <span className="text-xs text-slate-400 flex-shrink-0 w-8 text-right">{pct.toFixed(0)}%</span>
@@ -1256,12 +1273,12 @@ export default function ReporteCombustible() {
                       <div className="space-y-3">
                         {topOperadores.map(([nombre, data], i) => {
                           const pct = litrosEntregas > 0 ? (data.litros / litrosEntregas) * 100 : 0;
-                          const avatarColors = ['#ea580c','#f59e0b','#10b981','#6366f1'];
-                          const initials = nombre.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+                          const avatarColors = ['#ea580c', '#f59e0b', '#10b981', '#6366f1'];
+                          const initials = nombre.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
                           return (
                             <div key={nombre} className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-black"
-                                style={{background:avatarColors[i] || '#94a3b8'}}>
+                                style={{ background: avatarColors[i] || '#94a3b8' }}>
                                 {initials}
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1270,7 +1287,7 @@ export default function ReporteCombustible() {
                                   <span className="text-xs text-slate-500 ml-2 flex-shrink-0">{data.litros.toLocaleString('es-CL')} L · {data.cnt} desp.</span>
                                 </div>
                                 <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className="h-full rounded-full transition-all" style={{width:`${pct}%`,background:avatarColors[i]}}/>
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: avatarColors[i] }} />
                                 </div>
                               </div>
                             </div>
@@ -1312,7 +1329,7 @@ export default function ReporteCombustible() {
               const reporteRef = doc(db, 'empresas', empresaId, 'control_combustible', reporteDetalle.id);
               await updateDoc(reporteRef, editedData);
               console.log('Reporte actualizado:', editedData);
-              
+
               // Recargar reportes
               const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
@@ -1322,7 +1339,7 @@ export default function ReporteCombustible() {
                 ...doc.data()
               }));
               setReportes(reportesData);
-              
+
               // Actualizar el reporte en detalle
               setReporteDetalle({
                 ...reporteDetalle,
@@ -1346,7 +1363,7 @@ export default function ReporteCombustible() {
               // Obtener el documento del usuario actual
               const userRef = doc(db, 'users', currentUser.uid);
               const userDoc = await getDoc(userRef);
-              
+
               if (!userDoc.exists()) {
                 alert("Error: No se encontró información del usuario");
                 return;
@@ -1376,9 +1393,9 @@ export default function ReporteCombustible() {
                   userId: currentUser.uid
                 }
               });
-              
+
               console.log('Reporte firmado exitosamente');
-              
+
               // Recargar reportes
               const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
               const q = query(reportesRef, orderBy('fecha', 'desc'));
@@ -1388,7 +1405,7 @@ export default function ReporteCombustible() {
                 ...doc.data()
               }));
               setReportes(reportesData);
-              
+
               // Actualizar el reporte en detalle
               setReporteDetalle({
                 ...reporteDetalle,
@@ -1399,7 +1416,7 @@ export default function ReporteCombustible() {
                   userId: currentUser.uid
                 }
               });
-              
+
               alert("✓ Reporte firmado y validado exitosamente");
             } catch (error) {
               console.error("Error firmando reporte:", error);

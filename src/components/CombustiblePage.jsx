@@ -4,6 +4,7 @@ import { db, auth } from "../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import VoucherGenerator from './VoucherGenerator';
 import SignaturePad from "./SignaturePad";
+import { getNextGuiaNumber } from '../utils/voucherThermalGenerator';
 
 export default function CombustiblePage({ onClose }) {
   const isOpen = true;
@@ -11,23 +12,47 @@ export default function CombustiblePage({ onClose }) {
   const [machines, setMachines] = useState([]);
   const [empleados, setEmpleados] = useState([]);
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [pSnap, mSnap, eSnap] = await Promise.all([
-          getDocs(collection(db, 'projects')),
-          getDocs(collection(db, 'machines')),
-          getDocs(collection(db, 'employees')),
-        ]);
-        setProjects(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setMachines(mSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setEmpleados(eSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        console.error('Error cargando datos:', err);
-      }
-    };
-    loadData();
-  }, []);
+  const [equiposSurtidores, setEquiposSurtidores] = useState([]);
+
+  // Normaliza nombre de empresa para comparación fuzzy (sin tildes, minúsculas, sin espacios extra)
+  const normEmp = (s) => (s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim();
+
+  // Dos empresas hacen match si una contiene a la otra (normalizado)
+  const empresasMatch = (a, b) => {
+    if (!a || !b) return false;
+    const na = normEmp(a), nb = normEmp(b);
+    return na === nb || na.includes(nb) || nb.includes(na);
+  };
+
+  // Resuelve el ID/nombre seleccionado al nombre de la empresa
+  const resolverNombreEmpresa = (empresaIdONombre) => {
+    if (!empresaIdONombre) return null;
+    const doc = empresasLocal.find(e => e.id === empresaIdONombre);
+    return doc ? doc.nombre : empresaIdONombre;
+  };
+
+  const loadEmpresaData = async (empresaId) => {
+    try {
+      const [pSnap, mSnap, eSnap, eqSnap, empSnap] = await Promise.all([
+        getDocs(collection(db, 'empresas', empresaId, 'projects')),
+        getDocs(collection(db, 'empresas', empresaId, 'machines')),
+        getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
+        getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores')),
+        getDocs(collection(db, 'empresas', empresaId, 'empresas_combustible'))
+      ]);
+      setProjects(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const loadedMachines = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setMachines(loadedMachines);
+      setMachinesLocal(loadedMachines);
+      setEmpleados(eSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setEquiposSurtidores(eqSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setEmpresasLocal(empSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error('Error cargando datos de empresa:', err);
+    }
+  };
   const [paso, setPaso] = useState(1); // 1: Control, 2: Tipo (Entrada/Entrega), 3: Formulario
   const [tipoReporte, setTipoReporte] = useState(''); // 'entrada' o 'entrega'
   const [loading, setLoading] = useState(false);
@@ -40,14 +65,14 @@ export default function CombustiblePage({ onClose }) {
 
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [lastReportData, setLastReportData] = useState(null);
-  
+
   // Estados para las firmas
   const [firmaRepartidor, setFirmaRepartidor] = useState(null); // Para ENTRADA
   const [firmaReceptor, setFirmaReceptor] = useState(null); // Para SALIDA
   const [firmaReceptorTemp, setFirmaReceptorTemp] = useState(null); // Firma temporal hasta confirmar
   const [showModalFirmaRepartidor, setShowModalFirmaRepartidor] = useState(false);
   const [showModalFirmaReceptor, setShowModalFirmaReceptor] = useState(false);
-  
+
   // Estados para modales de creación rápida
   const [showModalEquipoSurtidor, setShowModalEquipoSurtidor] = useState(false);
   const [showModalEmpresa, setShowModalEmpresa] = useState(false);
@@ -55,7 +80,7 @@ export default function CombustiblePage({ onClose }) {
   const [searchMaquina, setSearchMaquina] = useState('');
   const [operadorExterno, setOperadorExterno] = useState({ nombre: '', rut: '' });
   const [maquinaExterna, setMaquinaExterna] = useState({ patente: '', tipo: '', modelo: '' });
-  
+
   // Datos temporales para crear nuevos registros
   const [nuevoEquipoSurtidor, setNuevoEquipoSurtidor] = useState({
     patente: '',
@@ -64,12 +89,12 @@ export default function CombustiblePage({ onClose }) {
     marca: '',
     modelo: ''
   });
-  
+
   const [nuevaEmpresa, setNuevaEmpresa] = useState({
     nombre: '',
     rut: ''
   });
-  
+
   // Listas locales que se actualizan cuando agregamos nuevos items
   const [machinesLocal, setMachinesLocal] = useState([]);
   const [empresasLocal, setEmpresasLocal] = useState([]);
@@ -78,7 +103,7 @@ export default function CombustiblePage({ onClose }) {
     const emp = empresasLocal.find(e => e.id === empresaId);
     return emp?.nombre?.toLowerCase().includes('mpf') || false;
   };
-  
+
   // Datos del formulario - Página 1 (Control de Combustible)
   const [datosControl, setDatosControl] = useState({
     projectId: '',
@@ -123,7 +148,7 @@ export default function CombustiblePage({ onClose }) {
         try {
           console.log('🔍 Buscando usuario en Firebase:', currentUser.uid);
           console.log('📧 Email:', currentUser.email);
-          
+
           // Cargar todos los usuarios
           const usersRef = collection(db, 'users');
           const usersSnap = await getDocs(usersRef);
@@ -131,30 +156,33 @@ export default function CombustiblePage({ onClose }) {
             id: doc.id,
             ...doc.data()
           }));
-          
+
           console.log('📋 Usuarios disponibles:', usersData);
-          
+
           // Buscar por UID (preferido)
           let userData = usersData.find(u => u.id === currentUser.uid);
-          
+
           // Si no encuentra por UID, buscar por email
           if (!userData) {
-            userData = usersData.find(u => 
+            userData = usersData.find(u =>
               u.email?.toLowerCase() === currentUser.email?.toLowerCase()
             );
           }
-          
+
           if (userData) {
             console.log('✅ Usuario encontrado:', userData);
             setCurrentUserData(userData);
             setUserRole(userData.role || 'operador');
-            
+
             // Autocompletar repartidorId cuando se abre el modal
             if (isOpen && !datosControl.repartidorId) {
               setDatosControl(prev => ({
                 ...prev,
                 repartidorId: userData.id
               }));
+            }
+            if (userData.empresaId) {
+              loadEmpresaData(userData.empresaId);
             }
           } else {
             console.warn('⚠️ No se encontró usuario en la colección users');
@@ -165,35 +193,13 @@ export default function CombustiblePage({ onClose }) {
         }
       }
     };
-    
+
     if (isOpen) {
       cargarDatosUsuario();
     }
   }, [currentUser, isOpen]);
 
-  // Inicializar listas locales cuando el modal se abre
-  useEffect(() => {
-    if (isOpen) {
-      setMachinesLocal(machines || []);
-      // Cargar empresas desde Firebase o usar vacío
-      cargarEmpresas();
-    }
-  }, [isOpen, machines]);
 
-  const cargarEmpresas = async () => {
-    try {
-      const empresasRef = collection(db, 'empresas_combustible');
-      const empresasSnap = await getDocs(empresasRef);
-      const empresasData = empresasSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setEmpresasLocal(empresasData);
-    } catch (error) {
-      console.error("Error cargando empresas:", error);
-      setEmpresasLocal([]);
-    }
-  };
 
   const resetForm = () => {
     setPaso(1);
@@ -228,7 +234,7 @@ export default function CombustiblePage({ onClose }) {
   const handleCrearEquipoSurtidor = async () => {
     console.log('🚀 Iniciando creación de equipo surtidor');
     console.log('📝 Datos:', nuevoEquipoSurtidor);
-    
+
     if (!nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre) {
       alert("Patente y Nombre son obligatorios");
       return;
@@ -237,8 +243,8 @@ export default function CombustiblePage({ onClose }) {
     try {
       setLoadingEquipo(true);
       console.log('💾 Guardando en Firebase...');
-      
-      const docRef = await addDoc(collection(db, 'machines'), {
+
+      const docRef = await addDoc(collection(db, 'empresas', currentUserData.empresaId, 'equipos_surtidores'), {
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
         code: nuevoEquipoSurtidor.patente.toUpperCase(),
         name: nuevoEquipoSurtidor.nombre,
@@ -262,11 +268,12 @@ export default function CombustiblePage({ onClose }) {
       };
 
       console.log('📋 Agregando a lista local:', nuevoEquipo);
+      setEquiposSurtidores([...equiposSurtidores, nuevoEquipo]);
       setMachinesLocal([...machinesLocal, nuevoEquipo]);
-      
+
       console.log('🎯 Autoseleccionando equipo:', docRef.id);
-      setDatosControl({...datosControl, equipoSurtidorId: docRef.id});
-      
+      setDatosControl({ ...datosControl, equipoSurtidorId: docRef.id });
+
       setShowModalEquipoSurtidor(false);
       setNuevoEquipoSurtidor({
         patente: '',
@@ -275,9 +282,8 @@ export default function CombustiblePage({ onClose }) {
         marca: '',
         modelo: ''
       });
-      
+
       console.log('🎉 Equipo surtidor creado exitosamente');
-      alert("✓ Equipo surtidor creado y seleccionado exitosamente");
     } catch (error) {
       console.error("❌ Error creando equipo:", error);
       console.error("Detalles:", error.message);
@@ -296,7 +302,7 @@ export default function CombustiblePage({ onClose }) {
 
     try {
       setLoading(true);
-      const docRef = await addDoc(collection(db, 'empresas_combustible'), {
+      const docRef = await addDoc(collection(db, 'empresas', currentUserData.empresaId, 'empresas_combustible'), {
         nombre: nuevaEmpresa.nombre,
         rut: nuevaEmpresa.rut,
         fechaCreacion: new Date().toISOString()
@@ -309,13 +315,12 @@ export default function CombustiblePage({ onClose }) {
       };
 
       setEmpresasLocal([...empresasLocal, nuevaEmp]);
-      setDatosEntrega({...datosEntrega, empresa: docRef.id});
+      setDatosEntrega({ ...datosEntrega, empresa: docRef.id });
       setShowModalEmpresa(false);
       setNuevaEmpresa({
         nombre: '',
         rut: ''
       });
-      alert("Empresa creada exitosamente");
     } catch (error) {
       console.error("Error creando empresa:", error);
       alert("Error al crear empresa");
@@ -374,13 +379,17 @@ export default function CombustiblePage({ onClose }) {
       const fecha = new Date();
       const numeroReporte = `COMB-${tipoReporte.toUpperCase()}-${fecha.getFullYear()}${(fecha.getMonth() + 1).toString().padStart(2, '0')}${fecha.getDate().toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
 
+      // Obtener el número correlativo ANTES de guardar
+      const numeroGuia = await getNextGuiaNumber(currentUserData.empresaId);
+
       const dataToSave = {
         tipo: tipoReporte,
         numeroReporte,
+        numeroGuia,
         ...datosControl,
         fechaCreacion: new Date().toISOString(),
         creadoPor: currentUser?.email || 'unknown',
-        repartidorNombre: currentUserData?.nombre || '',
+        repartidorNombre: currentUserData?.nombre || currentUser?.displayName || currentUser?.email?.split('@')[0] || '',
         repartidorRut: currentUserData?.rut || ''
       };
 
@@ -402,76 +411,77 @@ export default function CombustiblePage({ onClose }) {
         dataToSave.fechaFirma = new Date().toISOString();
       }
 
-      await addDoc(collection(db, 'reportes_combustible'), dataToSave);
+      const docRef = await addDoc(collection(db, 'empresas', currentUserData.empresaId, 'reportes_combustible'), dataToSave);
 
       console.log('✅ Reporte guardado en Firebase');
       console.log('📝 Tipo de reporte:', tipoReporte);
 
       if (tipoReporte === 'entrega') {
-      console.log('🎯 Es una entrega, preparando modal de voucher...');
-      const projectInfo = projects?.find(p => p.id === datosControl.projectId);
-      const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
-      const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
-      const empresaInfo = empresasLocal?.find(e => e.id === datosEntrega.empresa);
-      
-      // NUEVO: Obtener información del repartidor y equipo surtidor
-      const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
-      const equipoSurtidorInfo = machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
-      
-      console.log('📊 Información recopilada:', {
-        projectInfo,
-        machineInfo,
-        operadorInfo,
-        empresaInfo,
-        repartidorInfo,
-        equipoSurtidorInfo
-      });
-      
-      setLastReportData({
-        reportData: {
-          ...dataToSave,
-          numeroReporte,
-          fecha: datosControl.fecha,
-          cantidadLitros: datosEntrega.cantidadLitros,
-          horometroOdometro: datosEntrega.horometroOdometro,
-          firmaReceptor,
-          firmaRepartidor
-        },
-        projectName: projectInfo?.nombre || 'N/A',
-        machineInfo: {
-          patente: machineInfo?.patente || '',
-          codigo: machineInfo?.codigo || '',
-          nombre: machineInfo?.nombre || '',
-          type: machineInfo?.type || '',      // Tipo de máquina para "Tipo Maquina"
-          code: machineInfo?.code || ''        // Código para "Maquina"
-        },
-        operadorInfo: {
-          nombre: operadorInfo?.nombre || '',
-          rut: operadorInfo?.rut || ''
-        },
-        empresaInfo: empresaInfo ? {
-          nombre: empresaInfo.nombre || '',
-          rut: empresaInfo.rut || ''
-        } : null,
-        repartidorInfo: {
-          nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
-          rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
-        },
-        equipoSurtidorInfo: equipoSurtidorInfo ? {
-          nombre: equipoSurtidorInfo.nombre || '',
-          patente: equipoSurtidorInfo.patente || '',
-          tipo: equipoSurtidorInfo.tipo || ''
-        } : null
-      });
-      
-      console.log('💾 lastReportData guardado:', lastReportData);
-      console.log('🎭 Mostrando modal de voucher...');
-      setShowVoucherModal(true);
-      resetForm();
-    } else {
-      alert(`Reporte de Entrada registrado exitosamente: ${numeroReporte}`);
-      handleClose();
-    }
+        console.log('🎯 Es una entrega, preparando modal de voucher...');
+        const projectInfo = projects?.find(p => p.id === datosControl.projectId);
+        const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
+        const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
+        const empresaInfo = empresasLocal?.find(e => e.id === datosEntrega.empresa);
+
+        // NUEVO: Obtener información del repartidor y equipo surtidor
+        const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
+        const equipoSurtidorInfo = machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
+
+        console.log('📊 Información recopilada:', {
+          projectInfo,
+          machineInfo,
+          operadorInfo,
+          empresaInfo,
+          repartidorInfo,
+          equipoSurtidorInfo
+        });
+
+        setLastReportData({
+          reportData: {
+            ...dataToSave,
+            numeroReporte,
+            fecha: datosControl.fecha,
+            cantidadLitros: datosEntrega.cantidadLitros,
+            horometroOdometro: datosEntrega.horometroOdometro,
+            firmaReceptor,
+            firmaRepartidor
+          },
+          projectName: projectInfo?.nombre || 'N/A',
+          machineInfo: {
+            patente: machineInfo?.patente || '',
+            codigo: machineInfo?.codigo || '',
+            nombre: machineInfo?.nombre || '',
+            type: machineInfo?.type || '',      // Tipo de máquina para "Tipo Maquina"
+            code: machineInfo?.code || ''        // Código para "Maquina"
+          },
+          operadorInfo: {
+            nombre: operadorInfo?.nombre || '',
+            rut: operadorInfo?.rut || ''
+          },
+          empresaInfo: empresaInfo ? {
+            nombre: empresaInfo.nombre || '',
+            rut: empresaInfo.rut || ''
+          } : null,
+          repartidorInfo: {
+            nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
+            rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
+          },
+          equipoSurtidorInfo: equipoSurtidorInfo ? {
+            nombre: equipoSurtidorInfo.nombre || '',
+            patente: equipoSurtidorInfo.patente || '',
+            tipo: equipoSurtidorInfo.tipo || ''
+          } : null,
+          reporteId: docRef.id,
+          empresaId: currentUserData.empresaId
+        });
+
+        console.log('💾 lastReportData guardado:', lastReportData);
+        console.log('🎭 Mostrando modal de voucher...');
+        setShowVoucherModal(true);
+        resetForm();
+      } else {
+        handleClose();
+      }
     } catch (error) {
       console.error("Error guardando reporte:", error);
       alert("Error al guardar el reporte");
@@ -487,7 +497,7 @@ export default function CombustiblePage({ onClose }) {
         <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg sm:text-2xl font-black">Control de Combustible</h2>
+              <h2 className="text-lg sm:text-2xl font-black">Control de CombustiblePage</h2>
               <p className="text-orange-100 text-xs sm:text-sm mt-0.5 sm:mt-1">
                 {paso === 1 && "Información del Control"}
                 {paso === 2 && "Selecciona el tipo de reporte"}
@@ -554,7 +564,7 @@ export default function CombustiblePage({ onClose }) {
                   <select
                     required
                     value={datosControl.projectId}
-                    onChange={(e) => setDatosControl({...datosControl, projectId: e.target.value})}
+                    onChange={(e) => setDatosControl({ ...datosControl, projectId: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500 text-base sm:text-sm"
                   >
                     <option value="">Seleccione obra</option>
@@ -572,7 +582,7 @@ export default function CombustiblePage({ onClose }) {
                     type="date"
                     required
                     value={datosControl.fecha}
-                    onChange={(e) => setDatosControl({...datosControl, fecha: e.target.value})}
+                    onChange={(e) => setDatosControl({ ...datosControl, fecha: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500 text-base sm:text-sm"
                     max={new Date().toISOString().split('T')[0]}
                   />
@@ -581,7 +591,7 @@ export default function CombustiblePage({ onClose }) {
 
               <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
                 <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -594,7 +604,7 @@ export default function CombustiblePage({ onClose }) {
                       <div className="flex-1">
                         {currentUserData ? (
                           <div>
-                            <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
+                            <div className="font-bold text-amber-900">{currentUserData.nombre || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Sin nombre'}</div>
                             {currentUserData.rut && (
                               <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>
                             )}
@@ -640,24 +650,19 @@ export default function CombustiblePage({ onClose }) {
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                       Equipo Surtidor (Camión/Mochila)
-                      {userRole !== 'administrador' 
-                    }
+                      {userRole !== 'administrador'
+                      }
                     </label>
                     <div className="flex gap-2">
                       <select
                         value={datosControl.equipoSurtidorId}
-                        onChange={(e) => setDatosControl({...datosControl, equipoSurtidorId: e.target.value})}
+                        onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
                         className="flex-1 px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                       >
                         <option value="">Seleccione equipo surtidor</option>
-                        {machinesLocal.filter(m => 
-                          m.name?.toLowerCase().includes('combustible') || 
-                          m.name?.toLowerCase().includes('camión') ||
-                          m.name?.toLowerCase().includes('mochila') ||
-                          m.categoria === 'surtidor_combustible'
-                        ).map(m => (
+                        {equiposSurtidores.map(m => (
                           <option key={m.id} value={m.id}>
-                            {m.patente || m.code} - {m.name}
+                            {m.patente || m.code} - {m.nombre || m.name}
                           </option>
                         ))}
                       </select>
@@ -780,7 +785,7 @@ export default function CombustiblePage({ onClose }) {
                   <select
                     required
                     value={datosEntrada.tipoOrigen}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, tipoOrigen: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, tipoOrigen: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                   >
                     <option value="">Seleccione tipo</option>
@@ -794,12 +799,12 @@ export default function CombustiblePage({ onClose }) {
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Origen
                     {userRole !== 'administrador'
-                  }
+                    }
                   </label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrada.origen}
-                      onChange={(e) => setDatosEntrada({...datosEntrada, origen: e.target.value})}
+                      onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
                       className="flex-1 px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     >
                       <option value="">Seleccione origen</option>
@@ -825,24 +830,24 @@ export default function CombustiblePage({ onClose }) {
                 {/* Número de Documento (Guía o Vale según tipo) */}
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">
-                    {datosEntrada.tipoOrigen === 'estacion' 
-                      ? 'N° de Guía' 
-                      : datosEntrada.tipoOrigen === 'estanque' 
-                      ? 'N° de Vale' 
-                      : 'N° de Documento'} <span className="text-red-500">*</span>
+                    {datosEntrada.tipoOrigen === 'estacion'
+                      ? 'N° de Guía'
+                      : datosEntrada.tipoOrigen === 'estanque'
+                        ? 'N° de Vale'
+                        : 'N° de Documento'} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={datosEntrada.numeroDocumento}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, numeroDocumento: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, numeroDocumento: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     placeholder={
-                      datosEntrada.tipoOrigen === 'estacion' 
-                        ? 'Ej: GD-12345' 
+                      datosEntrada.tipoOrigen === 'estacion'
+                        ? 'Ej: GD-12345'
                         : datosEntrada.tipoOrigen === 'estanque'
-                        ? 'Ej: VALE-001'
-                        : 'Número de documento'
+                          ? 'Ej: VALE-001'
+                          : 'Número de documento'
                     }
                   />
                 </div>
@@ -856,7 +861,7 @@ export default function CombustiblePage({ onClose }) {
                     type="date"
                     required
                     value={datosEntrada.fechaDocumento}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, fechaDocumento: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, fechaDocumento: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                   />
                 </div>
@@ -872,7 +877,7 @@ export default function CombustiblePage({ onClose }) {
                     min="0"
                     step="0.01"
                     value={datosEntrada.cantidad}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, cantidad: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, cantidad: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 text-base sm:text-sm"
                     placeholder="Ej: 5000"
                   />
@@ -909,7 +914,7 @@ export default function CombustiblePage({ onClose }) {
                   </label>
                   <textarea
                     value={datosEntrada.observaciones}
-                    onChange={(e) => setDatosEntrada({...datosEntrada, observaciones: e.target.value})}
+                    onChange={(e) => setDatosEntrada({ ...datosEntrada, observaciones: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-green-200 rounded-lg focus:outline-none focus:border-green-500 min-h-[80px] text-base sm:text-sm"
                     placeholder="Notas adicionales..."
                   />
@@ -921,13 +926,13 @@ export default function CombustiblePage({ onClose }) {
                 <label className="block text-sm font-bold text-slate-700 mb-3">
                   Firma del Repartidor de Combustible <span className="text-red-500">*</span>
                 </label>
-                
+
                 {firmaRepartidor ? (
                   <div className="relative">
                     <div className="border-2 border-green-500 rounded-xl p-4 bg-green-50">
-                      <img 
-                        src={firmaRepartidor} 
-                        alt="Firma del repartidor" 
+                      <img
+                        src={firmaRepartidor}
+                        alt="Firma del repartidor"
                         className="max-h-32 mx-auto"
                       />
                       <div className="flex justify-center gap-2 mt-3">
@@ -995,13 +1000,13 @@ export default function CombustiblePage({ onClose }) {
                   <label className="block text-sm font-bold text-slate-700 mb-2">
                     Empresa
                     {userRole !== 'administrador'
-                  }
+                    }
                   </label>
                   <div className="flex gap-2">
                     <select
                       value={datosEntrega.empresa}
                       onChange={(e) => {
-                        setDatosEntrega({...datosEntrega, empresa: e.target.value, operadorId: '', machineId: ''});
+                        setDatosEntrega({ ...datosEntrega, empresa: e.target.value, operadorId: '', machineId: '' });
                         setOperadorExterno({ nombre: '', rut: '' });
                         setMaquinaExterna({ patente: '', tipo: '', modelo: '' });
                         setSearchOperador('');
@@ -1038,7 +1043,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="date"
                     value={datosEntrega.fecha}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, fecha: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, fecha: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     max={new Date().toISOString().split('T')[0]}
                   />
@@ -1053,11 +1058,11 @@ export default function CombustiblePage({ onClose }) {
                     <>
                       <div className="relative mb-2">
                         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                         </svg>
                         <input type="text" placeholder="Buscar operador..." value={searchOperador}
                           onChange={e => setSearchOperador(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm" />
                       </div>
                       {datosEntrega.operadorId && (() => {
                         const sel = empleados.find(e => e.id === datosEntrega.operadorId);
@@ -1070,9 +1075,9 @@ export default function CombustiblePage({ onClose }) {
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.nombre}</div>
                               <div className="text-xs text-slate-500">{sel.rut || 'Sin RUT'}</div>
                             </div>
-                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, operadorId: ''}); setSearchOperador(''); }}
+                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: '' }); setSearchOperador(''); }}
                               className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           </div>
                         ) : null;
@@ -1080,12 +1085,13 @@ export default function CombustiblePage({ onClose }) {
                       {!datosEntrega.operadorId && (
                         <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 max-h-52 sm:max-h-44 overflow-y-auto pr-1">
                           {empleados
+                            .filter(emp => empresasMatch(emp.empresa, resolverNombreEmpresa(datosEntrega.empresa)))
                             .filter(emp => !searchOperador ||
                               emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
                               emp.rut?.includes(searchOperador))
                             .map(emp => (
                               <button key={emp.id} type="button"
-                                onClick={() => { setDatosEntrega({...datosEntrega, operadorId: emp.id}); setSearchOperador(''); }}
+                                onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: emp.id }); setSearchOperador(''); }}
                                 className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
                                 <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">
                                   {emp.nombre?.charAt(0).toUpperCase()}
@@ -1103,12 +1109,12 @@ export default function CombustiblePage({ onClose }) {
                     <div className="space-y-2">
                       <input type="text" placeholder="Nombre completo *"
                         value={operadorExterno.nombre}
-                        onChange={e => setOperadorExterno({...operadorExterno, nombre: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setOperadorExterno({ ...operadorExterno, nombre: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="RUT (ej: 12.345.678-9)"
                         value={operadorExterno.rut}
-                        onChange={e => setOperadorExterno({...operadorExterno, rut: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setOperadorExterno({ ...operadorExterno, rut: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                     </div>
                   ) : (
                     <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
@@ -1126,11 +1132,11 @@ export default function CombustiblePage({ onClose }) {
                     <>
                       <div className="relative mb-2">
                         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                         </svg>
                         <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
                           onChange={e => setSearchMaquina(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"/>
+                          className="w-full pl-9 pr-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm" />
                       </div>
                       {datosEntrega.machineId && (() => {
                         const sel = machines.find(m => m.id === datosEntrega.machineId);
@@ -1138,16 +1144,16 @@ export default function CombustiblePage({ onClose }) {
                           <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
                             <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
                               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="font-bold text-slate-800 text-sm truncate">{sel.patente || sel.code}</div>
                               <div className="text-xs text-slate-500 truncate">{sel.name}</div>
                             </div>
-                            <button type="button" onClick={() => { setDatosEntrega({...datosEntrega, machineId: ''}); setSearchMaquina(''); }}
+                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: '' }); setSearchMaquina(''); }}
                               className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           </div>
                         ) : null;
@@ -1155,6 +1161,7 @@ export default function CombustiblePage({ onClose }) {
                       {!datosEntrega.machineId && (
                         <div className="grid grid-cols-1 xs:grid-cols-2 gap-2 max-h-52 sm:max-h-44 overflow-y-auto pr-1">
                           {machines
+                            .filter(m => empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrega.empresa)))
                             .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
                             .filter(m => !searchMaquina ||
                               m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
@@ -1162,11 +1169,11 @@ export default function CombustiblePage({ onClose }) {
                               m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
                             .map(m => (
                               <button key={m.id} type="button"
-                                onClick={() => { setDatosEntrega({...datosEntrega, machineId: m.id}); setSearchMaquina(''); }}
+                                onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: m.id }); setSearchMaquina(''); }}
                                 className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
                                 <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
                                   <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18"/>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
                                   </svg>
                                 </div>
                                 <div className="min-w-0">
@@ -1182,16 +1189,16 @@ export default function CombustiblePage({ onClose }) {
                     <div className="space-y-2">
                       <input type="text" placeholder="Patente *"
                         value={maquinaExterna.patente}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, patente: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, patente: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…)"
                         value={maquinaExterna.tipo}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, tipo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, tipo: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                       <input type="text" placeholder="Modelo (ej: Caterpillar 320)"
                         value={maquinaExterna.modelo}
-                        onChange={e => setMaquinaExterna({...maquinaExterna, modelo: e.target.value})}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"/>
+                        onChange={e => setMaquinaExterna({ ...maquinaExterna, modelo: e.target.value })}
+                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
                     </div>
                   ) : (
                     <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
@@ -1209,7 +1216,7 @@ export default function CombustiblePage({ onClose }) {
                     min="0"
                     step="0.1"
                     value={datosEntrega.horometroOdometro}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, horometroOdometro: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, horometroOdometro: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     placeholder="Ej: 1234.5"
                   />
@@ -1225,7 +1232,7 @@ export default function CombustiblePage({ onClose }) {
                     min="0"
                     step="0.01"
                     value={datosEntrega.cantidadLitros}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, cantidadLitros: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, cantidadLitros: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                     placeholder="Ej: 150.50"
                   />
@@ -1237,7 +1244,7 @@ export default function CombustiblePage({ onClose }) {
                   </label>
                   <textarea
                     value={datosEntrega.observaciones}
-                    onChange={(e) => setDatosEntrega({...datosEntrega, observaciones: e.target.value})}
+                    onChange={(e) => setDatosEntrega({ ...datosEntrega, observaciones: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px] text-base sm:text-sm"
                     placeholder="Notas adicionales..."
                   />
@@ -1249,13 +1256,13 @@ export default function CombustiblePage({ onClose }) {
                 <label className="block text-sm font-bold text-slate-700 mb-3">
                   Firma del Receptor de Combustible <span className="text-red-500">*</span>
                 </label>
-                
+
                 {firmaReceptor ? (
                   <div className="relative">
                     <div className="border-2 border-blue-500 rounded-xl p-4 bg-blue-50">
-                      <img 
-                        src={firmaReceptor} 
-                        alt="Firma del receptor" 
+                      <img
+                        src={firmaReceptor}
+                        alt="Firma del receptor"
                         className="max-h-32 mx-auto"
                       />
                       <div className="flex justify-center gap-2 mt-3">
@@ -1329,7 +1336,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.patente}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase()})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, patente: e.target.value.toUpperCase() })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: AABB01"
                   />
@@ -1341,7 +1348,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.nombre}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, nombre: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, nombre: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Camión Combustible"
                   />
@@ -1353,7 +1360,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.tipo}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, tipo: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, tipo: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Camión, Mochila"
                   />
@@ -1365,7 +1372,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.marca}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, marca: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, marca: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Mercedes Benz"
                   />
@@ -1377,7 +1384,7 @@ export default function CombustiblePage({ onClose }) {
                   <input
                     type="text"
                     value={nuevoEquipoSurtidor.modelo}
-                    onChange={(e) => setNuevoEquipoSurtidor({...nuevoEquipoSurtidor, modelo: e.target.value})}
+                    onChange={(e) => setNuevoEquipoSurtidor({ ...nuevoEquipoSurtidor, modelo: e.target.value })}
                     className="w-full px-4 py-2.5 sm:py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500 text-base sm:text-sm"
                     placeholder="Ej: Actros 2644"
                   />
@@ -1428,7 +1435,7 @@ export default function CombustiblePage({ onClose }) {
                 <input
                   type="text"
                   value={nuevaEmpresa.nombre}
-                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, nombre: e.target.value})}
+                  onChange={(e) => setNuevaEmpresa({ ...nuevaEmpresa, nombre: e.target.value })}
                   className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                   placeholder="Ej: Constructora ABC Ltda."
                 />
@@ -1440,7 +1447,7 @@ export default function CombustiblePage({ onClose }) {
                 <input
                   type="text"
                   value={nuevaEmpresa.rut}
-                  onChange={(e) => setNuevaEmpresa({...nuevaEmpresa, rut: e.target.value})}
+                  onChange={(e) => setNuevaEmpresa({ ...nuevaEmpresa, rut: e.target.value })}
                   className="w-full px-4 py-2.5 sm:py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-base sm:text-sm"
                   placeholder="Ej: 76.123.456-7"
                 />
@@ -1492,7 +1499,7 @@ export default function CombustiblePage({ onClose }) {
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
+              <SignaturePad
                 label=""
                 color="green"
                 onSave={(signatureData) => {
@@ -1547,7 +1554,7 @@ export default function CombustiblePage({ onClose }) {
               </div>
             </div>
             <div className="p-6">
-              <SignaturePad 
+              <SignaturePad
                 label=""
                 color="blue"
                 onSave={(signatureData) => {
@@ -1593,6 +1600,8 @@ export default function CombustiblePage({ onClose }) {
           empresaInfo={lastReportData.empresaInfo}
           repartidorInfo={lastReportData.repartidorInfo}
           equipoSurtidorInfo={lastReportData.equipoSurtidorInfo}
+          reporteId={lastReportData.reporteId}
+          empresaId={lastReportData.empresaId}
           onClose={() => {
             setShowVoucherModal(false);
             setLastReportData(null);

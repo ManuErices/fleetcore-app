@@ -11,10 +11,10 @@ const MPF_LOGO_BASE64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHY
  * @param {Object} params - Parámetros del voucher
  * @returns {string} HTML del voucher listo para imprimir
  */
-export function generateThermalVoucher({ 
-  reportData, 
-  projectName, 
-  machineInfo, 
+export function generateThermalVoucher({
+  reportData,
+  projectName,
+  machineInfo,
   operadorInfo,
   empresaInfo,
   repartidorInfo,
@@ -22,7 +22,7 @@ export function generateThermalVoucher({
   numeroGuiaCorrelativo
 }) {
   // Usar número de guía correlativo o generar uno basado en el reporte
-  const numeroGuia = numeroGuiaCorrelativo 
+  const numeroGuia = numeroGuiaCorrelativo
     ? numeroGuiaCorrelativo.toString().padStart(3, '0')
     : (reportData.numeroReporte ? reportData.numeroReporte.split('-').pop() : '001');
 
@@ -53,7 +53,7 @@ export function generateThermalVoucher({
     return `${partes[0]} ${partes[1]}`;
   };
 
-    // Formatear fecha
+  // Formatear fecha
   const formatDate = (dateStr) => {
     try {
       const [year, month, day] = dateStr.split('-');
@@ -67,17 +67,17 @@ export function generateThermalVoucher({
   const formatCantidad = (cantidad) => {
     if (!cantidad) return '0';
     const num = parseFloat(cantidad);
-    return num.toLocaleString('es-CL', { 
+    return num.toLocaleString('es-CL', {
       minimumFractionDigits: 0,
-      maximumFractionDigits: 2 
+      maximumFractionDigits: 2
     });
   };
 
   // Formatear hora
-  const hora = reportData.hora || new Date().toLocaleTimeString('es-CL', { 
-    hour: '2-digit', 
+  const hora = reportData.hora || new Date().toLocaleTimeString('es-CL', {
+    hour: '2-digit',
     minute: '2-digit',
-    hour12: false 
+    hour12: false
   });
 
   const fechaFormateada = formatDate(reportData.fecha || '');
@@ -402,21 +402,21 @@ export function generateThermalVoucher({
  */
 export function printThermalVoucher(params) {
   const html = generateThermalVoucher(params);
-  
+
   // Crear una nueva ventana
   const printWindow = window.open('', '_blank', 'width=400,height=600');
-  
+
   if (!printWindow) {
     alert('Por favor permite las ventanas emergentes para imprimir el voucher');
     return;
   }
-  
+
   // Escribir el HTML en la nueva ventana
   printWindow.document.write(html);
   printWindow.document.close();
-  
+
   // Esperar a que cargue y luego abrir el diálogo de impresión
-  printWindow.onload = function() {
+  printWindow.onload = function () {
     setTimeout(() => {
       printWindow.print();
     }, 250);
@@ -425,36 +425,37 @@ export function printThermalVoucher(params) {
 
 /**
  * Obtiene el siguiente número de guía correlativo
+ * Consulta reportes_combustible de la empresa (colección con permisos ya existentes)
+ * @param {string} empresaId - ID de la empresa
  * @returns {Promise<number>} Siguiente número correlativo
  */
-export async function getNextGuiaNumber() {
+export async function getNextGuiaNumber(empresaId) {
+  console.log('🔢 getNextGuiaNumber llamado con empresaId:', empresaId);
   try {
-    // Importar Firestore dinámicamente para evitar problemas de circular dependency
-    const { collection, query, orderBy, limit, getDocs, addDoc } = await import('firebase/firestore');
+    const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
     const { db } = await import('../lib/firebase');
-    
-    // Obtener el último número de guía de la colección
-    const guiasRef = collection(db, 'guias_despacho');
-    const q = query(guiasRef, orderBy('numeroGuia', 'desc'), limit(1));
-    const snapshot = await getDocs(q);
-    
-    let nextNumber = 1;
-    
-    if (!snapshot.empty) {
-      const lastGuia = snapshot.docs[0].data();
-      nextNumber = (lastGuia.numeroGuia || 0) + 1;
+
+    if (!empresaId) {
+      console.warn('⚠️ getNextGuiaNumber: sin empresaId, retornando 1');
+      return 1;
     }
-    
-    // Guardar el nuevo número en la colección para mantener el correlativo
-    await addDoc(guiasRef, {
-      numeroGuia: nextNumber,
-      fechaCreacion: new Date().toISOString()
-    });
-    
+
+    // Buscar el mayor numeroGuia ya usado en reportes_combustible
+    const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+    const q = query(reportesRef, orderBy('numeroGuia', 'desc'), limit(1));
+    const snapshot = await getDocs(q);
+
+    let lastNum = 0;
+    if (!snapshot.empty) {
+      const data = snapshot.docs[0].data();
+      lastNum = data.numeroGuia || 0;
+    }
+
+    const nextNumber = lastNum + 1;
+    console.log('✅ Último numeroGuia encontrado:', lastNum, '→ próximo:', nextNumber);
     return nextNumber;
   } catch (error) {
-    console.error('Error obteniendo número de guía:', error);
-    // En caso de error, retornar un número basado en timestamp para evitar duplicados
+    console.error('❌ Error en getNextGuiaNumber:', error.code, error.message);
     return parseInt(Date.now().toString().slice(-6));
   }
 }
@@ -464,17 +465,17 @@ export async function getNextGuiaNumber() {
  * @param {Object} params - Parámetros del voucher
  * @returns {string} Texto del voucher
  */
-export function generateThermalVoucherText({ 
-  reportData, 
-  projectName, 
-  machineInfo, 
+export function generateThermalVoucherText({
+  reportData,
+  projectName,
+  machineInfo,
   operadorInfo,
   empresaInfo,
   repartidorInfo,
   equipoSurtidorInfo,
   numeroGuiaCorrelativo
 }) {
-  const numeroGuia = numeroGuiaCorrelativo 
+  const numeroGuia = numeroGuiaCorrelativo
     ? numeroGuiaCorrelativo.toString().padStart(3, '0')
     : (reportData.numeroReporte ? reportData.numeroReporte.split('-').pop() : '001');
 
@@ -490,23 +491,23 @@ export function generateThermalVoucherText({
   const formatCantidad = (cantidad) => {
     if (!cantidad) return '0';
     const num = parseFloat(cantidad);
-    return num.toLocaleString('es-CL', { 
+    return num.toLocaleString('es-CL', {
       minimumFractionDigits: 0,
-      maximumFractionDigits: 2 
+      maximumFractionDigits: 2
     });
   };
 
-  const hora = reportData.hora || new Date().toLocaleTimeString('es-CL', { 
-    hour: '2-digit', 
+  const hora = reportData.hora || new Date().toLocaleTimeString('es-CL', {
+    hour: '2-digit',
     minute: '2-digit',
-    hour12: false 
+    hour12: false
   });
 
   const fechaFormateada = formatDate(reportData.fecha || '');
   const cantidadFormateada = formatCantidad(reportData.cantidadLitros);
-  
+
   const line = '--------------------------------';
-  
+
   return `
   MPF INGENIERIA CIVIL SPA
       RUT: 77.158.216-8
