@@ -336,18 +336,47 @@ export function generateThermalVoucher({
         <span class="label">Run:</span>
         <span>${formatRun(operadorInfo?.rut)}</span>
       </div>
-      <div class="tipo-maquina-izquierda">
-        <div class="label">Tipo Maquina:</div>
-        <div>${machineInfo?.type || machineInfo?.nombre || 'N/A'}</div>
-      </div>
       <div class="row">
         <span class="label">Maquina:</span>
         <span class="bold">${machineInfo?.code || machineInfo?.patente || 'N/A'}</span>
       </div>
+      <div class="row">
+        <div class="label">Tipo:</div>
+        <div>${machineInfo?.type || machineInfo?.nombre || 'N/A'}</div>
+      </div>
+      ${reportData.horometroOdometro ? `
+      <div class="row">
+        <span class="label">Horometro/Km:</span>
+        <span>${reportData.horometroOdometro}</span>
+      </div>` : ''}
     </div>
-    
+
     <div class="line"></div>
-    
+
+    <!-- SURTIDOR -->
+    <div class="section">
+      <div class="bold">SURTIDOR</div>
+      <div class="row">
+        <span class="label">Nombre:</span>
+        <span>${formatNombreCorto(repartidorInfo?.nombre || reportData.repartidorNombre)}</span>
+      </div>
+      <div class="row">
+        <span class="label">Run:</span>
+        <span>${formatRun(repartidorInfo?.rut || reportData.repartidorRut)}</span>
+      </div>
+      ${equipoSurtidorInfo ? `
+      <div class="tipo-maquina-izquierda">
+        <div class="label">Equipo Surtidor:</div>
+        <div>${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}</div>
+      </div>
+      <div class="row">
+        <span class="label">Patente:</span>
+        <span class="bold">${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
+      </div>` : ''}
+    </div>
+
+    <div class="line"></div>
+
     <!-- FECHA Y HORA -->
     <div class="section">
       <div class="row">
@@ -520,7 +549,15 @@ ${empresaInfo?.nombre || projectName || 'N/A'}
 RUT: ${empresaInfo?.rut || 'N/A'}
 
 Tipo Maquina: ${machineInfo?.type || machineInfo?.nombre || 'N/A'}
-Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}
+Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}${reportData.horometroOdometro ? `
+Horometro/Km: ${reportData.horometroOdometro}` : ''}
+${line}
+
+SURTIDOR:
+Nombre: ${repartidorInfo?.nombre || reportData.repartidorNombre || 'N/A'}
+Run: ${repartidorInfo?.rut || reportData.repartidorRut || 'N/A'}${equipoSurtidorInfo ? `
+Equipo: ${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}
+Patente: ${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}` : ''}
 ${line}
 
 Fecha Emision: ${fechaFormateada}

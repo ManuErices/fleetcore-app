@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function CombustibleDetalleModal({ 
-  reporte, 
-  onClose, 
-  projectName, 
+export default function CombustibleDetalleModal({
+  reporte,
+  onClose,
+  projectName,
   machineInfo,
   surtidorInfo,
   operadorInfo,
@@ -11,13 +11,18 @@ export default function CombustibleDetalleModal({
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
-  if (!reporte) return null;
-
   const isAdmin = userRole === 'administrador';
   const [isEditing, setIsEditing] = useState(false);
-  const [editedData, setEditedData] = useState({ ...reporte });
+  const [editedData, setEditedData] = useState(reporte ? { ...reporte } : {});
   const [showSignModal, setShowSignModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  if (!reporte) return null;
 
   const handleSaveChanges = () => {
     if (onSave) {
@@ -57,30 +62,30 @@ export default function CombustibleDetalleModal({
         <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4 sm:p-6 flex flex-col">
           <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-3"></div>
           <div className="flex items-start sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base sm:text-2xl font-black flex items-center gap-2">
-              <svg className="w-5 h-5 sm:w-8 sm:h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <div>
+              <h2 className="text-base sm:text-2xl font-black flex items-center gap-2">
+                <svg className="w-5 h-5 sm:w-8 sm:h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="truncate">Detalle de Combustible</span><span className="hidden sm:inline"> de Reporte</span>
+              </h2>
+              <p className="text-orange-100 text-sm mt-1">
+                N° {reporte.numeroReporte} - {reporte.fecha}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-              <span className="truncate">Detalle de Combustible</span><span className="hidden sm:inline"> de Reporte</span>
-            </h2>
-            <p className="text-orange-100 text-sm mt-1">
-              N° {reporte.numeroReporte} - {reporte.fecha}
-            </p>
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-10 h-10 rounded-full hover:bg-white/20 flex items-center justify-center transition-colors"
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
-          </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
           {/* Información General del Reporte */}
           <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-orange-200">
             <h3 className="text-lg font-black text-orange-900 mb-4 flex items-center gap-2">
@@ -89,8 +94,9 @@ export default function CombustibleDetalleModal({
               </svg>
               Información General
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <DataField label="Fecha de Registro" value={reporte.fecha} />
+              <DataField label="Hora" value={reporte.hora || (reporte.fechaCreacion ? new Date(reporte.fechaCreacion).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-')} />
               <DataField label="N° de Reporte" value={reporte.numeroReporte} />
               <DataField label="Proyecto" value={projectName || reporte.projectId} />
             </div>
@@ -107,7 +113,17 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <DataField label="Patente" value={machineInfo?.patente || reporte.machinePatente} />
-              <DataField label="Nombre/Modelo" value={machineInfo?.name || reporte.machineName} />
+              <DataField label="Nombre/Modelo" value={
+                machineInfo?.nombre || machineInfo?.name
+                || (machineInfo?.type && machineInfo?.marca ? `${machineInfo.type} - ${machineInfo.marca}` : machineInfo?.modelo)
+                || reporte.machineName
+              } />
+              {reporte.datosEntrada?.destinoCarga && (
+                <DataField
+                  label="Destino de Carga"
+                  value={reporte.datosEntrada.destinoCarga === 'camion' ? '🚛 Camión Surtidor' : '🛢️ Estanque de Distribución'}
+                />
+              )}
               {isEditing ? (
                 <div>
                   <div className="text-xs font-semibold text-slate-500 mb-1">Horómetro/Odómetro</div>
@@ -133,7 +149,7 @@ export default function CombustibleDetalleModal({
               </svg>
               Detalle de Combustible
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
               {isEditing ? (
                 <>
                   <div>
@@ -166,6 +182,15 @@ export default function CombustibleDetalleModal({
                     </div>
                   </div>
                   <DataField label="Empresa Proveedora" value={reporte.empresa || '-'} />
+                  {reporte.numerosDocumento?.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-slate-500 mb-1">N° Documentos</div>
+                      <div className="text-sm font-bold text-slate-900">{reporte.numerosDocumento.join(', ')}</div>
+                    </div>
+                  )}
+                  {!reporte.numerosDocumento && reporte.numeroDocumento && (
+                    <DataField label="N° Documento" value={reporte.numeroDocumento} />
+                  )}
                 </>
               )}
             </div>
@@ -181,9 +206,9 @@ export default function CombustibleDetalleModal({
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.surtidorNombre || '-'} />
-                {surtidorInfo?.rut && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo.rut}</p>
+                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'} />
+                {(surtidorInfo?.rut || reporte.repartidorRut) && (
+                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
                 )}
               </div>
               <div>
@@ -412,7 +437,7 @@ export default function CombustibleDetalleModal({
               <button
                 onClick={() => {
                   setShowSignModal(false);
-                              setAdminPassword('');
+                  setAdminPassword('');
                 }}
                 className="px-3 sm:px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
               >
@@ -429,9 +454,9 @@ export default function CombustibleDetalleModal({
 // Componente auxiliar
 function DataField({ label, value }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-xs font-semibold text-slate-500 mb-1">{label}</div>
-      <div className="text-sm font-bold text-slate-900">{value || '-'}</div>
+      <div className="text-sm font-bold text-slate-900 break-words">{value || '-'}</div>
     </div>
   );
 }
