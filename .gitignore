@@ -100,3 +100,5 @@ coverage/
 
 # Docs
 TODO.txt
+
+.env
