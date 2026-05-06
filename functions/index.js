@@ -343,8 +343,15 @@ async function getNotifTargets(empresaId, eventoTipo) {
     console.warn({ event: 'notifcfg_err', empresaId, message: e.message });
   }
   if (!enabled) return { emails: [], whatsapps: [] };
-  // Siempre incluir para debug
-  emails.add('felipesalazar3015@gmail.com');
+  // Siempre incluir al remitente para registro/auditoría
+  try {
+    const senderRaw = process.env.AWS_SES_SENDER || '';
+    const match = senderRaw.match(/<(.+)>|(\S+@\S+)/);
+    const senderEmail = match ? (match[1] || match[2]) : null;
+    if (senderEmail) emails.add(senderEmail.toLowerCase());
+  } catch (e) {
+    console.warn('Error al extraer senderEmail para auditoría');
+  }
 
   // Asegurar admin_contrato de la empresa
   try {
