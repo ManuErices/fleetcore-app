@@ -23,6 +23,7 @@ import OperadoresApp from "./pages/operadores";
 import AdminPanel from "./pages/reportes/AdminPanel";
 import RRHH from "./pages/rrhh";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
+import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
 import TrabajadorApp from "./pages/TrabajadorApp.jsx";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { EmpresaProvider } from "./lib/useEmpresa";
@@ -693,6 +694,17 @@ export default function App() {
         <InstallPWA />
         <SessionExpiryIndicator />
         <FinanzasApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
+      </EmpresaProvider>
+    );
+  }
+
+  if (selectedApp === 'contabilidad') {
+    return (
+      <EmpresaProvider user={user}>
+        <ConnectionStatus />
+        <InstallPWA />
+        <SessionExpiryIndicator />
+        <ContabilidadApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
       </EmpresaProvider>
     );
   }

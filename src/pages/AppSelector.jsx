@@ -78,8 +78,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const canAccessWorkFleet  = isSuperAdmin || isAdminContrato;
   const canAccessRRHH       = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
   const canAccessReportes   = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
-  const canAccessFinanzas   = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
-  const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
+  const canAccessFinanzas      = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas'))      && canAccess('finanzas'));
+  const canAccessContabilidad  = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('contabilidad'))  && canAccess('contabilidad'));
+  const canAccessWorkFleetM    = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
 
   // Razón de bloqueo para mostrar el mensaje correcto
   const blockReason = (moduleId, roleOk) => {
@@ -177,7 +178,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
         </div>
 
         {/* Grid de cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           <AppCard
             onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
             canAccess={canAccessFleetCore}
@@ -270,6 +271,30 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               { icon: "🤝", text: "Proveedores y cuentas por pagar" },
               { icon: "🏦", text: "Créditos y obligaciones" },
               { icon: "📈", text: "Reportes y análisis financiero" },
+            ]}
+            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+          />
+
+          <AppCard
+            onClick={() => handleSelect('contabilidad', canAccessContabilidad)}
+            canAccess={canAccessContabilidad}
+            blockReason={blockReason('contabilidad', isSuperAdmin || (userRole === 'administrativo' && hasModulo('contabilidad')))}
+            requiredPlan="enterprise"
+            glowColor="from-indigo-600 to-blue-700"
+            borderColor="border-indigo-200 hover:border-indigo-400"
+            logoSrc="/logo-fleetcore-f.png"
+            logoAlt="FleetCore Contabilidad"
+            buttonClass="from-indigo-900 to-blue-700 hover:from-indigo-800 hover:to-blue-600"
+            buttonLabel="Abrir Contabilidad"
+            badgeClass="bg-indigo-100 text-indigo-700"
+            badgeLabel="Contabilidad"
+            features={[
+              { icon: "📒", text: "Plan de cuentas IFRS/SII" },
+              { icon: "✏️", text: "Libro diario y asientos" },
+              { icon: "📊", text: "Balance 8 columnas" },
+              { icon: "🏛️", text: "ESF y Estado de Resultados" },
+              { icon: "🧾", text: "F29, F22 y PPM" },
+              { icon: "⚖️", text: "Impuesto diferido NIC 12" },
             ]}
             onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
           />
