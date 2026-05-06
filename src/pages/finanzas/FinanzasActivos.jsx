@@ -14,7 +14,7 @@ const TIPOS = [
   { id: "otro",        label: "Otro",        color: "from-purple-500 to-violet-600",  badge: "bg-purple-100 text-purple-700",  dot: "bg-purple-500",  icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
 ];
 const TIPO_MAP = Object.fromEntries(TIPOS.map(t => [t.id, t]));
-const OWN_LABELS = { OWNED: "Propio", RENTED: "Arrendado", LEASING: "Leasing" };
+const OWN_LABELS = { OWNED: "Propio", RENTED: "Arrendado", LEASING: "Leasing", CREDITO_AUTO: "Créd. Automotriz" };
 const DOCS_DEF = [
   { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
   { key: "vencSeguro",             label: "Seguro"               },
@@ -146,7 +146,7 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Propiedad</label>
                 <select value={form.ownership} onChange={e=>set("ownership",e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                  <option value="OWNED">Propio</option><option value="RENTED">Arrendado</option><option value="LEASING">Leasing</option>
+                  <option value="OWNED">Propio</option><option value="RENTED">Arrendado</option><option value="LEASING">Leasing</option><option value="CREDITO_AUTO">Crédito Automotriz</option>
                 </select>
               </div>
             </div>
@@ -325,12 +325,30 @@ export default function FinanzasActivos() {
       const todos=snapM.docs.map(d=>({
         id:d.id, machineId:d.id, _source:"machines",
         nombre:      d.data().name        || "",
-        tipo:        ["camion","camión","vehículo","vehiculo"].some(k=>(d.data().type||"").toLowerCase().includes(k)) ? "vehiculo" : "maquinaria",
+        tipo:        d.data().tipo || (() => {
+          const type = (d.data().type || "").toLowerCase();
+          const name = (d.data().name || "").toLowerCase();
+          const esVehiculo = [
+            // Valores del campo type en FleetCore
+            "van","pickup","truck","bus","minibus","suv","sedan","hatchback",
+            "station wagon","camioneta","furgon","furgón","minivan","jeep",
+            // Por si viene en español en type
+            "camión","camion","vehículo","vehiculo",
+            // Detección por nombre del activo
+          ].some(k => type.includes(k)) ||
+          [
+            "camioneta","furgon","furgón","hilux","wingle","poer","maxus",
+            "changan","jac","mitsubishi","toyota","ford","chevrolet",
+            "nissan","hyundai","kia","volkswagen","peugeot partner",
+            "great wall","gwm","jeep","suv",
+          ].some(k => name.includes(k));
+          return esVehiculo ? "vehiculo" : "maquinaria";
+        })(),
         code:        d.data().code        || "",
         marca:       d.data().marca       || "",
         modelo:      d.data().modelo      || "",
         patente:     d.data().patente     || "",
-        ownership:   d.data().ownership   || "OWN",
+        ownership:   (() => { const raw = d.data().ownership || "OWNED"; return raw === "OWN" ? "OWNED" : raw; })(),
         propietario: d.data().propietario || "",
         projectId:   d.data().projectId   || "",
         activo:      d.data().active      !== false,
@@ -531,7 +549,7 @@ export default function FinanzasActivos() {
                         {alerta?<span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full">⚠ Vence pronto</span>:<span className="text-emerald-500 text-xs font-semibold">✓ Al día</span>}
                       </td>
                       <td className="px-4 py-4 text-center hidden sm:table-cell">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${a.ownership==="OWNED"?"bg-purple-100 text-purple-700":a.ownership==="RENTED"?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700"}`}>{OWN_LABELS[a.ownership]||a.ownership||"—"}</span>
+                        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${a.ownership==="OWNED"?"bg-purple-100 text-purple-700":a.ownership==="RENTED"?"bg-amber-100 text-amber-700":a.ownership==="CREDITO_AUTO"?"bg-sky-100 text-sky-700":"bg-blue-100 text-blue-700"}`}>{OWN_LABELS[a.ownership]||a.ownership||"—"}</span>
                       </td>
                       <td className="px-4 py-4 text-center">
                         <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${a.activo?"bg-purple-100 text-purple-700":"bg-slate-100 text-slate-500"}`}>

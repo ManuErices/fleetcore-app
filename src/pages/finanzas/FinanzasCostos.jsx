@@ -37,6 +37,7 @@ const EMPTY = {
   nombre: "", categoria: "credito", descripcion: "", monto: "",
   moneda: "CLP", frecuencia: "mensual", fechaInicio: "", fechaTermino: "",
   proveedor: "", numeroContrato: "", diaPago: "", notas: "", activo: true,
+  activoVinculadoId: "",
 };
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -63,10 +64,54 @@ function diasRestantes(f) {
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
-function ModalCosto({ isOpen, onClose, onSave, editando }) {
+function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
   const [form, setForm] = useState(EMPTY);
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [activos, setActivos] = useState([]);
+  const [loadingActivos, setLoadingActivos] = useState(false);
+
+  // Cargar activos cuando el modal se abre
+  useEffect(() => {
+    if (!isOpen || !empresaId) return;
+    setLoadingActivos(true);
+    getDocs(collection(db, "empresas", empresaId, "machines"))
+      .then(snap => {
+        const lista = snap.docs
+          .map(d => ({
+            id: d.id,
+            nombre: d.data().name || "",
+            patente: d.data().patente || "",
+            code: d.data().code || "",
+            ownership: (() => {
+              const raw = d.data().ownership || "OWNED";
+              // Normalizar valor legacy "OWN" de FleetCore
+              return raw === "OWN" ? "OWNED" : raw;
+            })(),
+            tipo: d.data().tipo || (() => {
+              const type = (d.data().type || "").toLowerCase();
+              const name = (d.data().name || "").toLowerCase();
+              const esVehiculo = [
+                "van","pickup","truck","bus","minibus","suv","sedan","hatchback",
+                "station wagon","camioneta","furgon","furgón","minivan","jeep",
+                "camión","camion","vehículo","vehiculo",
+              ].some(k => type.includes(k)) ||
+              [
+                "camioneta","furgon","furgón","hilux","wingle","poer","maxus",
+                "changan","jac","mitsubishi","toyota","ford","chevrolet",
+                "nissan","hyundai","kia","volkswagen","peugeot partner",
+                "great wall","gwm","jeep","suv",
+              ].some(k => name.includes(k));
+              return esVehiculo ? "vehiculo" : "maquinaria";
+            })(),
+          }))
+          .filter(a => a.nombre || a.patente)
+          .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+        setActivos(lista);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingActivos(false));
+  }, [isOpen, empresaId]);
 
   useEffect(() => {
     setForm(editando ? { ...EMPTY, ...editando } : EMPTY);
@@ -78,13 +123,38 @@ function ModalCosto({ isOpen, onClose, onSave, editando }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const cat = CAT_MAP[form.categoria] || CATEGORIAS[0];
 
+  // Cuando se vincula un activo, pre-rellenar el nombre si está vacío
+  const handleVincularActivo = (activoId) => {
+    set("activoVinculadoId", activoId);
+    if (!form.nombre && activoId) {
+      const activo = activos.find(a => a.id === activoId);
+      if (activo) {
+        const label = [activo.nombre, activo.patente].filter(Boolean).join(" · ");
+        set("nombre", label);
+      }
+    } else if (!activoId) {
+      set("activoVinculadoId", "");
+    }
+  };
+
   const handleSubmit = async () => {
     if (!form.nombre || !form.monto || !form.fechaInicio) return;
     setSaving(true);
-    await onSave({ ...form, monto: parseFloat(form.monto) || 0 });
+    const payload = { ...form, monto: parseFloat(form.monto) || 0 };
+    if (form.categoria !== "leasing" && form.categoria !== "otro") {
+      delete payload.activoVinculadoId;
+    }
+    await onSave(payload);
     setSaving(false);
     onClose();
   };
+
+  // Activos filtrados según categoría seleccionada
+  const activosFiltrados = activos.filter(a => {
+    if (form.categoria === "leasing") return a.ownership === "LEASING";
+    if (form.categoria === "otro")    return a.tipo === "vehiculo" && (a.ownership === "OWNED" || a.ownership === "CREDITO_AUTO");
+    return false;
+  });
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -143,6 +213,73 @@ function ModalCosto({ isOpen, onClose, onSave, editando }) {
                   ))}
                 </div>
               </div>
+              {/* ── Selector de activo vinculado (solo para Leasing y Crédito Automotriz) ── */}
+              {(form.categoria === "leasing" || form.categoria === "otro") && (
+                <div className="rounded-xl border-2 border-purple-200 bg-purple-50 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-6 h-6 rounded-lg bg-purple-700 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-purple-800">Vincular a un activo</p>
+                      <p className="text-[11px] text-purple-500">
+                        {form.categoria === "leasing"
+                          ? "Activos registrados con financiamiento Leasing"
+                          : "Vehículos registrados en FleetCore"}
+                      </p>
+                    </div>
+                  </div>
+                  {loadingActivos ? (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs text-purple-500">Cargando activos...</span>
+                    </div>
+                  ) : activosFiltrados.length === 0 ? (
+                    <p className="text-xs text-purple-400 italic">
+                      {form.categoria === "leasing"
+                        ? "No hay activos con Leasing registrados"
+                        : "No hay vehículos registrados"}
+                    </p>
+                  ) : (
+                    <div className="relative">
+                      <svg className="w-3.5 h-3.5 text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5" />
+                      </svg>
+                      <select
+                        value={form.activoVinculadoId || ""}
+                        onChange={e => handleVincularActivo(e.target.value)}
+                        className="w-full pl-8 pr-4 py-2.5 border-2 border-purple-200 bg-white text-slate-700 rounded-xl focus:outline-none focus:border-purple-500 text-sm font-semibold appearance-none cursor-pointer"
+                      >
+                        <option value="">— Sin activo vinculado —</option>
+                        {activosFiltrados.map(a => {
+                          const label = a.nombre
+                            ? [a.nombre, a.patente || a.code].filter(Boolean).join(" · ")
+                            : (a.patente || a.code || a.id);
+                          return <option key={a.id} value={a.id}>{label}</option>;
+                        })}
+                      </select>
+                      <svg className="w-3 h-3 text-purple-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  )}
+                  {form.activoVinculadoId && (() => {
+                    const a = activosFiltrados.find(x => x.id === form.activoVinculadoId);
+                    return a ? (
+                      <div className="mt-2 flex items-center gap-2 text-[11px] text-purple-700 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block" />
+                        Vinculado: {a.nombre}{a.patente ? ` · ${a.patente}` : ""}
+                        <button onClick={() => set("activoVinculadoId", "")} className="ml-auto text-purple-400 hover:text-purple-700 transition-colors" title="Desvincular">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Nombre <span className="text-red-500">*</span></label>
                 <input value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: Crédito Caterpillar D8..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
@@ -221,6 +358,12 @@ function ModalCosto({ isOpen, onClose, onSave, editando }) {
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div><span className="text-slate-500">Nombre:</span><span className="font-bold text-slate-800 ml-1">{form.nombre || "—"}</span></div>
                   <div><span className="text-slate-500">Categoría:</span><span className="font-bold text-slate-800 ml-1">{cat.label}</span></div>
+                  {(form.categoria === "leasing" || form.categoria === "otro") && form.activoVinculadoId && (() => {
+                    const a = activosFiltrados.find(x => x.id === form.activoVinculadoId);
+                    return a ? (
+                      <div className="col-span-2"><span className="text-slate-500">Activo vinculado:</span><span className="font-bold text-purple-700 ml-1">{a.nombre}{a.patente ? ` · ${a.patente}` : ""}</span></div>
+                    ) : null;
+                  })()}
                   <div><span className="text-slate-500">Monto:</span><span className="font-bold text-slate-800 ml-1">{form.moneda} {Number(form.monto || 0).toLocaleString("es-CL")}</span></div>
                   <div><span className="text-slate-500">Frecuencia:</span><span className="font-bold text-slate-800 ml-1">{FREC_MAP[form.frecuencia]}</span></div>
                   <div><span className="text-slate-500">Inicio:</span><span className="font-bold text-slate-800 ml-1">{form.fechaInicio || "—"}</span></div>
@@ -577,7 +720,7 @@ export default function FinanzasCostos() {
         );
       })()}
 
-      <ModalCosto isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }} onSave={handleSave} editando={editando} />
+      <ModalCosto isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }} onSave={handleSave} editando={editando} empresaId={empresaId} />
     </div>
   );
 }
