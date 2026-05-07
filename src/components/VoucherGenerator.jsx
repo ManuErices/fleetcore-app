@@ -125,7 +125,7 @@ export default function VoucherGenerator({
               </div>
               <div>
                 <span className="text-slate-600">Cantidad:</span>
-                <span className="ml-2 font-semibold text-green-600">{reportData.cantidadLitros} Lts</span>
+                <span className="ml-2 font-semibold text-green-600">{Number(reportData.cantidadLitros).toLocaleString('es-CL')} Lts</span>
               </div>
               <div>
                 <span className="text-slate-600">Vehículo:</span>

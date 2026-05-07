@@ -311,6 +311,8 @@ export default function ReporteCombustible() {
 
   const handleReimprimirVoucher = async (reporte) => {
     const project = projects.find(p => p.id === reporte.projectId);
+    const equipoId = reporte.datosControl?.equipoSurtidorId;
+    const equipoSurtidor = equipoId ? machines.find(m => m.id === equipoId) : null;
     const machineId = reporte.datosEntrega?.machineId;
     const operadorId = reporte.datosEntrega?.operadorId;
     const machineInfo = machines.find(m => m.id === machineId) || {
@@ -356,7 +358,10 @@ export default function ReporteCombustible() {
       reportData: {
         fecha: reporte.fecha || reporte.fechaCreacion?.split('T')[0] || '',
         cantidadLitros: reporte.datosEntrega?.cantidadLitros || reporte.cantidadLitros || 0,
-        numeroReporte: reporte.numeroReporte || ''
+        numeroReporte: reporte.numeroReporte || '',
+        firmaReceptor: reporte.firmaReceptor,
+        firmaRepartidor: reporte.firmaRepartidor,
+        horometroOdometro: reporte.datosEntrega?.horometroOdometro || reporte.datosEntrada?.horometroOdometro || ''
       },
       projectName: project?.nombre || project?.name || reporte.projectId || '',
       machineInfo: {
@@ -377,6 +382,11 @@ export default function ReporteCombustible() {
         nombre: repartidorInfo.nombre || '',
         rut: repartidorInfo.rut || ''
       },
+      equipoSurtidorInfo: equipoSurtidor ? {
+        nombre: equipoSurtidor.name || equipoSurtidor.nombre || '',
+        patente: equipoSurtidor.patente || equipoSurtidor.code || '',
+        tipo: equipoSurtidor.type || equipoSurtidor.tipo || ''
+      } : null,
       numeroGuiaCorrelativo: numeroGuia
     });
   };
@@ -955,10 +965,10 @@ export default function ReporteCombustible() {
                           {reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}
                         </td>
                         <td className="px-3 py-3 text-sm text-center text-slate-700">
-                          {reporte.horometroOdometro || '-'}
+                          {reporte.horometroOdometro ? Number(reporte.horometroOdometro).toLocaleString('es-CL') : '-'}
                         </td>
                         <td className="px-3 py-3 text-sm text-center font-bold text-orange-600">
-                          {reporte.cantidad} L
+                          {Number(reporte.cantidad || 0).toLocaleString('es-CL')} L
                         </td>
                         <td className="px-3 py-3 text-center">
                           {(reporte.firmaRepartidor || reporte.firmaReceptor) ? (

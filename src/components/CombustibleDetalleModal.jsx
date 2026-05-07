@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { printThermalVoucher } from '../utils/voucherThermalGenerator';
 
 export default function CombustibleDetalleModal({
   reporte,
@@ -53,6 +54,24 @@ export default function CombustibleDetalleModal({
       ...prev,
       [field]: value
     }));
+  };
+
+  const handlePrint = () => {
+    printThermalVoucher({
+      reportData: {
+        ...reporte,
+        cantidadLitros: reporte.cantidadLitros,
+        horometroOdometro: reporte.horometroOdometro || reporte.datosEntrega?.horometroOdometro || reporte.datosEntrada?.horometroOdometro || ''
+      },
+      projectName,
+      machineInfo,
+      operadorInfo,
+      repartidorInfo: surtidorInfo || {
+        nombre: reporte.repartidorNombre || reporte.surtidorNombre,
+        rut: reporte.repartidorRut || reporte.surtidorRut
+      },
+      numeroGuiaCorrelativo: reporte.numeroGuia
+    });
   };
 
   return (
@@ -136,7 +155,7 @@ export default function CombustibleDetalleModal({
                   />
                 </div>
               ) : (
-                <DataField label="Horómetro/Odómetro" value={reporte.horometroOdometro || '-'} />
+                <DataField label="Horómetro/Odómetro" value={reporte.horometroOdometro ? Number(reporte.horometroOdometro).toLocaleString('es-CL') : '-'} />
               )}
             </div>
           </div>
@@ -177,7 +196,7 @@ export default function CombustibleDetalleModal({
                   <div className="bg-white rounded-lg p-4 border-2 border-green-300">
                     <div className="text-xs font-semibold text-green-700 mb-1">Cantidad Suministrada</div>
                     <div className="text-2xl sm:text-3xl font-black text-green-600 flex items-baseline gap-2">
-                      {reporte.cantidadLitros}
+                      {Number(reporte.cantidadLitros || 0).toLocaleString('es-CL')}
                       <span className="text-lg text-green-500">Litros</span>
                     </div>
                   </div>
@@ -220,30 +239,57 @@ export default function CombustibleDetalleModal({
             </div>
           </div>
 
-          {/* Firma del Receptor */}
-          {reporte.firmaReceptor && (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border-2 border-blue-200">
-              <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-                Firma del Receptor
-              </h3>
-              <div className="flex flex-col items-center gap-2">
-                <div className="bg-white border-2 border-blue-200 rounded-lg p-3 w-full max-w-xs">
-                  <img
-                    src={reporte.firmaReceptor}
-                    alt="Firma del receptor"
-                    className="w-full h-auto max-h-32 object-contain mx-auto"
-                  />
+          {/* Firmas y Fotos de Respaldo */}
+          {(reporte.firmaReceptor || reporte.firmaRepartidor) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {reporte.firmaReceptor && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border-2 border-blue-200">
+                  <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                    Firma/Foto Receptor
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="bg-white border-2 border-blue-200 rounded-lg p-3 w-full">
+                      <img
+                        src={reporte.firmaReceptor}
+                        alt="Firma del receptor"
+                        className="w-full h-auto max-h-64 object-contain mx-auto"
+                      />
+                    </div>
+                    <div className="w-full border-t-2 border-blue-300 pt-2 text-center">
+                      <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RECEPTOR</p>
+                      <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.operadorNombre || 'N/A'}</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="w-full max-w-xs border-t-2 border-blue-300 pt-2 text-center">
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">FIRMA RECEPTOR</p>
-                  {reporte.operadorNombre && (
-                    <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.operadorNombre}</p>
-                  )}
+              )}
+
+              {reporte.firmaRepartidor && (
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-6 border-2 border-orange-200">
+                  <h3 className="text-lg font-black text-orange-900 mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Firma/Foto Surtidor
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="bg-white border-2 border-orange-200 rounded-lg p-3 w-full">
+                      <img
+                        src={reporte.firmaRepartidor}
+                        alt="Firma del repartidor"
+                        className="w-full h-auto max-h-64 object-contain mx-auto"
+                      />
+                    </div>
+                    <div className="w-full border-t-2 border-orange-300 pt-2 text-center">
+                      <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">SURTIDOR</p>
+                      <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.repartidorNombre || reporte.surtidorNombre || 'N/A'}</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -377,6 +423,15 @@ export default function CombustibleDetalleModal({
                     Firmar y Validar
                   </button>
                   <button
+                    onClick={handlePrint}
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Imprimir Voucher
+                  </button>
+                  <button
                     onClick={onClose}
                     className="px-3 sm:px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
@@ -386,12 +441,23 @@ export default function CombustibleDetalleModal({
               )}
             </div>
           ) : (
-            <button
-              onClick={onClose}
-              className="w-full px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
-            >
-              Cerrar
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handlePrint}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Imprimir Voucher
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+              >
+                Cerrar
+              </button>
+            </div>
           )}
         </div>
       </div>

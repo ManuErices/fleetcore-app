@@ -45,14 +45,31 @@ export default function CameraCapture({ onCapture, onClose, color = 'green', tit
   const handleCapture = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    
+    // Forzar un tamaño máximo para evitar base64 gigantes que rompen el correo
+    const MAX_WIDTH = 640;
+    const MAX_HEIGHT = 480;
+    let width = video.videoWidth || 640;
+    let height = video.videoHeight || 480;
+
+    if (width > MAX_WIDTH) {
+      height *= MAX_WIDTH / width;
+      width = MAX_WIDTH;
+    }
+    if (height > MAX_HEIGHT) {
+      width *= MAX_HEIGHT / height;
+      height = MAX_HEIGHT;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+
     const ctx = canvas.getContext('2d');
     // Mirror para efecto selfie natural
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0);
-    setCapturedPhoto(canvas.toDataURL('image/jpeg', 0.85));
+    ctx.drawImage(video, 0, 0, width, height);
+    setCapturedPhoto(canvas.toDataURL('image/jpeg', 0.7)); // Bajar un poco la calidad para el correo
     stopCamera();
   };
 

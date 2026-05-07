@@ -26,30 +26,81 @@ function escape(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function fmtNumber(n) {
+  const num = parseFloat(n);
+  if (isNaN(num)) return String(n ?? '');
+  return num.toLocaleString('es-CL');
+}
+
 function fmtLitros(n) {
-  const num = Number(n);
-  if (!isFinite(num)) return String(n ?? '');
-  return num.toLocaleString('es-CL') + ' L';
+  return fmtNumber(n) + ' L';
 }
 
 function fmtFecha(iso) {
   if (!iso) return '';
   try {
     const d = typeof iso === 'string' ? new Date(iso) : iso?.toDate?.() || new Date(iso);
-    return d.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString('es-CL', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit',
+      timeZone: 'America/Santiago'
+    });
   } catch { return String(iso); }
+}
+
+function renderPhotos(reporte) {
+  const f1 = reporte.firmaReceptor;
+  const f2 = reporte.firmaRepartidor;
+  if (!f1 && !f2) return '';
+
+  let html = `<div style="margin-top: 24px; border-top: 1px solid ${BRAND.border}; padding-top: 16px;">`;
+  html += `<div style="font-size: 13px; font-weight: 800; color: ${BRAND.text}; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px;">Respaldos Fotográficos / Firmas</div>`;
+  html += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`;
+  
+  if (f1) {
+    html += `<td class="photo-cell" style="padding: 0 10px 10px 0; width: 50%; vertical-align: top;">
+      <div style="background: #ffffff; border: 1px solid ${BRAND.border}; border-radius: 8px; padding: 4px; text-align: center;">
+        <img src="${f1}" alt="Respaldo 1" width="250" style="width: 100%; max-width: 250px; height: auto; display: block; border-radius: 4px; margin: 0 auto;">
+        <div style="font-size: 10px; color: ${BRAND.textMuted}; margin-top: 4px; font-weight: 700;">RECEPTOR</div>
+      </div>
+    </td>`;
+  }
+  
+  if (f2) {
+    html += `<td class="photo-cell" style="padding: 0 0 10px ${f1 ? '10px' : '0'}; width: 50%; vertical-align: top;">
+      <div style="background: #ffffff; border: 1px solid ${BRAND.border}; border-radius: 8px; padding: 4px; text-align: center;">
+        <img src="${f2}" alt="Respaldo 2" width="250" style="width: 100%; max-width: 250px; height: auto; display: block; border-radius: 4px; margin: 0 auto;">
+        <div style="font-size: 10px; color: ${BRAND.textMuted}; margin-top: 4px; font-weight: 700;">SURTIDOR</div>
+      </div>
+    </td>`;
+  }
+  
+  html += `</tr></table></div>`;
+  return html;
 }
 
 function baseLayout({ title, preheader, contentHtml, ctaUrl, ctaLabel }) {
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escape(title)}</title></head>
+<title>${escape(title)}</title>
+<style>
+  @media only screen and (max-width: 600px) {
+    .container { width: 100% !important; border-radius: 0 !important; }
+    .photo-cell { width: 100% !important; display: block !important; padding: 0 0 16px 0 !important; }
+    .content-padding { padding: 20px !important; }
+    .header { padding: 20px !important; }
+  }
+</style>
+</head>
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${BRAND.text};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escape(preheader || title)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:24px 0;">
   <tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);">
-      <tr><td style="background:linear-gradient(135deg,${BRAND.primary},${BRAND.primaryDark});padding:24px 28px;">
+    <table class="container" role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+      <tr><td class="header" style="background:linear-gradient(135deg,${BRAND.primary},${BRAND.primaryDark});padding:24px 28px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="vertical-align:middle;">
             <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:.3px;">FleetCore</div>
@@ -106,14 +157,15 @@ function entradaCombustible({ reporte, empresaNombre, origenLabel, equipoSurtido
       ${row('N° de Documento', docs)}
       ${row('Fecha del documento', d.fechaDocumento)}
       ${row('Cantidad', fmtLitros(d.cantidad), { bold: true })}
-      ${row('Horómetro / Odómetro', d.horometroOdometro)}
+      ${row('Horómetro / Odómetro', fmtNumber(d.horometroOdometro))}
       ${row('Equipo surtidor', equipoSurtidorLabel)}
       ${row('Máquina / Estanque receptor', machineLabel)}
       ${row('Operador receptor', operadorLabel)}
       ${row('Observaciones', d.observaciones)}
       ${row('Registrado por', reporte.creadoPor)}
       ${row('Fecha de registro', fmtFecha(reporte.fechaCreacion))}
-    </table>`;
+    </table>
+    ${renderPhotos(reporte)}`;
 
   const text = [
     `Nueva entrada de combustible — ${empresaNombre || ''}`,
@@ -153,14 +205,15 @@ function voucherEntrega({ reporte, empresaNombre, empresaReceptora, equipoSurtid
       ${row('Máquina', machineLabel, { bold: true })}
       ${row('Operador', operadorLabel)}
       ${row('Cantidad entregada', fmtLitros(d.cantidadLitros), { bold: true })}
-      ${row('Horómetro / Odómetro', d.horometroOdometro)}
+      ${row('Horómetro / Odómetro', fmtNumber(d.horometroOdometro))}
       ${row('Equipo surtidor', equipoSurtidorLabel)}
       ${row('Fecha de entrega', d.fecha)}
       ${row('Observaciones', d.observaciones)}
       ${row('N° Reporte', reporte.numeroReporte)}
       ${row('Registrado por', reporte.creadoPor)}
       ${row('Fecha de registro', fmtFecha(reporte.fechaCreacion))}
-    </table>`;
+    </table>
+    ${renderPhotos(reporte)}`;
 
   const text = [
     `Voucher de entrega — ${empresaNombre || ''}`,

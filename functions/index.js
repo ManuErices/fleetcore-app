@@ -342,15 +342,21 @@ async function getNotifTargets(empresaId, eventoTipo) {
   } catch (e) {
     console.warn({ event: 'notifcfg_err', empresaId, message: e.message });
   }
-  if (!enabled) return { emails: [], whatsapps: [] };
-  // Siempre incluir al remitente para registro/auditoría
+
+  // Siempre incluir al remitente para registro/auditoría (antes del check de enabled)
   try {
     const senderRaw = process.env.AWS_SES_SENDER || '';
     const match = senderRaw.match(/<(.+)>|(\S+@\S+)/);
     const senderEmail = match ? (match[1] || match[2]) : null;
     if (senderEmail) emails.add(senderEmail.toLowerCase());
+    else console.warn('getNotifTargets: AWS_SES_SENDER vacío o inválido');
   } catch (e) {
-    console.warn('Error al extraer senderEmail para auditoría');
+    console.warn('Error al extraer senderEmail para auditoría:', e.message);
+  }
+
+  if (!enabled) {
+    console.log({ event: 'notif_disabled', empresaId, auditEmail: Array.from(emails) });
+    return { emails: Array.from(emails), whatsapps: [] };
   }
 
   // Asegurar admin_contrato de la empresa
@@ -430,6 +436,15 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
         && process.env.TWILIO_AUTH_TOKEN
         && !String(process.env.TWILIO_AUTH_TOKEN).startsWith('PLACEHOLDER');
 
+      // DIAGNOSTICO: Ver destinatarios finales
+      console.log('[DIAGNOSTICO SES] Intentando enviar email...', {
+        empresaId,
+        reporteId,
+        allTo,
+        sender: process.env.AWS_SES_SENDER,
+        region: process.env.AWS_SES_REGION
+      });
+
       // Email + WhatsApp en paralelo, sin que uno tumbe al otro
       const [emailRes, waRes] = await Promise.allSettled([
         allTo.length > 0
@@ -447,8 +462,10 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
         notifWhatsapps: whatsapps,
       };
       if (emailRes.status === 'fulfilled') {
+        console.log('[DIAGNOSTICO SES] Resultado Email:', emailRes.value);
         update.notifMessageId = emailRes.value.messageId || null;
       } else {
+        console.error('[DIAGNOSTICO SES] ERROR Email:', emailRes.reason?.message || emailRes.reason);
         update.notifEmailError = emailRes.reason?.message || String(emailRes.reason);
       }
       if (waRes.status === 'fulfilled') {

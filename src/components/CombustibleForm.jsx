@@ -9,6 +9,9 @@ import CameraCapture from './CameraCapture';
 import { getNextGuiaNumber } from '../utils/voucherThermalGenerator';
 import { useToast, ToastContainer } from './Toast';
 import { useEmpresaData } from '../hooks/useEmpresaData';
+import { ref, uploadString, getDownloadURL } from "firebase/storage";
+import { storage } from "../lib/firebase";
+import { formatMiles, unformatMiles } from '../utils/formatters';
 
 export default function CombustibleForm({ empresaId, onClose }) {
   const { toast, toasts, removeToast } = useToast();
@@ -519,16 +522,16 @@ export default function CombustibleForm({ empresaId, onClose }) {
           machineId: machineIdFinal,
           numerosDocumento: docsValidos2,
           numeroDocumento: docsValidos2[0] || '',
-          cantidad: parseFloat(datosEntrada.cantidad),
-          horometroOdometro: parseFloat(datosEntrada.horometroOdometro) || 0
+          cantidad: parseFloat(datosEntrada.cantidad.toString().replace(/\./g, '').replace(',', '.')),
+          horometroOdometro: parseFloat(datosEntrada.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0
         };
         dataToSave.firmaRepartidor = firmaRepartidor;
         dataToSave.fechaFirma = new Date().toISOString();
       } else {
         dataToSave.datosEntrega = {
           ...datosEntrega,
-          cantidadLitros: parseFloat(datosEntrega.cantidadLitros),
-          horometroOdometro: parseFloat(datosEntrega.horometroOdometro) || 0,
+          cantidadLitros: parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.')),
+          horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0,
           // Si es empresa externa, guardar datos manuales
           ...(esMPF(datosEntrega.empresa) ? {} : {
             operadorExterno,
@@ -537,6 +540,26 @@ export default function CombustibleForm({ empresaId, onClose }) {
         };
         dataToSave.firmaReceptor = firmaReceptor;
         dataToSave.fechaFirma = new Date().toISOString();
+      }
+
+      // --- SUBIR FOTOS A STORAGE SI ESTAMOS ONLINE ---
+      // Esto asegura que el correo tenga URLs válidas y no base64 gigantes que fallan
+      try {
+        if (firmaRepartidor && firmaRepartidor.startsWith('data:')) {
+          console.log('📤 Subiendo foto repartidor a Storage...');
+          const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_repartidor.jpg`);
+          await uploadString(fileRef, firmaRepartidor, 'data_url');
+          dataToSave.firmaRepartidor = await getDownloadURL(fileRef);
+        }
+        if (firmaReceptor && firmaReceptor.startsWith('data:')) {
+          console.log('📤 Subiendo foto receptor a Storage...');
+          const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_receptor.jpg`);
+          await uploadString(fileRef, firmaReceptor, 'data_url');
+          dataToSave.firmaReceptor = await getDownloadURL(fileRef);
+        }
+      } catch (storageErr) {
+        console.error('⚠️ Error subiendo a Storage (posiblemente offline):', storageErr);
+        // Si falla, mantenemos el base64 en Firestore para no perder el dato
       }
 
       // ✅ FIX: capturar el ID del reporte para guardarlo en el voucher
@@ -1188,11 +1211,16 @@ export default function CombustibleForm({ empresaId, onClose }) {
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Litros Cargados *</label>
                       <div className="relative">
                         <input
-                          type="number" required min="0" step="0.01"
-                          value={datosEntrada.cantidad}
-                          onChange={(e) => setDatosEntrada({ ...datosEntrada, cantidad: e.target.value })}
+                          type="text" required
+                          value={formatMiles(datosEntrada.cantidad)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                              setDatosEntrada({ ...datosEntrada, cantidad: raw });
+                            }
+                          }}
                           className="w-full px-5 py-4 bg-green-50 border-2 border-green-200 rounded-2xl focus:outline-none focus:border-green-500 font-black text-2xl text-green-700 shadow-inner transition-all"
-                          placeholder="0.00"
+                          placeholder="0"
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-300 font-black text-xs">LTS</span>
                       </div>
@@ -1201,11 +1229,16 @@ export default function CombustibleForm({ empresaId, onClose }) {
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Horómetro / KM</label>
                       <div className="relative">
                         <input
-                          type="number" min="0" step="0.1"
-                          value={datosEntrada.horometroOdometro}
-                          onChange={(e) => setDatosEntrada({ ...datosEntrada, horometroOdometro: e.target.value })}
+                          type="text"
+                          value={formatMiles(datosEntrada.horometroOdometro)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                              setDatosEntrada({ ...datosEntrada, horometroOdometro: raw });
+                            }
+                          }}
                           className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-black text-2xl text-slate-700 shadow-inner transition-all"
-                          placeholder="0.0"
+                          placeholder="0"
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 font-black text-xs">H/K</span>
                       </div>
@@ -1561,13 +1594,16 @@ export default function CombustibleForm({ empresaId, onClose }) {
                     Horómetro / Odómetro
                   </label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={datosEntrega.horometroOdometro}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, horometroOdometro: e.target.value })}
+                    type="text"
+                    value={formatMiles(datosEntrega.horometroOdometro)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                      if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                        setDatosEntrega({ ...datosEntrega, horometroOdometro: raw });
+                      }
+                    }}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="Ej: 1234.5"
+                    placeholder="Ej: 1.234"
                   />
                 </div>
 
@@ -1576,14 +1612,17 @@ export default function CombustibleForm({ empresaId, onClose }) {
                     Cantidad (Litros) <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     required
-                    min="0"
-                    step="0.01"
-                    value={datosEntrega.cantidadLitros}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, cantidadLitros: e.target.value })}
+                    value={formatMiles(datosEntrega.cantidadLitros)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                      if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                        setDatosEntrega({ ...datosEntrega, cantidadLitros: raw });
+                      }
+                    }}
                     className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="Ej: 150.50"
+                    placeholder="Ej: 150"
                   />
                 </div>
 

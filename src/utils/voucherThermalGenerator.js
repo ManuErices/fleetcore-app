@@ -85,19 +85,39 @@ export function generateThermalVoucher({
 
   // Generar sección de firmas
   const firmaReceptorImg = reportData.firmaReceptor || null;
-  const firmaLineaHTML = firmaReceptorImg
-    ? `<img src="${firmaReceptorImg}" class="firma-img" alt="Firma receptor" />`
-    : `<div class="firma-line"></div>`;
+  const firmaRepartidorImg = reportData.firmaRepartidor || null;
+
+  const isPhoto = (src) => src && src.startsWith('data:image') && !src.includes('svg');
+
+  const labelReceptor = isPhoto(firmaReceptorImg) ? 'REGISTRO FOTOGRAFICO' : 'FIRMA RECEPTOR';
+  const labelRepartidor = isPhoto(firmaRepartidorImg) ? 'REGISTRO FOTOGRAFICO' : 'FIRMA SURTIDOR';
 
   const firmasSectionHTML = `
-    <!-- FIRMA RECEPTOR -->
+    ${firmaReceptorImg ? `
     <div class="firma-section-single">
       <div class="firma-box">
-        ${firmaLineaHTML}
-        <div class="small firma-label">FIRMA</div>
+        <img src="${firmaReceptorImg}" class="firma-img" alt="Firma receptor" />
+        <div class="small firma-label">${labelReceptor}</div>
         <div class="small firma-rol">RECEPTOR</div>
       </div>
-    </div>
+    </div>` : ''}
+    
+    ${firmaRepartidorImg ? `
+    <div class="firma-section-single" style="margin-top: 4mm;">
+      <div class="firma-box">
+        <img src="${firmaRepartidorImg}" class="firma-img" alt="Firma surtidor" />
+        <div class="small firma-label">${labelRepartidor}</div>
+        <div class="small firma-rol">SURTIDOR</div>
+      </div>
+    </div>` : ''}
+    
+    ${!firmaReceptorImg && !firmaRepartidorImg ? `
+    <div class="firma-section-single">
+      <div class="firma-box">
+        <div class="firma-line"></div>
+        <div class="small firma-label">FIRMA RECEPTOR</div>
+      </div>
+    </div>` : ''}
     `;
 
   // Generar HTML del voucher
@@ -191,9 +211,10 @@ export function generateThermalVoucher({
       width: auto;
       max-width: 100%;
       height: auto;
-      max-height: 15mm;
+      max-height: 35mm;
       object-fit: contain;
       margin: 0 auto 1mm auto;
+      filter: grayscale(100%) contrast(1.5) brightness(1.1);
     }
     
     .small {
