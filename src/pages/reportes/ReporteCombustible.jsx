@@ -310,83 +310,117 @@ export default function ReporteCombustible() {
   };
 
   const handleReimprimirVoucher = async (reporte) => {
+    const isEntrada = reporte.tipo === 'entrada';
     const project = projects.find(p => p.id === reporte.projectId);
-    const equipoId = reporte.datosControl?.equipoSurtidorId;
-    const equipoSurtidor = equipoId ? machines.find(m => m.id === equipoId) : null;
-    const machineId = reporte.datosEntrega?.machineId;
-    const operadorId = reporte.datosEntrega?.operadorId;
-    const machineInfo = machines.find(m => m.id === machineId) || {
-      patente: reporte.datosEntrega?.machinePatente || reporte.machinePatente || '',
-      code: reporte.datosEntrega?.machineCode || '',
-      type: reporte.datosEntrega?.machineType || '',
-      nombre: reporte.datosEntrega?.machineName || reporte.machineName || '',
-      name: reporte.datosEntrega?.machineName || reporte.machineName || ''
-    };
-    const operadorInfo = empleados.find(e => e.id === operadorId) || {
-      nombre: reporte.datosEntrega?.operadorExterno?.nombre || reporte.operadorNombre || '',
-      rut: reporte.datosEntrega?.operadorExterno?.rut || reporte.operadorRut || ''
-    };
-    const empresaIdLocal = reporte.datosEntrega?.empresa;
-    // empresa puede ser ID de Firebase o nombre string directo
-    const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
-    // RUT: buscar en Firebase primero, luego en el campo guardado en el reporte
-    const empresaRut = empresaInfoFirebase?.rut
-      || reporte.datosEntrega?.empresaRut
-      || reporte.empresaRut
-      || '';
-    const empresaInfo = empresaInfoFirebase
-      ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaRut }
-      : empresaIdLocal
-        ? { nombre: empresaIdLocal, rut: empresaRut }
-        : null;
-    const repartidorInfo = empleados.find(e => e.id === reporte.repartidorId) || {
-      nombre: reporte.repartidorNombre || '',
-      rut: reporte.repartidorRut || ''
-    };
+    
+    let finalEmpresaInfo, finalOperadorInfo, finalRepartidorInfo, finalMachineInfo, finalEquipoSurtidorInfo;
 
-    // ✅ Número de guía: reusar el guardado en el reporte, NO generar uno nuevo
+    // --- LOGICA PARA ENTRADA (RECEPCION) ---
+    if (isEntrada) {
+      // EMPRESA: Siempre es MPF (quien recibe internamente)
+      finalEmpresaInfo = { nombre: 'MPF INGENIERIA CIVIL SPA', rut: '77.158.216-8' };
+
+      // RECEPTOR: El trabajador que registró el movimiento (repartidorId)
+      const trabajador = empleados.find(e => e.id === reporte.repartidorId) || {
+        nombre: reporte.repartidorNombre || '',
+        rut: reporte.repartidorRut || ''
+      };
+      finalOperadorInfo = { nombre: trabajador.nombre, rut: trabajador.rut };
+
+      // SURTIDOR: La empresa proveedora (Estación o Tercero)
+      finalRepartidorInfo = { 
+        nombre: reporte.empresaProveedora || reporte.datosEntrada?.origen || 'ESTACIÓN DE SERVICIO', 
+        rut: '' 
+      };
+
+      // MAQUINA: El equipo que recibió el combustible
+      const mId = reporte.datosEntrada?.machineId;
+      const m = machines.find(ma => ma.id === mId) || equiposSurtidores.find(ma => ma.id === mId);
+      finalMachineInfo = {
+        patente: m?.patente || m?.code || '',
+        code: m?.code || m?.patente || '',
+        type: m?.type || m?.nombre || '',
+        nombre: m?.name || m?.nombre || ''
+      };
+      finalEquipoSurtidorInfo = null;
+
+    } else {
+      // --- LOGICA PARA ENTREGA (SALIDA) ---
+      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoSurtidor = equipoId ? (equiposSurtidores.find(m => m.id === equipoId) || machines.find(m => m.id === equipoId)) : null;
+      
+      const machineId = reporte.datosEntrega?.machineId;
+      const operadorId = reporte.datosEntrega?.operadorId;
+      
+      const machineInfo = machines.find(m => m.id === machineId) || {
+        patente: reporte.datosEntrega?.machinePatente || reporte.machinePatente || '',
+        code: reporte.datosEntrega?.machineCode || '',
+        type: reporte.datosEntrega?.machineType || '',
+        nombre: reporte.datosEntrega?.machineName || reporte.machineName || '',
+        name: reporte.datosEntrega?.machineName || reporte.machineName || ''
+      };
+      
+      const operadorInfo = empleados.find(e => e.id === operadorId) || {
+        nombre: reporte.datosEntrega?.operadorExterno?.nombre || reporte.operadorNombre || '',
+        rut: reporte.datosEntrega?.operadorExterno?.rut || reporte.operadorRut || ''
+      };
+      
+      const empresaIdLocal = reporte.datosEntrega?.empresa;
+      const empresaInfoFirebase = empresas.find(e => e.id === empresaIdLocal);
+      const empresaRut = empresaInfoFirebase?.rut || reporte.datosEntrega?.empresaRut || reporte.empresaRut || '';
+      
+      finalEmpresaInfo = empresaInfoFirebase
+        ? { nombre: empresaInfoFirebase.nombre || '', rut: empresaRut }
+        : empresaIdLocal ? { nombre: empresaIdLocal, rut: empresaRut } : null;
+
+      finalOperadorInfo = {
+        nombre: operadorInfo?.nombre || '',
+        rut: operadorInfo?.rut || ''
+      };
+
+      finalRepartidorInfo = {
+        nombre: reporte.repartidorNombre || '',
+        rut: reporte.repartidorRut || ''
+      };
+
+      finalMachineInfo = {
+        patente: machineInfo?.patente || '',
+        code: machineInfo?.code || machineInfo?.patente || '',
+        type: machineInfo?.type || machineInfo?.nombre || '',
+        nombre: machineInfo?.name || machineInfo?.nombre || ''
+      };
+
+      finalEquipoSurtidorInfo = equipoSurtidor ? {
+        nombre: equipoSurtidor.name || equipoSurtidor.nombre || '',
+        patente: equipoSurtidor.patente || equipoSurtidor.code || '',
+        tipo: equipoSurtidor.type || equipoSurtidor.tipo || ''
+      } : null;
+    }
+
+    // ✅ Número de guía correlativo
     let numeroGuia = reporte.numeroGuia || null;
     if (!numeroGuia) {
-      // Solo generar si el reporte nunca tuvo número
-      numeroGuia = await getNextGuiaNumber();
+      numeroGuia = await getNextGuiaNumber(empresaId);
       try {
         await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', reporte.id), { numeroGuia });
-      } catch (_) { /* no bloquear la impresión si falla */ }
+      } catch (_) { }
     }
 
     printThermalVoucher({
       reportData: {
         fecha: reporte.fecha || reporte.fechaCreacion?.split('T')[0] || '',
-        cantidadLitros: reporte.datosEntrega?.cantidadLitros || reporte.cantidadLitros || 0,
+        cantidadLitros: reporte.datosEntrega?.cantidadLitros || reporte.datosEntrada?.cantidad || reporte.cantidadLitros || 0,
         numeroReporte: reporte.numeroReporte || '',
         firmaReceptor: reporte.firmaReceptor,
         firmaRepartidor: reporte.firmaRepartidor,
         horometroOdometro: reporte.datosEntrega?.horometroOdometro || reporte.datosEntrada?.horometroOdometro || ''
       },
       projectName: project?.nombre || project?.name || reporte.projectId || '',
-      machineInfo: {
-        patente: machineInfo?.patente || '',
-        code: machineInfo?.code || machineInfo?.patente || '',
-        type: machineInfo?.type || machineInfo?.nombre || '',
-        nombre: machineInfo?.name || machineInfo?.nombre || ''
-      },
-      operadorInfo: {
-        nombre: operadorInfo?.nombre || reporte.datosEntrega?.operadorExterno?.nombre || '',
-        rut: operadorInfo?.rut || reporte.datosEntrega?.operadorExterno?.rut || ''
-      },
-      empresaInfo: empresaInfo ? {
-        nombre: empresaInfo.nombre || '',
-        rut: empresaInfo.rut || ''
-      } : null,
-      repartidorInfo: {
-        nombre: repartidorInfo.nombre || '',
-        rut: repartidorInfo.rut || ''
-      },
-      equipoSurtidorInfo: equipoSurtidor ? {
-        nombre: equipoSurtidor.name || equipoSurtidor.nombre || '',
-        patente: equipoSurtidor.patente || equipoSurtidor.code || '',
-        tipo: equipoSurtidor.type || equipoSurtidor.tipo || ''
-      } : null,
+      machineInfo: finalMachineInfo,
+      operadorInfo: finalOperadorInfo,
+      empresaInfo: finalEmpresaInfo,
+      repartidorInfo: finalRepartidorInfo,
+      equipoSurtidorInfo: finalEquipoSurtidorInfo,
       numeroGuiaCorrelativo: numeroGuia
     });
   };
@@ -411,7 +445,6 @@ export default function ReporteCombustible() {
       'RUT Operador': r.operadorRut,
       'Horómetro/Odómetro': r.horometroOdometro,
       'Combustible (lts)': r.cantidadLitros,
-      'Empresa': r.empresa || '',
       'Observaciones': r.observaciones || ''
     }));
 

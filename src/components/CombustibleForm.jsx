@@ -15,7 +15,7 @@ import { formatMiles, unformatMiles } from '../utils/formatters';
 
 export default function CombustibleForm({ empresaId, onClose }) {
   const { toast, toasts, removeToast } = useToast();
-  const [paso, setPaso] = useState(1); // 1: Control, 2: Tipo (Entrada/Entrega), 3: Formulario
+  const [paso, setPaso] = useState(1); // 1: Tipo (Entrada/Entrega), 2: Control y Selección, 3: Formulario Final
   const [tipoReporte, setTipoReporte] = useState(''); // 'entrada' o 'entrega'
   const [loading, setLoading] = useState(false);
   const [loadingEquipo, setLoadingEquipo] = useState(false);
@@ -43,6 +43,17 @@ export default function CombustibleForm({ empresaId, onClose }) {
   const [showModalFirmaReceptor, setShowModalFirmaReceptor] = useState(false);
   --- fin firma --- */
 
+  useEffect(() => {
+    // Bloquear scroll del body cuando el modal está abierto para evitar doble scroll en desktop
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Al desmontar, restauramos el scroll original
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
+
   const [searchOperador, setSearchOperador] = useState('');
   const [searchMaquina, setSearchMaquina] = useState('');
   // Operador y máquina externos (empresa no-MPF)
@@ -57,6 +68,12 @@ export default function CombustibleForm({ empresaId, onClose }) {
     patente: '',
     tipo: '',
     modelo: '',
+    empresaId: ''
+  });
+  const [showModalEmpleado, setShowModalEmpleado] = useState(false);
+  const [nuevoEmpleadoData, setNuevoEmpleadoData] = useState({
+    nombre: '',
+    rut: '',
     empresaId: ''
   });
 
@@ -89,6 +106,15 @@ export default function CombustibleForm({ empresaId, onClose }) {
     setEstacionesLocal,
   } = useEmpresaData(empresaId);
 
+  const [trabajadoresLocales, setTrabajadoresLocales] = useState([]);
+  
+  // Sincronizar trabajadoresLocales cuando lleguen del hook
+  useEffect(() => {
+    if (empleados?.length) {
+      setTrabajadoresLocales(empleados);
+    }
+  }, [empleados]);
+
   // Normaliza nombre de empresa para comparación fuzzy (sin tildes, minúsculas, sin espacios extra)
   const normEmp = (s) => (s || '').toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quita tildes: é→e, ó→o
@@ -109,13 +135,19 @@ export default function CombustibleForm({ empresaId, onClose }) {
     return doc ? doc.nombre : empresaIdONombre;
   };
 
-  const EMPRESAS_SISTEMA = ['LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor', 'MPF Ingeniería Civil'];
+  const EMPRESAS_SISTEMA = ['MPF Ingeniería Civil', 'MPF'];
   const esEmpresaInterna = (empresaIdONombre) => {
     if (!empresaIdONombre) return false;
+    // Si es exactamente 'MPF' (el ID que usamos en el toggle)
+    if (empresaIdONombre === 'MPF') return true;
+    
     const nombreBuscar = resolverNombreEmpresa(empresaIdONombre);
-    const tieneOps = (empleados || []).some(e => empresasMatch(e.empresa, nombreBuscar));
-    const tieneMaq = (machinesLocal || machines || []).some(m => empresasMatch(m.empresa, nombreBuscar));
-    return tieneOps || tieneMaq;
+    const n = normEmp(nombreBuscar);
+    
+    return EMPRESAS_SISTEMA.some(na => {
+      const target = normEmp(na);
+      return n.includes(target) || target.includes(n);
+    });
   };
   // Alias para compatibilidad con código existente
   const esMPF = esEmpresaInterna;
@@ -199,10 +231,11 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
             // Autocompletar repartidorId cuando se abre el form
             if (!datosControl.repartidorId) {
-              setDatosControl(prev => ({
-                ...prev,
-                repartidorId: userData.id
-              }));
+              setDatosControl(prev => ({ ...prev, repartidorId: userData.id }));
+            }
+            // Auto-asignar como operador receptor para entradas si es trabajador
+            if (!isAdmin && !datosEntrada.operadorId) {
+              setDatosEntrada(prev => ({ ...prev, operadorId: userData.id }));
             }
           } else {
             console.warn('⚠️ No se encontró usuario en la colección users');
@@ -401,7 +434,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
     let nombreEmpresa = '';
     const targetEmpId = nuevaMaquinaData.empresaId || (tipoReporte === 'entrega' ? datosEntrega.empresa : (datosEntrada.tipoOrigen === 'estanque' ? datosEntrada.origen : ''));
-    
+
     if (targetEmpId) {
       const emp = empresasLocal.find(e => e.id === targetEmpId);
       nombreEmpresa = emp ? emp.nombre : targetEmpId;
@@ -420,12 +453,12 @@ export default function CombustibleForm({ empresaId, onClose }) {
         active: true,
         createdAt: serverTimestamp()
       };
-      
+
       const mRef = await addDoc(collection(db, 'empresas', empresaId, 'machines'), mData);
       const newMaq = { id: mRef.id, ...mData };
-      
+
       setMachinesLocal(prev => [...prev, newMaq]);
-      
+
       if (tipoReporte === 'entrega') {
         setDatosEntrega(prev => ({ ...prev, machineId: mRef.id }));
       } else {
@@ -438,6 +471,43 @@ export default function CombustibleForm({ empresaId, onClose }) {
     } catch (error) {
       console.error("Error creando máquina:", error);
       toast({ type: 'error', message: 'Error al crear máquina' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCrearEmpleado = async () => {
+    if (!nuevoEmpleadoData.nombre || !nuevoEmpleadoData.empresaId) {
+      toast({ type: 'warning', message: 'Nombre y Empresa son obligatorios' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const empresaNombre = resolverNombreEmpresa(nuevoEmpleadoData.empresaId);
+      const eRef = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), {
+        nombre: nuevoEmpleadoData.nombre.toUpperCase(),
+        rut: nuevoEmpleadoData.rut || '',
+        empresa: empresaNombre,
+        empresaId: nuevoEmpleadoData.empresaId,
+        fechaCreacion: new Date().toISOString()
+      });
+      
+      const newTrabajador = {
+        id: eRef.id,
+        nombre: nuevoEmpleadoData.nombre.toUpperCase(),
+        rut: nuevoEmpleadoData.rut || '',
+        empresa: empresaNombre,
+        empresaId: nuevoEmpleadoData.empresaId
+      };
+      
+      setTrabajadoresLocales(prev => [...prev, newTrabajador]);
+      setDatosEntrega(prev => ({ ...prev, operadorId: eRef.id }));
+      setShowModalEmpleado(false);
+      setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: '' });
+      toast({ type: 'success', message: 'Trabajador registrado y vinculado' });
+    } catch (error) {
+      console.error("Error creando empleado:", error);
+      toast({ type: 'error', message: 'Error al crear trabajador' });
     } finally {
       setLoading(false);
     }
@@ -517,6 +587,19 @@ export default function CombustibleForm({ empresaId, onClose }) {
         const machineIdFinal = datosEntrada.destinoCarga === 'camion'
           ? datosControl.equipoSurtidorId
           : datosEntrada.machineId;
+
+        // --- RESOLVER NOMBRE PROVEEDOR ---
+        let nombreProveedor = 'N/A';
+        if (datosEntrada.tipoOrigen === 'estacion') {
+          const est = estacionesLocal.find(e => e.id === datosEntrada.origen);
+          nombreProveedor = est ? est.nombre : 'Estación';
+        } else if (datosEntrada.tipoOrigen === 'externo') {
+          const emp = empresasLocal.find(e => e.id === datosEntrada.origen);
+          nombreProveedor = emp ? emp.nombre : datosEntrada.origen;
+        } else if (datosEntrada.tipoOrigen === 'interno') {
+          nombreProveedor = 'MPF INGENIERÍA';
+        }
+
         dataToSave.datosEntrada = {
           ...datosEntrada,
           machineId: machineIdFinal,
@@ -525,6 +608,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
           cantidad: parseFloat(datosEntrada.cantidad.toString().replace(/\./g, '').replace(',', '.')),
           horometroOdometro: parseFloat(datosEntrada.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0
         };
+        dataToSave.empresaProveedora = nombreProveedor; // Para el reporte principal
         dataToSave.firmaRepartidor = firmaRepartidor;
         dataToSave.fechaFirma = new Date().toISOString();
       } else {
@@ -572,60 +656,45 @@ export default function CombustibleForm({ empresaId, onClose }) {
       if (tipoReporte === 'entrega') {
         console.log('🎯 Es una entrega, preparando modal de voucher...');
         const projectInfo = projects?.find(p => p.id === datosControl.projectId);
-        const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
-        const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
-        const empresaIdSeleccionada = datosEntrega.empresa; // esto es el ID de Firestore
-        const empresaDoc = empresasLocal.find(e => e.id === empresaIdSeleccionada);
-        // Si no se encontró por ID, podría ser un nombre directo (legacy)
+
+        // Resolver Empresa
+        const empresaDoc = empresasLocal.find(e => e.id === datosEntrega.empresa);
         const empresaInfo = empresaDoc
           ? { nombre: empresaDoc.nombre || '', rut: empresaDoc.rut || '' }
-          : empresaIdSeleccionada
-            ? { nombre: empresaIdSeleccionada, rut: '' }
-            : null;
-        console.log('🏢 empresaInfo para voucher:', empresaInfo);
+          : { nombre: datosEntrega.empresa || 'N/A', rut: '' };
+
+        // Resolver Máquina
+        const machineInfo = machinesLocal?.find(m => m.id === datosEntrega.machineId);
+        const finalMachineInfo = machineInfo
+          ? { patente: machineInfo.patente || '', nombre: machineInfo.name || machineInfo.nombre || '', tipo: machineInfo.tipo || '' }
+          : { patente: maquinaExterna.patente || 'N/A', nombre: maquinaExterna.modelo || 'EXTERNA', tipo: maquinaExterna.tipo || 'N/A' };
+
+        // Resolver Operador/Receptor
+        const operadorInfo = empleados?.find(e => e.id === datosEntrega.operadorId);
+        const finalOperadorInfo = operadorInfo
+          ? { nombre: operadorInfo.nombre || '', rut: operadorInfo.rut || '' }
+          : { nombre: operadorExterno.nombre || 'N/A', rut: operadorExterno.rut || 'N/A' };
 
         // NUEVO: Obtener información del repartidor y equipo surtidor
         const repartidorInfo = empleados?.find(e => e.id === datosControl.repartidorId) || currentUserData;
-        // ✅ FIX: buscar en equiposSurtidores (AdminPanel) primero, luego en machinesLocal
         const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
           || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
-
-        console.log('📊 Información recopilada:', {
-          projectInfo,
-          machineInfo,
-          operadorInfo,
-          empresaInfo,
-          repartidorInfo,
-          equipoSurtidorInfo
-        });
 
         setLastReportData({
           reportData: {
             ...dataToSave,
             numeroReporte,
             fecha: datosControl.fecha,
-            cantidadLitros: datosEntrega.cantidadLitros,
-            horometroOdometro: datosEntrega.horometroOdometro,
+            cantidadLitros: parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.')),
+            horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')),
             firmaReceptor,
             firmaRepartidor
           },
           reporteId: nuevoReporteId,
-          projectName: projectInfo?.nombre || 'N/A',
-          machineInfo: {
-            patente: machineInfo?.patente || '',
-            codigo: machineInfo?.codigo || '',
-            nombre: machineInfo?.nombre || '',
-            type: machineInfo?.type || '',
-            code: machineInfo?.code || ''
-          },
-          operadorInfo: {
-            nombre: operadorInfo?.nombre || '',
-            rut: operadorInfo?.rut || ''
-          },
-          empresaInfo: empresaInfo ? {
-            nombre: empresaInfo.nombre || '',
-            rut: empresaInfo.rut || ''
-          } : null,
+          projectName: projectInfo?.nombre || projectInfo?.name || 'N/A',
+          machineInfo: finalMachineInfo,
+          operadorInfo: finalOperadorInfo,
+          empresaInfo: empresaInfo,
           repartidorInfo: {
             nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
             rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
@@ -656,15 +725,15 @@ export default function CombustibleForm({ empresaId, onClose }) {
   return (
     <>
       <ToastContainer toasts={toasts} onRemove={removeToast} />
-      <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[95vh] overflow-y-auto overflow-x-hidden relative">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-[90vw] w-full max-h-[95vh] overflow-y-auto overflow-x-hidden relative">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6 sticky top-0 z-10">
+        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-black">Control de Combustible</h2>
               <p className="text-orange-100 text-sm mt-1">
-                {paso === 1 && "Información del Control"}
-                {paso === 2 && "Selecciona el tipo de reporte"}
+                {paso === 1 && "Selecciona el tipo de movimiento"}
+                {paso === 2 && "Información del Control y Selección"}
                 {paso === 3 && tipoReporte === 'entrada' && "Entrada de Combustible al Estanque"}
                 {paso === 3 && tipoReporte === 'entrega' && "Entrega de Combustible a Máquina"}
               </p>
@@ -687,7 +756,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 1 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
                 1
               </div>
-              <span className="text-sm font-semibold">Control</span>
+              <span className="text-sm font-semibold">Tipo</span>
             </div>
             <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -696,7 +765,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${paso >= 2 ? 'bg-orange-600 text-white' : 'bg-slate-200'}`}>
                 2
               </div>
-              <span className="text-sm font-semibold">Tipo</span>
+              <span className="text-sm font-semibold">Selección</span>
             </div>
             <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -712,195 +781,12 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
         {/* Contenido */}
         <div className="p-6">
-          {/* PASO 1: Control de Combustible */}
+          {/* PASO 1: Tipo de Reporte */}
           {paso === 1 && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-orange-900 mb-1">📋 Control de Combustible</h3>
-                <p className="text-sm text-orange-700">Información general del control (Página 1 de 2)</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Código Obra <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={datosControl.projectId}
-                    onChange={(e) => { setDatosControl({ ...datosControl, projectId: e.target.value, origen: '' }); cargarEstaciones(e.target.value); }}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-                  >
-                    <option value="">Seleccione obra</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name || p.id}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Fecha <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={datosControl.fecha}
-                    onChange={(e) => setDatosControl({ ...datosControl, fecha: e.target.value })}
-                    className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-                    max={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 mt-6">
-                <h4 className="text-md font-black text-amber-900 mb-3">Información Repartidor</h4>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                      Nombre Repartidor/Surtidor <span className="text-red-500">*</span>
-                    </label>
-
-                    {isAdmin ? (
-                      // Admin: selector manual de empleado
-                      <div>
-                        <select
-                          value={datosControl.repartidorId}
-                          onChange={(e) => {
-                            const emp = surtidoresPersonas.find(p => p.id === e.target.value);
-                            setRepartidorSeleccionado(emp || null);
-                            setDatosControl(prev => ({ ...prev, repartidorId: e.target.value }));
-                          }}
-                          className="w-full px-4 py-2.5 border-2 border-amber-300 rounded-lg focus:outline-none focus:border-amber-500 bg-white text-slate-800 font-semibold"
-                        >
-                          <option value="">{surtidoresPersonas.length === 0 ? "No hay surtidores registrados" : "— Seleccione repartidor —"}</option>
-                          {surtidoresPersonas.map(emp => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.nombre || emp.name || emp.displayName || emp.email}
-                            </option>
-                          ))}
-                        </select>
-                        {repartidorSeleccionado && (
-                          <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-0.5">
-                            {repartidorSeleccionado.rut && <div><span className="font-bold">RUT:</span> {repartidorSeleccionado.rut}</div>}
-                            {repartidorSeleccionado.email && <div><span className="font-bold">Email:</span> {repartidorSeleccionado.email}</div>}
-                          </div>
-                        )}
-                        <p className="text-xs text-amber-600 mt-1">Selecciona el empleado que realiza la entrega</p>
-                      </div>
-                    ) : (
-                      // Operador: display estático del usuario actual
-                      <div>
-                        <div className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg bg-amber-50 font-semibold text-amber-900 flex items-center gap-2">
-                          <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                          </svg>
-                          <div className="flex-1">
-                            {currentUserData ? (
-                              <div>
-                                <div className="font-bold text-amber-900">{currentUserData.nombre || 'Sin nombre'}</div>
-                                {currentUserData.rut && <div className="text-xs text-amber-700">RUT: {currentUserData.rut}</div>}
-                                {currentUserData.email && <div className="text-xs text-amber-600">{currentUserData.email}</div>}
-                              </div>
-                            ) : (
-                              <div>
-                                <div className="text-red-600 font-bold">⚠ No se encontró usuario en el sistema</div>
-                                <div className="text-xs text-red-500 mt-1">Por favor contacta al administrador</div>
-                              </div>
-                            )}
-                          </div>
-                          {currentUserData && (
-                            <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                        <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                          Autocompletado con tu usuario
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                      Equipo Surtidor (Camión/Mochila)
-                      {!isAdmin
-                      }
-                    </label>
-                    <div className="flex gap-2">
-                      <select
-                        value={datosControl.equipoSurtidorId}
-                        onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
-                        className="flex-1 px-4 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                      >
-                        <option value="">Seleccione equipo surtidor</option>
-                        {/* ✅ FIX: usar solo equipos_surtidores del AdminPanel */}
-                        {equiposSurtidores.map(m => (
-                          <option key={m.id} value={m.id}>
-                            {m.patente || m.code} - {m.nombre || m.name}
-                          </option>
-                        ))}
-                        {equiposSurtidores.length === 0 && (
-                          <option disabled value="">Sin equipos registrados en Admin</option>
-                        )}
-                      </select>
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => setShowModalEquipoSurtidor(true)}
-                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white rounded-lg transition-all shadow-md hover:shadow-lg flex items-center gap-1 font-bold"
-                          title="Agregar nuevo equipo surtidor"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">Opcional: Camión o equipo que entrega el combustible</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-4 border-t border-orange-200">
-                {/* Botón historial vouchers del día */}
-                <button
-                  type="button"
-                  onClick={() => setShowHistorial(true)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold rounded-xl transition-all text-sm"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                  </svg>
-                  Ver Vouchers del Día
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => setPaso(2)}
-                  disabled={!datosControl.projectId || !datosControl.repartidorId}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
-                >
-                  Siguiente →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* PASO 2: Tipo de Reporte */}
-          {paso === 2 && (
-            <div className="space-y-6">
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-orange-900 mb-1">Tipo de Reporte</h3>
-                <p className="text-sm text-orange-700">Selecciona si es entrada o entrega de combustible</p>
+                <h3 className="text-lg font-black text-orange-900 mb-1">Tipo de Movimiento</h3>
+                <p className="text-sm text-orange-700">Selecciona si estás recibiendo o entregando combustible</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -908,20 +794,19 @@ export default function CombustibleForm({ empresaId, onClose }) {
                 <button
                   onClick={() => {
                     setTipoReporte('entrada');
-                    setPaso(3);
+                    setPaso(2);
                   }}
                   className="group relative bg-gradient-to-br from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 border-3 border-green-300 hover:border-green-500 rounded-2xl p-8 transition-all hover:shadow-xl"
                 >
                   <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-green-200">
                       <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
                       </svg>
                     </div>
                     <div className="text-center">
-                      <h4 className="text-xl font-black text-green-900 mb-2">ENTRADA</h4>
-                      <p className="text-sm text-green-700">Recepción de combustible al estanque</p>
-                      <p className="text-xs text-green-600 mt-2">• N° Guía • Cantidad • Origen</p>
+                      <h4 className="text-xl font-black text-green-900 mb-2 uppercase">Entrada</h4>
+                      <p className="text-sm text-green-700">Recepción de combustible al estanque o camión</p>
                     </div>
                   </div>
                 </button>
@@ -930,32 +815,367 @@ export default function CombustibleForm({ empresaId, onClose }) {
                 <button
                   onClick={() => {
                     setTipoReporte('entrega');
-                    setPaso(3);
+                    setPaso(2);
                   }}
                   className="group relative bg-gradient-to-br from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border-3 border-blue-300 hover:border-blue-500 rounded-2xl p-8 transition-all hover:shadow-xl"
                 >
                   <div className="flex flex-col items-center gap-4">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-blue-200">
                       <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                       </svg>
                     </div>
                     <div className="text-center">
-                      <h4 className="text-xl font-black text-blue-900 mb-2">SALIDA</h4>
-                      <p className="text-sm text-blue-700">Entrega de combustible a máquina</p>
-                      <p className="text-xs text-blue-600 mt-2">• Máquina • Operador • Litros</p>
+                      <h4 className="text-xl font-black text-blue-900 mb-2 uppercase">Salida</h4>
+                      <p className="text-sm text-blue-700">Entrega de combustible a máquina o equipo</p>
                     </div>
                   </div>
                 </button>
               </div>
 
-              <div className="flex gap-3 pt-4 border-t border-orange-200">
+              <div className="flex gap-3 pt-4 border-t border-orange-100">
                 <button
-                  onClick={() => setPaso(1)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                  type="button"
+                  onClick={handleClose}
+                  className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-all"
                 >
-                  ← Atrás
+                  Cancelar
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 2: Selección de Entidad (Empresa / Estación) */}
+          {paso === 2 && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
+              <div className="bg-white p-4 sm:p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-6">
+                <div>
+                  <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-3">
+                    <span className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center text-xs">1</span>
+                    {tipoReporte === 'entrada' ? "¿De dónde viene el combustible?" : "¿Quién entrega el combustible?"}
+                  </h3>
+                  {/* INFORMACIÓN DEL CONTROL (General) */}
+                  <div className="pt-4 border-t border-slate-100">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider text-center sm:text-left">Obra / Proyecto</label>
+                        <select
+                          value={datosControl.projectId}
+                          onChange={(e) => {
+                            setDatosControl({ ...datosControl, projectId: e.target.value });
+                            cargarEstaciones(e.target.value);
+                          }}
+                          className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all text-center sm:text-left"
+                        >
+                          <option value="">Seleccione obra</option>
+                          {projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider text-center sm:text-left">Fecha</label>
+                        <input
+                          type="date"
+                          value={datosControl.fecha}
+                          onChange={(e) => setDatosControl({ ...datosControl, fecha: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all text-center sm:text-left"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {tipoReporte === 'entrada' ? (
+                    <div className="mt-8 flex flex-wrap gap-4 justify-center">
+                      <button
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'interno', destinoCarga: 'camion' })}
+                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'interno' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">🏢</span>
+                        <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>MPF (Interno)</span>
+                      </button>
+                      <button
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '' })}
+                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'estacion' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">⛽</span>
+                        <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'estacion' ? 'text-green-700' : 'text-slate-500'}`}>Estación</span>
+                      </button>
+                      <button
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'externo', destinoCarga: '' })}
+                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'externo' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">🚛</span>
+                        <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'externo' ? 'text-green-700' : 'text-slate-500'}`}>Terceros</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-8 flex flex-wrap gap-4 justify-center">
+                      <button
+                        onClick={() => setDatosEntrega({ ...datosEntrega, empresa: 'MPF Ingeniería Civil' })}
+                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${esMPF(datosEntrega.empresa) ? 'bg-blue-50 border-blue-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-blue-200'}`}
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">🏗️</span>
+                        <span className={`font-black text-[10px] uppercase tracking-wider ${esMPF(datosEntrega.empresa) ? 'text-blue-700' : 'text-slate-500'}`}>Interno (MPF)</span>
+                      </button>
+                      <button
+                        onClick={() => setDatosEntrega({ ...datosEntrega, empresa: '' })}
+                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${!esMPF(datosEntrega.empresa) && datosEntrega.empresa !== '' ? 'bg-blue-50 border-blue-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-blue-200'}`}
+                      >
+                        <span className="text-3xl group-hover:scale-110 transition-transform">🤝</span>
+                        <span className={`font-black text-[10px] uppercase tracking-wider ${!esMPF(datosEntrega.empresa) && datosEntrega.empresa !== '' ? 'text-blue-700' : 'text-slate-500'}`}>Externo</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* --- Selectores de Entidad Específica --- */}
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500">
+                  {tipoReporte === 'entrada' ? (
+                    <div className="space-y-4">
+                      {datosEntrada.tipoOrigen === 'interno' && (
+                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-6">
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Repartidor</label>
+                              {isAdmin ? (
+                                <select
+                                  value={datosControl.repartidorId}
+                                  onChange={(e) => setDatosControl(prev => ({ ...prev, repartidorId: e.target.value }))}
+                                  className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm"
+                                >
+                                  <option value="">Seleccione...</option>
+                                  {surtidoresPersonas.map(emp => (
+                                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <div className="px-4 py-3 bg-blue-50 border-2 border-blue-100 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm h-[46px]">
+                                  👤 {currentUserData?.nombre || 'Mi usuario'}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Equipo Surtidor</label>
+                              <select
+                                value={datosControl.equipoSurtidorId}
+                                onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
+                                className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm"
+                              >
+                                <option value="">Seleccione equipo</option>
+                                {equiposSurtidores.map(m => (
+                                  <option key={m.id} value={m.id}>{m.patente || m.code} - {m.nombre}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --- SECCIÓN ESTACIÓN (Combinada y Optimizada) --- */}
+                      {datosEntrada.tipoOrigen === 'estacion' && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                          {/* Fila 1: Estación y Equipo */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Seleccione Estación</label>
+                              <select
+                                value={datosEntrada.origen}
+                                onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
+                                className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
+                              >
+                                <option value="">Seleccione estación</option>
+                                {estacionesLocal.map(est => (
+                                  <option key={est.id} value={est.id}>{(est.marca ? est.marca + ' - ' : '') + est.nombre}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="bg-amber-50/30 p-4 rounded-2xl border border-amber-100 space-y-2">
+                              <label className="block text-[10px] font-black text-slate-500 uppercase mb-1 px-1 tracking-widest">Equipo Surtidor que recibe</label>
+                              <select
+                                value={datosControl.equipoSurtidorId}
+                                onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
+                                className="w-full px-4 py-3 border-2 border-amber-100 rounded-xl focus:border-amber-500 font-bold bg-white text-sm shadow-sm"
+                              >
+                                <option value="">Seleccione Equipo</option>
+                                {equiposSurtidores.map(m => (
+                                  <option key={m.id} value={m.id}>{m.patente || m.code} - {m.nombre}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Sección Destino */}
+                          <div className="bg-orange-50/50 p-4 rounded-3xl border-2 border-orange-100 space-y-4">
+                            <div className="flex items-center gap-3 border-b border-orange-100 pb-3">
+                              <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center text-xs">🎯</div>
+                              <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-tight">¿A qué parte del equipo se carga?</h4>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'camion' })}
+                                className={`py-4 rounded-xl border-2 transition-all font-black text-[10px] uppercase flex flex-col items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'camion' ? 'bg-amber-500 border-amber-600 text-white shadow-lg scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-amber-200 shadow-sm'}`}
+                              >
+                                <span className="text-2xl">🚛</span>
+                                <span>Al Camión</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'estanque' })}
+                                className={`py-4 rounded-xl border-2 transition-all font-black text-[10px] uppercase flex flex-col items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'estanque' ? 'bg-blue-600 border-blue-700 text-white shadow-lg scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-blue-200 shadow-sm'}`}
+                              >
+                                <span className="text-2xl">🛢️</span>
+                                <span>Al Estanque</span>
+                              </button>
+                            </div>
+
+                            {datosEntrada.destinoCarga === 'estanque' && (
+                              <div className="animate-in slide-in-from-top-2 duration-300">
+                                <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1">Estanque Receptor Específico (Opcional)</label>
+                                <select
+                                  value={datosEntrada.machineId}
+                                  onChange={(e) => setDatosEntrada({ ...datosEntrada, machineId: e.target.value })}
+                                  className="w-full px-4 py-3 border-2 border-blue-100 rounded-xl focus:border-blue-500 font-bold bg-white text-sm shadow-sm"
+                                >
+                                  <option value="">Seleccione Estanque</option>
+                                  {(machinesLocal || machines || [])
+                                    .filter(m => m.type?.toLowerCase().includes('estanque') || m.name?.toLowerCase().includes('estanque'))
+                                    .map(m => (
+                                      <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
+                                    ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {datosEntrada.tipoOrigen === 'externo' && (
+                        <div className="space-y-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-200">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Empresa Proveedora</label>
+                            <div className="flex gap-2">
+                              <select
+                                value={datosEntrada.origen}
+                                onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value, machineId: '' })}
+                                className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
+                              >
+                                <option value="">Seleccione empresa</option>
+                                {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                ))}
+                              </select>
+                              <button type="button" onClick={() => setShowModalEmpresa(true)} className="px-4 bg-green-600 text-white rounded-xl font-black shadow-lg shadow-green-100 transition-all hover:bg-green-500">+</button>
+                            </div>
+                          </div>
+
+                          {datosEntrada.origen && (
+                            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Maquinaria del Proveedor</label>
+                              <div className="flex gap-2">
+                                <select
+                                  value={datosEntrada.machineId}
+                                  onChange={(e) => setDatosEntrada({ ...datosEntrada, machineId: e.target.value })}
+                                  className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
+                                >
+                                  <option value="">Seleccione maquinaria</option>
+                                  {machinesLocal
+                                    .filter(m => empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrada.origen)))
+                                    .map(m => (
+                                      <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
+                                    ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNuevaMaquinaData({ ...nuevaMaquinaData, empresaId: datosEntrada.origen });
+                                    setShowModalMaquina(true);
+                                  }}
+                                  className="px-4 bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-100 transition-all hover:bg-amber-400"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* INFORMACIÓN DEL CONTROL (REPARTIDOR Y EQUIPO) */}
+                      <div className="bg-blue-50/20 p-6 rounded-[2rem] border border-blue-100 space-y-5">
+                        <div className="flex items-center gap-3 mb-2 px-1">
+                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">1</span>
+                          <h4 className="text-xs font-black text-blue-800 uppercase tracking-wider">Identificación del Emisor</h4>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Repartidor</label>
+                            {isAdmin ? (
+                              <select
+                                value={datosControl.repartidorId}
+                                onChange={(e) => setDatosControl(prev => ({ ...prev, repartidorId: e.target.value }))}
+                                className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-blue-500 font-bold text-slate-700 text-sm"
+                              >
+                                <option value="">Seleccione...</option>
+                                {surtidoresPersonas.map(emp => (
+                                  <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="px-4 py-3 bg-white/50 border-2 border-blue-200 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm h-[46px]">
+                                👤 {currentUserData?.nombre || 'Mi usuario'}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Equipo Surtidor (Fuente)</label>
+                            <select
+                              value={datosControl.equipoSurtidorId}
+                              onChange={(e) => setDatosControl({ ...datosControl, equipoSurtidorId: e.target.value })}
+                              className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-blue-500 font-bold text-slate-700 text-sm"
+                            >
+                              <option value="">Seleccione equipo</option>
+                              {equiposSurtidores.map(m => (
+                                <option key={m.id} value={m.id}>{m.patente || m.code} - {m.nombre}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center flex flex-col items-center gap-4">
+                        <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-3xl">🎯</div>
+                        <div>
+                          <h4 className="font-black text-slate-800 uppercase text-sm">Todo listo para los detalles</h4>
+                          <p className="text-slate-500 text-[10px] font-bold mt-1">En el siguiente paso definirás la empresa, maquinaria y litros de la entrega.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Botones de Navegación Paso 2 */}
+                <div className="flex gap-3 pt-4 border-t border-slate-100 mt-2">
+                  <button
+                    onClick={() => setPaso(1)}
+                    className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black rounded-2xl transition-all uppercase tracking-tight text-[10px]"
+                  >
+                    ← Atrás
+                  </button>
+                  <button
+                    onClick={() => setPaso(3)}
+                    disabled={!datosControl.projectId || (tipoReporte === 'entrada' ? !datosEntrada.origen : !datosControl.repartidorId || !datosControl.equipoSurtidorId)}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-black rounded-2xl transition-all uppercase tracking-tight text-[10px] shadow-lg shadow-orange-100 disabled:grayscale disabled:opacity-50"
+                  >
+                    Siguiente →
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -963,219 +1183,57 @@ export default function CombustibleForm({ empresaId, onClose }) {
           {/* PASO 3a: ENTRADA DE COMBUSTIBLE */}
           {paso === 3 && tipoReporte === 'entrada' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="bg-green-600 rounded-[2rem] p-6 shadow-xl shadow-green-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="text-white">
-                  <h3 className="text-xl font-black mb-1 flex items-center gap-2">
-                    <span className="bg-white/20 p-2 rounded-xl">⬇️</span> Entrada de Combustible
-                  </h3>
-                  <p className="text-green-100 text-sm font-medium opacity-90">Gestión de recepción y carga de suministros</p>
-                </div>
-                <div className="px-4 py-2 bg-white/10 rounded-2xl border border-white/20 backdrop-blur-md">
-                  <span className="text-white font-black text-xs uppercase tracking-tighter">Paso 3 de 3</span>
-                </div>
-              </div>
+              <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
 
-              <div className="space-y-6">
-                {/* --- SECCIÓN 1: IDENTIFICACIÓN DEL MOVIMIENTO --- */}
-                <div className="bg-white p-5 rounded-3xl border-2 border-slate-100 shadow-sm space-y-5">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">
-                        1. Tipo de Movimiento <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        required
-                        value={datosEntrada.tipoOrigen}
-                        onChange={(e) => setDatosEntrada({ ...datosEntrada, tipoOrigen: e.target.value, origen: '', destinoCarga: '', machineId: '' })}
-                        className="w-full px-4 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-bold text-slate-700 transition-all shadow-inner appearance-none cursor-pointer"
-                      >
-                        <option value="">Seleccione tipo</option>
-                        <option value="estacion">⛽ Estación de Servicio (Guía)</option>
-                        <option value="estanque">🛢️ Estanque (Vale)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">
-                        2. Origen (Suministrador) <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={datosEntrada.origen}
-                          onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
-                          className="flex-1 px-4 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-bold text-slate-700 transition-all truncate shadow-inner appearance-none cursor-pointer"
-                        >
-                          <option value="">
-                            {datosEntrada.tipoOrigen === 'estacion'
-                              ? (estacionesLocal.length === 0 ? 'Sin estaciones' : 'Seleccione estación')
-                              : 'Seleccione empresa'}
-                          </option>
-                          {datosEntrada.tipoOrigen === 'estacion'
-                            ? estacionesLocal.map(est => (
-                              <option key={est.id} value={est.id}>{(est.marca ? est.marca + ' - ' : '') + est.nombre}</option>
-                            ))
-                            : empresasLocal.map(emp => (
-                              <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                            ))
-                          }
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setShowModalEmpresa(true)}
-                          className="px-4 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black shadow-lg shadow-green-100 transition-all active:scale-90"
-                        >
-                          +
-                        </button>
-                      </div>
+                {/* --- SECCIÓN 1: CANTIDADES Y HORÓMETRO --- */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Litros */}
+                  <div className="bg-green-50/30 p-6 rounded-[2.5rem] border-2 border-green-100 flex flex-col justify-center relative overflow-hidden">
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 text-center">Litros Totales</label>
+                    <div className="relative">
+                      <input
+                        type="text" required
+                        value={formatMiles(datosEntrada.cantidad)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                          if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrada({ ...datosEntrada, cantidad: raw });
+                        }}
+                        className="w-full px-4 py-5 bg-white border-2 border-green-200 rounded-2xl focus:border-green-500 font-black text-3xl text-green-700 text-center shadow-inner transition-all"
+                        placeholder="0"
+                      />
                     </div>
                   </div>
 
-                  {/* Condicionales de Destino o Máquina */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2 border-t border-slate-50">
-                    {/* Destino de la Carga (Solo si es Estación) */}
-                    {datosEntrada.tipoOrigen === 'estacion' && (
-                      <div className="space-y-3">
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
-                          3. Destino de la Carga <span className="text-red-500">*</span>
-                        </label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'camion' })}
-                            className={`py-3.5 rounded-2xl border-2 transition-all font-black text-xs uppercase flex items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'camion' ? 'bg-amber-500 border-amber-600 text-white shadow-lg shadow-amber-100' : 'bg-white border-slate-100 text-slate-400 hover:border-amber-200'}`}
-                          >
-                            <span>🚛</span> Al Camión
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'estanque' })}
-                            className={`py-3.5 rounded-2xl border-2 transition-all font-black text-xs uppercase flex items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'estanque' ? 'bg-blue-600 border-blue-700 text-white shadow-lg shadow-blue-100' : 'bg-white border-slate-100 text-slate-400 hover:border-blue-200'}`}
-                          >
-                            <span>🛢️</span> Al Estanque
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Máquina del Origen (Solo si es Estanque) */}
-                    {datosEntrada.tipoOrigen === 'estanque' && (
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center px-1">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            3. Máquina Suministradora <span className="text-red-500">*</span>
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => { setNuevaMaquinaData(prev => ({ ...prev, empresaId: datosEntrada.origen })); setShowModalMaquina(true); }}
-                            className="text-[9px] text-blue-600 font-black hover:underline"
-                          >
-                            + CREAR NUEVA
-                          </button>
-                        </div>
-
-                        <div className="relative h-[58px]">
-                          {datosEntrada.machineId ? (() => {
-                            const sel = (machinesLocal || machines || []).find(m => m.id === datosEntrada.machineId);
-                            return (
-                              <div className="flex items-center gap-4 px-4 py-2.5 bg-green-50 border-2 border-green-500 rounded-2xl shadow-sm animate-in zoom-in-95 duration-200">
-                                <div className="w-9 h-9 rounded-xl bg-green-600 flex items-center justify-center flex-shrink-0 text-white shadow-sm">
-                                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" /></svg>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-black text-slate-800 text-sm truncate uppercase leading-tight">{sel?.patente || sel?.code}</div>
-                                  <div className="text-[10px] font-bold text-green-700 truncate opacity-80">{sel?.name || sel?.tipo}</div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => { setDatosEntrada({ ...datosEntrada, machineId: '' }); setSearchMaquina(''); }}
-                                  className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-slate-400 hover:text-red-500 shadow-sm border border-slate-100 transition-all hover:scale-110"
-                                >
-                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                </button>
-                              </div>
-                            );
-                          })() : (
-                            <div className="relative group animate-in fade-in duration-300">
-                              <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-green-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                              </svg>
-                              <input
-                                type="text"
-                                placeholder="Escribe patente o código..."
-                                value={searchMaquina}
-                                onChange={e => setSearchMaquina(e.target.value)}
-                                className="w-full pl-11 pr-4 py-3.5 bg-white border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-bold text-sm text-slate-700 transition-all shadow-sm"
-                              />
-                              {searchMaquina && (
-                                <div className="absolute top-full left-0 right-0 z-50 mt-2 bg-white rounded-2xl border-2 border-slate-100 shadow-2xl overflow-hidden animate-in slide-in-from-top-2 duration-200">
-                                  <div className="max-h-48 overflow-y-auto p-2 space-y-1">
-                                    {(machinesLocal || machines || [])
-                                      .filter(m => {
-                                        if (!datosEntrada.origen) return false;
-                                        const nombreEmpresa = resolverNombreEmpresa(datosEntrada.origen);
-                                        return !nombreEmpresa || empresasMatch(m.empresa, nombreEmpresa) || !m.empresa || m.empresa === 'Sin Asignar';
-                                      })
-                                      .filter(m =>
-                                        (m.patente || '').toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                                        (m.name || m.nombre || '').toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                                        (m.code || '').toLowerCase().includes(searchMaquina.toLowerCase())
-                                      )
-                                      .map(m => (
-                                        <button
-                                          key={m.id} type="button"
-                                          onClick={() => { setDatosEntrada({ ...datosEntrada, machineId: m.id }); setSearchMaquina(''); }}
-                                          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-green-50 rounded-xl transition-all text-left group/item"
-                                        >
-                                          <div className="w-8 h-8 rounded-lg bg-slate-100 group-hover/item:bg-green-100 flex items-center justify-center transition-colors">
-                                            <svg className="w-4 h-4 text-slate-400 group-hover/item:text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" /></svg>
-                                          </div>
-                                          <div className="min-w-0 flex-1">
-                                            <div className="font-black text-slate-700 text-xs uppercase truncate">{m.patente || m.code}</div>
-                                            <div className="text-[10px] text-slate-400 font-bold truncate uppercase">{m.type || m.name}</div>
-                                          </div>
-                                        </button>
-                                      ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                  {/* Horómetro / KM */}
+                  <div className="bg-amber-50/30 p-6 rounded-[2.5rem] border-2 border-amber-100 flex flex-col justify-center relative overflow-hidden">
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 text-center">Horómetro / KM</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formatMiles(datosEntrada.horometroOdometro)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                          if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrada({ ...datosEntrada, horometroOdometro: raw });
+                        }}
+                        className="w-full px-4 py-5 bg-white border-2 border-amber-200 rounded-2xl focus:border-amber-500 font-black text-3xl text-amber-700 text-center shadow-inner transition-all"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* --- SECCIÓN 2: DOCUMENTACIÓN Y TIEMPO --- */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div className="bg-white p-5 rounded-3xl border-2 border-slate-100 shadow-sm">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">
-                      4. Fecha del Movimiento
-                    </label>
-                    <input
-                      type="date"
-                      value={datosEntrada.fechaDocumento}
-                      onChange={(e) => setDatosEntrada({ ...datosEntrada, fechaDocumento: e.target.value })}
-                      className="w-full px-4 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-bold text-slate-700 shadow-inner"
-                    />
-                  </div>
-
-                  <div className="bg-white p-5 rounded-3xl border-2 border-slate-100 shadow-sm space-y-4">
+                {/* --- SECCIÓN 2: DOCUMENTACIÓN Y NOTAS (Layout Simétrico) --- */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4 border-t border-slate-50">
+                  {/* Columna Izquierda: Vales / Guías */}
+                  <div className="space-y-4">
                     <div className="flex justify-between items-center px-1">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        5. Vales / Guías <span className="text-red-500">*</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setDatosEntrada({ ...datosEntrada, numerosDocumento: [...datosEntrada.numerosDocumento, ''] })}
-                        className="text-[10px] text-green-600 font-black hover:underline"
-                      >
-                        + AÑADIR OTRO
-                      </button>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Vales / Guías de Despacho</label>
+                      <span className="text-[10px] font-black text-green-600 bg-green-50 px-3 py-1 rounded-full uppercase">{datosEntrada.numerosDocumento.filter(d => d).length} / 10 REGISTRADOS</span>
                     </div>
-                    <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+
+                    <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                       {datosEntrada.numerosDocumento.map((num, idx) => (
-                        <div key={idx} className="relative animate-in slide-in-from-bottom-1 duration-200">
+                        <div key={idx} className="relative group">
                           <input
                             type="text" required={idx === 0} value={num}
                             onChange={(e) => {
@@ -1183,544 +1241,363 @@ export default function CombustibleForm({ empresaId, onClose }) {
                               arr[idx] = e.target.value;
                               setDatosEntrada({ ...datosEntrada, numerosDocumento: arr });
                             }}
-                            placeholder={`N° ${idx + 1}`}
-                            className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-green-500 text-xs font-black text-slate-700 shadow-sm text-center"
+                            placeholder={`N° Doc ${idx + 1}`}
+                            className="w-full px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-xs font-black text-slate-700 shadow-inner"
                           />
                           {idx > 0 && (
                             <button
                               type="button"
-                              onClick={() => {
-                                const arr = datosEntrada.numerosDocumento.filter((_, i) => i !== idx);
-                                setDatosEntrada({ ...datosEntrada, numerosDocumento: arr });
-                              }}
-                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[8px] shadow-sm active:scale-75 transition-transform"
+                              onClick={() => setDatosEntrada({ ...datosEntrada, numerosDocumento: datosEntrada.numerosDocumento.filter((_, i) => i !== idx) })}
+                              className="absolute -top-1 -right-1 w-5 h-5 bg-white border border-red-100 text-red-500 rounded-full flex items-center justify-center text-[10px] shadow-md hover:bg-red-500 hover:text-white transition-all opacity-0 group-hover:opacity-100"
                             >
                               ×
                             </button>
                           )}
                         </div>
                       ))}
+                      {datosEntrada.numerosDocumento.length < 10 && (
+                        <button
+                          type="button"
+                          onClick={() => setDatosEntrada({ ...datosEntrada, numerosDocumento: [...datosEntrada.numerosDocumento, ''] })}
+                          className="flex items-center justify-center gap-2 px-4 py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-400 hover:border-green-500 hover:text-green-600 transition-all bg-slate-50 hover:bg-green-50/50"
+                        >
+                          <span className="text-lg font-black">+</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest">Añadir</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Columna Derecha: Observaciones y Email */}
+                  <div className="flex flex-col gap-6">
+                    <div className="space-y-3">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Observaciones / Notas</label>
+                      <textarea
+                        value={datosEntrada.observaciones}
+                        onChange={(e) => setDatosEntrada({ ...datosEntrada, observaciones: e.target.value })}
+                        className="w-full px-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-green-500 font-bold text-slate-600 shadow-inner h-[100px] text-sm"
+                        placeholder="Notas adicionales sobre la recepción..."
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Enviar Copia (Opcional)</label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          value={datosEntrada.extraEmail}
+                          onChange={(e) => setDatosEntrada({ ...datosEntrada, extraEmail: e.target.value })}
+                          className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-green-500 font-black text-sm text-slate-700 shadow-inner"
+                          placeholder="correo@ejemplo.com"
+                        />
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">📧</span>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* --- SECCIÓN 3: DATOS DE CARGA Y RECEPCIÓN --- */}
-                <div className="bg-white p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-sm">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Litros Cargados *</label>
-                      <div className="relative">
-                        <input
-                          type="text" required
-                          value={formatMiles(datosEntrada.cantidad)}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                              setDatosEntrada({ ...datosEntrada, cantidad: raw });
-                            }
-                          }}
-                          className="w-full px-5 py-4 bg-green-50 border-2 border-green-200 rounded-2xl focus:outline-none focus:border-green-500 font-black text-2xl text-green-700 shadow-inner transition-all"
-                          placeholder="0"
-                        />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-300 font-black text-xs">LTS</span>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Horómetro / KM</label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={formatMiles(datosEntrada.horometroOdometro)}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                              setDatosEntrada({ ...datosEntrada, horometroOdometro: raw });
-                            }
-                          }}
-                          className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-black text-2xl text-slate-700 shadow-inner transition-all"
-                          placeholder="0"
-                        />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 font-black text-xs">H/K</span>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Operador Receptor</label>
-                      <select
-                        value={datosEntrada.operadorId}
-                        onChange={(e) => setDatosEntrada({ ...datosEntrada, operadorId: e.target.value })}
-                        className="w-full px-4 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-green-500 font-bold text-xs text-slate-600 shadow-inner appearance-none cursor-pointer"
+                {/* --- SECCIÓN 3: FOTO DE RESPALDO (Simplificada) --- */}
+                <div className="flex flex-col items-center justify-center p-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center mb-24">
+                  {firmaRepartidor ? (
+                    <div className="relative group/photo inline-block">
+                      <img
+                        src={firmaRepartidor}
+                        alt="Respaldo"
+                        className="w-72 h-48 object-cover rounded-2xl border-4 border-white shadow-xl"
+                      />
+                      <button
+                        onClick={() => { setFirmaRepartidor(null); setShowModalCamaraRepartidor(true); }}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover/photo:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center gap-2 backdrop-blur-sm"
                       >
-                        <option value="">Sin asignar</option>
-                        {empleados?.map(emp => (
-                          <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                        ))}
-                      </select>
+                        <span className="text-4xl text-white">🔄</span>
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Cambiar Fotografía</span>
+                      </button>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Email Aviso</label>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowModalCamaraRepartidor(true)}
+                      className="flex flex-col items-center gap-4 group transition-all active:scale-95"
+                    >
+                      <div className="w-24 h-24 bg-green-600 group-hover:bg-green-500 text-white rounded-full flex items-center justify-center text-4xl shadow-lg shadow-green-100 transition-all">
+                        📷
+                      </div>
+                      <span className="text-xs font-black text-slate-500 uppercase tracking-widest group-hover:text-green-600 transition-colors">
+                        Tomar fotografía para firmar
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Botones de Navegación Paso 3a (Sticky Footer) */}
+                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-slate-100 flex gap-4 z-50">
+                  <button
+                    onClick={() => setPaso(2)}
+                    className="flex-1 px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-[10px] tracking-widest"
+                  >
+                    ← Regresar
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={loading || !datosEntrada.cantidad || !firmaRepartidor || datosEntrada.numerosDocumento.filter(d => d).length === 0}
+                    className="flex-[2] px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-black rounded-2xl transition-all uppercase text-[10px] tracking-widest shadow-xl shadow-green-100 disabled:grayscale disabled:opacity-50 active:scale-95"
+                  >
+                    {loading ? 'Guardando...' : '✓ Finalizar Recepción'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASO 3b: ENTREGA DE COMBUSTIBLE (Diseño Unificado) */}
+          {paso === 3 && tipoReporte === 'entrega' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
+
+                {/* --- SECCIÓN 1: CANTIDADES (LITROS Y HORÓMETRO) --- */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Litros */}
+                  <div className="bg-blue-50/30 p-6 rounded-[2.5rem] border-2 border-blue-100 flex flex-col justify-center relative overflow-hidden text-center">
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Litros Entregados</label>
+                    <div className="relative">
                       <input
-                        type="email"
-                        value={datosEntrada.extraEmail}
-                        onChange={(e) => setDatosEntrada({ ...datosEntrada, extraEmail: e.target.value })}
-                        className="w-full px-4 py-5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:outline-none focus:border-blue-400 font-bold text-xs text-slate-600 shadow-inner"
-                        placeholder="ej@correo.com"
+                        type="text" required
+                        value={formatMiles(datosEntrega.cantidadLitros)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                          if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrega({ ...datosEntrega, cantidadLitros: raw });
+                        }}
+                        className="w-full px-4 py-5 bg-white border-2 border-blue-200 rounded-2xl focus:border-blue-500 font-black text-3xl text-blue-700 text-center shadow-inner transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Horómetro / KM */}
+                  <div className="bg-slate-50 p-6 rounded-[2.5rem] border-2 border-slate-100 flex flex-col justify-center relative overflow-hidden text-center">
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Horómetro / Odómetro</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formatMiles(datosEntrega.horometroOdometro)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                          if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrega({ ...datosEntrega, horometroOdometro: raw });
+                        }}
+                        className="w-full px-4 py-5 bg-white border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-3xl text-slate-700 text-center shadow-inner transition-all"
+                        placeholder="0"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* --- OBSERVACIONES --- */}
-                <div className="px-2 space-y-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Notas Adicionales (Opcional)</label>
-                  <textarea
-                    value={datosEntrada.observaciones}
-                    onChange={(e) => setDatosEntrada({ ...datosEntrada, observaciones: e.target.value })}
-                    className="w-full px-6 py-5 bg-white border-2 border-slate-100 rounded-[2rem] focus:outline-none focus:border-green-500 min-h-[120px] font-medium text-slate-600 shadow-sm text-sm transition-all"
-                    placeholder="Describe aquí cualquier observación importante sobre esta entrada de combustible..."
-                  />
-                </div>
-              </div>
-
-              {/* Foto del Repartidor */}
-              <div className="mt-6">
-                <label className="block text-sm font-bold text-slate-700 mb-3 px-1">
-                  Foto de identificación — Repartidor <span className="text-red-500">*</span>
-                </label>
-
-                {firmaRepartidor ? (
-                  <div className="border-2 border-green-500 rounded-[2rem] p-4 bg-green-50">
-                    <img
-                      src={firmaRepartidor}
-                      alt="Foto del repartidor"
-                      className="max-h-48 mx-auto rounded-2xl object-cover shadow-lg"
-                    />
-                    <div className="flex justify-center gap-2 mt-4">
-                      <span className="px-4 py-1.5 bg-green-600 text-white text-[10px] font-black uppercase rounded-full shadow-md">
-                        ✓ Foto capturada
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setFirmaRepartidor(null); setShowModalCamaraRepartidor(true); }}
-                        className="px-4 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-black uppercase rounded-full shadow-sm hover:bg-slate-50"
-                      >
-                        Cambiar foto
-                      </button>
-                    </div>
+                {/* --- SECCIÓN 2: DESTINO DE LA ENTREGA (Empresa, Máquina, Receptor) --- */}
+                <div className="pt-4 border-t border-slate-100 space-y-6">
+                  <div className="flex items-center gap-3 px-1">
+                    <span className="w-7 h-7 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-black">2</span>
+                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Destino de la Entrega</h4>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowModalCamaraRepartidor(true)}
-                    className="w-full py-10 border-4 border-dashed border-slate-200 rounded-[2.5rem] bg-slate-50 hover:bg-green-50 hover:border-green-200 transition-all group"
-                  >
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-16 h-16 rounded-full bg-white border-2 border-slate-100 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                        <svg className="w-8 h-8 text-slate-400 group-hover:text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                      </div>
-                      <span className="text-slate-600 font-black text-sm uppercase tracking-wider group-hover:text-green-700">Tomar foto de identificación</span>
-                      <span className="text-slate-400 text-[10px] font-medium tracking-tight px-10">Es obligatoria para validar la recepción del combustible</span>
-                    </div>
-                  </button>
-                )}
-              </div>
 
-              <div className="flex gap-4 pt-6 border-t border-slate-100">
-                <button
-                  onClick={() => setPaso(2)}
-                  className="flex-1 px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-xs tracking-widest"
-                >
-                  ← Atrás
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading || !datosEntrada.tipoOrigen || !datosEntrada.numerosDocumento?.some(d => d.trim()) || !datosEntrada.cantidad || !firmaRepartidor || (datosEntrada.tipoOrigen === 'estacion' && !datosEntrada.destinoCarga)}
-                  className="flex-[2] px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:shadow-2xl hover:shadow-green-100 text-white font-black rounded-2xl transition-all uppercase text-xs tracking-widest disabled:grayscale disabled:opacity-50"
-                >
-                  {loading ? 'Procesando...' : 'Finalizar Reporte'}
-                </button>
-              </div>
-            </div>
-          )}
-
-
-          {/* PASO 3b: ENTREGA DE COMBUSTIBLE */}
-          {paso === 3 && tipoReporte === 'entrega' && (
-            <div className="space-y-6">
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                <h3 className="text-lg font-black text-blue-900 mb-1">➡️ Entrega de Combustible</h3>
-                <p className="text-sm text-blue-700">Entrega de combustible a máquina (Página 2 de 2)</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Empresa
-                    {!isAdmin
-                    }
-                  </label>
-                  <div className="flex gap-2">
-                    <select
-                      value={datosEntrega.empresa}
-                      onChange={(e) => {
-                        setDatosEntrega({ ...datosEntrega, empresa: e.target.value, operadorId: '', machineId: '' });
-                        setOperadorExterno({ nombre: '', rut: '' });
-                        setMaquinaExterna({ patente: '', tipo: '', modelo: '' });
-                        setSearchOperador('');
-                        setSearchMaquina('');
-                      }}
-                      className="flex-1 px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="">Seleccione empresa</option>
-                      {empresasLocal.map(emp => (
-                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {datosEntrega.empresa && (() => {
-                    const empDoc = empresasLocal.find(e => e.id === datosEntrega.empresa);
-                    const nombreEmpresa = empDoc ? empDoc.nombre : datosEntrega.empresa;
-                    const nOps = (empleados || []).filter(e => e.empresa === nombreEmpresa).length;
-                    const nMaq = (machinesLocal || machines || []).filter(m => m.empresa === nombreEmpresa).length;
-                    return (nOps > 0 || nMaq > 0) ? (
-                      <p className="text-xs text-blue-500 mt-1.5 font-medium">
-                        {nOps} operador{nOps !== 1 ? 'es' : ''} · {nMaq} máquina{nMaq !== 1 ? 's' : ''} registradas
-                      </p>
-                    ) : (
-                      <p className="text-xs text-amber-500 mt-1.5 font-medium">
-                        ⚠ Sin operadores ni máquinas registradas para esta empresa
-                      </p>
-                    );
-                  })()}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Fecha
-                  </label>
-                  <input
-                    type="date"
-                    value={datosEntrega.fecha}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, fecha: e.target.value })}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    max={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-
-                {/* ── OPERADOR ── */}
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Operador (Quien recibe) <span className="text-red-500">*</span>
-                  </label>
-
-                  {esMPF(datosEntrega.empresa) ? (
-                    <>
-                      <div className="relative mb-2">
-                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                        </svg>
-                        <input type="text" placeholder="Buscar operador..." value={searchOperador}
-                          onChange={e => setSearchOperador(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                      </div>
-                      {datosEntrega.operadorId && (() => {
-                        const sel = empleados.find(e => e.id === datosEntrega.operadorId);
-                        return sel ? (
-                          <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
-                            <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                              {sel.nombre?.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-slate-800 text-sm truncate">{sel.nombre}</div>
-                              <div className="text-xs text-slate-500">{sel.rut || 'Sin RUT'}</div>
-                            </div>
-                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: '' }); setSearchOperador(''); }}
-                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </div>
-                        ) : null;
-                      })()}
-                      {!datosEntrega.operadorId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {(empleados || [])
-                            .filter(emp => {
-                              if (!datosEntrega.empresa) return false;
-                              const nombreEmpresa = resolverNombreEmpresa(datosEntrega.empresa);
-                              return empresasMatch(emp.empresa, nombreEmpresa);
-                            })
-                            .filter(emp => !searchOperador ||
-                              emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) ||
-                              emp.rut?.includes(searchOperador))
-                            .map(emp => (
-                              <button key={emp.id} type="button"
-                                onClick={() => { setDatosEntrega({ ...datosEntrega, operadorId: emp.id }); setSearchOperador(''); }}
-                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
-                                <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs flex-shrink-0">
-                                  {emp.nombre?.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-slate-800 text-xs truncate">{emp.nombre}</div>
-                                  <div className="text-[10px] text-slate-400 truncate">{emp.rut || 'Sin RUT'}</div>
-                                </div>
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                    </>
-                  ) : datosEntrega.empresa ? (
-                    <div className="space-y-2">
-                      <input type="text" placeholder="Nombre completo *"
-                        value={operadorExterno.nombre}
-                        onChange={e => setOperadorExterno({ ...operadorExterno, nombre: e.target.value })}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                      <input type="text" placeholder="RUT (ej: 12.345.678-9)"
-                        value={operadorExterno.rut}
-                        onChange={e => setOperadorExterno({ ...operadorExterno, rut: e.target.value })}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                    </div>
-                  ) : (
-                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
-                      Primero selecciona una empresa
-                    </div>
-                  )}
-                </div>
-
-                {/* ── MÁQUINA ── */}
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="block text-sm font-bold text-slate-700">
-                      Máquina <span className="text-red-500">*</span>
-                    </label>
+                  {/* Toggle Interno/Externo */}
+                  <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2">
                     <button
-                      type="button"
-                      onClick={() => {
-                        setNuevaMaquinaData(prev => ({ ...prev, empresaId: datosEntrega.empresa }));
-                        setShowModalMaquina(true);
-                      }}
-                      className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded-md font-bold hover:bg-blue-200 transition-colors"
+                      onClick={() => setDatosEntrega({ ...datosEntrega, empresa: 'MPF', machineId: '', operadorId: '' })}
+                      className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${esMPF(datosEntrega.empresa) ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-200'}`}
                     >
-                      + Nueva Máquina
+                      🏗️ Interno (MPF)
+                    </button>
+                    <button
+                      onClick={() => setDatosEntrega({ ...datosEntrega, empresa: '', machineId: '', operadorId: '' })}
+                      className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${!esMPF(datosEntrega.empresa) ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-200'}`}
+                    >
+                      🤝 Externo
                     </button>
                   </div>
 
-                  {esMPF(datosEntrega.empresa) ? (
-                    <>
-                      <div className="relative mb-2">
-                        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                        </svg>
-                        <input type="text" placeholder="Buscar por patente o nombre..." value={searchMaquina}
-                          onChange={e => setSearchMaquina(e.target.value)}
-                          className="w-full pl-9 pr-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                      </div>
-                      {datosEntrega.machineId && (() => {
-                        const sel = (machinesLocal || machines || []).find(m => m.id === datosEntrega.machineId);
-                        return sel ? (
-                          <div className="flex items-center gap-3 px-3 py-2 bg-orange-50 border-2 border-orange-400 rounded-xl mb-2">
-                            <div className="w-9 h-9 rounded-lg bg-orange-500 flex items-center justify-center flex-shrink-0">
-                              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
-                              </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-slate-800 text-sm truncate">{sel.patente || sel.code}</div>
-                              <div className="text-xs text-slate-500 truncate">{sel.name}</div>
-                            </div>
-                            <button type="button" onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: '' }); setSearchMaquina(''); }}
-                              className="text-slate-400 hover:text-red-500 flex-shrink-0">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Columna Izquierda: Empresa y Maquinaria */}
+                    <div className="space-y-4">
+                      {!esMPF(datosEntrega.empresa) && (
+                        <div className="space-y-2">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Empresa Receptora</label>
+                          <div className="flex gap-2">
+                            <select
+                              value={datosEntrega.empresa}
+                              onChange={(e) => setDatosEntrega({ ...datosEntrega, empresa: e.target.value, machineId: '', operadorId: '' })}
+                              className="flex-1 px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-xs text-slate-700 shadow-inner"
+                            >
+                              <option value="">Seleccione empresa</option>
+                              {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
+                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                              ))}
+                            </select>
+                            <button onClick={() => setShowModalEmpresa(true)} className="px-5 bg-blue-600 text-white rounded-2xl font-black shadow-lg transition-all hover:bg-blue-500">+</button>
                           </div>
-                        ) : null;
-                      })()}
-                      {!datosEntrega.machineId && (
-                        <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
-                          {(machinesLocal || machines || [])
-                            .filter(m => !m.name?.toLowerCase().includes('combustible') && !m.name?.toLowerCase().includes('mochila'))
-                            .filter(m => {
-                              if (!datosEntrega.empresa) return false;
-                              const nombreEmpresa = resolverNombreEmpresa(datosEntrega.empresa);
-                              return empresasMatch(m.empresa, nombreEmpresa);
-                            })
-                            .filter(m => !searchMaquina ||
-                              m.patente?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                              m.name?.toLowerCase().includes(searchMaquina.toLowerCase()) ||
-                              m.code?.toLowerCase().includes(searchMaquina.toLowerCase()))
-                            .map(m => (
-                              <button key={m.id} type="button"
-                                onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: m.id }); setSearchMaquina(''); }}
-                                className="flex items-center gap-2 px-3 py-2 bg-white border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all text-left">
-                                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
-                                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
-                                  </svg>
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="font-bold text-slate-800 text-xs truncate">{m.patente || m.code}</div>
-                                  <div className="text-[10px] text-slate-400 truncate">{m.type || m.nombre || m.name}</div>
-                                </div>
-                              </button>
-                            ))}
                         </div>
                       )}
-                    </>
-                  ) : datosEntrega.empresa ? (
-                    <div className="space-y-2">
-                      <input type="text" placeholder="Patente *"
-                        value={maquinaExterna.patente}
-                        onChange={e => setMaquinaExterna({ ...maquinaExterna, patente: e.target.value })}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                      <input type="text" placeholder="Tipo (ej: Excavadora, Bulldozer…) *"
-                        value={maquinaExterna.tipo}
-                        onChange={e => setMaquinaExterna({ ...maquinaExterna, tipo: e.target.value })}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
-                      <input type="text" placeholder="Modelo (ej: Caterpillar 320)"
-                        value={maquinaExterna.modelo}
-                        onChange={e => setMaquinaExterna({ ...maquinaExterna, modelo: e.target.value })}
-                        className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm" />
+
+                      <div className="space-y-2">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Maquinaria que recibe</label>
+                        <div className="flex gap-2">
+                          <select
+                            value={datosEntrega.machineId}
+                            onChange={(e) => setDatosEntrega({ ...datosEntrega, machineId: e.target.value })}
+                            className="flex-1 px-4 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-xs text-slate-700 shadow-inner"
+                          >
+                            <option value="">Seleccione maquinaria</option>
+                            {machinesLocal
+                              .filter(m => esMPF(datosEntrega.empresa) ? esMPF(m.empresa) : empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrega.empresa)))
+                              .map(m => (
+                                <option key={m.id} value={m.id}>{m.patente || m.code || 'S/P'} - {m.name || m.nombre || m.tipo || m.modelo || 'Sin nombre'}</option>
+                              ))}
+                          </select>
+                          <button
+                            onClick={() => {
+                              setNuevaMaquinaData({ ...nuevaMaquinaData, empresaId: datosEntrega.empresa || 'MPF' });
+                              setShowModalMaquina(true);
+                            }}
+                            className="px-5 bg-blue-600 text-white rounded-2xl font-black shadow-lg transition-all hover:bg-blue-500"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Columna Derecha: Persona que recibe */}
+                    <div className="space-y-4">
+                      <div className="bg-slate-50/50 p-6 rounded-[2.5rem] border-2 border-slate-100 space-y-4">
+                        <div className="flex items-center justify-between px-1">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Persona que recibe</label>
+                          <button
+                            onClick={() => {
+                              setNuevoEmpleadoData({ ...nuevoEmpleadoData, empresaId: datosEntrega.empresa || 'MPF' });
+                              setShowModalEmpleado(true);
+                            }}
+                            className="text-[10px] font-black text-blue-600 hover:underline"
+                          >
+                            + Añadir Nuevo
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="BUSCAR NOMBRE O RUT..."
+                            value={searchOperador}
+                            onChange={(e) => setSearchOperador(e.target.value)}
+                            className="w-full pl-12 pr-6 py-4 bg-white border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-xs uppercase tracking-widest"
+                          />
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl">🔍</span>
+                        </div>
+
+                        {datosEntrega.operadorId ? (() => {
+                          const sel = trabajadoresLocales.find(e => e.id === datosEntrega.operadorId);
+                          return (
+                            <div className="mt-4 p-5 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl flex items-center gap-5 shadow-xl shadow-blue-200 animate-in zoom-in duration-300">
+                              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl font-black shadow-inner">
+                                {sel?.nombre?.charAt(0) || '👤'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-0.5">Operador Seleccionado</div>
+                                <div className="font-black text-base uppercase truncate leading-tight">{sel?.nombre || 'Nuevo Trabajador'}</div>
+                                <div className="text-[11px] font-bold opacity-80 mt-0.5">RUT: {sel?.rut || 'Sin RUT'}</div>
+                              </div>
+                              <button 
+                                onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: '' })} 
+                                className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-xl font-black transition-all active:scale-90"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })() : (
+                          <div className="max-h-48 overflow-y-auto pr-2 space-y-2">
+                            {(trabajadoresLocales || [])
+                              .filter(emp => esMPF(datosEntrega.empresa) ? esMPF(emp.empresa) : empresasMatch(emp.empresa, resolverNombreEmpresa(datosEntrega.empresa)))
+                              .filter(emp => !searchOperador || emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) || emp.rut?.includes(searchOperador))
+                              .map(emp => (
+                                <button
+                                  key={emp.id} type="button"
+                                  onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: emp.id })}
+                                  className="w-full flex items-center gap-3 px-4 py-3 bg-white border-2 border-slate-100 hover:border-blue-400 rounded-xl transition-all text-left"
+                                >
+                                  <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-black">{emp.nombre?.charAt(0)}</div>
+                                  <div className="min-w-0">
+                                    <div className="font-black text-slate-700 text-[11px] truncate uppercase">{emp.nombre}</div>
+                                    <div className="text-[9px] text-slate-400 font-bold">{emp.rut}</div>
+                                  </div>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* --- SECCIÓN 3: FOTO DE IDENTIFICACIÓN (Simplificada) --- */}
+                <div className="flex flex-col items-center justify-center p-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center mb-24">
+                  {firmaReceptor ? (
+                    <div className="relative group/photo inline-block">
+                      <img
+                        src={firmaReceptor}
+                        alt="Identificación"
+                        className="w-72 h-48 object-cover rounded-2xl border-4 border-white shadow-xl"
+                      />
+                      <button
+                        onClick={() => { setFirmaReceptor(null); setShowModalCamaraReceptor(true); }}
+                        className="absolute inset-0 bg-black/60 opacity-0 group-hover/photo:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center gap-2 backdrop-blur-sm"
+                      >
+                        <span className="text-4xl text-white">🔄</span>
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Cambiar Fotografía</span>
+                      </button>
                     </div>
                   ) : (
-                    <div className="px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg text-sm text-slate-400 text-center">
-                      Primero selecciona una empresa
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowModalCamaraReceptor(true)}
+                      className="flex flex-col items-center gap-4 group transition-all active:scale-95"
+                    >
+                      <div className="w-24 h-24 bg-blue-600 group-hover:bg-blue-500 text-white rounded-full flex items-center justify-center text-4xl shadow-lg shadow-blue-100 transition-all">
+                        📷
+                      </div>
+                      <span className="text-xs font-black text-slate-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
+                        Tomar fotografía para firmar
+                      </span>
+                    </button>
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Horómetro / Odómetro
-                  </label>
-                  <input
-                    type="text"
-                    value={formatMiles(datosEntrega.horometroOdometro)}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                      if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                        setDatosEntrega({ ...datosEntrega, horometroOdometro: raw });
-                      }
-                    }}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="Ej: 1.234"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Cantidad (Litros) <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formatMiles(datosEntrega.cantidadLitros)}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                      if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                        setDatosEntrega({ ...datosEntrega, cantidadLitros: raw });
-                      }
-                    }}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="Ej: 150"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Email adicional para aviso (Opcional)
-                  </label>
-                  <input
-                    type="email"
-                    value={datosEntrega.extraEmail}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, extraEmail: e.target.value })}
-                    className="w-full px-4 py-2 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                    placeholder="ejemplo@correo.com"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-2">
-                    Observaciones
-                  </label>
-                  <textarea
-                    value={datosEntrega.observaciones}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, observaciones: e.target.value })}
-                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500 min-h-[80px]"
-                    placeholder="Notas adicionales..."
-                  />
-                </div>
-              </div>
-
-              {/* Foto del Receptor */}
-              <div className="mt-6">
-                <label className="block text-sm font-bold text-slate-700 mb-3">
-                  Foto de identificación — Receptor <span className="text-red-500">*</span>
-                </label>
-
-                {firmaReceptor ? (
-                  <div className="border-2 border-blue-500 rounded-xl p-4 bg-blue-50">
-                    <img
-                      src={firmaReceptor}
-                      alt="Foto del receptor"
-                      className="max-h-40 mx-auto rounded-lg object-cover"
-                    />
-                    <div className="flex justify-center gap-2 mt-3">
-                      <span className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-full">
-                        ✓ Foto tomada
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setFirmaReceptor(null); setShowModalCamaraReceptor(true); }}
-                        className="px-3 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-full transition-all"
-                      >
-                        Tomar de nuevo
-                      </button>
-                    </div>
-                  </div>
-                ) : (
+                {/* Botones de Acción Paso 3b (Sticky Footer) */}
+                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-slate-100 flex gap-4 z-50">
                   <button
-                    type="button"
-                    onClick={() => setShowModalCamaraReceptor(true)}
-                    className="w-full px-6 py-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 hover:bg-blue-100 transition-all group"
+                    onClick={() => setPaso(2)}
+                    className="flex-1 px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-[10px] tracking-widest"
                   >
-                    <div className="flex flex-col items-center gap-2">
-                      <svg className="w-12 h-12 text-blue-600 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      <span className="text-blue-800 font-bold">Click para sacar foto</span>
-                      <span className="text-blue-600 text-xs">Se abrirá la cámara para identificarte</span>
-                    </div>
+                    ← Regresar
                   </button>
-                )}
-
-                {/* --- FIRMA deshabilitada (sustituida por foto) ---
-              <button onClick={() => setShowModalFirmaReceptor(true)} ...>
-                <SignaturePad color="blue" onSave={setFirmaReceptor} />
-              </button>
-              --- fin firma --- */}
-              </div>
-
-              <div className="flex gap-3 pt-4 border-t border-blue-200">
-                <button
-                  onClick={() => setPaso(2)}
-                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  ← Atrás
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading || !datosEntrega.machineId || !datosEntrega.cantidadLitros || !firmaReceptor}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed"
-                >
-                  {loading ? 'Guardando...' : '✓ Guardar Entrega'}
-                </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={
+                      loading || 
+                      !datosEntrega.cantidadLitros || 
+                      !firmaReceptor || 
+                      !datosEntrega.machineId ||
+                      !datosEntrega.operadorId
+                    }
+                    className="flex-[2] px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-2xl transition-all uppercase text-[10px] tracking-widest shadow-xl shadow-blue-100 disabled:grayscale disabled:opacity-50 active:scale-95"
+                  >
+                    {loading ? 'Guardando...' : '✓ Finalizar Entrega'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+
+
 
       {/* Modal: Nuevo Equipo Surtidor */}
       {showModalEquipoSurtidor && (
@@ -1981,14 +1858,84 @@ export default function CombustibleForm({ empresaId, onClose }) {
         />
       )}
 
+      {/* Modal: Nuevo Trabajador */}
+      {showModalEmpleado && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
+              <h3 className="text-xl font-black">👤 Nuevo Trabajador</h3>
+              <p className="text-blue-100 text-sm mt-1">Registrar operador para la empresa seleccionada</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Empresa Vinculada</label>
+                <select
+                  value={nuevoEmpleadoData.empresaId}
+                  onChange={(e) => setNuevoEmpleadoData({ ...nuevoEmpleadoData, empresaId: e.target.value })}
+                  className="w-full px-4 py-2 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm bg-slate-50"
+                >
+                  <option value="">Seleccione empresa...</option>
+                  <option value="MPF">MPF Ingeniería Civil</option>
+                  {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Nombre Completo <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Juan Perez"
+                    value={nuevoEmpleadoData.nombre}
+                    onChange={(e) => setNuevoEmpleadoData({ ...nuevoEmpleadoData, nombre: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">RUT</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 12.345.678-9"
+                    value={nuevoEmpleadoData.rut}
+                    onChange={(e) => setNuevoEmpleadoData({ ...nuevoEmpleadoData, rut: e.target.value })}
+                    className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-blue-200">
+                <button
+                  onClick={() => {
+                    setShowModalEmpleado(false);
+                    setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: '' });
+                  }}
+                  className="flex-1 px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleCrearEmpleado}
+                  disabled={loading || !nuevoEmpleadoData.nombre || !nuevoEmpleadoData.empresaId}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-400 text-white font-bold rounded-xl transition-all shadow-lg disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Creando...' : '✓ Crear Trabajador'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- MODALES DE FIRMA deshabilitados (sustituidos por CameraCapture) ---
-    {showModalFirmaRepartidor && (
-      <div ...><SignaturePad color="green" onSave={setFirmaRepartidor} /></div>
-    )}
-    {showModalFirmaReceptor && (
-      <div ...><SignaturePad color="blue" onSave={setFirmaReceptor} /></div>
-    )}
-    --- fin modales de firma --- */}
+        {showModalFirmaRepartidor && (
+          <div ...><SignaturePad color="green" onSave={setFirmaRepartidor} /></div>
+        )}
+        {showModalFirmaReceptor && (
+          <div ...><SignaturePad color="blue" onSave={setFirmaReceptor} /></div>
+        )}
+        --- fin modales de firma --- */}
 
       {/* Modal del generador de voucher térmico */}
       {showVoucherModal && lastReportData && (
