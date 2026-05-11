@@ -107,7 +107,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
   } = useEmpresaData(empresaId);
 
   const [trabajadoresLocales, setTrabajadoresLocales] = useState([]);
-  
+
   // Sincronizar trabajadoresLocales cuando lleguen del hook
   useEffect(() => {
     if (empleados?.length) {
@@ -140,10 +140,10 @@ export default function CombustibleForm({ empresaId, onClose }) {
     if (!empresaIdONombre) return false;
     // Si es exactamente 'MPF' (el ID que usamos en el toggle)
     if (empresaIdONombre === 'MPF') return true;
-    
+
     const nombreBuscar = resolverNombreEmpresa(empresaIdONombre);
     const n = normEmp(nombreBuscar);
-    
+
     return EMPRESAS_SISTEMA.some(na => {
       const target = normEmp(na);
       return n.includes(target) || target.includes(n);
@@ -163,15 +163,17 @@ export default function CombustibleForm({ empresaId, onClose }) {
   // Datos ENTRADA de combustible (al estanque)
   const [datosEntrada, setDatosEntrada] = useState({
     origen: '',
-    tipoOrigen: '', // 'estacion' o 'estanque'
+    tipoOrigen: '', // 'estacion' | 'externo' | 'interno'
     destinoCarga: '', // 'camion' | 'estanque' (solo cuando tipoOrigen === 'estacion')
     numerosDocumento: [''], // Múltiples guías/vales
     numeroDocumento: '', // primer documento (backward compat)
     fechaDocumento: new Date().toISOString().split('T')[0],
     cantidad: '',
     horometroOdometro: '',
-    machineId: '',
-    operadorId: '',
+    machineId: '',           // máquina/estanque receptor MPF (interno/externo) o estanque receptor opcional (estacion)
+    operadorId: '',          // receptor MPF
+    maquinaProveedorId: '',  // máquina del proveedor (solo externo/terceros)
+    operadorProveedorId: '', // operador del proveedor (solo externo/terceros)
     observaciones: '',
     extraEmail: ''
   });
@@ -302,7 +304,10 @@ export default function CombustibleForm({ empresaId, onClose }) {
       horometroOdometro: '',
       machineId: '',
       operadorId: '',
-      observaciones: ''
+      maquinaProveedorId: '',
+      operadorProveedorId: '',
+      observaciones: '',
+      extraEmail: ''
     });
     setDatosEntrega({
       empresa: '',
@@ -311,7 +316,8 @@ export default function CombustibleForm({ empresaId, onClose }) {
       machineId: '',
       horometroOdometro: '',
       cantidadLitros: '',
-      observaciones: ''
+      observaciones: '',
+      extraEmail: ''
     });
   };
 
@@ -459,7 +465,10 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
       setMachinesLocal(prev => [...prev, newMaq]);
 
-      if (tipoReporte === 'entrega') {
+      const target = nuevaMaquinaData.targetField;
+      if (target === 'maquinaProveedor') {
+        setDatosEntrada(prev => ({ ...prev, maquinaProveedorId: mRef.id }));
+      } else if (tipoReporte === 'entrega') {
         setDatosEntrega(prev => ({ ...prev, machineId: mRef.id }));
       } else {
         setDatosEntrada(prev => ({ ...prev, machineId: mRef.id }));
@@ -491,7 +500,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
         empresaId: nuevoEmpleadoData.empresaId,
         fechaCreacion: new Date().toISOString()
       });
-      
+
       const newTrabajador = {
         id: eRef.id,
         nombre: nuevoEmpleadoData.nombre.toUpperCase(),
@@ -499,9 +508,17 @@ export default function CombustibleForm({ empresaId, onClose }) {
         empresa: empresaNombre,
         empresaId: nuevoEmpleadoData.empresaId
       };
-      
+
       setTrabajadoresLocales(prev => [...prev, newTrabajador]);
-      setDatosEntrega(prev => ({ ...prev, operadorId: eRef.id }));
+
+      const targetEmp = nuevoEmpleadoData.targetField;
+      if (targetEmp === 'operadorProveedor') {
+        setDatosEntrada(prev => ({ ...prev, operadorProveedorId: eRef.id }));
+      } else if (targetEmp === 'operadorEntrada') {
+        setDatosEntrada(prev => ({ ...prev, operadorId: eRef.id }));
+      } else {
+        setDatosEntrega(prev => ({ ...prev, operadorId: eRef.id }));
+      }
       setShowModalEmpleado(false);
       setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: '' });
       toast({ type: 'success', message: 'Trabajador registrado y vinculado' });
@@ -540,6 +557,16 @@ export default function CombustibleForm({ empresaId, onClose }) {
       if (datosEntrada.tipoOrigen === 'estacion' && !datosEntrada.destinoCarga) {
         toast({ type: 'warning', message: 'Indica si la carga fue al camión surtidor o al estanque' });
         return;
+      }
+      if ((datosEntrada.tipoOrigen === 'interno' || datosEntrada.tipoOrigen === 'externo')) {
+        if (!datosEntrada.operadorId) {
+          toast({ type: 'warning', message: 'Selecciona quién recibe el combustible' });
+          return;
+        }
+        if (!datosEntrada.machineId) {
+          toast({ type: 'warning', message: 'Selecciona el vehículo o equipo que recibe el combustible' });
+          return;
+        }
       }
       if (!firmaRepartidor) {
         toast({ type: 'warning', message: 'Se requiere foto de identificación del repartidor' });
@@ -584,7 +611,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
       if (tipoReporte === 'entrada') {
         const docsValidos2 = datosEntrada.numerosDocumento.filter(d => d.trim());
-        const machineIdFinal = datosEntrada.destinoCarga === 'camion'
+        const machineIdFinal = (datosEntrada.tipoOrigen === 'estacion' && datosEntrada.destinoCarga === 'camion')
           ? datosControl.equipoSurtidorId
           : datosEntrada.machineId;
 
@@ -612,9 +639,11 @@ export default function CombustibleForm({ empresaId, onClose }) {
         dataToSave.firmaRepartidor = firmaRepartidor;
         dataToSave.fechaFirma = new Date().toISOString();
       } else {
+        const cantidadLitrosNum = parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.'));
+        dataToSave.cantidadLitros = cantidadLitrosNum;
         dataToSave.datosEntrega = {
           ...datosEntrega,
-          cantidadLitros: parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.')),
+          cantidadLitros: cantidadLitrosNum,
           horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0,
           // Si es empresa externa, guardar datos manuales
           ...(esMPF(datosEntrega.empresa) ? {} : {
@@ -628,6 +657,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
       // --- SUBIR FOTOS A STORAGE SI ESTAMOS ONLINE ---
       // Esto asegura que el correo tenga URLs válidas y no base64 gigantes que fallan
+      let storageQuotaExceeded = false;
       try {
         if (firmaRepartidor && firmaRepartidor.startsWith('data:')) {
           console.log('📤 Subiendo foto repartidor a Storage...');
@@ -642,8 +672,23 @@ export default function CombustibleForm({ empresaId, onClose }) {
           dataToSave.firmaReceptor = await getDownloadURL(fileRef);
         }
       } catch (storageErr) {
-        console.error('⚠️ Error subiendo a Storage (posiblemente offline):', storageErr);
-        // Si falla, mantenemos el base64 en Firestore para no perder el dato
+        console.warn('⚠️ Error subiendo a Storage (offline o cuota excedida):', storageErr?.code || storageErr?.message);
+        if (storageErr?.code === 'storage/quota-exceeded' || storageErr?.message?.includes('402')) {
+          storageQuotaExceeded = true;
+          toast({ type: 'warning', message: 'Storage de Firebase (pago/cuota) tiene problemas. El reporte se guardará pero con fotos limitadas.', duration: 8000 });
+        }
+
+        // --- PROTECCIÓN CONTRA DOCUMENTOS GIGANTES EN FIRESTORE ---
+        // Si el base64 es demasiado grande (> 400KB), no lo guardamos en Firestore 
+        // para evitar el límite de 1MB por documento.
+        if (dataToSave.firmaRepartidor && dataToSave.firmaRepartidor.length > 500000) {
+          console.warn('📸 Foto repartidor demasiado grande para Firestore, se omitirá.');
+          dataToSave.firmaRepartidor = 'error_too_large';
+        }
+        if (dataToSave.firmaReceptor && dataToSave.firmaReceptor.length > 500000) {
+          console.warn('📸 Foto receptor demasiado grande para Firestore, se omitirá.');
+          dataToSave.firmaReceptor = 'error_too_large';
+        }
       }
 
       // ✅ FIX: capturar el ID del reporte para guardarlo en el voucher
@@ -888,26 +933,26 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   {tipoReporte === 'entrada' ? (
                     <div className="mt-8 flex flex-wrap gap-4 justify-center">
                       <button
-                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'interno', destinoCarga: 'camion' })}
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'interno', destinoCarga: '', origen: '', maquinaProveedorId: '', operadorProveedorId: '' })}
                         className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'interno' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
                       >
                         <span className="text-3xl group-hover:scale-110 transition-transform">🏢</span>
                         <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>MPF (Interno)</span>
                       </button>
                       <button
-                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '' })}
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
                         className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'estacion' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
                       >
                         <span className="text-3xl group-hover:scale-110 transition-transform">⛽</span>
                         <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'estacion' ? 'text-green-700' : 'text-slate-500'}`}>Estación</span>
                       </button>
-                      <button
-                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'externo', destinoCarga: '' })}
+                      {/* <button
+                        onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'externo', destinoCarga: '', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
                         className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${datosEntrada.tipoOrigen === 'externo' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-green-200'}`}
                       >
                         <span className="text-3xl group-hover:scale-110 transition-transform">🚛</span>
                         <span className={`font-black text-[10px] uppercase tracking-wider ${datosEntrada.tipoOrigen === 'externo' ? 'text-green-700' : 'text-slate-500'}`}>Terceros</span>
-                      </button>
+                      </button> */}
                     </div>
                   ) : (
                     <div className="mt-8 flex flex-wrap gap-4 justify-center">
@@ -917,13 +962,6 @@ export default function CombustibleForm({ empresaId, onClose }) {
                       >
                         <span className="text-3xl group-hover:scale-110 transition-transform">🏗️</span>
                         <span className={`font-black text-[10px] uppercase tracking-wider ${esMPF(datosEntrega.empresa) ? 'text-blue-700' : 'text-slate-500'}`}>Interno (MPF)</span>
-                      </button>
-                      <button
-                        onClick={() => setDatosEntrega({ ...datosEntrega, empresa: '' })}
-                        className={`px-4 py-3 rounded-2xl border-3 transition-all flex flex-col items-center gap-2 group min-w-[100px] ${!esMPF(datosEntrega.empresa) && datosEntrega.empresa !== '' ? 'bg-blue-50 border-blue-500 shadow-lg scale-105' : 'bg-white border-slate-100 hover:border-blue-200'}`}
-                      >
-                        <span className="text-3xl group-hover:scale-110 transition-transform">🤝</span>
-                        <span className={`font-black text-[10px] uppercase tracking-wider ${!esMPF(datosEntrega.empresa) && datosEntrega.empresa !== '' ? 'text-blue-700' : 'text-slate-500'}`}>Externo</span>
                       </button>
                     </div>
                   )}
@@ -1061,7 +1099,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
                             <div className="flex gap-2">
                               <select
                                 value={datosEntrada.origen}
-                                onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value, machineId: '' })}
+                                onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value, maquinaProveedorId: '', operadorProveedorId: '' })}
                                 className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
                               >
                                 <option value="">Seleccione empresa</option>
@@ -1074,31 +1112,61 @@ export default function CombustibleForm({ empresaId, onClose }) {
                           </div>
 
                           {datosEntrada.origen && (
-                            <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Maquinaria del Proveedor</label>
-                              <div className="flex gap-2">
-                                <select
-                                  value={datosEntrada.machineId}
-                                  onChange={(e) => setDatosEntrada({ ...datosEntrada, machineId: e.target.value })}
-                                  className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
-                                >
-                                  <option value="">Seleccione maquinaria</option>
-                                  {machinesLocal
-                                    .filter(m => empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrada.origen)))
-                                    .map(m => (
-                                      <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
-                                    ))}
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setNuevaMaquinaData({ ...nuevaMaquinaData, empresaId: datosEntrada.origen });
-                                    setShowModalMaquina(true);
-                                  }}
-                                  className="px-4 bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-100 transition-all hover:bg-amber-400"
-                                >
-                                  +
-                                </button>
+                            <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-4">
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Maquinaria del Proveedor</label>
+                                <div className="flex gap-2">
+                                  <select
+                                    value={datosEntrada.maquinaProveedorId}
+                                    onChange={(e) => setDatosEntrada({ ...datosEntrada, maquinaProveedorId: e.target.value })}
+                                    className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
+                                  >
+                                    <option value="">Seleccione maquinaria</option>
+                                    {machinesLocal
+                                      .filter(m => empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrada.origen)))
+                                      .map(m => (
+                                        <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
+                                      ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNuevaMaquinaData({ patente: '', tipo: '', modelo: '', empresaId: datosEntrada.origen, targetField: 'maquinaProveedor' });
+                                      setShowModalMaquina(true);
+                                    }}
+                                    className="px-4 bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-100 transition-all hover:bg-amber-400"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest px-1 mb-2">Operador del Proveedor</label>
+                                <div className="flex gap-2">
+                                  <select
+                                    value={datosEntrada.operadorProveedorId}
+                                    onChange={(e) => setDatosEntrada({ ...datosEntrada, operadorProveedorId: e.target.value })}
+                                    className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm shadow-sm"
+                                  >
+                                    <option value="">Seleccione operador</option>
+                                    {trabajadoresLocales
+                                      .filter(emp => empresasMatch(emp.empresa, resolverNombreEmpresa(datosEntrada.origen)))
+                                      .map(emp => (
+                                        <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                                      ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: datosEntrada.origen, targetField: 'operadorProveedor' });
+                                      setShowModalEmpleado(true);
+                                    }}
+                                    className="px-4 bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-100 transition-all hover:bg-amber-400"
+                                  >
+                                    +
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -1170,7 +1238,23 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   </button>
                   <button
                     onClick={() => setPaso(3)}
-                    disabled={!datosControl.projectId || (tipoReporte === 'entrada' ? !datosEntrada.origen : !datosControl.repartidorId || !datosControl.equipoSurtidorId)}
+                    disabled={(() => {
+                      if (!datosControl.projectId) return true;
+                      if (tipoReporte === 'entrada') {
+                        if (!datosEntrada.tipoOrigen) return true;
+                        if (datosEntrada.tipoOrigen === 'interno') {
+                          return !datosControl.repartidorId || !datosControl.equipoSurtidorId;
+                        }
+                        if (datosEntrada.tipoOrigen === 'estacion') {
+                          return !datosEntrada.origen || !datosControl.equipoSurtidorId || !datosEntrada.destinoCarga;
+                        }
+                        if (datosEntrada.tipoOrigen === 'externo') {
+                          return !datosEntrada.origen || !datosEntrada.maquinaProveedorId || !datosEntrada.operadorProveedorId;
+                        }
+                        return true;
+                      }
+                      return !datosControl.repartidorId || !datosControl.equipoSurtidorId;
+                    })()}
                     className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-black rounded-2xl transition-all uppercase tracking-tight text-[10px] shadow-lg shadow-orange-100 disabled:grayscale disabled:opacity-50"
                   >
                     Siguiente →
@@ -1296,6 +1380,74 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   </div>
                 </div>
 
+                {/* --- SECCIÓN: QUIEN RECIBE (interno / externo) --- */}
+                {(datosEntrada.tipoOrigen === 'interno' || datosEntrada.tipoOrigen === 'externo') && (
+                  <div className="pt-4 border-t border-slate-100 space-y-4">
+                    <div className="flex items-center gap-3 px-1">
+                      <span className="w-7 h-7 rounded-lg bg-green-100 text-green-600 flex items-center justify-center text-xs font-black">🎯</span>
+                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">¿Quién recibe?</h4>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Receptor</label>
+                        {isAdmin ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={datosEntrada.operadorId}
+                              onChange={(e) => setDatosEntrada({ ...datosEntrada, operadorId: e.target.value })}
+                              className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm"
+                            >
+                              <option value="">Seleccione receptor</option>
+                              {trabajadoresLocales.filter(emp => esMPF(emp.empresa)).map(emp => (
+                                <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: 'MPF', targetField: 'operadorEntrada' });
+                                setShowModalEmpleado(true);
+                              }}
+                              className="px-4 bg-green-600 text-white rounded-xl font-black shadow-lg shadow-green-100 transition-all hover:bg-green-500"
+                            >
+                              +
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="px-4 py-3 bg-white border-2 border-green-100 rounded-xl font-bold text-green-900 flex items-center gap-2 text-sm h-[46px]">
+                            👤 {currentUserData?.nombre || 'Mi usuario'}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Vehículo / Equipo que recibe</label>
+                        <div className="flex gap-2">
+                          <select
+                            value={datosEntrada.machineId}
+                            onChange={(e) => setDatosEntrada({ ...datosEntrada, machineId: e.target.value })}
+                            className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-sm"
+                          >
+                            <option value="">Seleccione vehículo / estanque</option>
+                            {machinesLocal.filter(m => esMPF(m.empresa)).map(m => (
+                              <option key={m.id} value={m.id}>{(m.patente || m.code || '')} - {m.name || m.tipo || ''}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNuevaMaquinaData({ patente: '', tipo: '', modelo: '', empresaId: 'MPF', targetField: 'machine_entrada' });
+                              setShowModalMaquina(true);
+                            }}
+                            className="px-4 bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-100 transition-all hover:bg-amber-400"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* --- SECCIÓN 3: FOTO DE RESPALDO (Simplificada) --- */}
                 <div className="flex flex-col items-center justify-center p-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center mb-24">
                   {firmaRepartidor ? (
@@ -1339,7 +1491,14 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   </button>
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || !datosEntrada.cantidad || !firmaRepartidor || datosEntrada.numerosDocumento.filter(d => d).length === 0}
+                    disabled={
+                      loading ||
+                      !datosEntrada.cantidad ||
+                      !firmaRepartidor ||
+                      datosEntrada.numerosDocumento.filter(d => d).length === 0 ||
+                      ((datosEntrada.tipoOrigen === 'interno' || datosEntrada.tipoOrigen === 'externo') &&
+                        (!datosEntrada.operadorId || !datosEntrada.machineId))
+                    }
                     className="flex-[2] px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-black rounded-2xl transition-all uppercase text-[10px] tracking-widest shadow-xl shadow-green-100 disabled:grayscale disabled:opacity-50 active:scale-95"
                   >
                     {loading ? 'Guardando...' : '✓ Finalizar Recepción'}
@@ -1503,8 +1662,8 @@ export default function CombustibleForm({ empresaId, onClose }) {
                                 <div className="font-black text-base uppercase truncate leading-tight">{sel?.nombre || 'Nuevo Trabajador'}</div>
                                 <div className="text-[11px] font-bold opacity-80 mt-0.5">RUT: {sel?.rut || 'Sin RUT'}</div>
                               </div>
-                              <button 
-                                onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: '' })} 
+                              <button
+                                onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: '' })}
                                 className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-xl font-black transition-all active:scale-90"
                               >
                                 ✕
@@ -1537,6 +1696,20 @@ export default function CombustibleForm({ empresaId, onClose }) {
                 </div>
 
                 {/* --- SECCIÓN 3: FOTO DE IDENTIFICACIÓN (Simplificada) --- */}
+                <div className="space-y-3 pt-2">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Enviar Copia (Opcional)</label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={datosEntrega.extraEmail || ''}
+                      onChange={(e) => setDatosEntrega({ ...datosEntrega, extraEmail: e.target.value })}
+                      className="w-full pl-12 pr-6 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-sm text-slate-700 shadow-inner"
+                      placeholder="correo@ejemplo.com"
+                    />
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">📧</span>
+                  </div>
+                </div>
+
                 <div className="flex flex-col items-center justify-center p-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center mb-24">
                   {firmaReceptor ? (
                     <div className="relative group/photo inline-block">
@@ -1580,9 +1753,9 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   <button
                     onClick={handleSubmit}
                     disabled={
-                      loading || 
-                      !datosEntrega.cantidadLitros || 
-                      !firmaReceptor || 
+                      loading ||
+                      !datosEntrega.cantidadLitros ||
+                      !firmaReceptor ||
                       !datosEntrega.machineId ||
                       !datosEntrega.operadorId
                     }
@@ -1776,7 +1949,8 @@ export default function CombustibleForm({ empresaId, onClose }) {
                   className="w-full px-4 py-2 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 text-sm bg-slate-50"
                 >
                   <option value="">Seleccione empresa...</option>
-                  {empresasLocal.map(emp => (
+                  <option value="MPF">MPF Ingeniería Civil</option>
+                  {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
                     <option key={emp.id} value={emp.id}>{emp.nombre}</option>
                   ))}
                 </select>

@@ -333,22 +333,50 @@ export function generateThermalVoucher({
     </div>
     
     <div class="line"></div>
-    
-    <!-- DATOS DEL CLIENTE -->
+
+    <!-- SURTIDOR -->
     <div class="section">
-      <div class="bold">EMPRESA:</div>
-      <div>${empresaInfo?.nombre || projectName || 'N/A'}</div>
+      <div class="bold">SURTIDOR</div>
+      <div class="row">
+        <span class="label">Empresa:</span>
+        <span>MPF Ingenieria Civil</span>
+      </div>
       <div class="row">
         <span class="label">RUT:</span>
-        <span>${empresaInfo?.rut || 'N/A'}</span>
+        <span>77.158.216-8</span>
       </div>
+      <div class="row">
+        <span class="label">Nombre:</span>
+        <span>${formatNombreCorto(repartidorInfo?.nombre || reportData.repartidorNombre)}</span>
+      </div>
+      <div class="row">
+        <span class="label">Run:</span>
+        <span>${formatRun(repartidorInfo?.rut || reportData.repartidorRut)}</span>
+      </div>
+      ${equipoSurtidorInfo ? `
+      <div class="tipo-maquina-izquierda">
+        <div class="label">Equipo Surtidor:</div>
+        <div>${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}</div>
+      </div>
+      <div class="row">
+        <span class="label">Patente:</span>
+        <span class="bold">${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
+      </div>` : ''}
     </div>
-    
+
     <div class="line"></div>
-    
+
     <!-- RECEPTOR -->
     <div class="section">
       <div class="bold">RECEPTOR</div>
+      <div class="row">
+        <span class="label">Empresa:</span>
+        <span>${empresaInfo?.nombre || projectName || 'N/A'}</span>
+      </div>
+      <div class="row">
+        <span class="label">RUT:</span>
+        <span>${empresaInfo?.rut || (empresaInfo?.nombre && /mpf/i.test(empresaInfo.nombre) ? '77.158.216-8' : 'N/A')}</span>
+      </div>
       <div class="row">
         <span class="label">Nombre:</span>
         <span>${formatNombreCorto(operadorInfo?.nombre)}</span>
@@ -369,30 +397,6 @@ export function generateThermalVoucher({
       <div class="row">
         <span class="label">Horometro/Km:</span>
         <span>${reportData.horometroOdometro}</span>
-      </div>` : ''}
-    </div>
-
-    <div class="line"></div>
-
-    <!-- SURTIDOR -->
-    <div class="section">
-      <div class="bold">SURTIDOR</div>
-      <div class="row">
-        <span class="label">Nombre:</span>
-        <span>${formatNombreCorto(repartidorInfo?.nombre || reportData.repartidorNombre)}</span>
-      </div>
-      <div class="row">
-        <span class="label">Run:</span>
-        <span>${formatRun(repartidorInfo?.rut || reportData.repartidorRut)}</span>
-      </div>
-      ${equipoSurtidorInfo ? `
-      <div class="tipo-maquina-izquierda">
-        <div class="label">Equipo Surtidor:</div>
-        <div>${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}</div>
-      </div>
-      <div class="row">
-        <span class="label">Patente:</span>
-        <span class="bold">${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
       </div>` : ''}
     </div>
 
@@ -565,20 +569,21 @@ export function generateThermalVoucherText({
   GUIA DE DESPACHO N° ${numeroGuia}
 ${line}
 
-EMPRESA:
-${empresaInfo?.nombre || projectName || 'N/A'}
-RUT: ${empresaInfo?.rut || 'N/A'}
-
-Tipo Maquina: ${machineInfo?.type || machineInfo?.nombre || 'N/A'}
-Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}${reportData.horometroOdometro ? `
-Horometro/Km: ${reportData.horometroOdometro}` : ''}
-${line}
-
 SURTIDOR:
+Empresa: MPF Ingenieria Civil
+RUT: 77.158.216-8
 Nombre: ${repartidorInfo?.nombre || reportData.repartidorNombre || 'N/A'}
 Run: ${repartidorInfo?.rut || reportData.repartidorRut || 'N/A'}${equipoSurtidorInfo ? `
 Equipo: ${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}
 Patente: ${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}` : ''}
+${line}
+
+RECEPTOR:
+Empresa: ${empresaInfo?.nombre || projectName || 'N/A'}
+RUT: ${empresaInfo?.rut || (empresaInfo?.nombre && /mpf/i.test(empresaInfo.nombre) ? '77.158.216-8' : 'N/A')}
+Tipo Maquina: ${machineInfo?.type || machineInfo?.nombre || 'N/A'}
+Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}${reportData.horometroOdometro ? `
+Horometro/Km: ${reportData.horometroOdometro}` : ''}
 ${line}
 
 Fecha Emision: ${fechaFormateada}

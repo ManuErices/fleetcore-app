@@ -50,14 +50,16 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const MAX_DIM = 600;
+    const sw = video.videoWidth || 1280;
+    const sh = video.videoHeight || 720;
+    const scale = Math.min(1, MAX_DIM / Math.max(sw, sh));
+    canvas.width = Math.round(sw * scale);
+    canvas.height = Math.round(sh * scale);
 
-    // Draw the current video frame to the canvas
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convert to base64
-    const photoData = canvas.toDataURL("image/jpeg", 0.8);
+    const photoData = canvas.toDataURL("image/jpeg", 0.5);
     onCapture(photoData);
     stopCamera();
     onClose();
