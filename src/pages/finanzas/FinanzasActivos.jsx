@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   collection, getDocs,
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
-import { db } from "../../lib/firebase";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
@@ -27,6 +28,7 @@ const EMPTY = {
   valorCompra:"", valorLibros:"", fechaCompra:"", vidaUtilAnios:"", moneda:"CLP",
   depreciacionAnual:"", vencPermisoCirculacion:"", vencSeguro:"",
   vencRevisionTecnica:"", vencSoapCivil:"", notasDoc:"", notas:"", activo:true, machineId:null,
+  archivosDoc: { vencPermisoCirculacion:"", vencSeguro:"", vencRevisionTecnica:"", vencSoapCivil:"" },
 };
 
 function fmt(n, moneda="CLP") {
@@ -69,6 +71,105 @@ function BadgeDoc({fecha,label}) {
     <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${s}`}>
       <span className="text-xs font-bold">{label}</span>
       <span className="text-xs font-semibold">{e==="vencido"?"Vencido":`${d}d`}{e==="ok"&&<span className="ml-1">✓</span>}</span>
+    </div>
+  );
+}
+
+// ─── Uploader de documento individual ────────────────────────────────────────
+function DocUploader({ label, docKey, activoId, empresaId, urlActual, onUploaded }) {
+  const [uploading, setUploading]   = useState(false);
+  const [progress, setProgress]     = useState(0);
+  const [error, setError]           = useState(null);
+  const inputRef                    = useRef(null);
+
+  const esImagen = urlActual && /\.(jpg|jpeg|png|gif|webp)/i.test(urlActual.split("?")[0]);
+  const esPDF    = urlActual && /\.pdf/i.test(urlActual.split("?")[0]);
+  const nombreArchivo = urlActual
+    ? decodeURIComponent(urlActual.split("/").pop().split("?")[0]).replace(/.*_/, "")
+    : null;
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const maxMB = 10;
+    if (file.size > maxMB * 1024 * 1024) { setError(`Máximo ${maxMB}MB`); return; }
+    setError(null);
+    setUploading(true);
+    setProgress(0);
+    const ext      = file.name.split(".").pop();
+    const path     = `empresas/${empresaId}/activos/${activoId}/${docKey}_${Date.now()}.${ext}`;
+    const storRef  = ref(storage, path);
+    const task     = uploadBytesResumable(storRef, file);
+    task.on("state_changed",
+      snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+      err  => { setError("Error al subir"); setUploading(false); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        onUploaded(docKey, url);
+        setUploading(false);
+      }
+    );
+  };
+
+  const handleEliminarArchivo = async () => {
+    if (!urlActual) return;
+    try {
+      const fileRef = ref(storage, urlActual);
+      await deleteObject(fileRef);
+    } catch (e) { /* ignora si ya no existe */ }
+    onUploaded(docKey, "");
+  };
+
+  return (
+    <div className="mt-2">
+      {urlActual ? (
+        <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+          {/* Icono tipo archivo */}
+          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+            {esImagen
+              ? <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              : <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+            }
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-emerald-700 truncate">{nombreArchivo || "Archivo subido"}</p>
+            <p className="text-[10px] text-emerald-500">✓ Documento respaldado</p>
+          </div>
+          {/* Acciones */}
+          <a href={urlActual} target="_blank" rel="noopener noreferrer"
+            className="w-7 h-7 rounded-lg bg-emerald-100 hover:bg-emerald-200 flex items-center justify-center transition-all flex-shrink-0" title="Ver / Descargar">
+            <svg className="w-3.5 h-3.5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+          </a>
+          <button onClick={handleEliminarArchivo}
+            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-all flex-shrink-0" title="Eliminar archivo">
+            <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+          <button onClick={() => inputRef.current?.click()}
+            className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="Reemplazar archivo">
+            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+        </div>
+      ) : uploading ? (
+        <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs font-bold text-purple-700">Subiendo...</p>
+            <p className="text-xs font-black text-purple-600">{progress}%</p>
+          </div>
+          <div className="w-full bg-purple-100 rounded-full h-1.5">
+            <div className="bg-gradient-to-r from-purple-600 to-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="w-full flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-xl text-xs font-semibold text-slate-400 hover:text-purple-600 transition-all group"
+        >
+          <svg className="w-4 h-4 flex-shrink-0 group-hover:text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          Subir archivo (PDF, JPG, PNG — máx. 10MB)
+        </button>
+      )}
+      {error && <p className="text-xs text-red-500 font-semibold mt-1">{error}</p>}
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+        onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
     </div>
   );
 }
@@ -216,6 +317,14 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
                   <label className="block text-sm font-bold text-slate-700 mb-1.5">{label}</label>
                   <input type="date" value={form[key]||""} onChange={e=>set(key,e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
                   {form[key]&&(()=>{const d=diasR(form[key]); if(d<0) return <p className="text-xs text-red-600 font-bold mt-1">⚠ Vencido hace {Math.abs(d)}d</p>; if(d<=30) return <p className="text-xs text-amber-600 font-bold mt-1">⚠ Vence en {d}d</p>; return <p className="text-xs text-emerald-600 font-semibold mt-1">✓ Vigente ({d}d)</p>;})()}
+                  <DocUploader
+                    label={label}
+                    docKey={key}
+                    activoId={editando?.id || "nuevo"}
+                    empresaId={empresaId}
+                    urlActual={form.archivosDoc?.[key] || ""}
+                    onUploaded={(k, url) => set("archivosDoc", { ...(form.archivosDoc||{}), [k]: url })}
+                  />
                 </div>
               ))}
             </div>
@@ -285,11 +394,25 @@ function PanelDetalle({activo,onClose,onEdit,projects}) {
         <div className="space-y-3">
           <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Documentos</p>
           <div className="space-y-2">
-            {DOCS_DEF.map(({key,label})=>(
-              activo[key]
-                ?<BadgeDoc key={key} fecha={activo[key]} label={label}/>
-                :<div key={key} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 text-slate-400 text-xs"><span className="font-bold">{label}</span><span>Sin fecha</span></div>
-            ))}
+            {DOCS_DEF.map(({key,label})=>{
+              const url = activo.archivosDoc?.[key];
+              return (
+                <div key={key}>
+                  {activo[key]
+                    ? <BadgeDoc fecha={activo[key]} label={label}/>
+                    : <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 text-slate-400 text-xs"><span className="font-bold">{label}</span><span>Sin fecha</span></div>
+                  }
+                  {url && (
+                    <a href={url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 mt-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors group">
+                      <svg className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                      <span className="text-xs font-bold text-emerald-700 truncate flex-1">Ver / Descargar</span>
+                      <svg className="w-3 h-3 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                    </a>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {activo.notasDoc&&<p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">{activo.notasDoc}</p>}
         </div>
@@ -309,6 +432,7 @@ export default function FinanzasActivos() {
   const [editando,setEditando]=useState(null);
   const [detalle,setDetalle]=useState(null);
   const [deletingId,setDeletingId]=useState(null);
+  const [confirmEliminar,setConfirmEliminar]=useState(null); // activo a eliminar
   const [filtroTipo,setFiltroTipo]=useState("todos");
   const [filtroEstado,setFiltroEstado]=useState("activos");
   const [filtroDoc,setFiltroDoc]=useState("todos");
@@ -364,6 +488,7 @@ export default function FinanzasActivos() {
         vencRevisionTecnica:    d.data().vencRevisionTecnica    || "",
         vencSoapCivil:          d.data().vencSoapCivil          || "",
         notasDoc:               d.data().notasDoc               || "",
+        archivosDoc:            d.data().archivosDoc            || {},
         notas:                  d.data().notas                  || "",
       }));
       setActivos(proyectoId!=="todos" ? todos.filter(a=>a.projectId===proyectoId) : todos);
@@ -396,10 +521,23 @@ export default function FinanzasActivos() {
   };
 
   const handleEliminar=async(a)=>{
-    if(!window.confirm("¿Eliminar este activo?")) return;
+    setConfirmEliminar(a);
+  };
+
+  const confirmarEliminar=async()=>{
+    const a=confirmEliminar;
+    if(!a) return;
+    setConfirmEliminar(null);
     setDeletingId(a.id);
-    await deleteDoc(doc(db,"empresas",empresaId,"machines",a.id));
-    setDeletingId(null); if(detalle?.id===a.id) setDetalle(null); await cargar();
+    // Eliminar de machines (FleetCore) o de finanzas_activos según origen
+    if(a._source==="machines"){
+      await deleteDoc(doc(db,"empresas",empresaId,"machines",a.id));
+    } else {
+      await deleteDoc(doc(db,"empresas",empresaId,"finanzas_activos",a.id));
+    }
+    setDeletingId(null);
+    if(detalle?.id===a.id) setDetalle(null);
+    await cargar();
   };
 
   const handleSort=(col)=>{ if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc"); else{setSortCol(col);setSortDir("asc");} };
@@ -562,11 +700,9 @@ export default function FinanzasActivos() {
                           <button onClick={()=>{setEditando(a);setShowModal(true);}} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all" title="Editar">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                           </button>
-                          {!esMachine&&(
-                            <button onClick={()=>handleEliminar(a)} disabled={deletingId===a.id} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
-                              {deletingId===a.id?<div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/>:<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>}
-                            </button>
-                          )}
+                          <button onClick={()=>handleEliminar(a)} disabled={deletingId===a.id} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
+                            {deletingId===a.id?<div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/>:<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -588,6 +724,55 @@ export default function FinanzasActivos() {
       <PanelDetalle activo={detalle} onClose={()=>setDetalle(null)} onEdit={()=>{setEditando(detalle);setShowModal(true);setDetalle(null);}} projects={projects}/>
 
       <ModalActivo isOpen={showModal} onClose={()=>{setShowModal(false);setEditando(null);}} onSave={handleSave} editando={editando} projects={projects}/>
+
+      {/* Modal confirmación eliminar */}
+      {confirmEliminar && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="bg-gradient-to-r from-red-500 to-red-600 p-5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-white font-black text-sm">Eliminar activo</h3>
+                <p className="text-red-200 text-xs">Esta acción no se puede deshacer</p>
+              </div>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-slate-700 font-semibold">
+                ¿Estás seguro que deseas eliminar <span className="font-black text-slate-900">"{confirmEliminar.nombre || confirmEliminar.code || "este activo"}"</span>?
+              </p>
+              {confirmEliminar._source === "machines" && (
+                <div className="mt-3 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <p className="text-xs text-amber-700 font-semibold">
+                    Este activo está sincronizado con FleetCore. Se eliminará también de la flota principal.
+                  </p>
+                </div>
+              )}
+              <p className="text-xs text-slate-400 mt-3">Se eliminarán también los documentos y datos financieros asociados.</p>
+            </div>
+            <div className="px-5 pb-5 flex gap-3">
+              <button
+                onClick={() => setConfirmEliminar(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarEliminar}
+                className="flex-1 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-black rounded-xl text-sm transition-all shadow-md"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
