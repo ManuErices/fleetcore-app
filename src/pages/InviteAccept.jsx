@@ -6,13 +6,13 @@
  *   2. Se lee /invitaciones/{token} — valida que no esté usado ni expirado
  *   3. Si no tiene cuenta → muestra form de registro (email + contraseña)
  *   4. Si ya tiene cuenta → asigna la empresa directamente
- *   5. Al completar: escribe /users/{uid} con empresaId + role, marca invitación como usada
+ *   5. Al completar: escribe /users/{uid} con empresaId + role + modulos, marca invitación como usada
  */
 
 import React, { useState, useEffect } from "react";
 import { db, auth } from "../lib/firebase";
 import {
-  doc, getDoc, updateDoc, setDoc, serverTimestamp, getDocFromServer,
+  doc, setDoc, serverTimestamp, getDocFromServer,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -28,87 +28,89 @@ const ROLES_LABEL = {
   trabajador:      "Trabajador",
 };
 
-export default function InviteAccept({ token }) {
-  const [step,      setStep]      = useState("loading"); // loading | invalid | expired | used | register | login | accepting | done | error
-  const [invData,   setInvData]   = useState(null);
-  const [empresa,   setEmpresa]   = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [form,      setForm]      = useState({ nombre: "", email: "", password: "", confirm: "" });
-  const [error,     setError]     = useState("");
-  const [saving,    setSaving]    = useState(false);
-  const [mode,      setMode]      = useState("register"); // register | login
+const MODULOS_LABEL = {
+  fleetcore:    "Oficina Técnica",
+  reportes:     "Reportes",
+  rrhh:         "RRHH",
+  finanzas:     "Finanzas",
+  contabilidad: "Contabilidad",
+  workfleet:    "WorkFleet",
+};
 
-  // Escuchar sesión activa
+export default function InviteAccept({ token }) {
+  const [step,        setStep]        = useState("loading");
+  const [invData,     setInvData]     = useState(null);
+  const [empresa,     setEmpresa]     = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [form,        setForm]        = useState({ nombre: "", email: "", password: "", confirm: "" });
+  const [error,       setError]       = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [mode,        setMode]        = useState("register");
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => setCurrentUser(u));
     return unsub;
   }, []);
 
-  // Cargar y validar invitación
   useEffect(() => {
     if (!token) { setStep("invalid"); return; }
     (async () => {
       try {
-        // ✅ FIX: leer SIEMPRE del servidor, no del caché offline
-        // El caché de Firestore puede tener guardado un error de permisos anterior
         const snap = await getDocFromServer(doc(db, "invitaciones", token));
         if (!snap.exists()) { setStep("invalid"); return; }
 
         const data = snap.data();
-
         if (data.usada) { setStep("used"); return; }
         if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
           setStep("expired"); return;
         }
 
-        // Cargar datos de empresa
-        const empSnap = await getDocFromServer(doc(db, "empresas", data.empresaId));
-        if (!empSnap.exists()) { setStep("invalid"); return; }
-
         setInvData(data);
-        setEmpresa({ id: data.empresaId, ...empSnap.data() });
-        // Pre-fill email if specified in invite
+        // empresaNombre se guarda en el doc de invitación para evitar leer empresas/{id} sin auth
+        setEmpresa({ id: data.empresaId, nombre: data.empresaNombre || '' });
         if (data.emailDestino) setForm(f => ({ ...f, email: data.emailDestino }));
         setStep("register");
       } catch (e) {
-        console.error(e);
+        console.error("Error cargando invitación:", e);
         setStep("error");
       }
     })();
   }, [token]);
 
-  const handleChange = e => {
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }));
-    setError("");
-  };
-
-  const aceptarInvitacion = async (uid) => {
+  const aceptarInvitacion = async (uid, emailOverride) => {
     setStep("accepting");
     try {
+      const email = emailOverride || form.email || currentUser?.email || "";
+
       // Crear/actualizar doc de usuario
       await setDoc(doc(db, "users", uid), {
-        empresaId:    invData.empresaId,
-        role:         invData.rol,
-        email:        form.email || currentUser?.email,
-        nombre:       form.nombre || "",
-        updatedAt:    serverTimestamp(),
+        empresaId: invData.empresaId,
+        role:      invData.rol,
+        modulos:   invData.modulos || [],
+        email,
+        nombre:    form.nombre || "",
+        updatedAt: serverTimestamp(),
       }, { merge: true });
 
-      // Marcar invitación como usada
-      await updateDoc(doc(db, "invitaciones", token), {
-        usada:     true,
-        usadaPor:  uid,
-        usadaEn:   serverTimestamp(),
-      });
+      // Marcar invitación como usada — setDoc con merge evita problemas de cache offline
+      await setDoc(doc(db, "invitaciones", token), {
+        usada:    true,
+        usadaPor: uid,
+        usadaEn:  serverTimestamp(),
+      }, { merge: true });
 
       setStep("done");
-      // Redirigir al AppSelector después de 2s
-      setTimeout(() => { window.location.href = "/"; }, 2000);
+      setTimeout(() => { window.location.href = "/"; }, 2500);
     } catch (e) {
-      console.error(e);
+      console.error("Error aceptando invitación:", e);
       setError("Error al procesar la invitación: " + e.message);
       setStep("register");
     }
+  };
+
+  const handleChange = e => {
+    setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+    setError("");
   };
 
   const handleRegister = async () => {
@@ -119,8 +121,8 @@ export default function InviteAccept({ token }) {
 
     setSaving(true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      await aceptarInvitacion(cred.user.uid);
+      const cred = await createUserWithEmailAndPassword(auth, form.email.trim(), form.password);
+      await aceptarInvitacion(cred.user.uid, form.email.trim());
     } catch (e) {
       if (e.code === "auth/email-already-in-use") {
         setError("Este email ya tiene cuenta. Inicia sesión para aceptar la invitación.");
@@ -128,6 +130,7 @@ export default function InviteAccept({ token }) {
       } else {
         setError(e.message);
       }
+    } finally {
       setSaving(false);
     }
   };
@@ -136,96 +139,169 @@ export default function InviteAccept({ token }) {
     if (!form.email.trim() || !form.password) { setError("Ingresa email y contraseña"); return; }
     setSaving(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, form.email, form.password);
-      await aceptarInvitacion(cred.user.uid);
+      const cred = await signInWithEmailAndPassword(auth, form.email.trim(), form.password);
+      await aceptarInvitacion(cred.user.uid, form.email.trim());
     } catch (e) {
       setError("Email o contraseña incorrectos");
+    } finally {
       setSaving(false);
     }
   };
 
   const handleAcceptWithCurrentUser = async () => {
     setSaving(true);
-    await aceptarInvitacion(currentUser.uid);
-    setSaving(false);
+    try {
+      await aceptarInvitacion(currentUser.uid, currentUser.email);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // ── Estados de pantalla ────────────────────────────────────
+  // ── Pantallas de estado ──────────────────────────────────────
 
-  if (step === "loading") return <Screen><Spinner /><p className="text-white/60 text-sm mt-3">Verificando invitación...</p></Screen>;
-  if (step === "invalid") return <Screen><StatusCard icon="❌" title="Invitación inválida" desc="Este link no existe o fue eliminado." /></Screen>;
-  if (step === "expired") return <Screen><StatusCard icon="⏰" title="Invitación expirada" desc="Este link ya no es válido. Pide una nueva invitación al administrador." /></Screen>;
-  if (step === "used")    return <Screen><StatusCard icon="✓" title="Invitación ya usada" desc="Este link ya fue utilizado. Si es tuyo, inicia sesión normalmente." link="/" linkLabel="Ir al inicio" /></Screen>;
-  if (step === "accepting") return <Screen><Spinner /><p className="text-white/60 text-sm mt-3">Configurando tu cuenta...</p></Screen>;
-  if (step === "error")   return <Screen><StatusCard icon="⚠️" title="Error inesperado" desc="Algo salió mal. Intenta nuevamente o contacta al soporte." /></Screen>;
+  if (step === "loading") return (
+    <Screen>
+      <Loading text="Verificando invitación..." />
+    </Screen>
+  );
+
+  if (step === "accepting") return (
+    <Screen>
+      <Loading text="Configurando tu cuenta..." />
+    </Screen>
+  );
+
+  if (step === "invalid") return (
+    <Screen>
+      <StatusCard
+        icon={<IconX />}
+        iconBg="bg-red-500/20 border-red-400/50"
+        iconColor="text-red-400"
+        title="Invitación inválida"
+        desc="Este link no existe o fue eliminado."
+      />
+    </Screen>
+  );
+
+  if (step === "expired") return (
+    <Screen>
+      <StatusCard
+        icon={<IconClock />}
+        iconBg="bg-amber-500/20 border-amber-400/50"
+        iconColor="text-amber-400"
+        title="Invitación expirada"
+        desc="Este link ya no es válido. Solicita una nueva invitación al administrador."
+      />
+    </Screen>
+  );
+
+  if (step === "used") return (
+    <Screen>
+      <StatusCard
+        icon={<IconCheck />}
+        iconBg="bg-blue-500/20 border-blue-400/50"
+        iconColor="text-blue-400"
+        title="Invitación ya usada"
+        desc="Este link ya fue utilizado. Si es tuyo, inicia sesión normalmente."
+        link="/"
+        linkLabel="Ir al inicio"
+      />
+    </Screen>
+  );
+
+  if (step === "error") return (
+    <Screen>
+      <StatusCard
+        icon={<IconWarn />}
+        iconBg="bg-red-500/20 border-red-400/50"
+        iconColor="text-red-400"
+        title="Error inesperado"
+        desc="Algo salió mal. Intenta nuevamente o contacta al soporte."
+        link={`/invite/${token}`}
+        linkLabel="Reintentar"
+      />
+    </Screen>
+  );
 
   if (step === "done") return (
     <Screen>
       <div className="text-center">
-        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mx-auto mb-4">
-          <svg className="w-10 h-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
+        <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400/60 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-500/20">
+          <IconCheck className="w-10 h-10 text-emerald-400" />
         </div>
-        <h2 className="text-2xl font-black text-white mb-2">¡Bienvenido a {empresa?.nombre}!</h2>
-        <p className="text-white/60 text-sm">Redirigiendo a tu espacio de trabajo...</p>
+        <h2 className="text-2xl font-black text-white mb-2">¡Bienvenido a {empresa?.nombre || 'la empresa'}!</h2>
+        <p className="text-white/50 text-sm">Redirigiendo a tu espacio de trabajo...</p>
       </div>
     </Screen>
   );
 
   // ── Pantalla principal: aceptar invitación ─────────────────
+  const modulos = invData?.modulos || [];
+
   return (
     <Screen>
       <div className="w-full max-w-md">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <img src="/favicon.svg" alt="FleetCore" className="h-12 w-auto mx-auto mb-4 object-contain" />
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-2xl mb-4">
-            <span className="text-emerald-400 text-sm">🎉</span>
-            <span className="text-emerald-300 text-xs font-bold">Fuiste invitado a unirte</span>
+
+        {/* Badge empresa */}
+        <div className="text-center mb-7">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl mb-5">
+            <span className="text-indigo-300 text-xs font-bold tracking-wide uppercase">Invitación</span>
           </div>
-          <h1 className="text-2xl font-black text-white mb-1">{empresa?.nombre}</h1>
-          <p className="text-white/50 text-sm">
-            Rol asignado: <span className="text-white/80 font-semibold">{ROLES_LABEL[invData?.rol] || invData?.rol}</span>
-          </p>
+          <h1 className="text-3xl font-black text-white mb-1 leading-tight">
+            {empresa?.nombre || 'FleetCore'}
+          </h1>
+          <div className="flex items-center justify-center gap-2 mt-2 flex-wrap">
+            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-black border ${roleBadgeCls(invData?.rol)}`}>
+              {ROLES_LABEL[invData?.rol] || invData?.rol}
+            </span>
+            {modulos.length > 0 && modulos.map(m => (
+              <span key={m} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 border border-blue-400/30 text-blue-300">
+                {MODULOS_LABEL[m] || m}
+              </span>
+            ))}
+          </div>
         </div>
 
         {/* Card */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6 space-y-4">
+        <div className="bg-white/[0.07] backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
 
-          {/* Si ya tiene sesión iniciada */}
+          {/* Ya tiene sesión */}
           {currentUser && step === "register" && (
             <div className="space-y-4">
-              <div className="p-3 bg-blue-500/20 border border-blue-400/30 rounded-xl">
-                <p className="text-blue-200 text-xs">
-                  Estás conectado como <span className="font-bold text-white">{currentUser.email}</span>
-                </p>
+              <div className="flex items-center gap-3 p-3 bg-indigo-500/10 border border-indigo-400/20 rounded-xl">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/30 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-sm font-bold">{currentUser.email?.[0]?.toUpperCase()}</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider font-bold">Sesión activa</p>
+                  <p className="text-sm text-white/90 font-semibold truncate">{currentUser.email}</p>
+                </div>
               </div>
-              <p className="text-white/70 text-sm text-center">¿Aceptar la invitación con esta cuenta?</p>
+              <p className="text-white/50 text-sm text-center">¿Aceptar la invitación con esta cuenta?</p>
               <button
                 onClick={handleAcceptWithCurrentUser}
                 disabled={saving}
-                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm transition-all disabled:opacity-50"
+                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20"
               >
                 {saving ? "Procesando..." : "✓ Aceptar invitación"}
               </button>
               <button
                 onClick={() => { auth.signOut(); }}
-                className="w-full py-2 text-xs text-white/40 hover:text-white/70 transition-colors"
+                className="w-full py-2 text-xs text-white/30 hover:text-white/60 transition-colors"
               >
                 Usar otra cuenta
               </button>
             </div>
           )}
 
-          {/* Sin sesión — tabs register/login */}
+          {/* Sin sesión */}
           {!currentUser && (
             <>
               {/* Tabs */}
-              <div className="flex gap-1 p-1 bg-white/5 rounded-xl">
+              <div className="flex gap-1 p-1 bg-white/5 rounded-xl border border-white/5">
                 {["register", "login"].map(m => (
                   <button key={m} onClick={() => { setMode(m); setError(""); }}
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mode === m ? "bg-white/20 text-white" : "text-white/40 hover:text-white/60"}`}>
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mode === m ? "bg-white/15 text-white shadow-sm" : "text-white/30 hover:text-white/50"}`}>
                     {m === "register" ? "Crear cuenta" : "Ya tengo cuenta"}
                   </button>
                 ))}
@@ -236,27 +312,27 @@ export default function InviteAccept({ token }) {
                   <Field label="Nombre completo *">
                     <input name="nombre" value={form.nombre} onChange={handleChange}
                       placeholder="Juan Pérez"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm" />
+                      className={inputCls} />
                   </Field>
                   <Field label="Email *">
                     <input name="email" type="email" value={form.email} onChange={handleChange}
                       placeholder="tu@empresa.cl"
                       disabled={!!invData?.emailDestino}
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm disabled:opacity-60" />
+                      className={inputCls + (invData?.emailDestino ? " opacity-60" : "")} />
                   </Field>
                   <Field label="Contraseña *">
                     <input name="password" type="password" value={form.password} onChange={handleChange}
                       placeholder="Mínimo 6 caracteres"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm" />
+                      className={inputCls} />
                   </Field>
                   <Field label="Confirmar contraseña *">
                     <input name="confirm" type="password" value={form.confirm} onChange={handleChange}
                       placeholder="Repite la contraseña"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm" />
+                      className={inputCls} />
                   </Field>
-                  {error && <p className="text-red-300 text-xs bg-red-500/10 border border-red-400/20 rounded-xl px-3 py-2">{error}</p>}
+                  {error && <ErrorBanner msg={error} />}
                   <button onClick={handleRegister} disabled={saving}
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm transition-all disabled:opacity-50">
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20">
                     {saving ? "Creando cuenta..." : "Crear cuenta y unirme →"}
                   </button>
                 </>
@@ -267,16 +343,16 @@ export default function InviteAccept({ token }) {
                   <Field label="Email">
                     <input name="email" type="email" value={form.email} onChange={handleChange}
                       placeholder="tu@email.cl"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm" />
+                      className={inputCls} />
                   </Field>
                   <Field label="Contraseña">
                     <input name="password" type="password" value={form.password} onChange={handleChange}
                       placeholder="Tu contraseña"
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-emerald-400 text-sm" />
+                      className={inputCls} />
                   </Field>
-                  {error && <p className="text-red-300 text-xs bg-red-500/10 border border-red-400/20 rounded-xl px-3 py-2">{error}</p>}
+                  {error && <ErrorBanner msg={error} />}
                   <button onClick={handleLogin} disabled={saving}
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm transition-all disabled:opacity-50">
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20">
                     {saving ? "Iniciando sesión..." : "Iniciar sesión y unirme →"}
                   </button>
                 </>
@@ -289,12 +365,40 @@ export default function InviteAccept({ token }) {
   );
 }
 
-// ── Helpers UI ─────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────
+
+function roleBadgeCls(rol) {
+  const map = {
+    admin_contrato: "bg-purple-500/20 border-purple-400/30 text-purple-300",
+    administrativo: "bg-blue-500/20 border-blue-400/30 text-blue-300",
+    operador:       "bg-cyan-500/20 border-cyan-400/30 text-cyan-300",
+    mandante:       "bg-amber-500/20 border-amber-400/30 text-amber-300",
+    trabajador:     "bg-emerald-500/20 border-emerald-400/30 text-emerald-300",
+  };
+  return map[rol] || "bg-white/10 border-white/20 text-white/70";
+}
+
+const inputCls = "w-full px-4 py-3 rounded-xl bg-white/8 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:border-indigo-400/60 focus:bg-white/12 text-sm transition-all";
+
+// ── Componentes UI ─────────────────────────────────────────────
+
 function Screen({ children }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-emerald-900/20 to-slate-900 flex items-center justify-center px-4 py-8">
-      <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-      {children}
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 flex items-center justify-center px-4 py-8 relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-[700px] h-[700px] bg-indigo-500/8 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/8 rounded-full blur-3xl pointer-events-none" />
+      <div className="relative z-10">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Loading({ text }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+      <p className="text-white/50 text-sm">{text}</p>
     </div>
   );
 }
@@ -302,27 +406,66 @@ function Screen({ children }) {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="block text-[11px] font-bold text-white/50 uppercase tracking-widest mb-1.5">{label}</label>
+      <label className="block text-[11px] font-bold text-white/40 uppercase tracking-widest mb-1.5">{label}</label>
       {children}
     </div>
   );
 }
 
-function Spinner() {
-  return <div className="w-10 h-10 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto" />;
+function ErrorBanner({ msg }) {
+  return (
+    <div className="flex items-start gap-2 px-3 py-2.5 bg-red-500/10 border border-red-400/20 rounded-xl">
+      <span className="text-red-400 text-sm mt-0.5 flex-shrink-0">!</span>
+      <p className="text-red-300 text-xs">{msg}</p>
+    </div>
+  );
 }
 
-function StatusCard({ icon, title, desc, link, linkLabel }) {
+function StatusCard({ icon, iconBg, iconColor, title, desc, link, linkLabel }) {
   return (
     <div className="text-center max-w-sm">
-      <div className="text-5xl mb-4">{icon}</div>
+      <div className={`w-16 h-16 rounded-2xl ${iconBg} border flex items-center justify-center mx-auto mb-4`}>
+        <span className={iconColor}>{icon}</span>
+      </div>
       <h2 className="text-xl font-black text-white mb-2">{title}</h2>
-      <p className="text-white/50 text-sm mb-4">{desc}</p>
+      <p className="text-white/40 text-sm mb-4">{desc}</p>
       {link && (
-        <a href={link} className="inline-flex px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl transition-all">
+        <a href={link} className="inline-flex px-5 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 text-white text-sm font-bold rounded-xl transition-all">
           {linkLabel}
         </a>
       )}
     </div>
+  );
+}
+
+function IconCheck({ className = "w-6 h-6" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function IconClock() {
+  return (
+    <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
+function IconWarn() {
+  return (
+    <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
   );
 }
