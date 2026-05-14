@@ -14,6 +14,7 @@ const { sendWhatsapp } = require('./twilio');
 const {
   entradaCombustible, voucherEntrega, genericNotification,
   whatsappEntrada, whatsappEntrega, whatsappTest,
+  invitacionUsuario,
 } = require('./email-templates');
 
 if (!admin.apps.length) admin.initializeApp();
@@ -540,3 +541,40 @@ exports.testWhatsapp = onRequest({}, (req, res) => {
     }
   });
 });
+
+// ============================================================
+// TRIGGER — Email al crear invitación de usuario
+// ============================================================
+exports.onInvitacionCreada = onDocumentCreated(
+  { document: 'invitaciones/{invitationId}', secrets: SES_SECRETS },
+  async (event) => {
+    const { invitationId } = event.params;
+    const snap = event.data;
+    if (!snap) return;
+    const inv = snap.data() || {};
+
+    const emailDestino = inv.emailDestino;
+    if (!emailDestino) return;
+
+    try {
+      const empresaNombre = await getEmpresaNombre(inv.empresaId);
+      const appUrl = process.env.APP_URL || 'https://fleetcore.web.app';
+      const link = `${appUrl}/invite/${invitationId}`;
+
+      const { subject, html } = invitacionUsuario({
+        emailDestino,
+        rol: inv.rol,
+        link,
+        empresaNombre,
+        diasExpira: inv.diasExpira || 7,
+      });
+
+      await sendEmail({ to: emailDestino, subject, html });
+      await snap.ref.set({ emailEnviado: true, emailEnviadoAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      console.log({ event: 'invite_email_ok', invitationId, emailDestino });
+    } catch (err) {
+      console.error({ event: 'invite_email_err', invitationId, message: err.message });
+      await snap.ref.set({ emailError: err.message }, { merge: true });
+    }
+  }
+);

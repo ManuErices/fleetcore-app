@@ -134,6 +134,35 @@ function whatsappTest({ empresaNombre }) {
   return `✅ *FleetCore* – Notificaciones WhatsApp configuradas correctamente para *${empresaNombre || 'su empresa'}*.`;
 }
 
+// ── invitacionUsuario ──────────────────────────────────────────
+function invitacionUsuario({ emailDestino, rol, link, empresaNombre, diasExpira }) {
+  const rolLabels = {
+    admin_contrato: 'Administrador',
+    administrativo: 'Administrativo',
+    operador: 'Operador',
+    mandante: 'Mandante',
+    trabajador: 'Trabajador',
+  };
+  const rolLabel = rolLabels[rol] || rol;
+  const subject = `Invitación a FleetCore — ${empresaNombre}`;
+
+  const body = `
+    <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
+      <p style="margin:0;font-size:15px;font-weight:700;color:#166534;">Has sido invitado a unirte a <strong>${empresaNombre}</strong></p>
+      <p style="margin:6px 0 0;font-size:13px;color:#15803d;">Rol asignado: <strong>${rolLabel}</strong></p>
+    </div>
+    <p style="font-size:13px;color:#475569;margin:0 0 24px;">Haz clic en el botón para crear tu cuenta y acceder a FleetCore. El link expira en <strong>${diasExpira || 7} días</strong>.</p>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${link}" style="display:inline-block;background:#065f46;color:#fff;font-weight:900;font-size:15px;text-decoration:none;padding:14px 36px;border-radius:10px;letter-spacing:.5px;">
+        Aceptar invitación
+      </a>
+    </div>
+    <p style="font-size:11px;color:#94a3b8;margin:16px 0 0;">Si no esperabas esta invitación, ignora este correo. Link: ${link}</p>
+  `;
+
+  return { subject, html: emailShell('Invitación a FleetCore', '#065f46', body) };
+}
+
 module.exports = {
   entradaCombustible,
   voucherEntrega,
@@ -141,4 +170,5 @@ module.exports = {
   whatsappEntrada,
   whatsappEntrega,
   whatsappTest,
+  invitacionUsuario,
 };

@@ -86,6 +86,7 @@ export default function InviteUserPanel({ empresaId, onClose }) {
         empresaId,
         rol:          form.rol,
         emailDestino: form.emailDestino.trim() || null,
+        diasExpira:   form.diasExpira,
         usada:        false,
         creadaEn:     serverTimestamp(),
         expiresAt,

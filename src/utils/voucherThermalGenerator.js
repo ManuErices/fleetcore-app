@@ -83,42 +83,6 @@ export function generateThermalVoucher({
   const fechaFormateada = formatDate(reportData.fecha || '');
   const cantidadFormateada = formatCantidad(reportData.cantidadLitros);
 
-  // Generar sección de firmas
-  const firmaReceptorImg = reportData.firmaReceptor || null;
-  const firmaRepartidorImg = reportData.firmaRepartidor || null;
-
-  const isPhoto = (src) => src && src.startsWith('data:image') && !src.includes('svg');
-
-  const labelReceptor = isPhoto(firmaReceptorImg) ? 'REGISTRO FOTOGRAFICO' : 'FIRMA RECEPTOR';
-  const labelRepartidor = isPhoto(firmaRepartidorImg) ? 'REGISTRO FOTOGRAFICO' : 'FIRMA SURTIDOR';
-
-  const firmasSectionHTML = `
-    ${firmaReceptorImg ? `
-    <div class="firma-section-single">
-      <div class="firma-box">
-        <img src="${firmaReceptorImg}" class="firma-img" alt="Firma receptor" />
-        <div class="small firma-label">${labelReceptor}</div>
-        <div class="small firma-rol">RECEPTOR</div>
-      </div>
-    </div>` : ''}
-    
-    ${firmaRepartidorImg ? `
-    <div class="firma-section-single" style="margin-top: 4mm;">
-      <div class="firma-box">
-        <img src="${firmaRepartidorImg}" class="firma-img" alt="Firma surtidor" />
-        <div class="small firma-label">${labelRepartidor}</div>
-        <div class="small firma-rol">SURTIDOR</div>
-      </div>
-    </div>` : ''}
-    
-    ${!firmaReceptorImg && !firmaRepartidorImg ? `
-    <div class="firma-section-single">
-      <div class="firma-box">
-        <div class="firma-line"></div>
-        <div class="small firma-label">FIRMA RECEPTOR</div>
-      </div>
-    </div>` : ''}
-    `;
 
   // Generar HTML del voucher
   const voucherHTML = `
@@ -433,9 +397,7 @@ export function generateThermalVoucher({
     </div>
     
     <div class="line"></div>
-    
-    ${firmasSectionHTML}
-    
+
   </div></div><!-- fin voucher-content -->
   
   <!-- BARRA STICKY DE ACCIONES -->
