@@ -160,9 +160,91 @@ export default function CombustibleForm({ empresaId, onClose }) {
 
         {/* Loading overlay — blocks all interaction while saving */}
         {f.loading && (
-          <div className="absolute inset-0 bg-white/85 backdrop-blur-sm z-[200] flex flex-col items-center justify-center gap-5 rounded-2xl">
-            <div className="w-14 h-14 border-4 border-orange-200 border-t-orange-600 rounded-full animate-spin" />
-            <p className="text-sm font-black text-slate-600 uppercase tracking-widest">Guardando registro...</p>
+          <div className="fixed inset-0 bg-white/90 backdrop-blur-md z-[250] flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-200">
+            <div className="relative mb-8">
+              <div className="w-24 h-24 border-[6px] border-slate-100 border-t-orange-600 rounded-full animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <svg className="w-8 h-8 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
+                </svg>
+              </div>
+            </div>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 uppercase tracking-tight">Guardando Registro</h3>
+            <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">
+              {f.isOfflineSave ? "Guardando en memoria local..." : "Sincronizando con la nube..."}
+            </p>
+            {f.isOfflineSave && (
+              <div className="mt-8 p-4 bg-orange-50 border border-orange-100 rounded-2xl max-w-xs">
+                <p className="text-xs text-orange-800 font-medium leading-relaxed">
+                  No tienes internet, pero no te preocupes. El registro se guardará en tu teléfono y se enviará cuando recuperes señal.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Success full-screen overlay — Guided experience for operators */}
+        {f.isSuccess && (
+          <div className="fixed inset-0 bg-white z-[300] flex flex-col animate-in fade-in zoom-in duration-300 overflow-y-auto">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-screen">
+              <div className="w-32 h-32 bg-emerald-100 rounded-full flex items-center justify-center mb-8 shadow-inner">
+                <svg className="w-20 h-20 text-emerald-600 animate-in slide-in-from-bottom-4 fade-in duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              
+              <h2 className="text-4xl font-black text-slate-900 mb-4 uppercase tracking-tight">
+                ¡Registro Guardado!
+              </h2>
+              
+              <div className="bg-slate-50 rounded-[2.5rem] p-8 border-2 border-slate-100 w-full max-w-sm mb-10 shadow-sm">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <div className={`w-3 h-3 rounded-full ${f.isOfflineSave ? 'bg-orange-500' : 'bg-emerald-500'} animate-pulse`} />
+                  <p className="text-lg font-black text-slate-800 uppercase tracking-tight">
+                    {f.isOfflineSave ? "Modo Offline" : "Enviado a la Nube"}
+                  </p>
+                </div>
+                <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                  {f.isOfflineSave 
+                    ? "El reporte se guardó correctamente en tu teléfono. Se sincronizará automáticamente cuando vuelvas al campamento."
+                    : "El reporte se ha sincronizado exitosamente con el sistema central."}
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-4 w-full max-w-sm">
+                {f.tipoReporte === 'entrega' && (
+                  <button 
+                    onClick={() => f.setShowVoucherModal(true)}
+                    className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl text-xl shadow-xl shadow-blue-100 mb-2 uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-3"
+                  >
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Ver Comprobante
+                  </button>
+                )}
+
+                <button 
+                  onClick={() => { f.setIsSuccess(false); f.resetForm(); }}
+                  className="w-full py-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xl shadow-xl shadow-emerald-100 uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  Nuevo Registro
+                </button>
+                
+                <button 
+                  onClick={onClose}
+                  className="w-full py-4 text-slate-400 font-bold text-sm uppercase tracking-widest hover:text-slate-600 transition-colors"
+                >
+                  Salir
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-8 text-center bg-slate-50 border-t border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                FLEETCORE · TECNOLOGÍA PARA LA MINERÍA
+              </p>
+            </div>
           </div>
         )}
       </div>

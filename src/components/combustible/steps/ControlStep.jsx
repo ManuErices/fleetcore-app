@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
 
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
@@ -96,8 +97,8 @@ export default function ControlStep({
   );
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
-      <div className="bg-white p-4 sm:p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-6">
+    <div className="flex flex-col min-h-[65dvh] space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
+      <div className="flex-1 bg-white p-4 sm:p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-6">
 
         <div>
           <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-3">
@@ -203,12 +204,12 @@ export default function ControlStep({
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
                             <div className="max-h-36 overflow-y-auto space-y-1">
-                              {surtidoresPersonas.filter(emp => !searchRepartidor || emp.nombre?.toLowerCase().includes(searchRepartidor.toLowerCase())).map(emp => (
+                              {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
                                 <button key={emp.id} type="button"
                                   onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-green-400 rounded-xl transition-all text-left">
                                   <div className="w-7 h-7 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><PersonIcon /></div>
-                                  <div className="font-black text-sm text-slate-700 uppercase">{emp.nombre}</div>
+                                  <div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div>
                                 </button>
                               ))}
                             </div>
@@ -242,7 +243,7 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-36 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => !searchEquipo || (m.patente || m.code || '').toLowerCase().includes(searchEquipo.toLowerCase()) || (m.nombre || '').toLowerCase().includes(searchEquipo.toLowerCase())).map(m => (
+                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -300,7 +301,7 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-32 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => !searchEquipo || (m.patente || m.code || '').toLowerCase().includes(searchEquipo.toLowerCase()) || (m.nombre || '').toLowerCase().includes(searchEquipo.toLowerCase())).map(m => (
+                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -405,7 +406,7 @@ export default function ControlStep({
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
                             <div className="max-h-36 overflow-y-auto space-y-1">
-                              {proveedorMachines.filter(m => !searchMaquinaProveedor || (m.patente || m.code || '').toLowerCase().includes(searchMaquinaProveedor.toLowerCase()) || (m.name || m.tipo || '').toLowerCase().includes(searchMaquinaProveedor.toLowerCase())).map(m => (
+                              {proveedorMachines.filter(m => matchMachine(m, searchMaquinaProveedor)).map(m => (
                                 <button key={m.id} type="button"
                                   onClick={() => { setDatosEntrada(prev => ({ ...prev, maquinaProveedorId: m.id })); setSearchMaquinaProveedor(''); }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -443,12 +444,12 @@ export default function ControlStep({
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
                             <div className="max-h-36 overflow-y-auto space-y-1">
-                              {proveedorWorkers.filter(emp => !searchOperadorProveedor || emp.nombre?.toLowerCase().includes(searchOperadorProveedor.toLowerCase()) || emp.rut?.includes(searchOperadorProveedor)).map(emp => (
+                              {proveedorWorkers.filter(emp => matchWorker(emp, searchOperadorProveedor)).map(emp => (
                                 <button key={emp.id} type="button"
                                   onClick={() => { setDatosEntrada(prev => ({ ...prev, operadorProveedorId: emp.id })); setSearchOperadorProveedor(''); }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-green-400 rounded-xl transition-all text-left">
                                   <div className="w-7 h-7 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><PersonIcon /></div>
-                                  <div><div className="font-black text-sm text-slate-700 uppercase">{emp.nombre}</div><div className="text-xs text-slate-400">{emp.rut}</div></div>
+                                  <div><div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div><div className="text-xs text-slate-400">{emp.rut}</div></div>
                                 </button>
                               ))}
                             </div>
@@ -488,12 +489,12 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-36 overflow-y-auto space-y-1">
-                            {surtidoresPersonas.filter(emp => !searchRepartidor || emp.nombre?.toLowerCase().includes(searchRepartidor.toLowerCase())).map(emp => (
+                            {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
                               <button key={emp.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-blue-400 rounded-xl transition-all text-left">
                                 <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
-                                <div className="font-black text-sm text-slate-700 uppercase">{emp.nombre}</div>
+                                <div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div>
                               </button>
                             ))}
                           </div>
@@ -526,7 +527,7 @@ export default function ControlStep({
                           <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                         </div>
                         <div className="max-h-36 overflow-y-auto space-y-1">
-                          {equiposSurtidores.filter(m => !searchEquipo || (m.patente || m.code || '').toLowerCase().includes(searchEquipo.toLowerCase()) || (m.nombre || '').toLowerCase().includes(searchEquipo.toLowerCase())).map(m => (
+                          {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                             <button key={m.id} type="button"
                               onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                               className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">

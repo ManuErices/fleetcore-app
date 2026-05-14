@@ -42,7 +42,7 @@ export default function InviteAccept({ token }) {
   const [invData,     setInvData]     = useState(null);
   const [empresa,     setEmpresa]     = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [form,        setForm]        = useState({ nombre: "", email: "", password: "", confirm: "" });
+  const [form,        setForm]        = useState({ nombre: "", rut: "", email: "", password: "", confirm: "" });
   const [error,       setError]       = useState("");
   const [saving,      setSaving]      = useState(false);
   const [mode,        setMode]        = useState("register");
@@ -89,6 +89,7 @@ export default function InviteAccept({ token }) {
         modulos:   invData.modulos || [],
         email,
         nombre:    form.nombre || "",
+        rut:       form.rut || "",
         updatedAt: serverTimestamp(),
       }, { merge: true });
 
@@ -277,7 +278,19 @@ export default function InviteAccept({ token }) {
                   <p className="text-sm text-white/90 font-semibold truncate">{currentUser.email}</p>
                 </div>
               </div>
-              <p className="text-white/50 text-sm text-center">¿Aceptar la invitación con esta cuenta?</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Nombre completo">
+                  <input name="nombre" value={form.nombre} onChange={handleChange}
+                    placeholder="Juan Pérez"
+                    className={inputCls} />
+                </Field>
+                <Field label="RUT">
+                  <input name="rut" value={form.rut} onChange={handleChange}
+                    placeholder="12.345.678-9"
+                    className={inputCls} />
+                </Field>
+              </div>
+              {error && <ErrorBanner msg={error} />}
               <button
                 onClick={handleAcceptWithCurrentUser}
                 disabled={saving}
@@ -309,11 +322,18 @@ export default function InviteAccept({ token }) {
 
               {mode === "register" && (
                 <>
-                  <Field label="Nombre completo *">
-                    <input name="nombre" value={form.nombre} onChange={handleChange}
-                      placeholder="Juan Pérez"
-                      className={inputCls} />
-                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Nombre completo *">
+                      <input name="nombre" value={form.nombre} onChange={handleChange}
+                        placeholder="Juan Pérez"
+                        className={inputCls} />
+                    </Field>
+                    <Field label="RUT *">
+                      <input name="rut" value={form.rut} onChange={handleChange}
+                        placeholder="12.345.678-9"
+                        className={inputCls} />
+                    </Field>
+                  </div>
                   <Field label="Email *">
                     <input name="email" type="email" value={form.email} onChange={handleChange}
                       placeholder="tu@empresa.cl"

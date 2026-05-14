@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { formatMiles } from '../../../utils/formatters';
+import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
 
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
@@ -80,8 +81,8 @@ export default function EntregaStep({
     .filter(m => esMPF(datosEntrega.empresa) ? esMPF(m.empresa) : empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrega.empresa)));
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
+    <div className="flex flex-col min-h-[75dvh] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex-1 bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
 
         {/* Destino de la entrega */}
         <div className="pt-4 border-t border-slate-100 space-y-6">
@@ -159,7 +160,7 @@ export default function EntregaStep({
                     </div>
                     <div className="max-h-44 overflow-y-auto space-y-1">
                       {filteredMachines
-                        .filter(m => !searchMaquina || (m.tipo || '').toLowerCase().includes(searchMaquina.toLowerCase()) || (m.patente || m.codigo || m.code || '').toLowerCase().includes(searchMaquina.toLowerCase()) || (m.modelo || '').toLowerCase().includes(searchMaquina.toLowerCase()))
+                        .filter(m => matchMachine(m, searchMaquina))
                         .map(m => (
                           <button key={m.id} type="button"
                             onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: m.id }); setSearchMaquina(''); }}
@@ -216,14 +217,14 @@ export default function EntregaStep({
                   <div className="max-h-48 overflow-y-auto pr-1 space-y-1">
                     {(trabajadoresLocales || [])
                       .filter(emp => esMPF(datosEntrega.empresa) ? esMPF(emp.empresa) : empresasMatch(emp.empresa, resolverNombreEmpresa(datosEntrega.empresa)))
-                      .filter(emp => !searchOperador || emp.nombre?.toLowerCase().includes(searchOperador.toLowerCase()) || emp.rut?.includes(searchOperador))
+                      .filter(emp => matchWorker(emp, searchOperador))
                       .map(emp => (
                         <button key={emp.id} type="button"
                           onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: emp.id })}
                           className="w-full flex items-center gap-3 px-4 py-3 bg-white border-2 border-slate-100 hover:border-blue-400 rounded-xl transition-all text-left">
                           <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-sm font-black">{emp.nombre?.charAt(0)}</div>
                           <div className="min-w-0">
-                            <div className="font-black text-slate-700 text-sm truncate uppercase">{emp.nombre}</div>
+                            <div className="font-black text-slate-700 text-sm truncate">{shortName(emp.nombre)}</div>
                             <div className="text-xs text-slate-400 font-bold">{emp.rut}</div>
                           </div>
                         </button>

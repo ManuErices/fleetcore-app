@@ -21,6 +21,8 @@ export function useCombustibleForm(empresaId, onClose) {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserData, setCurrentUserData] = useState(null);
   const [userRole, setUserRole] = useState('operador');
+  const [isOfflineSave, setIsOfflineSave] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato' || userRole === 'admin';
   const [surtidoresPersonas, setSurtidoresPersonas] = useState([]);
   const [repartidorSeleccionado, setRepartidorSeleccionado] = useState(null);
@@ -111,10 +113,9 @@ export function useCombustibleForm(empresaId, onClose) {
     if (!currentUser?.uid) return;
     const cargarDatosUsuario = async () => {
       try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const usersData = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        let userData = usersData.find(u => u.id === currentUser.uid)
-          || usersData.find(u => u.email?.toLowerCase() === currentUser.email?.toLowerCase());
+        // Leer solo el doc del usuario actual (la regla no permite leer toda la colección)
+        const userSnap = await getDoc(doc(db, 'users', currentUser.uid));
+        const userData = userSnap.exists() ? { id: userSnap.id, ...userSnap.data() } : null;
         if (userData) {
           setCurrentUserData(userData);
           setUserRole(userData.role || 'operador');
@@ -142,6 +143,14 @@ export function useCombustibleForm(empresaId, onClose) {
       setSurtidoresPersonas(empleados.filter(e => e.esSurtidor === true));
     }
   }, [empleados]);
+
+  // Auto-seleccionar proyecto cuando solo hay uno disponible
+  useEffect(() => {
+    if (projects?.length === 1 && !datosControl.projectId) {
+      setDatosControl(prev => ({ ...prev, projectId: projects[0].id }));
+      cargarEstaciones(projects[0].id);
+    }
+  }, [projects]);
 
   // ── Helpers ───────────────────────────────────────────────────
 
@@ -206,6 +215,8 @@ export function useCombustibleForm(empresaId, onClose) {
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
       horometroOdometro: '', cantidadLitros: '', observaciones: '', extraEmails: []
     });
+    setIsSuccess(false);
+    setIsOfflineSave(false);
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -482,25 +493,31 @@ export function useCombustibleForm(empresaId, onClose) {
         dataToSave.fechaFirma = new Date().toISOString();
       }
 
-      // Subir fotos a Storage
-      try {
-        if (firmaRepartidor?.startsWith('data:')) {
-          const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_repartidor.jpg`);
-          await uploadString(fileRef, firmaRepartidor, 'data_url');
-          dataToSave.firmaRepartidor = await getDownloadURL(fileRef);
+      // Subir fotos a Storage (Solo si hay internet)
+      const online = navigator.onLine;
+      setIsOfflineSave(!online);
+
+      if (online) {
+        try {
+          if (firmaRepartidor?.startsWith('data:')) {
+            const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_repartidor.jpg`);
+            await uploadString(fileRef, firmaRepartidor, 'data_url');
+            dataToSave.firmaRepartidor = await getDownloadURL(fileRef);
+          }
+          if (firmaReceptor?.startsWith('data:')) {
+            const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_receptor.jpg`);
+            await uploadString(fileRef, firmaReceptor, 'data_url');
+            dataToSave.firmaReceptor = await getDownloadURL(fileRef);
+          }
+        } catch (storageErr) {
+          console.warn('⚠️ Error subiendo a Storage:', storageErr?.code || storageErr?.message);
+          // Si falla el storage pero hay internet, guardamos el base64 de todos modos para no perder el dato
+          if (dataToSave.firmaRepartidor?.length > 500000) dataToSave.firmaRepartidor = 'error_too_large';
+          if (dataToSave.firmaReceptor?.length > 500000) dataToSave.firmaReceptor = 'error_too_large';
         }
-        if (firmaReceptor?.startsWith('data:')) {
-          const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_receptor.jpg`);
-          await uploadString(fileRef, firmaReceptor, 'data_url');
-          dataToSave.firmaReceptor = await getDownloadURL(fileRef);
-        }
-      } catch (storageErr) {
-        console.warn('⚠️ Error subiendo a Storage:', storageErr?.code || storageErr?.message);
-        if (storageErr?.code === 'storage/quota-exceeded' || storageErr?.message?.includes('402')) {
-          toast({ type: 'warning', message: 'Storage de Firebase tiene problemas. El reporte se guardará con fotos limitadas.', duration: 8000 });
-        }
-        if (dataToSave.firmaRepartidor?.length > 500000) dataToSave.firmaRepartidor = 'error_too_large';
-        if (dataToSave.firmaReceptor?.length > 500000) dataToSave.firmaReceptor = 'error_too_large';
+      } else {
+        console.log("📵 Modo offline detectado, omitiendo Storage y guardando en Firestore directamente");
+        // Firestore persistirá esto localmente de inmediato
       }
 
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
@@ -557,11 +574,12 @@ export function useCombustibleForm(empresaId, onClose) {
             ? { nombre: equipoSurtidorInfo.nombre || '', patente: equipoSurtidorInfo.patente || '', tipo: equipoSurtidorInfo.tipo || '' }
             : null
         });
-        setShowVoucherModal(true);
-        resetForm();
+        setIsSuccess(true);
+        // No llamamos a resetForm() aquí para que la pantalla de éxito pueda mostrar datos si es necesario
+        // Pero marcamos como éxito para la UI
       } else {
+        setIsSuccess(true);
         toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
-        setTimeout(handleClose, 1500);
       }
     } catch (error) {
       console.error("Error guardando reporte:", error);
@@ -579,6 +597,7 @@ export function useCombustibleForm(empresaId, onClose) {
     paso, setPaso, tipoReporte, setTipoReporte,
     // Loading
     loading, loadingEquipo, loadingEmpresa,
+    isOfflineSave, isSuccess, setIsSuccess,
     // User
     currentUser, currentUserData, userRole, isAdmin,
     surtidoresPersonas, repartidorSeleccionado,

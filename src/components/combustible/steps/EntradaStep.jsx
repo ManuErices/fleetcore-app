@@ -68,8 +68,8 @@ export default function EntradaStep({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
+    <div className="flex flex-col min-h-[70dvh] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex-1 bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
 
         {/* Documentación y notas */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4 border-t border-slate-50">
