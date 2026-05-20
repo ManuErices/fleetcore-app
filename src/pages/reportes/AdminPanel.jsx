@@ -627,20 +627,25 @@ function OperadoresSection() {
       <SectionCard title="Operadores" subtitle="Empleados registrados en el sistema" count={data.length} color="blue" onAdd={openNew} addLabel="Nuevo Operador"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
       >
-        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
-            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" placeholder="Buscar por nombre, RUT o cargo..." value={busquedaOp} onChange={e => setBusquedaOp(e.target.value)} />
-          </div>
-          <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400 bg-white" value={filtroEmpresaOp} onChange={e => setFiltroEmpresaOp(e.target.value)}>
-            <option value="">Todas las empresas</option>
-            {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
+        {(() => {
+          const empresasOpciones = [...new Set(data.map(r => r.empresa).filter(Boolean))].sort();
+          return (
+            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+                <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400" placeholder="Buscar por nombre, RUT o cargo..." value={busquedaOp} onChange={e => setBusquedaOp(e.target.value)} />
+              </div>
+              <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-400 bg-white" value={filtroEmpresaOp} onChange={e => setFiltroEmpresaOp(e.target.value)}>
+                <option value="">Todas las empresas</option>
+                {empresasOpciones.map(e => <option key={e} value={e}>{e.toUpperCase()}</option>)}
+              </select>
+            </div>
+          );
+        })()}
         <DataTable loading={loading} data={data.filter(r => {
           const q = busquedaOp.toLowerCase();
           const matchQ = !q || r.nombre?.toLowerCase().includes(q) || r.rut?.includes(busquedaOp) || r.cargo?.toLowerCase().includes(q);
-          const matchE = !filtroEmpresaOp || r.empresa === filtroEmpresaOp;
+          const matchE = !filtroEmpresaOp || (r.empresa || '').toUpperCase() === filtroEmpresaOp.toUpperCase();
           return matchQ && matchE;
         })} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
           columns={[
@@ -723,14 +728,9 @@ function OperadoresSection() {
           <Field label="Empresa">
             <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })}>
               <option value="">Seleccione empresa</option>
-              <option value="LifeMed">LifeMed</option>
-              <option value="Intosim">Intosim</option>
-              <option value="Río Tinto">Río Tinto</option>
-              <option value="Global">Global</option>
-              <option value="Celenor">Celenor</option>
-              <option value="MPF Ingeniería Civil">MPF Ingeniería Civil</option>
-              {form.empresa && !['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil',''].includes(form.empresa) && (
-                <option value={form.empresa}>{form.empresa}</option>
+              {EMPRESAS_LISTA.map(e => <option key={e} value={e}>{e}</option>)}
+              {form.empresa && !EMPRESAS_LISTA.includes(form.empresa) && form.empresa !== '' && (
+                <option value={form.empresa}>{form.empresa.toUpperCase()}</option>
               )}
             </select>
           </Field>
@@ -968,17 +968,19 @@ function CatalogoModal({ isOpen, onClose, categoria, titulo, onCreated, onDelete
 
 // Prefijos de código interno por empresa
 const EMPRESA_PREFIJOS = {
-  'MPF Ingeniería Civil': 'MPF',
-  'LifeMed':   'LM',
-  'Intosim':   'IT',
-  'Río Tinto': 'RT',
-  'Global':    'GL',
-  'Celenor':   'CE',
+  'MPF INGENIERÍA CIVIL': 'MPF',
+  'LIFEMED':   'LM',
+  'INTOSIM':   'IT',
+  'RÍO TINTO': 'RT',
+  'GLOBAL':    'GL',
+  'CELENOR':   'CE',
 };
+
+const EMPRESAS_LISTA = ['LIFEMED', 'INTOSIM', 'RÍO TINTO', 'GLOBAL', 'CELENOR', 'MPF INGENIERÍA CIVIL'];
 
 // Formatea código interno según empresa: MPF→TSTB36 / resto→AB-CD01
 function fmtCodigo(raw, empresa) {
-  const isMPF = empresa === 'MPF Ingeniería Civil';
+  const isMPF = (empresa || '').toUpperCase() === 'MPF INGENIERÍA CIVIL';
   // Limpiar: solo letras y números, uppercase
   let v = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   if (!v) return '';
@@ -1101,20 +1103,25 @@ function MaquinasSection() {
       <SectionCard title="Máquinas" subtitle="Equipos registrados en la flota" count={data.length} color="purple" onAdd={openNew} addLabel="Nueva Máquina"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>}
       >
-        <div className="flex flex-col sm:flex-row gap-2 mb-4">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
-            <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" placeholder="Buscar por código, patente, tipo o marca..." value={busquedaMaq} onChange={e => setBusquedaMaq(e.target.value)} />
-          </div>
-          <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400 bg-white" value={filtroEmpresaMaq} onChange={e => setFiltroEmpresaMaq(e.target.value)}>
-            <option value="">Todas las empresas</option>
-            {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
+        {(() => {
+          const empresasOpcionesMaq = [...new Set(data.map(r => r.empresa).filter(Boolean))].sort();
+          return (
+            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+                <input className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" placeholder="Buscar por código, patente, tipo o marca..." value={busquedaMaq} onChange={e => setBusquedaMaq(e.target.value)} />
+              </div>
+              <select className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400 bg-white" value={filtroEmpresaMaq} onChange={e => setFiltroEmpresaMaq(e.target.value)}>
+                <option value="">Todas las empresas</option>
+                {empresasOpcionesMaq.map(e => <option key={e} value={e}>{e.toUpperCase()}</option>)}
+              </select>
+            </div>
+          );
+        })()}
         <DataTable loading={loading} data={data.filter(r => {
           const q = busquedaMaq.toLowerCase();
           const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
-          const matchE = !filtroEmpresaMaq || r.empresa === filtroEmpresaMaq;
+          const matchE = !filtroEmpresaMaq || (r.empresa || '').toUpperCase() === filtroEmpresaMaq.toUpperCase();
           return matchQ && matchE;
         })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
           columns={[
@@ -1135,22 +1142,22 @@ function MaquinasSection() {
           <Field label="Empresa">
             <select className={inputCls} value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value, code: '' })}>
               <option value="">Seleccione empresa</option>
-              {['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'].map(e => (
+              {EMPRESAS_LISTA.map(e => (
                 <option key={e} value={e}>{e}</option>
               ))}
-              {form.empresa && !['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil',''].includes(form.empresa) && (
-                <option value={form.empresa}>{form.empresa}</option>
+              {form.empresa && !EMPRESAS_LISTA.includes(form.empresa) && form.empresa !== '' && (
+                <option value={form.empresa}>{form.empresa.toUpperCase()}</option>
               )}
             </select>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label={form.empresa && form.empresa !== 'MPF Ingeniería Civil' ? 'Código Interno (AB-CD01)' : 'Código Interno'}>
+            <Field label={form.empresa && form.empresa.toUpperCase() !== 'MPF INGENIERÍA CIVIL' ? 'Código Interno (AB-CD01)' : 'Código Interno'}>
               <input
                 className={inputCls}
                 value={form.code}
                 onChange={e => setForm({ ...form, code: fmtCodigo(e.target.value, form.empresa) })}
-                placeholder={form.empresa && form.empresa !== 'MPF Ingeniería Civil' ? 'Ej: AB-CD01' : 'Ej: TBJP70'}
+                placeholder={form.empresa && form.empresa.toUpperCase() !== 'MPF INGENIERÍA CIVIL' ? 'Ej: AB-CD01' : 'Ej: TBJP70'}
                 disabled={!form.empresa}
               />
               {!form.empresa && (

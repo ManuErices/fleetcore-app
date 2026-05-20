@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, NavLink, useNavigate, Navigate } from "react-router-dom";
+
+// ── Oficina Técnica pages ─────────────────────────────────────
 import Dashboard from "./pages/oficina-tecnica/Dashboard";
 import Machines from "./pages/oficina-tecnica/Machines";
 import Logs from "./pages/oficina-tecnica/Logs";
@@ -12,188 +14,44 @@ import OC from "./pages/oficina-tecnica/OC";
 import Consolidado from "./pages/oficina-tecnica/Consolidado";
 import Rendiciones from "./pages/oficina-tecnica/Rendiciones";
 import Subcontratos from "./pages/oficina-tecnica/Subcontratos";
-import ReportDetallado from "./pages/reportes/ReportDetallado";
-import LoginPage from "./pages/LoginPage.jsx";
-import AppSelector from "./pages/AppSelector.jsx";
-import ReporteWorkFleet from "./pages/reportes/ReporteWorkFleet";
 import Pasajes from "./pages/oficina-tecnica/Pasajes";
+import ReportDetallado from "./pages/reportes/ReportDetallado";
+import ReporteWorkFleet from "./pages/reportes/ReporteWorkFleet";
 import ReporteCombustible from "./pages/reportes/ReporteCombustible";
-import CombustibleModal from "./components/CombustibleModal";
-import OperadoresApp from "./pages/operadores";
 import AdminPanel from "./pages/reportes/AdminPanel";
 import RRHH from "./pages/rrhh";
+
+// ── App shells ────────────────────────────────────────────────
+import ReportesShell from "./pages/reportes/ReportesShell";
+import RRHHShell from "./pages/rrhh/RRHHShell";
+import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
-import TrabajadorApp from "./pages/TrabajadorApp.jsx";
-import { auth, googleProvider, db } from "./lib/firebase";
-import { EmpresaProvider } from "./lib/useEmpresa";
-import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
 
-// ── PWA ──────────────────────────────────────────────────────
+// ── Auth / onboarding pages ───────────────────────────────────
+import LoginPage from "./pages/LoginPage.jsx";
+import AppSelector from "./pages/AppSelector.jsx";
+import TrabajadorApp from "./pages/TrabajadorApp.jsx";
+import PricingPage from "./pages/PricingPage.jsx";
+import PaymentResult from "./pages/PaymentResult.jsx";
+import EmpresaSetup from "./pages/EmpresaSetup.jsx";
+import InviteAccept from "./pages/InviteAccept.jsx";
+
+// ── Misc components ───────────────────────────────────────────
+import CombustibleModal from "./components/CombustibleModal";
 import ConnectionStatus from "./components/ConnectionStatus";
 import InstallPWA from "./components/InstallPWA";
 import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 
-// ── NUEVO: Suscripciones ──────────────────────────────────────
-import PricingPage from "./pages/PricingPage.jsx";
-import PaymentResult from "./pages/PaymentResult.jsx";
+// ── Firebase ──────────────────────────────────────────────────
+import { auth, googleProvider, db } from "./lib/firebase";
+import { EmpresaProvider } from "./lib/useEmpresa";
+import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
-import EmpresaSetup from "./pages/EmpresaSetup.jsx";
-import InviteAccept from "./pages/InviteAccept.jsx";
 
 // ============================================================
-// RRHH Shell
-// ============================================================
-function RRHHShell({ user, onLogout, onBackToSelector }) {
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center shadow">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <div className="text-sm font-black text-slate-800 leading-tight">Fleet<span className="text-emerald-600">Core</span></div>
-              <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase leading-tight">El Núcleo de RRHH</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden sm:block text-sm text-slate-500 font-medium">{user?.displayName || user?.email?.split('@')[0]}</span>
-            <button onClick={onBackToSelector} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cambiar aplicación">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </button>
-            <button onClick={onLogout} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cerrar sesión">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-            </button>
-          </div>
-        </div>
-      </header>
-      <RRHH />
-    </div>
-  );
-}
-
-// ============================================================
-// Reportes Shell
-// ============================================================
-function ReportesShell({ user, onLogout, onBackToSelector }) {
-  const [activeView, setActiveView] = useState('combustible');
-  const [userRole, setUserRole] = useState(null);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    getDoc(doc(db, 'users', user.uid))
-      .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'administrativo'); })
-      .catch(() => { });
-  }, [user]);
-
-  const navItems = [
-    { id: 'combustible', label: 'Reporte Combustible' },
-    { id: 'maquinaria', label: 'Reporte Maquinaria' },
-    ...(['superadmin', 'admin_contrato'].includes(userRole) ? [{ id: 'admin', label: 'Administración' }] : []),
-  ];
-  const ROLE_LABELS = {
-    superadmin: 'Super Admin', admin_contrato: 'Admin Contrato',
-    administrativo: 'Administrativo', operador: 'Operador',
-    mandante: 'Mandante', trabajador: 'Trabajador',
-  };
-  const roleLabel = ROLE_LABELS[userRole] || 'Usuario';
-
-  return (
-    <div className="min-h-screen bg-slate-50 relative">
-      <div className="fixed inset-0 bg-grid opacity-30 pointer-events-none" />
-      <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-1 sm:py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
-              <img src="/favicon.svg" alt="Reportes" className="h-14 w-14 object-contain block sm:hidden" />
-              <img src="/logo-header.svg" alt="Reportes" className="h-14 w-auto object-contain hidden sm:block" />
-            </div>
-            <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
-              {user && (
-                <div className="relative">
-                  <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl bg-white hover:bg-slate-50 border border-slate-200 shadow-sm hover:shadow-md transition-all group">
-                    <div className="relative">
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-teal-700 to-cyan-700 flex items-center justify-center shadow-md">
-                        <span className="text-white text-xs sm:text-sm font-bold">{user.email?.[0]?.toUpperCase() || 'U'}</span>
-                      </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-emerald-500 rounded-full border-2 border-white" />
-                    </div>
-                    <div className="hidden lg:block text-left">
-                      <div className="text-sm font-semibold text-slate-900">{user.email?.split('@')[0]}</div>
-                      <div className="text-xs text-slate-500">{roleLabel}</div>
-                    </div>
-                    <svg className={`w-3 h-3 sm:w-4 sm:h-4 text-slate-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                  </button>
-                  {showUserMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-                      <div className="absolute right-0 top-full mt-2 sm:mt-3 w-64 sm:w-72 bg-white rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
-                        <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-50 to-white border-b border-slate-100">
-                          <div className="flex items-center gap-3 sm:gap-4">
-                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-teal-700 to-cyan-700 flex items-center justify-center shadow-lg">
-                              <span className="text-white text-base sm:text-lg font-bold">{user.email?.[0]?.toUpperCase() || 'U'}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm sm:text-base text-slate-900 truncate">{user.email?.split('@')[0]}</div>
-                              <div className="text-xs sm:text-sm text-slate-600 truncate">{user.email}</div>
-                              <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full">
-                                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Conectado
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="p-2 space-y-1">
-                          <button onClick={onBackToSelector} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-                            Cambiar Aplicación
-                          </button>
-                          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-50 rounded-xl transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                            Cerrar Sesión
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <nav className="hidden lg:flex items-center gap-3 mt-6 pt-6 border-t border-slate-200/50">
-            {navItems.map(item => (
-              <button key={item.id} onClick={() => setActiveView(item.id)}
-                className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${activeView === item.id ? 'bg-teal-600 text-white shadow-md' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}>
-                {item.label}
-              </button>
-            ))}
-          </nav>
-          <div className="lg:hidden flex gap-1 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-            {navItems.map(item => (
-              <button key={item.id} onClick={() => setActiveView(item.id)}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeView === item.id ? 'bg-teal-600 text-white shadow' : 'text-slate-600 bg-white border border-slate-200'}`}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-      <main className="max-w-[1400px] mx-auto">
-        {activeView === 'combustible' && <ReporteCombustible />}
-        {activeView === 'maquinaria' && <ReporteWorkFleet />}
-        {activeView === 'admin' && ['superadmin', 'admin_contrato'].includes(userRole) && <AdminPanel />}
-      </main>
-    </div>
-  );
-}
-
-// ============================================================
-// Shell principal (FleetCore)
+// Shell principal (Oficina Técnica / FleetCore)
 // ============================================================
 function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -203,7 +61,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [userRole, setUserRole] = useState('operador');
 
-  // NUEVO: datos del plan activo
   const { planData, status, isActive } = usePlan();
 
   useEffect(() => {
@@ -238,7 +95,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                     </div>
                     <div className="hidden lg:block text-left">
                       <div className="text-sm font-semibold text-slate-900">{user.email?.split('@')[0]}</div>
-                      {/* NUEVO: mostrar plan activo */}
                       <div className="text-xs text-slate-500 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
                         Plan {planData?.name || 'Starter'}
@@ -269,7 +125,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                           </div>
                         </div>
                         <div className="p-2 space-y-1">
-                          {/* NUEVO: link a planes */}
                           <button
                             onClick={() => { setShowUserMenu(false); onGoToPricing(); }}
                             className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors"
@@ -380,7 +235,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             </div>
 
             <NavTab to="/fuel-price" label="Combustible" locked={userRole === 'mandante'} />
-
           </nav>
         </div>
 
@@ -421,7 +275,6 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                 <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Configuración</div>
                 <MobileNavLink to="/fuel-price" label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
-                {/* NUEVO: link a pricing en mobile */}
                 <button
                   onClick={() => { setShowMobileMenu(false); onGoToPricing(); }}
                   className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-blue-700 hover:bg-blue-50 transition-all"
@@ -482,7 +335,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
 }
 
 // ============================================================
-// NavTab helper
+// NavTab / MobileNavLink helpers (usados por Shell)
 // ============================================================
 function NavTab({ to, label, locked = false }) {
   if (locked) {
@@ -517,6 +370,32 @@ function MobileNavLink({ to, label, onClick }) {
 }
 
 // ============================================================
+// PWAWrapper — envuelve cada shell con providers y componentes PWA
+// ============================================================
+function PWAWrapper({ user, children }) {
+  return (
+    <EmpresaProvider user={user}>
+      <ConnectionStatus />
+      <InstallPWA />
+      <SessionExpiryIndicator />
+      {children}
+    </EmpresaProvider>
+  );
+}
+
+// ============================================================
+// Mapa declarativo de apps
+// ============================================================
+const APP_MAP = {
+  workfleet:     OperadoresApp,
+  'workfleet-m': OperadoresApp,
+  rrhh:          RRHHShell,
+  reportes:      ReportesShell,
+  finanzas:      FinanzasApp,
+  contabilidad:  ContabilidadApp,
+};
+
+// ============================================================
 // App root
 // ============================================================
 export default function App() {
@@ -525,15 +404,12 @@ export default function App() {
   const [selectedApp, setSelectedApp] = useState(null);
   const [needsSetup, setNeedsSetup] = useState(false);
 
-  // ✅ FIX: interceptaciones ANTES del useEffect pero usando variables,
-  // no returns condicionales que violan reglas de hooks
   const pathname = window.location.pathname;
   const isTrabajadorRoute = pathname.startsWith('/trabajador');
   const inviteMatch = pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
   const inviteToken = inviteMatch ? inviteMatch[1] : null;
 
   useEffect(() => {
-    // Si es ruta especial no necesitamos cargar auth
     if (isTrabajadorRoute || inviteToken) {
       setLoading(false);
       return;
@@ -541,7 +417,6 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        // Check if user has an empresa assigned
         try {
           const snap = await getDoc(doc(db, 'users', currentUser.uid));
           if (!snap.exists() || !snap.data().empresaId) {
@@ -549,9 +424,7 @@ export default function App() {
             setLoading(false);
             return;
           }
-        } catch (e) {
-          // If we can't read, let the normal flow handle it
-        }
+        } catch (e) { }
         const savedApp = localStorage.getItem('selectedApp');
         setSelectedApp(savedApp);
       }
@@ -575,13 +448,17 @@ export default function App() {
     localStorage.removeItem('selectedApp');
   };
 
-  // NUEVO: navegar a pricing desde cualquier shell
   const handleGoToPricing = () => {
     localStorage.setItem('selectedApp', 'pricing');
     setSelectedApp('pricing');
   };
 
-  // ✅ Rutas especiales — retornar aquí es seguro porque todos los hooks ya corrieron
+  const handleSelectApp = (app) => {
+    localStorage.setItem('selectedApp', app);
+    setSelectedApp(app);
+  };
+
+  // ── Rutas especiales (sin auth) ───────────────────────────
   if (isTrabajadorRoute) return <TrabajadorApp />;
   if (inviteToken) return <InviteAccept token={inviteToken} />;
 
@@ -601,7 +478,6 @@ export default function App() {
 
   if (!user) return <LoginPage />;
 
-  // Usuario sin empresa asignada → mostrar onboarding
   if (needsSetup) {
     return (
       <EmpresaSetup
@@ -612,12 +488,10 @@ export default function App() {
     );
   }
 
-  // ── NUEVO: resultado de pago de MercadoPago ───────────────
-  if (window.location.pathname === '/payment-result') {
+  if (pathname === '/payment-result') {
     return <PaymentResult onBack={handleBackToSelector} />;
   }
 
-  // ── NUEVO: página de pricing ──────────────────────────────
   if (selectedApp === 'pricing') {
     return (
       <PricingPage
@@ -635,86 +509,28 @@ export default function App() {
       <AppSelector
         user={user}
         onLogout={handleLogout}
-        onSelectApp={(app) => {
-          localStorage.setItem('selectedApp', app);
-          setSelectedApp(app);
-        }}
+        onSelectApp={handleSelectApp}
       />
     );
   }
 
-  if (selectedApp === 'workfleet') {
+  // ── Apps registradas en APP_MAP ───────────────────────────
+  const ShellComponent = APP_MAP[selectedApp];
+  if (ShellComponent) {
     return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
+      <PWAWrapper user={user}>
+        <ShellComponent
+          user={user}
+          onLogout={handleLogout}
+          onBackToSelector={handleBackToSelector}
+        />
+      </PWAWrapper>
     );
   }
 
-  if (selectedApp === 'workfleet-m') {
-    return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <OperadoresApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
-    );
-  }
-
-  if (selectedApp === 'rrhh') {
-    return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <RRHHShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
-    );
-  }
-
-  if (selectedApp === 'reportes') {
-    return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <ReportesShell user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
-    );
-  }
-
-  if (selectedApp === 'finanzas') {
-    return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <FinanzasApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
-    );
-  }
-
-  if (selectedApp === 'contabilidad') {
-    return (
-      <EmpresaProvider user={user}>
-        <ConnectionStatus />
-        <InstallPWA />
-        <SessionExpiryIndicator />
-        <ContabilidadApp user={user} onLogout={handleLogout} onBackToSelector={handleBackToSelector} />
-      </EmpresaProvider>
-    );
-  }
-
-  // FleetCore principal
+  // ── Fallback: Oficina Técnica (fleetcore) ─────────────────
   return (
-    <EmpresaProvider user={user}>
-      <ConnectionStatus />
-      <InstallPWA />
-      <SessionExpiryIndicator />
+    <PWAWrapper user={user}>
       <Shell
         user={user}
         onLogout={handleLogout}
@@ -722,6 +538,6 @@ export default function App() {
         onBackToSelector={handleBackToSelector}
         onGoToPricing={handleGoToPricing}
       />
-    </EmpresaProvider>
+    </PWAWrapper>
   );
 }

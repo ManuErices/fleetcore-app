@@ -85,6 +85,7 @@ export function useCombustibleForm(empresaId, onClose) {
     horometroOdometro: '',
     machineId: '',
     operadorId: '',
+    receptorNombre: '',
     maquinaProveedorId: '',
     operadorProveedorId: '',
     observaciones: '',
@@ -125,6 +126,9 @@ export function useCombustibleForm(empresaId, onClose) {
           }
           if (!effectIsAdmin && !datosEntrada.operadorId) {
             setDatosEntrada(prev => ({ ...prev, operadorId: userData.id }));
+          }
+          if (!datosEntrada.receptorNombre && userData.nombre) {
+            setDatosEntrada(prev => ({ ...prev, receptorNombre: userData.nombre }));
           }
         }
       } catch (error) {
@@ -209,7 +213,7 @@ export function useCombustibleForm(empresaId, onClose) {
     setDatosEntrada({
       origen: '', tipoOrigen: '', destinoCarga: '', numerosDocumento: [''], numeroDocumento: '',
       fechaDocumento: TODAY(), cantidad: '', horometroOdometro: '', machineId: '', operadorId: '',
-      maquinaProveedorId: '', operadorProveedorId: '', observaciones: '', extraEmails: []
+      receptorNombre: '', maquinaProveedorId: '', operadorProveedorId: '', observaciones: '', extraEmails: []
     });
     setDatosEntrega({
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
@@ -395,7 +399,8 @@ export function useCombustibleForm(empresaId, onClose) {
       abort('error', 'Tu usuario no está registrado. Contacta al administrador.');
       return;
     }
-    if (!datosControl.projectId || !datosControl.repartidorId) {
+    const repartidorRequired = tipoReporte !== 'entrada' || datosEntrada.tipoOrigen !== 'estacion';
+    if (!datosControl.projectId || (repartidorRequired && !datosControl.repartidorId)) {
       abort('warning', 'Completa los campos obligatorios del control de combustible');
       return;
     }

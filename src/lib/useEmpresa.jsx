@@ -27,10 +27,10 @@ const EmpresaContext = createContext(null);
 
 // ─── Provider ─────────────────────────────────────────────────
 export function EmpresaProvider({ user, children }) {
-  const [empresaId,   setEmpresaId]   = useState(null);
-  const [empresa,     setEmpresa]     = useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState(null);
+  const [empresaId, setEmpresaId] = useState(null);
+  const [empresa, setEmpresa] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!user) {

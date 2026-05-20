@@ -73,6 +73,7 @@ export default function ControlStep({
   const [searchEquipo, setSearchEquipo] = useState('');
   const [searchMaquinaProveedor, setSearchMaquinaProveedor] = useState('');
   const [searchOperadorProveedor, setSearchOperadorProveedor] = useState('');
+  const [searchReceptor, setSearchReceptor] = useState('');
 
   const canAdvance = (() => {
     if (!datosControl.projectId) return true;
@@ -268,6 +269,7 @@ export default function ControlStep({
               {/* ESTACIÓN */}
               {datosEntrada.tipoOrigen === 'estacion' && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                       <label className="block text-sm font-black text-slate-500 uppercase tracking-widest px-1">Seleccione Estación</label>
@@ -354,6 +356,54 @@ export default function ControlStep({
                               <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
                             ))}
                         </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Quién recibe */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                    <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Quién recibe</label>
+                    {isAdmin ? (
+                      datosEntrada.receptorNombre ? (
+                        <div className="p-3 bg-gradient-to-br from-green-600 to-emerald-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
+                          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center font-black text-sm">{datosEntrada.receptorNombre.charAt(0)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-black text-sm uppercase truncate">{datosEntrada.receptorNombre}</div>
+                          </div>
+                          <button onClick={() => setDatosEntrada(prev => ({ ...prev, receptorNombre: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black transition-all">✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <input type="text" placeholder="Buscar receptor..." value={searchReceptor} onChange={e => setSearchReceptor(e.target.value)}
+                              className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
+                          </div>
+                          <div className="max-h-36 overflow-y-auto space-y-1">
+                            {(trabajadoresLocales || [])
+                              .filter(emp => matchWorker(emp, searchReceptor))
+                              .map(emp => (
+                                <button key={emp.id} type="button"
+                                  onClick={() => { setDatosEntrada(prev => ({ ...prev, receptorNombre: emp.nombre })); setSearchReceptor(''); }}
+                                  className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-green-400 rounded-xl transition-all text-left">
+                                  <div className="w-7 h-7 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><PersonIcon /></div>
+                                  <div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div>
+                                </button>
+                              ))}
+                          </div>
+                          {currentUserData?.nombre && (
+                            <button type="button"
+                              onClick={() => setDatosEntrada(prev => ({ ...prev, receptorNombre: currentUserData.nombre }))}
+                              className="w-full py-2 text-xs font-black text-green-700 hover:underline">
+                              Usar mi nombre ({currentUserData.nombre})
+                            </button>
+                          )}
+                        </>
+                      )
+                    ) : (
+                      <div className="px-4 py-3 bg-blue-50 border-2 border-blue-100 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
+                        {currentUserData?.nombre || 'Mi usuario'}
                       </div>
                     )}
                   </div>

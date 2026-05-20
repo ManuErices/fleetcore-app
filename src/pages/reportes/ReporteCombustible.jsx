@@ -38,7 +38,8 @@ export default function ReporteCombustible() {
     tipo: '',
     proyecto: '',
     maquina: '',
-    surtidor: ''
+    surtidor: '',
+    receptor: ''
   });
 
   // Listas únicas
@@ -218,6 +219,24 @@ export default function ReporteCombustible() {
       resultado = resultado.filter(r => r.repartidorId === filtros.surtidor);
     }
 
+    if (filtros.receptor) {
+      const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const words = norm(filtros.receptor).split(/\s+/).filter(Boolean);
+      resultado = resultado.filter(r => {
+        const operadorId = r.datosEntrega?.operadorId || r.datosEntrada?.operadorId;
+        const operador = operadorId ? empleados.find(e => e.id === operadorId) : null;
+        const repartidor = empleados.find(e => e.id === r.repartidorId);
+        const haystack = norm([
+          r.datosEntrada?.receptorNombre,
+          operador?.nombre,
+          repartidor?.nombre,
+          r.repartidorNombre,
+          r.creadoPor,
+        ].join(' '));
+        return words.every(w => haystack.includes(w));
+      });
+    }
+
     // Enriquecer con datos
     return resultado.map(r => {
       const project = projects.find(p => p.id === r.projectId);
@@ -269,6 +288,7 @@ export default function ReporteCombustible() {
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
         operadorNombre: operador?.nombre || '',
         operadorRut: operador?.rut || '',
+        receptorNombre: r.datosEntrada?.receptorNombre || '',
         cantidad: cantidad,
         horometroOdometro,
         tipo: r.tipo || 'entrada'
@@ -772,36 +792,42 @@ export default function ReporteCombustible() {
           </div>
         </div>
 
-        {/* Switch Tipo + Filtros */}
-        <div className="max-w-7xl mx-auto mb-6 space-y-4">
+        {/* Filtros + Acciones */}
+        <div className="max-w-7xl mx-auto mb-6 space-y-3">
 
-          {/* Filtros */}
-          <div className="bg-white rounded-xl shadow-md p-6 border-2 border-orange-100">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Inicio</label>
-                <input
-                  type="date"
-                  value={filtros.fechaInicio}
-                  onChange={(e) => { setFiltros({ ...filtros, fechaInicio: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-                />
+          {/* Fila de filtros */}
+          <div className="bg-white rounded-2xl shadow-sm border border-orange-100 px-4 py-3">
+            <div className="flex flex-wrap lg:flex-nowrap items-end gap-3">
+
+              {/* Fechas — más compactas */}
+              <div className="flex gap-2 flex-shrink-0">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Desde</label>
+                  <input
+                    type="date"
+                    value={filtros.fechaInicio}
+                    onChange={(e) => { setFiltros({ ...filtros, fechaInicio: e.target.value }); setPaginaActual(1); }}
+                    className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hasta</label>
+                  <input
+                    type="date"
+                    value={filtros.fechaFin}
+                    onChange={(e) => { setFiltros({ ...filtros, fechaFin: e.target.value }); setPaginaActual(1); }}
+                    className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Fecha Fin</label>
-                <input
-                  type="date"
-                  value={filtros.fechaFin}
-                  onChange={(e) => { setFiltros({ ...filtros, fechaFin: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Proyecto</label>
+
+              {/* Proyecto */}
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proyecto</label>
                 <select
                   value={filtros.proyecto}
                   onChange={(e) => { setFiltros({ ...filtros, proyecto: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
                 >
                   <option value="">Todos</option>
                   {projects.map(p => (
@@ -809,12 +835,14 @@ export default function ReporteCombustible() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Máquina</label>
+
+              {/* Máquina */}
+              <div className="flex-1 min-w-[130px]">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Máquina</label>
                 <select
                   value={filtros.maquina}
                   onChange={(e) => { setFiltros({ ...filtros, maquina: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:outline-none focus:border-orange-500"
+                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
                 >
                   <option value="">Todas</option>
                   {machines.map(m => (
@@ -822,74 +850,92 @@ export default function ReporteCombustible() {
                   ))}
                 </select>
               </div>
+
+              {/* Operador */}
+              <div className="flex-1 min-w-[130px]">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Operador</label>
+                <input
+                  type="text"
+                  placeholder="Nombre o apellido..."
+                  value={filtros.receptor}
+                  onChange={(e) => { setFiltros({ ...filtros, receptor: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
+                />
+              </div>
+
+              {/* Toggle Entrada / Salida */}
+              <div className="flex-shrink-0">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tipo</label>
+                <div className="flex items-center gap-1.5 bg-slate-100 rounded-lg p-0.5">
+                  {[{ val: '', label: 'Todos' }, { val: 'entrada', label: 'Entrada' }, { val: 'entrega', label: 'Salida' }].map(opt => (
+                    <button key={opt.val}
+                      onClick={() => { setFiltros({ ...filtros, tipo: opt.val }); setPaginaActual(1); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-black transition-all ${
+                        filtros.tipo === opt.val
+                          ? opt.val === 'entrada' ? 'bg-blue-600 text-white shadow'
+                            : opt.val === 'entrega' ? 'bg-orange-500 text-white shadow'
+                            : 'bg-white text-slate-700 shadow'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Limpiar + contador */}
+              <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Resultados</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-black">
+                    {reportesFiltrados.length}
+                  </span>
+                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.receptor || filtros.tipo) && (
+                    <button
+                      onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '' }); setPaginaActual(1); }}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs font-bold transition-all"
+                      title="Limpiar filtros"
+                    >
+                      ✕ Limpiar
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Botones de Acción */}
-        <div className="max-w-7xl mx-auto mb-6">
-          <div className="bg-white rounded-xl shadow-md p-4 border-2 border-orange-100">
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={descargarPDFDetallado}
-                disabled={reportesSeleccionados.length === 0}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-slate-700 to-slate-900 hover:from-slate-600 hover:to-slate-800 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                PDF Detallado ({reportesSeleccionados.length})
-              </button>
-              <button
-                onClick={descargarExcel}
-                disabled={reportesFiltrados.length === 0}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Excel
-              </button>
-              <button
-                onClick={descargarPDF}
-                disabled={reportesFiltrados.length === 0}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                PDF
-              </button>
-              <div className="flex-1"></div>
-              {/* Switch Entrada / Salida */}
-              <div className="flex items-center gap-3">
-                <span className={`text-sm font-bold transition-colors ${filtros.tipo === 'entrada' ? 'text-blue-600' : 'text-slate-400'}`}>
-                  Entrada
-                </span>
-                <button
-                  onClick={() => { setFiltros({ ...filtros, tipo: filtros.tipo === 'entrega' ? 'entrada' : 'entrega' }); setPaginaActual(1); }}
-                  className={`relative w-16 h-8 rounded-full transition-all duration-300 focus:outline-none shadow-inner ${filtros.tipo === 'entrega'
-                    ? 'bg-gradient-to-r from-orange-500 to-amber-500'
-                    : filtros.tipo === 'entrada'
-                      ? 'bg-gradient-to-r from-blue-500 to-indigo-500'
-                      : 'bg-slate-300'
-                    }`}
-                  title={filtros.tipo === 'entrega' ? 'Ver Entradas' : 'Ver Salidas'}
-                >
-                  <span className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${filtros.tipo === 'entrega' ? 'left-9' : 'left-1'
-                    }`} />
-                </button>
-                <span className={`text-sm font-bold transition-colors ${filtros.tipo === 'entrega' ? 'text-orange-600' : 'text-slate-400'}`}>
-                  Salida
-                </span>
-              </div>
-              <div className="text-sm text-slate-600 flex items-center gap-2 ml-4">
-                <span className="font-semibold">Total registros:</span>
-                <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full font-bold">
-                  {reportesFiltrados.length}
-                </span>
-              </div>
-            </div>
+          {/* Fila de acciones de exportación */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={descargarPDFDetallado}
+              disabled={reportesSeleccionados.length === 0}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-slate-700 to-slate-900 hover:from-slate-600 hover:to-slate-800 text-white font-semibold text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              PDF Detallado {reportesSeleccionados.length > 0 && `(${reportesSeleccionados.length})`}
+            </button>
+            <button
+              onClick={descargarExcel}
+              disabled={reportesFiltrados.length === 0}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Excel
+            </button>
+            <button
+              onClick={descargarPDF}
+              disabled={reportesFiltrados.length === 0}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              PDF
+            </button>
           </div>
         </div>
 
@@ -1143,7 +1189,10 @@ export default function ReporteCombustible() {
             projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
             machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.datosEntrada?.machineId || reporteDetalle.machineId))}
             surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
-            operadorInfo={empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))}
+            operadorInfo={
+              empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))
+              || (reporteDetalle.datosEntrada?.receptorNombre ? { nombre: reporteDetalle.datosEntrada.receptorNombre, rut: '' } : null)
+            }
             userRole={userRole}
             onSave={async (editedData) => {
               try {
