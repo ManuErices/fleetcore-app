@@ -264,18 +264,18 @@ export default function InviteAccept({ token }) {
         </div>
 
         {/* Card */}
-        <div className="bg-white/[0.07] backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+        <div className="bg-slate-800/80 backdrop-blur-xl border border-slate-600/40 rounded-2xl p-6 shadow-2xl space-y-4">
 
           {/* Ya tiene sesión */}
           {currentUser && step === "register" && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 p-3 bg-indigo-500/10 border border-indigo-400/20 rounded-xl">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/30 flex items-center justify-center flex-shrink-0">
+              <div className="flex items-center gap-3 p-3 bg-indigo-500/20 border border-indigo-400/40 rounded-xl">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/50 flex items-center justify-center flex-shrink-0">
                   <span className="text-white text-sm font-bold">{currentUser.email?.[0]?.toUpperCase()}</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] text-white/40 uppercase tracking-wider font-bold">Sesión activa</p>
-                  <p className="text-sm text-white/90 font-semibold truncate">{currentUser.email}</p>
+                  <p className="text-[10px] text-indigo-300 uppercase tracking-wider font-bold">Sesión activa</p>
+                  <p className="text-sm text-white font-semibold truncate">{currentUser.email}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -311,10 +311,10 @@ export default function InviteAccept({ token }) {
           {!currentUser && (
             <>
               {/* Tabs */}
-              <div className="flex gap-1 p-1 bg-white/5 rounded-xl border border-white/5">
+              <div className="flex gap-1 p-1 bg-slate-700/60 rounded-xl border border-slate-600/40">
                 {["register", "login"].map(m => (
                   <button key={m} onClick={() => { setMode(m); setError(""); }}
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mode === m ? "bg-white/15 text-white shadow-sm" : "text-white/30 hover:text-white/50"}`}>
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${mode === m ? "bg-indigo-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-200"}`}>
                     {m === "register" ? "Crear cuenta" : "Ya tengo cuenta"}
                   </button>
                 ))}
@@ -398,15 +398,15 @@ function roleBadgeCls(rol) {
   return map[rol] || "bg-white/10 border-white/20 text-white/70";
 }
 
-const inputCls = "w-full px-4 py-3 rounded-xl bg-white/8 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:border-indigo-400/60 focus:bg-white/12 text-sm transition-all";
+const inputCls = "w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-sm transition-all";
 
 // ── Componentes UI ─────────────────────────────────────────────
 
 function Screen({ children }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 flex items-center justify-center px-4 py-8 relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-[700px] h-[700px] bg-indigo-500/8 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/8 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[700px] h-[700px] bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
       <div className="relative z-10">
         {children}
       </div>
@@ -426,7 +426,7 @@ function Loading({ text }) {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="block text-[11px] font-bold text-white/40 uppercase tracking-widest mb-1.5">{label}</label>
+      <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-widest mb-1.5">{label}</label>
       {children}
     </div>
   );

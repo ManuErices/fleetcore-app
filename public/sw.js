@@ -1,8 +1,8 @@
 // Service Worker para MPF Maquinaria - Nuevo Cobre
 // Optimizado para funcionar offline a 4000m
-// v1.0.1 - Fix: manejo de errores en fetch para no bloquear instalación PWA
+// v1.0.3 - Fix: precachear bundles de Vite en instalación para soporte offline real
 
-const CACHE_NAME = 'mpf-maquinaria-v1.0.2';
+const CACHE_NAME = 'mpf-maquinaria-v1.0.3';
 const RUNTIME_CACHE = 'mpf-runtime-v2';
 
 const CRITICAL_ASSETS = [
@@ -15,17 +15,41 @@ const CRITICAL_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-  console.log('[SW] 🔧 Instalando Service Worker v1.0.1');
+  console.log('[SW] 🔧 Instalando Service Worker v1.0.3');
 
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(CRITICAL_ASSETS))
+      .then(async () => {
+        // Precachear los bundles de Vite (JS/CSS con hash) referenciados en index.html.
+        // Esto es necesario porque Vite genera nombres como /assets/index-XYZ.js
+        // que el SW no conoce de antemano. Sin esto, la app no carga offline.
+        try {
+          const runtimeCache = await caches.open(RUNTIME_CACHE);
+          const res = await fetch('/index.html', { cache: 'no-store' });
+          if (res.ok) {
+            const html = await res.clone().text();
+            await runtimeCache.put('/index.html', res);
+            const assetUrls = [...html.matchAll(/["'](\/assets\/[^"']+\.(?:js|css))['"]/g)]
+              .map(m => m[1]);
+            await Promise.all(
+              assetUrls.map(url =>
+                fetch(url)
+                  .then(r => (r.ok ? runtimeCache.put(url, r) : null))
+                  .catch(() => null)
+              )
+            );
+            console.log('[SW] 📦 Assets precacheados:', assetUrls);
+          }
+        } catch (e) {
+          console.warn('[SW] ⚠️ No se pudieron precachear los assets de Vite:', e);
+        }
+      })
       .then(() => {
         console.log('[SW] ✅ Service Worker instalado');
         return self.skipWaiting();
       })
       .catch((error) => {
-        // No lanzar el error: un fallo de instalación no debe romper la PWA
         console.error('[SW] ❌ Error en instalación:', error);
       })
   );
@@ -211,4 +235,4 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(clients.openWindow('/'));
 });
 
-console.log('[SW] FleetCore Service Worker v1.0.2 cargado ✅');
+console.log('[SW] FleetCore Service Worker v1.0.3 cargado ✅');
