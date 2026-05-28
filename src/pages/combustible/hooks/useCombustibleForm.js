@@ -4,7 +4,7 @@ import { db, auth, storage } from "../../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import { getNextGuiaNumber } from '../../../utils/voucherThermalGenerator';
-import { useToast } from '../../Toast';
+import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
 
 const TODAY = () => new Date().toISOString().split('T')[0];

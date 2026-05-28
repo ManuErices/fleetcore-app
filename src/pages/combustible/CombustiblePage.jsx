@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { db, auth } from "../lib/firebase";
+import { db, auth } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import CombustibleForm from './combustible/CombustibleForm';
+import CombustibleForm from './CombustibleForm';
 
 export default function CombustiblePage({ onClose }) {
   const [empresaId, setEmpresaId] = useState(null);

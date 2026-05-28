@@ -1,7 +1,7 @@
 // src/components/Layout.jsx
 
 const NAV = [
-  { key: 'plan',      label: 'Plan de Trabajo', roles: ['admin','supervisor','operador','mandante'] },
+  { key: 'plan',      label: 'Plan de Trabajo', roles: ['admin','supervisor','operador'] },
   { key: 'informe',   label: 'Informe Diario',  roles: ['admin','supervisor','operador'] },
   { key: 'libro',     label: 'Libro de Obras',  roles: ['admin','supervisor','operador','mandante'] },
   { key: 'historial', label: 'Historial',        roles: ['admin','supervisor','operador','mandante'] },

@@ -3,7 +3,7 @@ import { initializeFirestore, getFirestore, persistentLocalCache, persistentMult
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyByzRUHnLrxAaZOS9Dap1Kl0ZH5STWWzKE",
   authDomain: "mpf-maquinaria.firebaseapp.com",
   projectId: "mpf-maquinaria",

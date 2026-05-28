@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { printThermalVoucher } from '../utils/voucherThermalGenerator';
+import { printThermalVoucher } from '../../utils/voucherThermalGenerator';
 
 export default function CombustibleDetalleModal({
   reporte,

@@ -1,13 +1,16 @@
 // src/pages/PlanTrabajo.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { generarConIA } from '../lib/claude.js'
 import ResultPanel from '../components/ResultPanel.jsx'
 import LayoutEditor from '../components/LayoutEditor.jsx'
+import { useEmpresaData } from '../../../hooks/useEmpresaData.js'
+import { useEmpresa } from '../../../lib/useEmpresa.jsx'
+import SearchableDropdown from '../../../components/SearchableDropdown.jsx'
 
 const today = new Date().toISOString().split('T')[0]
 
 const S = {
-  page: { maxWidth: 800 },
+  page: { maxWidth: 800, margin: '0 auto', width: '100%' },
   heading: { fontSize: 22, fontWeight: 600, color: '#1e293b', marginBottom: 4 },
   subheading: { fontSize: 14, color: '#64748b', marginBottom: 24 },
   card: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '1.1rem 1.25rem', marginBottom: 14 },
@@ -55,6 +58,18 @@ function ItemList({ items, setItems, placeholder }) {
 }
 
 export default function PlanTrabajo({ session }) {
+  const { empresaId } = useEmpresa()
+  const { machinesLocal, empleados } = useEmpresaData(empresaId)
+  
+  const isMPF = (companyName) => {
+    if (!companyName) return true;
+    const n = companyName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return n.includes('mpf');
+  }
+
+  const mpfMachines = machinesLocal?.filter(m => isMPF(m.empresa)) || []
+  const mpfEmpleados = empleados?.filter(e => isMPF(e.empresa)) || []
+
   const [loading, setLoading] = useState(false)
   const [result,  setResult]  = useState('')
   const [layoutPngB64,  setLayoutPngB64]  = useState('')
@@ -66,6 +81,18 @@ export default function PlanTrabajo({ session }) {
   const [sector,     setSector]     = useState('')
   const [supervisor, setSupervisor] = useState('')
   const [cargo,      setCargo]      = useState('')
+
+  useEffect(() => {
+    console.log('--- PlanTrabajo AutoFill Debug ---')
+    console.log('Session actual:', session)
+    console.log('Supervisor actual:', supervisor)
+    console.log('Cargo actual:', cargo)
+    
+    if (session) {
+      if (session.nombre && !supervisor) setSupervisor(session.nombre)
+      if (session.cargo && !cargo) setCargo(session.cargo)
+    }
+  }, [session])
 
   const [equipos, setEquipos] = useState([{ tipo: '', operador: '' }])
   const addEquipo    = () => setEquipos([...equipos, { tipo: '', operador: '' }])
@@ -165,11 +192,21 @@ Redacta con lenguaje técnico formal, sin errores ortográficos. Usa bullets con
           </div>
           <div style={S.col}>
             <label style={S.label}>Realizado por</label>
-            <input className="fi" style={S.input} value={supervisor} onChange={e=>setSupervisor(e.target.value)} placeholder="Nombre supervisor"/>
+            <input 
+              className="w-full px-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm text-slate-700 outline-none transition-colors" 
+              value={supervisor} 
+              onChange={e=>setSupervisor(e.target.value)} 
+              placeholder="Ej: Juan Pérez" 
+            />
           </div>
           <div style={S.col}>
             <label style={S.label}>Cargo</label>
-            <input className="fi" style={S.input} value={cargo} onChange={e=>setCargo(e.target.value)} placeholder="Supervisor de Terreno"/>
+            <input 
+              className="w-full px-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm text-slate-700 outline-none transition-colors" 
+              value={cargo} 
+              onChange={e=>setCargo(e.target.value)} 
+              placeholder="Ej: Supervisor de Terreno" 
+            />
           </div>
         </div>
       </div>
@@ -179,15 +216,27 @@ Redacta con lenguaje técnico formal, sin errores ortográficos. Usa bullets con
         <div style={S.cardTitle}>Equipos y Operadores</div>
         {equipos.map((eq, i) => (
           <div key={i} style={S.row}>
-            <div style={S.col}>
+            <div style={{...S.col, position: 'relative', zIndex: 10 - i}}>
               {i===0 && <label style={S.label}>Equipo</label>}
-              <input className="fi" style={S.input} value={eq.tipo} onChange={e=>setEquipo(i,'tipo',e.target.value)} placeholder="Ej: Excavadora 56"/>
+              <SearchableDropdown
+                value={eq.tipo}
+                onChange={val => setEquipo(i, 'tipo', val)}
+                placeholder="Buscar tipo o patente..."
+                options={mpfMachines}
+                renderItem={m => `${m?.tipo || m?.name || 'Equipo'} - ${m?.patente || m?.code || ''}`.replace(/- $/, '').trim()}
+              />
             </div>
-            <div style={S.col}>
+            <div style={{...S.col, position: 'relative', zIndex: 10 - i}}>
               {i===0 && <label style={S.label}>Operador</label>}
-              <input className="fi" style={S.input} value={eq.operador} onChange={e=>setEquipo(i,'operador',e.target.value)} placeholder="Nombre operador"/>
+              <SearchableDropdown
+                value={eq.operador}
+                onChange={val => setEquipo(i, 'operador', val)}
+                placeholder="Buscar nombre operador..."
+                options={mpfEmpleados}
+                renderItem={e => e?.nombre || ''}
+              />
             </div>
-            <button style={{...S.btnRemove, marginTop: i===0 ? 22 : 0}} onClick={()=>removeEquipo(i)}>×</button>
+            <button style={{...S.btnRemove, marginTop: i===0 ? 22 : 0, zIndex: 0}} onClick={()=>removeEquipo(i)}>×</button>
           </div>
         ))}
         <button style={S.btnAdd} onClick={addEquipo}>+ Agregar equipo</button>

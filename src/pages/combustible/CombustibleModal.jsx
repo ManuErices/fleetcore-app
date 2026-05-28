@@ -1,4 +1,4 @@
-import CombustibleForm from './combustible/CombustibleForm';
+import CombustibleForm from './CombustibleForm';
 
 export default function CombustibleModal({ isOpen, onClose, empresaId }) {
   if (!isOpen) return null;

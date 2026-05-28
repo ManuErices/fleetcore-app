@@ -39,7 +39,7 @@ import EmpresaSetup from "./pages/EmpresaSetup.jsx";
 import InviteAccept from "./pages/InviteAccept.jsx";
 
 // ── Misc components ───────────────────────────────────────────
-import CombustibleModal from "./components/CombustibleModal";
+import CombustibleModal from "./pages/combustible/CombustibleModal";
 import ConnectionStatus from "./components/ConnectionStatus";
 import InstallPWA from "./components/InstallPWA";
 import SessionExpiryIndicator from "./components/SessionExpiryIndicator";

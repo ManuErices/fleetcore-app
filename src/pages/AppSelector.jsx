@@ -20,6 +20,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const [empresaId, setEmpresaId] = useState(null);
   const [showSuperAdmin, setShowSuperAdmin] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [loading, setLoading] = useState(true);
   const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
   const navigate = useNavigate();
@@ -42,22 +43,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
         // ✅ FIX: cargar empresaId para pasarlo a InviteUserPanel
         if (data.empresaId) setEmpresaId(data.empresaId);
 
-        // Redirección automática según rol
-        if (role === 'mandante') {
-          localStorage.setItem('selectedApp', 'workfleet');
-          onSelectApp('workfleet');
-          return;
-        }
-        if (role === 'revisor') {
-          localStorage.setItem('selectedApp', 'documentos');
-          onSelectApp('documentos');
-          return;
-        }
-        if (role === 'operador') {
-          localStorage.setItem('selectedApp', 'workfleet-m');
-          onSelectApp('workfleet-m');
-          return;
-        }
+        // Redirección automática solo para trabajador (usa otra ruta)
         if (role === 'trabajador') {
           window.location.href = '/trabajador';
           return;
@@ -76,7 +62,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const isAdminContrato = userRole === 'admin_contrato';
   const isRevisorAdmin = userRole === 'revisor_admin';
   const isRevisor = userRole === 'revisor';
-  const isRevisorRole = isRevisorAdmin || isRevisor;
+  const isMandanteAdmin = userRole === 'mandante_admin';
+  const isMandante = userRole === 'mandante';
+  const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
 
   // Permisos combinados: rol + módulo + plan
@@ -88,7 +76,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const canAccessReportes = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
   const canAccessFinanzas = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
   const canAccessContabilidad = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
-  const canAccessDocumentos = isSuperAdmin || isAdminContrato || isRevisorAdmin || isRevisor || (userRole === 'administrativo' && hasModulo('fleetcore'));
+  const canAccessDocumentos = isSuperAdmin || isAdminContrato || isRevisorRole || (userRole === 'administrativo' && hasModulo('fleetcore'));
   const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
 
   // Razón de bloqueo para mostrar el mensaje correcto
@@ -115,69 +103,82 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   return (
     <>
       {showSuperAdmin && <SuperAdminPanel onClose={() => setShowSuperAdmin(false)} />}
-      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin} />}
+      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin || isMandanteAdmin} />}
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
         <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
 
-        <div className="relative w-full max-w-6xl">
-          {/* Header */}
-          <div className="text-center mb-5 sm:mb-8 animate-fadeInUp">
-
-            {/* Banner de plan activo */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4">
-              <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">Plan</span>
-              <span className="text-sm font-black text-white">{planData.name}</span>
-              {status === 'trial' && (
-                <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 text-xs font-bold rounded-full">Trial</span>
-              )}
-              {!isActive && (
-                <span className="px-2 py-0.5 bg-red-400/20 text-red-300 text-xs font-bold rounded-full">Inactivo</span>
-              )}
-              <button
-                onClick={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-                className="ml-1 text-xs text-blue-300 underline hover:text-white transition-colors"
-              >
-                {isActive ? 'Cambiar plan' : 'Activar plan'}
-              </button>
-            </div>
-
-            <div className="inline-flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4 sm:mb-6">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg">
-                <span className="text-white text-sm font-bold">
-                  {user?.email?.[0]?.toUpperCase() || "U"}
-                </span>
+        {/* Header del Menú de Usuario (Esquina superior derecha de la pantalla) */}
+        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50 flex items-center justify-end">
+          <div className="relative">
+            <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-3 px-3 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 hover:bg-white/20 transition-all shadow-lg">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-inner">
+                <span className="text-white text-xs sm:text-sm font-bold">{user?.email?.[0]?.toUpperCase() || "U"}</span>
               </div>
-              <div className="text-left">
+              <div className="hidden sm:block text-left mr-2">
                 <div className="text-sm font-semibold text-white">{user?.displayName || user?.email?.split('@')[0]}</div>
-                <div className="text-xs text-blue-200">{user?.email}</div>
+                <div className="text-xs text-blue-200 flex items-center gap-1">
+                  Plan {planData?.name || 'Starter'}
+                  {status === 'trial' && <span className="text-amber-400 font-bold">(Trial)</span>}
+                </div>
               </div>
-              {userRole === 'superadmin' && (
-                <button
-                  onClick={() => setShowSuperAdmin(true)}
-                  className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/30 rounded-xl text-xs font-black text-indigo-200 hover:text-white transition-all"
-                  title="Panel de administración"
-                >
-                  🛡️ Admin
-                </button>
-              )}
-              {(userRole === 'admin_contrato' || userRole === 'superadmin' || userRole === 'revisor_admin') && (
-                <button
-                  onClick={() => setShowInvite(true)}
-                  className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 rounded-xl text-xs font-black text-emerald-200 hover:text-white transition-all"
-                  title={isRevisorAdmin ? "Invitar revisores" : "Invitar usuarios"}
-                >
-                  👥 {isRevisorAdmin ? 'Revisores' : 'Invitar'}
-                </button>
-              )}
-              <button onClick={onLogout} className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors" title="Cerrar sesión">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
-            </div>
+              <svg className={`w-4 h-4 text-white transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
 
+            {showUserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/10 z-50 overflow-hidden animate-scaleIn">
+                  <div className="p-4 border-b border-white/10">
+                    <div className="text-sm font-semibold text-white truncate">{user?.email}</div>
+                    <div className="text-xs text-blue-300 mt-1 capitalize">{userRole?.replace('_', ' ')}</div>
+                  </div>
+                  <div className="p-2 space-y-1">
+                    {userRole === 'superadmin' && (
+                      <button
+                        onClick={() => { setShowUserMenu(false); setShowSuperAdmin(true); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                      >
+                        🛡️ Panel de Admin
+                      </button>
+                    )}
+                    {(userRole === 'admin_contrato' || userRole === 'superadmin' || isRevisorAdmin || isMandanteAdmin) && (
+                      <button
+                        onClick={() => { setShowUserMenu(false); setShowInvite(true); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                      >
+                        👥 {(isRevisorAdmin || isMandanteAdmin) ? 'Invitar Equipo' : 'Invitar Usuarios'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowUserMenu(false); localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                    >
+                      ⭐ Cambiar Plan
+                    </button>
+                    <div className="h-px bg-white/10 my-1"></div>
+                    <button
+                      onClick={onLogout}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-400 hover:bg-white/10 rounded-xl transition-colors text-left"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="relative w-full max-w-6xl pt-8 sm:pt-0">
+          {/* Título Principal */}
+          <div className="text-center mb-8 sm:mb-12 animate-fadeInUp mt-14 sm:mt-0">
             <h1 className="text-2xl sm:text-4xl lg:text-6xl font-black text-white mb-2 sm:mb-4 tracking-tight">
               {isRevisorRole ? 'Bienvenido a FleetCore-I' : 'Selecciona tu aplicación'}
             </h1>
@@ -211,7 +212,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                   { icon: "✍️", text: "Firma digital por roles" },
                   { icon: "🤖", text: "Redacción asistida por IA" },
                 ]}
-                onUpgrade={() => {}}
+                onUpgrade={() => { }}
               />
             </div>
           )}

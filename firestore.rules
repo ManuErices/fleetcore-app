@@ -228,7 +228,8 @@ service cloud.firestore {
     match /users/{uid} {
       allow read:   if isSuperAdmin()
                     || (isAuth() && request.auth.uid == uid);
-      allow create: if isAuth() && request.auth.uid == uid;  // Registro inicial — sin rol aún
+      allow create: if isSuperAdmin() 
+                    || (isAuth() && request.auth.uid == uid);  // Registro inicial — sin rol aún
       allow update: if isSuperAdmin()
                     || (isAuth() && request.auth.uid == uid);
       allow delete: if isSuperAdmin();

@@ -1,9 +1,9 @@
 import React from "react";
 import { useCombustibleForm } from './hooks/useCombustibleForm';
-import { ToastContainer } from '../Toast';
-import CameraCapture from '../CameraCapture';
-import VoucherGenerator from '../VoucherGenerator';
-import VoucherHistorialDia from '../VoucherHistorialDia';
+import { ToastContainer } from '../../components/Toast';
+import CameraCapture from '../../components/CameraCapture';
+import VoucherGenerator from '../../components/VoucherGenerator';
+import VoucherHistorialDia from '../../components/VoucherHistorialDia';
 
 import TipoStep from './steps/TipoStep';
 import ControlStep from './steps/ControlStep';

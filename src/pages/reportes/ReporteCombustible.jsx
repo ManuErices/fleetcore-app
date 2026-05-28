@@ -6,9 +6,9 @@ import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import CombustibleDetalleModal from "../../components/CombustibleDetalleModal";
-import CombustibleModal from "../../components/CombustibleModal";
-import CombustibleAnalytics from "../../components/CombustibleAnalytics";
+import CombustibleDetalleModal from "../combustible/CombustibleDetalleModal";
+import CombustibleModal from "../combustible/CombustibleModal";
+import CombustibleAnalytics from "../combustible/CombustibleAnalytics";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
 

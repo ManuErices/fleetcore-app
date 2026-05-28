@@ -214,7 +214,7 @@ async function drawSvgOverlay(ctx, svgOverlay) {
 export default function LayoutEditor({ sector, equipos, onExport }) {
   const canvasRef   = useRef(null)
   const bgCanvasRef = useRef(null)
-  const [vistaType,  setVistaType]  = useState('lateral')
+  const [vistaType,  setVistaType]  = useState('planta')
   const [elements,   setElements]   = useState([])
   const [svgOverlay, setSvgOverlay] = useState('')
   const [dragging,   setDragging]   = useState(null)
@@ -442,7 +442,8 @@ export default function LayoutEditor({ sector, equipos, onExport }) {
       {/* Toolbar */}
       <div style={{ display:'flex', gap:8, marginBottom:8, alignItems:'center', flexWrap:'wrap' }}>
         <div style={{ display:'flex', gap:4 }}>
-          {[['lateral','Vista lateral'],['planta','Vista planta']].map(([v,l]) => (
+          {/* [['lateral','Vista lateral'],['planta','Vista planta']] */}
+          {[['planta','Vista planta']].map(([v,l]) => (
             <button key={v} onClick={() => { setVistaType(v); setElements([]); setSvgOverlay(''); setSelected(null) }} style={{
               padding:'6px 12px', fontSize:12, borderRadius:7, cursor:'pointer',
               border: vistaType===v ? '2px solid #1a3a5c' : '1px solid #e2e8f0',
@@ -467,7 +468,7 @@ export default function LayoutEditor({ sector, equipos, onExport }) {
         }}>✓ Usar este layout</button>
       </div>
 
-      <div style={{ display:'flex', gap:10 }}>
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
         {/* Panel */}
         <div style={{ width:128, flexShrink:0 }}>
           <div style={{ display:'flex', flexDirection:'column', gap:2, marginBottom:6 }}>
@@ -499,7 +500,7 @@ export default function LayoutEditor({ sector, equipos, onExport }) {
         </div>
 
         {/* Canvas */}
-        <div style={{ flex:1, borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
+        <div style={{ flex:'1 1 300px', borderRadius:8, overflow:'hidden', border:'1px solid #e2e8f0' }}>
           <canvas ref={bgCanvasRef} width={CANVAS_W} height={CANVAS_H}
             style={{ display:'none' }}/>
           <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}

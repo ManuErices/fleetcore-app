@@ -17,12 +17,13 @@ function mapRole(mainRole) {
   if (mainRole === 'admin_contrato') return 'supervisor'
   if (mainRole === 'revisor_admin') return 'supervisor'
   if (mainRole === 'revisor') return 'mandante'
+  if (mainRole === 'mandante_admin') return 'mandante'
   if (mainRole === 'mandante') return 'mandante'
   if (mainRole === 'operador') return 'operador'
   return 'supervisor'
 }
 
-export default function DocumentosApp({ user, onBackToSelector }) {
+export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState('plan')
@@ -33,6 +34,9 @@ export default function DocumentosApp({ user, onBackToSelector }) {
       const existing = getSession()
       if (existing) {
         setSession(existing)
+        if (existing.rol === 'mandante') {
+          setPage('libro')
+        }
         setLoading(false)
         return
       }
@@ -57,6 +61,9 @@ export default function DocumentosApp({ user, onBackToSelector }) {
           }
           sessionStorage.setItem(SESSION_KEY, JSON.stringify(newSession))
           setSession(newSession)
+          if (rol === 'mandante') {
+            setPage('libro')
+          }
         } catch {
           setSession(null)
         }
@@ -67,11 +74,15 @@ export default function DocumentosApp({ user, onBackToSelector }) {
     initSession()
   }, [user])
 
-  function handleLogin(s) { setSession(s); setPage('plan') }
+  function handleLogin(s) { 
+    setSession(s); 
+    setPage(s.rol === 'mandante' ? 'libro' : 'plan');
+  }
 
   function handleLogout() {
     logout()
     setSession(null)
+    if (onLogout) onLogout() // Llamar al logout de la app principal (Firebase)
   }
 
   if (loading) return null
@@ -80,8 +91,8 @@ export default function DocumentosApp({ user, onBackToSelector }) {
 
   return (
     <Layout session={session} page={page} setPage={setPage} onLogout={handleLogout} onBack={onBackToSelector}>
-      {page === 'plan' && <PlanTrabajo session={session} />}
-      {page === 'informe' && <InformeDiario session={session} />}
+      {page === 'plan' && session?.rol !== 'mandante' && <PlanTrabajo session={session} />}
+      {page === 'informe' && session?.rol !== 'mandante' && <InformeDiario session={session} />}
       {page === 'historial' && <Historial />}
       {page === 'libro' && <LibroObras />}
     </Layout>

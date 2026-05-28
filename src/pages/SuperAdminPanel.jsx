@@ -12,9 +12,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { db } from "../lib/firebase";
 import {
-  collection, getDocs, doc, updateDoc, setDoc,
+  collection, getDocs, doc, updateDoc, setDoc, addDoc,
   serverTimestamp, query, orderBy, where,
 } from "firebase/firestore";
+import { firebaseConfig } from "../lib/firebase";
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 
 // ─── Constantes ───────────────────────────────────────────────
 const MODULES = {
@@ -74,6 +77,35 @@ function SectionHeader({ title, subtitle, action }) {
         {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
       </div>
       {action}
+    </div>
+  );
+}
+
+function Modal({ isOpen, onClose, title, children }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <h3 className="text-sm font-black text-slate-800">{title}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, required }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      {children}
     </div>
   );
 }
@@ -202,6 +234,24 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
   const [expanded, setExpanded] = useState(null);
   const [editSub,  setEditSub]  = useState(null); // empresaId siendo editado en plan
 
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({ nombre: "", rut: "", adminEmail: "", plan: "trial", estado: "activo" });
+
+  const handleCrearEmpresa = async () => {
+    if (!form.nombre) return alert("Nombre es requerido");
+    setSaving("new_emp");
+    try {
+      await addDoc(collection(db, "empresas"), {
+        ...form,
+        creadoEn: serverTimestamp()
+      });
+      setShowModal(false);
+      setForm({ nombre: "", rut: "", adminEmail: "", plan: "trial", estado: "activo" });
+      onRefresh();
+    } catch(e) { alert("Error: " + e.message); }
+    setSaving(null);
+  };
+
   const filtradas = empresas
     .filter(e => filtro === "todas" || e.estado === filtro)
     .filter(e => !busqueda || e.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -246,7 +296,45 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
       <SectionHeader
         title="Empresas registradas"
         subtitle={`${empresas.length} empresas en el sistema`}
+        action={
+          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl shadow-sm transition-all">
+            Nueva Empresa
+          </button>
+        }
       />
+
+      {/* Modal Crear Empresa */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Crear Empresa">
+        <Field label="Nombre" required>
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Minera del Norte" />
+        </Field>
+        <Field label="RUT">
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 77.123.456-7" />
+        </Field>
+        <Field label="Email Admin">
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="email" value={form.adminEmail} onChange={e => setForm({...form, adminEmail: e.target.value})} placeholder="Ej: admin@empresa.com" />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Plan">
+            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.plan} onChange={e => setForm({...form, plan: e.target.value})}>
+              <option value="trial">Trial</option>
+              <option value="starter">Starter</option>
+              <option value="pro">Pro</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+          </Field>
+          <Field label="Estado">
+            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
+              <option value="pendiente">Pendiente</option>
+              <option value="activo">Activo</option>
+              <option value="suspendido">Suspendido</option>
+            </select>
+          </Field>
+        </div>
+        <button onClick={handleCrearEmpresa} disabled={saving === "new_emp"} className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
+          {saving === "new_emp" ? "Creando..." : "Crear Empresa"}
+        </button>
+      </Modal>
 
       {/* Filtros y búsqueda */}
       <div className="flex flex-wrap gap-3 mb-4">
@@ -410,6 +498,46 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
   const [busqueda, setBusqueda] = useState("");
   const [saving, setSaving] = useState(null);
 
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "" });
+
+  const handleCrearUsuario = async () => {
+    if (!form.email || !form.password) return alert("Email y password requeridos");
+    setSaving("new_usr");
+    let tempApp;
+    try {
+      tempApp = initializeApp(firebaseConfig, "tempApp_" + Date.now());
+      const tempAuth = getAuth(tempApp);
+      const cred = await createUserWithEmailAndPassword(tempAuth, form.email, form.password);
+      await setDoc(doc(db, "users", cred.user.uid), {
+        email: form.email,
+        nombre: form.nombre,
+        rut: form.rut,
+        role: form.role,
+        empresaId: form.empresaId,
+        password: form.password,
+        createdAt: serverTimestamp()
+      });
+      setShowModal(false);
+      setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "" });
+      onRefresh();
+    } catch(e) { 
+      let msg = e.message;
+      if (e.code === 'auth/email-already-in-use') {
+        msg = "Este correo electrónico ya está registrado en el sistema. Si el usuario ya existe, búscalo en la tabla para cambiar su rol o empresa.";
+      } else if (e.code === 'auth/weak-password') {
+        msg = "La contraseña debe tener al menos 6 caracteres.";
+      } else if (e.code === 'auth/invalid-email') {
+        msg = "El formato del correo electrónico no es válido.";
+      }
+      alert("Error: " + msg); 
+    }
+    finally {
+      if(tempApp) await deleteApp(tempApp);
+      setSaving(null);
+    }
+  };
+
   const getEmpresa = (uid) => {
     const u = usuarios.find(u => u.id === uid);
     return empresas.find(e => e.id === u?.empresaId);
@@ -436,7 +564,42 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       <SectionHeader
         title="Usuarios del sistema"
         subtitle={`${usuarios.length} usuarios registrados`}
+        action={
+          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl shadow-sm transition-all">
+            Crear Manualmente
+          </button>
+        }
       />
+
+      {/* Modal Crear Usuario */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Crear Usuario">
+        <Field label="Nombre">
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Juan Pérez" />
+        </Field>
+        <Field label="Email" required>
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="Ej: usuario@empresa.com" />
+        </Field>
+        <Field label="Contraseña" required>
+          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="Al menos 6 caracteres" />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Rol" required>
+            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.role} onChange={e => setForm({...form, role: e.target.value})}>
+              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              <option value="mandante_admin">mandante_admin</option>
+            </select>
+          </Field>
+          <Field label="Empresa">
+            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.empresaId} onChange={e => setForm({...form, empresaId: e.target.value})}>
+              <option value="">Ninguna</option>
+              {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </select>
+          </Field>
+        </div>
+        <button onClick={handleCrearUsuario} disabled={saving === "new_usr"} className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
+          {saving === "new_usr" ? "Creando..." : "Crear Usuario"}
+        </button>
+      </Modal>
 
       <input
         value={busqueda}
@@ -613,6 +776,13 @@ export default function SuperAdminPanel({ onClose }) {
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
   }, [onClose]);
+
+  // Bloquear scroll del body
+  useEffect(() => {
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = originalStyle; };
+  }, []);
 
   const TABS = [
     { id: "dashboard", label: "Dashboard",  icon: "📊" },

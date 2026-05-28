@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import ReportDetallado from '../reportes/ReportDetallado';
-import CombustiblePage from '../../components/CombustiblePage';
+import CombustiblePage from '../combustible/CombustiblePage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 
