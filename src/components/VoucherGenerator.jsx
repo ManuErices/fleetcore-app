@@ -34,7 +34,22 @@ export default function VoucherGenerator({
     try {
       setPrinting(true);
 
-      // Generar número de guía SOLO al momento de imprimir, si no hay uno ya
+      // ABRIR VENTANA DE FORMA SÍNCRONA para evitar bloqueos de popups en iOS/Safari
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        alert("Por favor, permite las ventanas emergentes en tu navegador para imprimir.");
+        setPrinting(false);
+        return;
+      }
+
+      printWindow.document.write(`
+        <html><head><title>Generando Comprobante...</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 40px; background: #f8fafc;">
+          <h3 style="color: #475569;">Generando voucher, por favor espera...</h3>
+        </body></html>
+      `);
+
+      // Generar número de guía si no existe
       let guiaNum = numeroGuia;
       if (!guiaNum) {
         guiaNum = await getNextGuiaNumber(empresaId);
@@ -42,8 +57,8 @@ export default function VoucherGenerator({
         console.log('📋 Número de guía generado al imprimir:', guiaNum);
       }
 
-      // Imprimir voucher térmico con número correlativo
-      printThermalVoucher({
+      // Generar e imprimir
+      await printThermalVoucher({
         reportData,
         projectName,
         machineInfo,
@@ -51,25 +66,21 @@ export default function VoucherGenerator({
         empresaInfo,
         repartidorInfo,
         equipoSurtidorInfo,
-        numeroGuiaCorrelativo: guiaNum
+        numeroGuiaCorrelativo: guiaNum,
+        printWindow // Pasamos la ventana ya abierta
       });
 
-      // Guardar numeroGuia en el reporte de Firebase con la ruta CORRECTA
+      // Guardar numeroGuia en Firebase
       if (reporteId && guiaNum && empresaId) {
         try {
           await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', reporteId), {
             numeroGuia: guiaNum
           });
-          console.log('✅ numeroGuia guardado en reporte:', reporteId, '→', guiaNum);
         } catch (err) {
           console.error('⚠️ No se pudo guardar numeroGuia:', err);
         }
-      } else {
-        console.warn('⚠️ Falta reporteId o empresaId para guardar numeroGuia:', { reporteId, empresaId, guiaNum });
       }
 
-      // Opcional: mostrar un toast o mensaje en la UI en lugar de un alert
-      // alert(`✅ Voucher N° ${guiaNum.toString().padStart(3, '0')} enviado a impresión`);
       setPrinting(false);
 
     } catch (error) {

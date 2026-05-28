@@ -17,9 +17,10 @@ export function matchWorker(emp, search) {
   const hayName = normalize(emp.nombre || '');
   const hayRut  = (emp.rut || '').replace(/\D/g, '');
   const words   = normalize(search).split(/\s+/).filter(Boolean);
-  return words.every(w =>
-    hayName.includes(w) || hayRut.includes(w.replace(/\D/g, ''))
-  );
+  return words.every(w => {
+    const numW = w.replace(/\D/g, '');
+    return hayName.includes(w) || (numW.length > 0 && hayRut.includes(numW));
+  });
 }
 
 /**

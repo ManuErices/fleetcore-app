@@ -17,11 +17,17 @@ import {
 } from "firebase/firestore";
 
 const ROLES = [
-  { value: "admin_contrato",  label: "Administrador",   desc: "Acceso completo a la empresa" },
-  { value: "administrativo",  label: "Administrativo",  desc: "Acceso a módulos asignados" },
-  { value: "operador",        label: "Operador",        desc: "Solo WorkFleet móvil" },
-  { value: "mandante",        label: "Mandante",        desc: "Solo lectura de reportes" },
-  { value: "trabajador",      label: "Trabajador",      desc: "Portal de trabajador" },
+  { value: "admin_contrato",  label: "Administrador",        desc: "Acceso completo a la empresa" },
+  { value: "administrativo",  label: "Administrativo",       desc: "Acceso a módulos asignados" },
+  { value: "operador",        label: "Operador",             desc: "Solo WorkFleet móvil" },
+  { value: "mandante",        label: "Mandante",             desc: "Solo lectura de reportes" },
+  { value: "trabajador",      label: "Trabajador",           desc: "Portal de trabajador" },
+  { value: "revisor_admin",   label: "Revisor Admin",        desc: "FleetCore-I: gestiona revisores" },
+  { value: "revisor",         label: "Revisor",              desc: "FleetCore-I: solo lectura de documentos" },
+];
+
+const ROLES_REVISOR = [
+  { value: "revisor",  label: "Revisor",  desc: "Solo lectura de documentos en FleetCore-I" },
 ];
 
 const MODULOS_ADMIN = [
@@ -44,15 +50,16 @@ function getBaseUrl() {
   return window.location.origin;
 }
 
-export default function InviteUserPanel({ empresaId, onClose }) {
+export default function InviteUserPanel({ empresaId, onClose, soloRevisores = false }) {
   const [invitaciones, setInvitaciones] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [creating,     setCreating]     = useState(false);
   const [copied,       setCopied]       = useState(null);
   const [showForm,     setShowForm]     = useState(false);
+  const rolesDisponibles = soloRevisores ? ROLES_REVISOR : ROLES;
   const [form, setForm] = useState({
     emailDestino: "",
-    rol:          "administrativo",
+    rol:          soloRevisores ? "revisor" : "administrativo",
     diasExpira:   7,
     modulos:      [],
   });
@@ -159,7 +166,7 @@ export default function InviteUserPanel({ empresaId, onClose }) {
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between"
           style={{ background: "linear-gradient(135deg, #065f46 0%, #047857 100%)", borderRadius: "16px 16px 0 0" }}>
           <div>
-            <h2 className="text-base font-black text-white">Invitar usuarios</h2>
+            <h2 className="text-base font-black text-white">{soloRevisores ? 'Invitar revisores' : 'Invitar usuarios'}</h2>
             <p className="text-xs text-emerald-200 mt-0.5">{activas.length} invitación{activas.length !== 1 ? "es" : ""} activa{activas.length !== 1 ? "s" : ""}</p>
           </div>
           <button onClick={onClose}
@@ -209,7 +216,7 @@ export default function InviteUserPanel({ empresaId, onClose }) {
                   Rol que tendrá *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {ROLES.map(r => (
+                  {rolesDisponibles.map(r => (
                     <button key={r.value}
                       onClick={() => setForm(f => ({ ...f, rol: r.value, modulos: [] }))}
                       className={`p-3 rounded-xl text-left border-2 transition-all ${form.rol === r.value ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>

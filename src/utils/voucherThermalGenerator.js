@@ -416,27 +416,70 @@ export function generateThermalVoucher({
  * Abre el voucher en una nueva ventana para imprimir
  * @param {Object} params - Parámetros del voucher
  */
-export function printThermalVoucher(params) {
+export async function printThermalVoucher(params) {
   const html = generateThermalVoucher(params);
 
-  // Crear una nueva ventana
-  const printWindow = window.open('', '_blank', 'width=400,height=600');
+  if (params.printWindow) {
+    const { printWindow } = params;
+    try {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
 
-  if (!printWindow) {
-    alert('Por favor permite las ventanas emergentes para imprimir el voucher');
-    return;
+      printWindow.onload = function () {
+        setTimeout(() => {
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch (e) {
+            console.error('Error al imprimir:', e);
+          }
+        }, 500);
+      };
+      
+      // Fallback in case onload doesn't fire when writing to an already open window
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (e) {
+          console.error('Error al imprimir:', e);
+        }
+      }, 1000);
+    } catch (err) {
+      console.error('Error escribiendo en ventana de impresión:', err);
+    }
+  } else {
+    // Fallback original (iframe) si no se pasa printWindow
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    iframe.contentWindow.document.open();
+    iframe.contentWindow.document.write(html);
+    iframe.contentWindow.document.close();
+
+    iframe.onload = function () {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } catch (e) {
+          console.error('Error al imprimir:', e);
+        }
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 10000);
+      }, 500);
+    };
   }
-
-  // Escribir el HTML en la nueva ventana
-  printWindow.document.write(html);
-  printWindow.document.close();
-
-  // Esperar a que cargue y luego abrir el diálogo de impresión
-  printWindow.onload = function () {
-    setTimeout(() => {
-      printWindow.print();
-    }, 250);
-  };
 }
 
 /**
@@ -448,7 +491,7 @@ export function printThermalVoucher(params) {
 export async function getNextGuiaNumber(empresaId) {
   console.log('🔢 getNextGuiaNumber llamado con empresaId:', empresaId);
   try {
-    const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
+    const { collection, query, limit, getDocs } = await import('firebase/firestore');
     const { db } = await import('../lib/firebase');
 
     if (!empresaId) {
@@ -456,16 +499,16 @@ export async function getNextGuiaNumber(empresaId) {
       return 1;
     }
 
-    // Buscar el mayor numeroGuia ya usado en reportes_combustible
+    // Buscar el mayor numeroGuia ya usado en reportes_combustible (sin orderBy para evitar índice compuesto)
     const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-    const q = query(reportesRef, orderBy('numeroGuia', 'desc'), limit(1));
+    const q = query(reportesRef, limit(200));
     const snapshot = await getDocs(q);
 
     let lastNum = 0;
-    if (!snapshot.empty) {
-      const data = snapshot.docs[0].data();
-      lastNum = data.numeroGuia || 0;
-    }
+    snapshot.docs.forEach(d => {
+      const n = d.data().numeroGuia || 0;
+      if (n > lastNum) lastNum = n;
+    });
 
     const nextNumber = lastNum + 1;
     console.log('✅ Último numeroGuia encontrado:', lastNum, '→ próximo:', nextNumber);

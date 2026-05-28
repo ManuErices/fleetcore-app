@@ -1,4 +1,5 @@
 import React from "react";
+import { formatRut } from "../../../utils/formatters";
 
 export default function EmpleadoModal({
   data, setData,
@@ -45,7 +46,7 @@ export default function EmpleadoModal({
                 type="text"
                 placeholder="Ej: 12.345.678-9"
                 value={data.rut}
-                onChange={(e) => setData({ ...data, rut: e.target.value })}
+                onChange={(e) => setData({ ...data, rut: formatRut(e.target.value) })}
                 className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:outline-none focus:border-blue-500"
               />
             </div>

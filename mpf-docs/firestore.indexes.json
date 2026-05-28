@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "folios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "libro",  "order": "ASCENDING" },
+        { "fieldPath": "numero", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

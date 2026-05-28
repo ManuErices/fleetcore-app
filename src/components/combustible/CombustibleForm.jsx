@@ -28,7 +28,10 @@ export default function CombustibleForm({ empresaId, onClose }) {
     <>
       <ToastContainer toasts={f.toasts} onRemove={f.removeToast} />
 
-      <div className="bg-white w-full max-w-5xl mx-auto overflow-x-hidden relative">
+      <div className={`bg-white w-full max-w-5xl mx-auto overflow-x-hidden relative ${f.isSuccess ? 'min-h-[60dvh] flex flex-col' : ''}`}>
+        
+        {/* Form Content - Hides when success */}
+        <div className={f.isSuccess ? 'hidden' : 'block'}>
 
         {/* Header */}
         <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6">
@@ -157,10 +160,12 @@ export default function CombustibleForm({ empresaId, onClose }) {
             />
           )}
         </div>
+        </div>
+        {/* End Form Content */}
 
         {/* Loading overlay — blocks all interaction while saving */}
         {f.loading && (
-          <div className="fixed inset-0 bg-white/90 backdrop-blur-md z-[250] flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-[250] flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-200">
             <div className="relative mb-8">
               <div className="w-24 h-24 border-[6px] border-slate-100 border-t-orange-600 rounded-full animate-spin" />
               <div className="absolute inset-0 flex items-center justify-center">
@@ -183,10 +188,10 @@ export default function CombustibleForm({ empresaId, onClose }) {
           </div>
         )}
 
-        {/* Success full-screen overlay — Guided experience for operators */}
+        {/* Success overlay — Guided experience for operators */}
         {f.isSuccess && (
-          <div className="fixed inset-0 bg-white z-[300] flex flex-col animate-in fade-in zoom-in duration-300 overflow-y-auto">
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-screen">
+          <div className="flex-1 bg-white z-[300] flex flex-col animate-in fade-in zoom-in duration-300">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[60dvh]">
               <div className="w-32 h-32 bg-emerald-100 rounded-full flex items-center justify-center mb-8 shadow-inner">
                 <svg className="w-20 h-20 text-emerald-600 animate-in slide-in-from-bottom-4 fade-in duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />

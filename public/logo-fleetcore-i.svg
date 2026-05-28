@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <!-- Hexagon icon -->
+  <g transform="translate(160, 58)">
+    <polygon points="0,-46 40,-23 40,23 0,46 -40,23 -40,-23"
+      fill="url(#grad)" stroke="none"/>
+    <!-- Letter I -->
+    <rect x="-6" y="-22" width="12" height="44" rx="3" fill="white"/>
+    <rect x="-14" y="-22" width="28" height="10" rx="3" fill="white"/>
+    <rect x="-14" y="12" width="28" height="10" rx="3" fill="white"/>
+    <defs>
+      <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#0e7490"/>
+        <stop offset="100%" style="stop-color:#164e63"/>
+      </linearGradient>
+    </defs>
+  </g>
+  <!-- FleetCore-I text -->
+  <text x="160" y="128" font-family="system-ui, -apple-system, sans-serif"
+    font-size="28" font-weight="900" text-anchor="middle" fill="#1e293b">
+    <tspan font-weight="400">Fleet</tspan><tspan font-weight="900">Core-I</tspan>
+  </text>
+  <!-- Tagline -->
+  <text x="160" y="152" font-family="system-ui, -apple-system, sans-serif"
+    font-size="11" font-weight="600" text-anchor="middle"
+    fill="#0e7490" letter-spacing="2">INFORMES E INSPECCIÓN</text>
+</svg>

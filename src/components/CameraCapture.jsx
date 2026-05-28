@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 export default function CameraCapture({ onCapture, onClose, title = "Capturar Foto", color = "blue" }) {
   const [streaming, setStreaming] = useState(false);
@@ -67,12 +68,20 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
 
   useEffect(() => {
     startCamera();
-    return () => stopCamera();
+    
+    // Prevenir doble scroll al abrir el modal
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      stopCamera();
+      document.body.style.overflow = originalStyle;
+    };
   }, []);
 
-  return (
-    <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
-      <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden flex flex-col">
+  const modalContent = (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300" style={{ zIndex: 99999 }}>
+      <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90dvh]">
         {/* Header */}
         <div className={`bg-gradient-to-r ${colors[color] || colors.blue} p-6 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
@@ -164,4 +173,6 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

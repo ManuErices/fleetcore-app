@@ -207,7 +207,7 @@ export default function EntregaStep({
                       <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-xl font-black">{sel?.nombre?.charAt(0) || '?'}</div>
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-black uppercase tracking-widest opacity-60 mb-0.5">Seleccionado</div>
-                        <div className="font-black text-base uppercase truncate">{sel?.nombre || 'Nuevo Trabajador'}</div>
+                        <div className="font-black text-base uppercase leading-tight break-words pr-2">{sel?.nombre || 'Nuevo Trabajador'}</div>
                         <div className="text-xs font-bold opacity-80">RUT: {sel?.rut || 'Sin RUT'}</div>
                       </div>
                       <button onClick={() => setDatosEntrega({ ...datosEntrega, operadorId: '' })} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-lg font-black transition-all">✕</button>

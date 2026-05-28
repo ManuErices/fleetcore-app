@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Documentos (Plan de Trabajo, Informe Diario)
+    match /documentos/{docId} {
+      allow read, write: if true;
+    }
+
+    // Firmas PIN
+    match /pins/{usuario} {
+      allow read, write: if true;
+    }
+
+    // Usuarios registrados (auth)
+    match /usuarios/{usuario} {
+      allow read, write: if true;
+    }
+
+    // Libro de Obras (folios)
+    match /folios/{folioId} {
+      allow read, write: if true;
+    }
+  }
+}

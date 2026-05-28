@@ -48,6 +48,11 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
           onSelectApp('workfleet');
           return;
         }
+        if (role === 'revisor') {
+          localStorage.setItem('selectedApp', 'documentos');
+          onSelectApp('documentos');
+          return;
+        }
         if (role === 'operador') {
           localStorage.setItem('selectedApp', 'workfleet-m');
           onSelectApp('workfleet-m');
@@ -69,6 +74,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   // ── Helpers de permisos ──────────────────────────────────────
   const isSuperAdmin = userRole === 'superadmin';
   const isAdminContrato = userRole === 'admin_contrato';
+  const isRevisorAdmin = userRole === 'revisor_admin';
+  const isRevisor = userRole === 'revisor';
+  const isRevisorRole = isRevisorAdmin || isRevisor;
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
 
   // Permisos combinados: rol + módulo + plan
@@ -80,6 +88,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const canAccessReportes = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
   const canAccessFinanzas = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
   const canAccessContabilidad = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
+  const canAccessDocumentos = isSuperAdmin || isAdminContrato || isRevisorAdmin || isRevisor || (userRole === 'administrativo' && hasModulo('fleetcore'));
   const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
 
   // Razón de bloqueo para mostrar el mensaje correcto
@@ -106,7 +115,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   return (
     <>
       {showSuperAdmin && <SuperAdminPanel onClose={() => setShowSuperAdmin(false)} />}
-      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} />}
+      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin} />}
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
         <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
@@ -153,13 +162,13 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                   🛡️ Admin
                 </button>
               )}
-              {(userRole === 'admin_contrato' || userRole === 'superadmin') && (
+              {(userRole === 'admin_contrato' || userRole === 'superadmin' || userRole === 'revisor_admin') && (
                 <button
                   onClick={() => setShowInvite(true)}
                   className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 rounded-xl text-xs font-black text-emerald-200 hover:text-white transition-all"
-                  title="Invitar usuarios"
+                  title={isRevisorAdmin ? "Invitar revisores" : "Invitar usuarios"}
                 >
-                  👥 Invitar
+                  👥 {isRevisorAdmin ? 'Revisores' : 'Invitar'}
                 </button>
               )}
               <button onClick={onLogout} className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors" title="Cerrar sesión">
@@ -170,15 +179,44 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             </div>
 
             <h1 className="text-2xl sm:text-4xl lg:text-6xl font-black text-white mb-2 sm:mb-4 tracking-tight">
-              Selecciona tu aplicación
+              {isRevisorRole ? 'Bienvenido a FleetCore-I' : 'Selecciona tu aplicación'}
             </h1>
             <p className="text-sm sm:text-lg text-blue-200 font-medium">
-              Elige la herramienta que necesitas
+              {isRevisorRole ? 'Portal de revisión de documentos e informes' : 'Elige la herramienta que necesitas'}
             </p>
           </div>
 
           {/* Grid de cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
+          {/* Vista exclusiva para roles revisor */}
+          {isRevisorRole && (
+            <div className="max-w-sm mx-auto w-full">
+              <AppCard
+                onClick={() => handleSelect('documentos', true)}
+                canAccess={true}
+                blockReason={null}
+                requiredPlan="starter"
+                glowColor="from-cyan-500 to-teal-700"
+                borderColor="border-cyan-200 hover:border-cyan-400"
+                logoSrc="/logo-fleetcore-i.svg"
+                logoAlt="FleetCore-I"
+                buttonClass="from-cyan-900 to-teal-700 hover:from-cyan-800 hover:to-teal-600"
+                buttonLabel="Abrir FleetCore-I"
+                badgeClass="bg-cyan-100 text-cyan-700"
+                badgeLabel="FleetCore-I"
+                features={[
+                  { icon: "📋", text: "Plan de trabajo con IA" },
+                  { icon: "📝", text: "Informe diario de obra" },
+                  { icon: "📚", text: "Libro de obras y comunicaciones" },
+                  { icon: "🗂️", text: "Historial de documentos" },
+                  { icon: "✍️", text: "Firma digital por roles" },
+                  { icon: "🤖", text: "Redacción asistida por IA" },
+                ]}
+                onUpgrade={() => {}}
+              />
+            </div>
+          )}
+
+          <div className={isRevisorRole ? 'hidden' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'}>
             <AppCard
               onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
               canAccess={canAccessFleetCore}
@@ -298,11 +336,35 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               ]}
               onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
             />
+
+            <AppCard
+              onClick={() => handleSelect('documentos', canAccessDocumentos)}
+              canAccess={canAccessDocumentos}
+              blockReason={blockReason('documentos', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('fleetcore')))}
+              requiredPlan="starter"
+              glowColor="from-cyan-500 to-teal-700"
+              borderColor="border-cyan-200 hover:border-cyan-400"
+              logoSrc="/logo-fleetcore-i.svg"
+              logoAlt="FleetCore-I"
+              buttonClass="from-cyan-900 to-teal-700 hover:from-cyan-800 hover:to-teal-600"
+              buttonLabel="Abrir FleetCore-I"
+              badgeClass="bg-cyan-100 text-cyan-700"
+              badgeLabel="FleetCore-I"
+              features={[
+                { icon: "📋", text: "Plan de trabajo con IA" },
+                { icon: "📝", text: "Informe diario de obra" },
+                { icon: "📚", text: "Libro de obras y comunicaciones" },
+                { icon: "🗂️", text: "Historial de documentos" },
+                { icon: "✍️", text: "Firma digital por roles" },
+                { icon: "🤖", text: "Redacción asistida por IA" },
+              ]}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+            />
           </div>
 
 
           {/* ── Aplicaciones Móviles ── */}
-          <div className="mt-10 mb-4">
+          <div className={`mt-10 mb-4 ${isRevisorRole ? 'hidden' : ''}`}>
             <div className="flex items-center gap-3 mb-6">
               <div className="h-px flex-1 bg-white/20" />
               <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>

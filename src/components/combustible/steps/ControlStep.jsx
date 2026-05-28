@@ -341,23 +341,7 @@ export default function ControlStep({
                         <span>Al Estanque</span>
                       </button>
                     </div>
-                    {datosEntrada.destinoCarga === 'estanque' && (
-                      <div className="animate-in slide-in-from-top-2 duration-300">
-                        <label className="block text-xs font-black text-slate-500 uppercase mb-2 px-1">Estanque Receptor (Opcional)</label>
-                        <select
-                          value={datosEntrada.machineId}
-                          onChange={(e) => setDatosEntrada({ ...datosEntrada, machineId: e.target.value })}
-                          className="w-full px-4 py-3 border-2 border-blue-100 rounded-xl focus:border-blue-500 font-bold bg-white text-sm shadow-sm"
-                        >
-                          <option value="">Seleccione Estanque</option>
-                          {(machinesLocal || machines || [])
-                            .filter(m => m.type?.toLowerCase().includes('estanque') || m.name?.toLowerCase().includes('estanque'))
-                            .map(m => (
-                              <option key={m.id} value={m.id}>{m.patente || m.code} - {m.name}</option>
-                            ))}
-                        </select>
-                      </div>
-                    )}
+                    {/* Removes Estanque Receptor select */}
                   </div>
 
                   {/* Quién recibe */}

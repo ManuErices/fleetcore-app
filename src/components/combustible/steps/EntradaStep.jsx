@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { formatMiles } from '../../../utils/formatters';
+import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
 
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
@@ -85,6 +86,7 @@ export default function EntradaStep({
                 <div key={idx} className="relative group">
                   <input
                     type="text" required={idx === 0} value={num}
+                    autoFocus={idx === datosEntrada.numerosDocumento.length - 1 && idx > 0}
                     onChange={(e) => {
                       const arr = [...datosEntrada.numerosDocumento];
                       arr[idx] = e.target.value;
@@ -205,14 +207,14 @@ export default function EntradaStep({
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-1">
                         {mpfWorkers
-                          .filter(emp => !searchReceptor || emp.nombre?.toLowerCase().includes(searchReceptor.toLowerCase()) || emp.rut?.includes(searchReceptor))
+                          .filter(emp => matchWorker(emp, searchReceptor))
                           .map(emp => (
                             <button key={emp.id} type="button"
                               onClick={() => { setDatosEntrada({ ...datosEntrada, operadorId: emp.id }); setSearchReceptor(''); }}
                               className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-green-400 rounded-xl transition-all text-left">
                               <div className="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center text-green-600"><PersonIcon /></div>
                               <div>
-                                <div className="font-black text-sm text-slate-700 uppercase">{emp.nombre}</div>
+                                <div className="font-black text-sm text-slate-700 uppercase">{shortName(emp.nombre)}</div>
                                 <div className="text-xs text-slate-400">{emp.rut}</div>
                               </div>
                             </button>

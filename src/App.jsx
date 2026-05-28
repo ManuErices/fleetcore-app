@@ -27,6 +27,7 @@ import RRHHShell from "./pages/rrhh/RRHHShell";
 import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
+import DocumentosApp from "./pages/documentos/DocumentosApp.jsx";
 
 // ── Auth / onboarding pages ───────────────────────────────────
 import LoginPage from "./pages/LoginPage.jsx";
@@ -393,6 +394,7 @@ const APP_MAP = {
   reportes:      ReportesShell,
   finanzas:      FinanzasApp,
   contabilidad:  ContabilidadApp,
+  documentos:    DocumentosApp,
 };
 
 // ============================================================
