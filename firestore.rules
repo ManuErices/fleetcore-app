@@ -37,6 +37,11 @@ service cloud.firestore {
       return isAuth() && userRole() == 'admin_contrato';
     }
 
+    // Mandante admin — puede gestionar usuarios mandante de su empresa
+    function isMandanteAdmin() {
+      return isAuth() && userRole() == 'mandante_admin';
+    }
+
     // Cualquier admin (superadmin o admin_contrato)
     function isAnyAdmin() {
       return isSuperAdmin() || isAdminContrato();
@@ -227,8 +232,9 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
       allow read:   if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid);
-      allow create: if isSuperAdmin() 
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId());
+      allow create: if isSuperAdmin()
                     || (isAuth() && request.auth.uid == uid);  // Registro inicial — sin rol aún
       allow update: if isSuperAdmin()
                     || (isAuth() && request.auth.uid == uid);
@@ -268,8 +274,11 @@ service cloud.firestore {
       allow read: if true;
       // superadmin puede crear cualquier invitación
       // admin_contrato puede crear invitaciones solo para su empresa
+      // mandante_admin puede crear invitaciones de rol mandante para su empresa
       allow create: if isSuperAdmin()
-                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId());
+                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId())
+                    || (isMandanteAdmin() && request.resource.data.empresaId == userEmpresaId()
+                        && request.resource.data.rol == 'mandante');
       // Cualquier usuario autenticado puede marcar una invitación como usada (al aceptarla)
       allow update: if isAuth();
       // Solo admins pueden revocar

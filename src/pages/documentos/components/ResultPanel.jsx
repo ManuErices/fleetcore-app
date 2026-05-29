@@ -70,7 +70,7 @@ export default function ResultPanel({ texto, tipo, titulo, session, fecha, secto
           sector: sector || '',
           extraFields: extraFields || {},
           layoutPngB64: layoutPngB64 || '',
-          firmas, // incluye datos de firmas en el Word
+          firmas,
         }),
       })
       if (!response.ok) throw new Error('Error al generar Word')
@@ -90,29 +90,133 @@ export default function ResultPanel({ texto, tipo, titulo, session, fecha, secto
   const firmasCompletas = Object.keys(firmas).length === 3 && Object.values(firmas).every(f => f.firmado)
 
   return (
-    <div style={{ marginTop: 20 }}>
-      {/* Panel de texto generado */}
-      <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:12, padding:'1.25rem' }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingBottom:12, marginBottom:16, borderBottom:'1px solid #f1f5f9', flexWrap:'wrap', gap:8 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'.06em', color:'#64748b' }}>Documento generado</span>
-            <span style={{ background:'#dcfce7', color:'#15803d', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:700 }}>✓ Listo</span>
+    <div style={{ marginTop: 24, animation: 'resultFade .5s ease' }}>
+      <style>{`
+        @keyframes resultFade {
+          from { opacity:0; transform: translateY(16px); }
+          to   { opacity:1; transform: translateY(0); }
+        }
+        @keyframes successPulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+          50%      { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+        }
+        .result-copy-btn {
+          padding: 7px 14px; font-size: 12px; font-weight: 500;
+          background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+          border-radius: 8px; cursor: pointer; color: rgba(255,255,255,0.75);
+          font-family: inherit; transition: all .15s;
+        }
+        .result-copy-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+        .result-save-btn {
+          padding: 7px 14px; font-size: 12px; font-weight: 500;
+          background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+          border-radius: 8px; cursor: pointer; color: rgba(255,255,255,0.75);
+          font-family: inherit; transition: all .15s;
+        }
+        .result-save-btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); color: #fff; }
+        .result-export-btn {
+          padding: 7px 16px; font-size: 12px; font-weight: 700;
+          border: none; border-radius: 8px; cursor: pointer;
+          font-family: inherit; transition: all .15s;
+          display: flex; align-items: center; gap: 6px;
+        }
+        .result-export-btn:hover:not(:disabled) { transform: translateY(-1px); }
+      `}</style>
+
+      {/* Panel principal del documento generado */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 16,
+        overflow: 'hidden',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+        border: '1px solid rgba(16,185,129,0.2)',
+      }}>
+        {/* Header del documento */}
+        <div style={{
+          background: 'linear-gradient(135deg, #0F2035 0%, #1a3a5c 50%, #134e4a 100%)',
+          padding: '14px 20px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          flexWrap: 'wrap', gap: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: 'linear-gradient(135deg, #10B981, #059669)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 0 10px rgba(16,185,129,0.5)',
+              animation: 'successPulse 2.5s ease infinite',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M5 13l4 4L19 7" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1 }}>Documento generado</div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>Listo para revisión y exportación</div>
+            </div>
           </div>
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            <button onClick={copiar} style={{ padding:'6px 12px', fontSize:12, background:'transparent', border:'1px solid #e2e8f0', borderRadius:7, cursor:'pointer', color:'#475569' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button onClick={copiar} className="result-copy-btn">
               {copied ? '¡Copiado!' : 'Copiar texto'}
             </button>
-            <button onClick={guardar} disabled={saving||saved} style={{ padding:'6px 12px', fontSize:12, background: saved?'#dcfce7':'transparent', border:'1px solid #e2e8f0', borderRadius:7, cursor:saved||saving?'default':'pointer', color:saved?'#15803d':'#475569' }}>
+            <button
+              onClick={guardar}
+              disabled={saving || saved}
+              className="result-save-btn"
+              style={{
+                background: saved ? 'rgba(16,185,129,0.2)' : undefined,
+                borderColor: saved ? 'rgba(16,185,129,0.4)' : undefined,
+                color: saved ? '#6EE7B7' : undefined,
+                cursor: saved || saving ? 'default' : 'pointer',
+              }}
+            >
               {saved ? '✓ Guardado' : saving ? 'Guardando…' : 'Guardar'}
             </button>
-            <button onClick={exportarWord} disabled={exporting} style={{ padding:'6px 14px', fontSize:12, fontWeight:600, background:exporting?'#94a3b8': firmasCompletas?'#15803d':'#0F4761', border:'none', borderRadius:7, cursor:exporting?'not-allowed':'pointer', color:'#fff', display:'flex', alignItems:'center', gap:6 }}>
-              {exporting ? '⏳ Generando...' : firmasCompletas ? '⬇ Exportar Word (firmado)' : '⬇ Exportar Word'}
+            <button
+              onClick={exportarWord}
+              disabled={exporting}
+              className="result-export-btn"
+              style={{
+                background: exporting ? '#94a3b8'
+                  : firmasCompletas ? 'linear-gradient(135deg, #10B981, #059669)'
+                  : 'linear-gradient(135deg, #2563eb, #0891b2)',
+                color: '#fff',
+                boxShadow: exporting ? 'none'
+                  : firmasCompletas ? '0 3px 12px rgba(16,185,129,0.4)'
+                  : '0 3px 12px rgba(37,99,235,0.4)',
+                cursor: exporting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {exporting ? (
+                '⏳ Generando...'
+              ) : (
+                <>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  {firmasCompletas ? 'Exportar Word (firmado)' : 'Exportar Word'}
+                </>
+              )}
             </button>
           </div>
         </div>
-        <pre style={{ whiteSpace:'pre-wrap', fontSize:13.5, lineHeight:1.9, color:'#1e293b', fontFamily:'inherit', maxHeight:560, overflowY:'auto', paddingRight:4 }}>
-          {texto}
-        </pre>
+
+        {/* Contenido del documento */}
+        <div style={{ padding: '1.5rem' }}>
+          <pre style={{
+            whiteSpace: 'pre-wrap',
+            fontSize: 13.5,
+            lineHeight: 1.9,
+            color: '#1e293b',
+            fontFamily: 'inherit',
+            maxHeight: 560,
+            overflowY: 'auto',
+            paddingRight: 4,
+            margin: 0,
+          }}>
+            {texto}
+          </pre>
+        </div>
       </div>
 
       {/* Panel de firmas */}

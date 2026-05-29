@@ -3,31 +3,6 @@ import { useState, useEffect } from 'react'
 import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, getFirmas } from '../lib/firmas.js'
 import { getSession } from '../lib/auth.js'
 
-const C = {
-  navy:    '#0D2B45',
-  accent:  '#1B5E8A',
-  green:   '#15803d',
-  greenBg: '#dcfce7',
-  red:     '#dc2626',
-  redBg:   '#fef2f2',
-  gray:    '#64748b',
-  border:  '#e2e8f0',
-  silver:  '#f8fafc',
-}
-
-function StatusBadge({ firmado }) {
-  return (
-    <span style={{
-      padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
-      background: firmado ? C.greenBg : '#fef9c3',
-      color: firmado ? C.green : '#92400e',
-    }}>
-      {firmado ? '✓ Firmado' : 'Pendiente'}
-    </span>
-  )
-}
-
-// Modal simplificado: solo muestra datos del perfil + pide PIN
 function PinModal({ session, rolLabel, onSuccess, onClose }) {
   const [pin,     setPin]     = useState('')
   const [error,   setError]   = useState('')
@@ -47,40 +22,61 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+      position: 'fixed', inset: 0,
+      background: 'rgba(10,16,30,0.65)',
+      backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      animation: 'fadeIn .15s ease',
     }}>
+      <style>{`
+        @keyframes fadeIn { from{opacity:0;} to{opacity:1;} }
+        @keyframes modalUp { from{opacity:0;transform:translateY(20px);} to{opacity:1;transform:translateY(0);} }
+      `}</style>
       <div style={{
-        background: '#fff', borderRadius: 16, padding: '2rem',
-        width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+        background: '#fff', borderRadius: 18, padding: '2rem',
+        width: 360, boxShadow: '0 24px 60px rgba(0,0,0,0.25)',
+        animation: 'modalUp .2s ease',
+        border: '1px solid rgba(0,0,0,0.06)',
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.navy }}>Firmar documento</div>
-            <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{rolLabel}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+              background: 'linear-gradient(135deg, #0F2035, #2563eb)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 3px 10px rgba(37,99,235,0.3)',
+            }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#0F2035' }}>Firmar documento</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{rolLabel}</div>
+            </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: C.gray }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8', lineHeight: 1 }}>×</button>
         </div>
 
-        {/* Datos del firmante (solo lectura, vienen del perfil) */}
+        {/* Datos del firmante */}
         <div style={{
-          background: C.silver, border: `1px solid ${C.border}`, borderRadius: 10,
+          background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
           padding: '14px 16px', marginBottom: 20,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.gray, textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>
             Datos del firmante
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13 }}>
-            <div><span style={{ color: C.gray }}>Nombre: </span><span style={{ fontWeight: 600, color: C.navy }}>{session.nombre}</span></div>
-            {session.rut    && <div><span style={{ color: C.gray }}>RUT: </span><span style={{ color: C.navy }}>{session.rut}</span></div>}
-            {session.cargo  && <div><span style={{ color: C.gray }}>Cargo: </span><span style={{ color: C.navy }}>{session.cargo}</span></div>}
-            {session.empresa && <div><span style={{ color: C.gray }}>Empresa: </span><span style={{ color: C.navy }}>{session.empresa}</span></div>}
+            <div><span style={{ color: '#94a3b8' }}>Nombre: </span><span style={{ fontWeight: 600, color: '#0F2035' }}>{session.nombre}</span></div>
+            {session.rut    && <div><span style={{ color: '#94a3b8' }}>RUT: </span><span style={{ color: '#334155' }}>{session.rut}</span></div>}
+            {session.cargo  && <div><span style={{ color: '#94a3b8' }}>Cargo: </span><span style={{ color: '#334155' }}>{session.cargo}</span></div>}
+            {session.empresa && <div><span style={{ color: '#94a3b8' }}>Empresa: </span><span style={{ color: '#334155' }}>{session.empresa}</span></div>}
           </div>
         </div>
 
         {/* PIN */}
-        <label style={{ fontSize: 11, fontWeight: 700, color: C.gray, textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: 6 }}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 8 }}>
           Ingresa tu PIN para confirmar
         </label>
         <input
@@ -88,14 +84,20 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
           value={pin} onChange={e => { setPin(e.target.value.replace(/\D/g,'')); setError('') }}
           placeholder="••••" autoFocus
           style={{
-            width: '100%', padding: '12px', fontSize: 24, letterSpacing: 10,
-            border: `1px solid ${error ? C.red : C.border}`, borderRadius: 8,
-            boxSizing: 'border-box', outline: 'none', textAlign: 'center',
+            width: '100%', padding: '12px', fontSize: 26, letterSpacing: 12,
+            border: `1.5px solid ${error ? '#EF4444' : '#e2e8f0'}`,
+            borderRadius: 10, boxSizing: 'border-box', outline: 'none',
+            textAlign: 'center', color: '#0F2035', background: '#f8fafc',
+            transition: 'border-color .15s, box-shadow .15s',
           }}
         />
 
         {error && (
-          <div style={{ marginTop: 8, padding: '8px 12px', background: C.redBg, borderRadius: 8, fontSize: 13, color: C.red }}>
+          <div style={{
+            marginTop: 8, padding: '8px 12px', borderRadius: 8, fontSize: 13,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+            color: '#EF4444',
+          }}>
             {error}
           </div>
         )}
@@ -103,10 +105,13 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
         <button
           onClick={handleFirmar} disabled={loading}
           style={{
-            width: '100%', marginTop: 16, padding: '12px', fontSize: 14, fontWeight: 700,
-            background: loading ? '#94a3b8' : C.navy,
-            color: '#fff', border: 'none', borderRadius: 10,
+            width: '100%', marginTop: 16, padding: '13px', fontSize: 14, fontWeight: 700,
+            background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0F2035, #2563eb)',
+            color: '#fff', border: 'none', borderRadius: 11,
             cursor: loading ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            boxShadow: loading ? 'none' : '0 4px 14px rgba(37,99,235,0.35)',
+            transition: 'all .15s',
           }}>
           {loading ? 'Procesando...' : 'Firmar documento'}
         </button>
@@ -152,31 +157,66 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
   }
 
   if (!docId) return (
-    <div style={{ background: C.silver, border: `1px solid ${C.border}`, borderRadius: 12, padding: '1.25rem', marginTop: 16 }}>
-      <div style={{ fontSize: 13, color: C.gray, textAlign: 'center' }}>
-        Guarda el documento primero para habilitar las firmas
+    <div style={{
+      background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 14,
+      padding: '1.25rem', marginTop: 16, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 13, color: '#94a3b8' }}>
+        Guarda el documento primero para habilitar las firmas digitales
       </div>
     </div>
   )
 
-  if (loading) return <div style={{ padding: '1rem', color: C.gray, fontSize: 13 }}>Cargando firmas...</div>
+  if (loading) return (
+    <div style={{ padding: '1.25rem', color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>
+      Cargando firmas...
+    </div>
+  )
 
   const firmadas = FLUJO.filter(r => firmas[r]?.firmado).length
   const pct = Math.round((firmadas / FLUJO.length) * 100)
+  const allDone = firmadas === FLUJO.length
 
   return (
-    <div style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '1.25rem', marginTop: 16 }}>
+    <div style={{
+      background: '#fff', borderRadius: 16, padding: '1.25rem', marginTop: 16,
+      border: `1px solid ${allDone ? 'rgba(16,185,129,0.3)' : '#e2e8f0'}`,
+      boxShadow: allDone ? '0 4px 20px rgba(16,185,129,0.12)' : '0 2px 12px rgba(0,0,0,0.04)',
+      transition: 'all .3s',
+    }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${C.border}` }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>Firmas digitales</div>
-          <div style={{ fontSize: 11, color: C.gray, marginTop: 2 }}>{firmadas}/{FLUJO.length} firmado{firmadas !== 1 ? 's':''}</div>
-        </div>
-        <div style={{ width: 120 }}>
-          <div style={{ height: 6, background: '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${pct}%`, background: pct===100 ? C.green : C.accent, borderRadius: 99, transition: 'width .4s' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 14, borderBottom: '1px solid #f1f5f9' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: allDone ? 'linear-gradient(135deg, #10B981, #059669)' : 'linear-gradient(135deg, #1a3a5c, #2563eb)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: allDone ? '0 2px 8px rgba(16,185,129,0.4)' : '0 2px 8px rgba(37,99,235,0.3)',
+            transition: 'all .3s',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </div>
-          <div style={{ fontSize: 10, color: C.gray, marginTop: 3, textAlign: 'right' }}>{pct}%</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#0F2035' }}>Firmas digitales</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>{firmadas}/{FLUJO.length} firmado{firmadas !== 1 ? 's' : ''}</div>
+          </div>
+        </div>
+        {/* Progress bar */}
+        <div style={{ width: 130 }}>
+          <div style={{ height: 6, background: '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${pct}%`,
+              background: pct === 100
+                ? 'linear-gradient(90deg, #10B981, #059669)'
+                : 'linear-gradient(90deg, #2563eb, #06B6D4)',
+              borderRadius: 99,
+              transition: 'width .5s ease, background .3s',
+            }} />
+          </div>
+          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3, textAlign: 'right', fontWeight: 600 }}>{pct}%</div>
         </div>
       </div>
 
@@ -186,13 +226,17 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
           const rol    = ROLES_FIRMA[rolKey]
           const firma  = firmas[rolKey]
           const locked = idx > 0 && !firmas[FLUJO[idx-1]]?.firmado
+          const signed = firma?.firmado
 
           return (
             <div key={rolKey} style={{
-              border: `1px solid ${firma?.firmado ? '#bbf7d0' : C.border}`,
-              borderRadius: 10,
-              background: firma?.firmado ? '#f0fdf4' : locked ? '#fafafa' : '#fff',
-              padding: '12px 14px', opacity: locked ? 0.6 : 1,
+              border: `1px solid ${signed ? 'rgba(16,185,129,0.25)' : locked ? '#f1f5f9' : '#e2e8f0'}`,
+              borderLeft: `3px solid ${signed ? '#10B981' : locked ? '#e2e8f0' : '#2563eb'}`,
+              borderRadius: 11,
+              background: signed ? '#f0fdf4' : locked ? '#fafafa' : '#fff',
+              padding: '12px 14px',
+              opacity: locked ? 0.65 : 1,
+              transition: 'all .2s',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1 }}>
@@ -200,22 +244,35 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
                     <span style={{
                       width: 22, height: 22, borderRadius: '50%', fontSize: 11, fontWeight: 700,
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      background: firma?.firmado ? C.green : locked ? '#cbd5e0' : C.accent,
-                      color: '#fff', flexShrink: 0,
-                    }}>{idx+1}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: locked ? C.gray : C.navy }}>
+                      background: signed
+                        ? 'linear-gradient(135deg, #10B981, #059669)'
+                        : locked ? '#e2e8f0'
+                        : 'linear-gradient(135deg, #2563eb, #0891b2)',
+                      color: locked && !signed ? '#94a3b8' : '#fff',
+                      flexShrink: 0,
+                      boxShadow: signed ? '0 2px 6px rgba(16,185,129,0.35)' : !locked ? '0 2px 6px rgba(37,99,235,0.25)' : 'none',
+                      transition: 'all .3s',
+                    }}>{idx + 1}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: locked && !signed ? '#94a3b8' : '#0F2035' }}>
                       {rol.label}
                     </span>
-                    {locked && <span style={{ fontSize: 10, color: '#94a3b8' }}>Esperando firma anterior</span>}
+                    {locked && (
+                      <span style={{ fontSize: 10, color: '#94a3b8', background: '#f1f5f9', padding: '2px 7px', borderRadius: 99 }}>
+                        Esperando firma anterior
+                      </span>
+                    )}
                   </div>
 
-                  {firma?.firmado ? (
-                    <div style={{ fontSize: 12, color: C.gray, marginLeft: 30, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <div><span style={{ fontWeight: 600, color: C.navy }}>{firma.nombre}</span>{firma.cargo && ` · ${firma.cargo}`}</div>
-                      {firma.rut     && <div>RUT: {firma.rut}</div>}
+                  {signed ? (
+                    <div style={{ fontSize: 12, color: '#64748b', marginLeft: 30, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div><span style={{ fontWeight: 600, color: '#0F2035' }}>{firma.nombre}</span>{firma.cargo && ` · ${firma.cargo}`}</div>
+                      {firma.rut && <div>RUT: {firma.rut}</div>}
                       {firma.empresa && <div>{firma.empresa}</div>}
-                      <div style={{ color: '#94a3b8' }}>{firma.fecha} {firma.hora}</div>
-                      <div style={{ marginTop: 2, fontSize: 11, fontWeight: 700, color: C.green }}>✓ FIRMADO DIGITALMENTE</div>
+                      <div style={{ color: '#94a3b8', fontSize: 11 }}>{firma.fecha} {firma.hora}</div>
+                      <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: '#10B981', display:'flex', alignItems:'center', gap:4 }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#10B981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        FIRMADO DIGITALMENTE
+                      </div>
                     </div>
                   ) : (
                     <div style={{ fontSize: 11, color: '#94a3b8', marginLeft: 30 }}>Pendiente de firma</div>
@@ -223,12 +280,21 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 12 }}>
-                  <StatusBadge firmado={firma?.firmado} />
+                  <span style={{
+                    padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+                    background: signed ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.1)',
+                    color: signed ? '#10B981' : '#92400e',
+                  }}>
+                    {signed ? '✓ Firmado' : 'Pendiente'}
+                  </span>
                   {puedeFirmar(rolKey) && (
                     <button onClick={() => setModal(rolKey)} style={{
                       padding: '6px 14px', fontSize: 12, fontWeight: 700,
-                      background: C.navy, color: '#fff',
-                      border: 'none', borderRadius: 8, cursor: 'pointer',
+                      background: 'linear-gradient(135deg, #0F2035, #2563eb)',
+                      color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+                      transition: 'all .15s',
                     }}>
                       Firmar
                     </button>
@@ -240,11 +306,15 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
         })}
       </div>
 
-      {firmadas === FLUJO.length && (
+      {allDone && (
         <div style={{
-          marginTop: 14, padding: '10px 14px', background: C.greenBg,
-          borderRadius: 8, fontSize: 13, color: C.green, fontWeight: 600, textAlign: 'center',
+          marginTop: 14, padding: '12px 16px',
+          background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(5,150,105,0.06))',
+          border: '1px solid rgba(16,185,129,0.25)',
+          borderRadius: 10, fontSize: 13, color: '#10B981', fontWeight: 600, textAlign: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Documento completamente firmado — descarga el PDF desde el Historial
         </div>
       )}

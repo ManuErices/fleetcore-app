@@ -8,6 +8,7 @@ import PlanTrabajo from './pages/PlanTrabajo.jsx'
 import InformeDiario from './pages/InformeDiario.jsx'
 import Historial from './pages/Historial.jsx'
 import LibroObras from './pages/LibroObras.jsx'
+import AdminPanel from './pages/AdminPanel.jsx'
 
 const SESSION_KEY = 'mpf_session'
 
@@ -30,18 +31,37 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
 
   useEffect(() => {
     async function initSession() {
-      // Si ya hay sesión activa, usarla
+      // Si ya hay sesión activa, usarla — enriquecerla si le faltan campos nuevos
       const existing = getSession()
       if (existing) {
-        setSession(existing)
-        if (existing.rol === 'mandante') {
-          setPage('libro')
+        if (user && !existing.rolOriginal) {
+          // Sesión antigua sin rolOriginal: enriquecer desde Firestore sin forzar re-login
+          try {
+            const snap = await getDoc(doc(mainDb, 'users', user.uid))
+            const data = snap.exists() ? snap.data() : {}
+            const empresaId = data.empresaId || ''
+            let empresaNombre = existing.empresa || ''
+            if (empresaId) {
+              try {
+                const empSnap = await getDoc(doc(mainDb, 'empresas', empresaId))
+                if (empSnap.exists()) empresaNombre = empSnap.data().nombre || empresaNombre
+              } catch {}
+            }
+            const enriched = { ...existing, rolOriginal: data.role || '', empresaId, empresaNombre }
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify(enriched))
+            setSession(enriched)
+            if (enriched.rol === 'mandante') setPage('libro')
+            setLoading(false)
+            return
+          } catch {}
         }
+        setSession(existing)
+        if (existing.rol === 'mandante') setPage('libro')
         setLoading(false)
         return
       }
 
-      // Si viene usuario de Firebase Auth, auto-crear sesión
+      // Si viene usuario de Firebase Auth, crear sesión completa
       if (user) {
         try {
           const snap = await getDoc(doc(mainDb, 'users', user.uid))
@@ -50,6 +70,16 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
           const nombre = data.nombre || user.displayName || user.email.split('@')[0]
           const cargo = data.cargo || ''
           const empresa = rol === 'mandante' ? 'Río Tinto Mining' : 'MPF Ingeniería Civil SpA'
+          const empresaId = data.empresaId || ''
+
+          // Nombre real de la empresa para invitaciones
+          let empresaNombre = empresa
+          if (empresaId) {
+            try {
+              const empSnap = await getDoc(doc(mainDb, 'empresas', empresaId))
+              if (empSnap.exists()) empresaNombre = empSnap.data().nombre || empresa
+            } catch {}
+          }
 
           const newSession = {
             usuario: user.email.split('@')[0],
@@ -58,12 +88,13 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
             cargo,
             empresa,
             rol,
+            rolOriginal: data.role || '',
+            empresaId,
+            empresaNombre,
           }
           sessionStorage.setItem(SESSION_KEY, JSON.stringify(newSession))
           setSession(newSession)
-          if (rol === 'mandante') {
-            setPage('libro')
-          }
+          if (rol === 'mandante') setPage('libro')
         } catch {
           setSession(null)
         }
@@ -91,10 +122,11 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
 
   return (
     <Layout session={session} page={page} setPage={setPage} onLogout={handleLogout} onBack={onBackToSelector}>
-      {page === 'plan' && session?.rol !== 'mandante' && <PlanTrabajo session={session} />}
-      {page === 'informe' && session?.rol !== 'mandante' && <InformeDiario session={session} />}
+      {page === 'plan'     && session?.rol !== 'mandante' && <PlanTrabajo session={session} />}
+      {page === 'informe'  && session?.rol !== 'mandante' && <InformeDiario session={session} />}
       {page === 'historial' && <Historial />}
-      {page === 'libro' && <LibroObras />}
+      {page === 'libro'    && <LibroObras />}
+      {page === 'admin'    && session?.rolOriginal === 'mandante_admin' && <AdminPanel session={session} />}
     </Layout>
   )
 }

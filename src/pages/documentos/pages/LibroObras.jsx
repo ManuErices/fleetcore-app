@@ -126,8 +126,19 @@ function PinModal({ session, accion, onSuccess, onClose }) {
 // ── Badge de estado ────────────────────────────────────────────
 function EstadoBadge({ estado }) {
   const e = ESTADOS[estado] || ESTADOS.borrador
+  const gradients = {
+    borrador:   'linear-gradient(135deg, #94a3b8, #64748b)',
+    emitido:    'linear-gradient(135deg, #3B82F6, #1B5E8A)',
+    respondido: 'linear-gradient(135deg, #10B981, #059669)',
+    cerrado:    'linear-gradient(135deg, #374151, #1f2937)',
+  }
   return (
-    <span style={{ padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:700, background:e.bg, color:e.color, whiteSpace:'nowrap' }}>
+    <span style={{
+      padding: '3px 11px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+      background: gradients[estado] || gradients.borrador,
+      color: '#fff', whiteSpace: 'nowrap',
+      boxShadow: '0 1px 5px rgba(0,0,0,0.18)',
+    }}>
       {e.label}
     </span>
   )
@@ -585,45 +596,62 @@ Redacta en tono formal y técnico. Solo el cuerpo del folio. Máximo 180 palabra
 function FolioRow({ folio, onClick }) {
   const libro    = LIBROS[folio.libro]
   const tipoInfo = [...TIPOS_FOLIO.comunicaciones, ...TIPOS_FOLIO.prevencion].find(t => t.key === folio.tipo)
-  const estado   = ESTADOS[folio.estado] || ESTADOS.borrador
   const pendiente = folio.estado === 'emitido' && !folio.respuesta
 
   return (
-    <div onClick={onClick} style={{
-      background:'#fff', border:`1px solid ${pendiente ? '#fde68a' : C.border}`,
-      borderLeft: pendiente ? '4px solid #f59e0b' : `4px solid ${libro.color}`,
-      borderRadius:10, padding:'12px 16px', cursor:'pointer',
-      transition:'box-shadow .15s',
-      marginBottom:8,
-    }}
-    onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)'}
-    onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-    >
+    <div onClick={onClick}
+      className="folio-row"
+      style={{
+        background: '#fff',
+        border: `1px solid ${pendiente ? '#fde68a' : '#e8eef5'}`,
+        borderLeft: pendiente ? '4px solid #f59e0b' : `4px solid ${libro.color}`,
+        borderRadius: 12, padding: '13px 16px', cursor: 'pointer',
+        transition: 'all .18s ease',
+        marginBottom: 8,
+        boxShadow: pendiente ? '0 2px 14px rgba(245,158,11,0.1)' : '0 1px 4px rgba(0,0,0,0.04)',
+      }}>
       <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-        {/* Código */}
-        <div style={{ fontFamily:'monospace', fontWeight:700, fontSize:13, color:libro.color, minWidth:65, flexShrink:0 }}>
+        {/* Código — badge con gradiente */}
+        <div style={{
+          fontFamily: 'monospace', fontWeight: 800, fontSize: 12,
+          color: '#fff',
+          background: `linear-gradient(135deg, ${libro.color} 0%, ${libro.color}cc 100%)`,
+          padding: '4px 10px', borderRadius: 8,
+          minWidth: 65, flexShrink: 0, textAlign: 'center',
+          boxShadow: `0 2px 8px ${libro.color}35`,
+          letterSpacing: '0.03em',
+        }}>
           {folio.codigo}
         </div>
 
         {/* Info principal */}
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3, flexWrap:'wrap' }}>
-            <span style={{ fontSize:12, fontWeight:700, color:C.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-              {folio.asunto}
-            </span>
+          <div style={{ fontSize:13, fontWeight:700, color:'#0F2035', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
+            {folio.asunto}
           </div>
-          <div style={{ fontSize:11, color:C.gray }}>
-            {tipoInfo?.label} · {folio.creadoPor?.nombre} · {fmtFecha(folio.creadoEn)}
-            {pendiente && <span style={{ marginLeft:8, color:'#d97706', fontWeight:700 }}>⚡ Requiere respuesta</span>}
+          <div style={{ fontSize:11, color:'#94a3b8', display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
+            <span>{tipoInfo?.label}</span>
+            <span>·</span>
+            <span>{folio.creadoPor?.nombre}</span>
+            <span>·</span>
+            <span>{fmtFecha(folio.creadoEn)}</span>
+            {pendiente && (
+              <span style={{
+                background: 'rgba(245,158,11,0.1)', color:'#d97706', fontWeight:700,
+                padding: '1px 8px', borderRadius: 99, fontSize: 10,
+                border: '1px solid rgba(245,158,11,0.22)',
+              }}>
+                Requiere respuesta
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Estado */}
-        <div style={{ flexShrink:0 }}>
+        {/* Estado + flecha */}
+        <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:8 }}>
           <EstadoBadge estado={folio.estado} />
+          <span style={{ color:'#cbd5e1', fontSize:16, flexShrink:0 }}>›</span>
         </div>
-
-        <span style={{ color:C.gray, fontSize:14, flexShrink:0 }}>›</span>
       </div>
     </div>
   )
@@ -678,50 +706,194 @@ export default function LibroObras() {
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+      <style>{`
+        @keyframes tabShimmer {
+          0%   { transform: translateX(-200%); }
+          100% { transform: translateX(200%);  }
+        }
+        @keyframes badgePulse {
+          0%,100% { opacity:1; }
+          50%     { opacity:.6; }
+        }
+        @keyframes dotBounce {
+          0%,80%,100% { transform:scale(.6); opacity:.4; }
+          40%         { transform:scale(1);  opacity:1;  }
+        }
+        @keyframes slideUpFadeIn {
+          from { opacity:0; transform:translateY(12px); }
+          to   { opacity:1; transform:translateY(0); }
+        }
+        .folio-row:hover {
+          box-shadow: 0 6px 22px rgba(0,0,0,0.09) !important;
+          transform: translateY(-1px);
+          border-color: #d1dce8 !important;
+        }
+        .libro-tab-btn:hover:not(.libro-tab-active) {
+          box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
+          transform: translateY(-1px);
+        }
+        .stat-card { transition: transform .15s, box-shadow .15s; }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.1) !important; }
+        .filter-pill { transition: all .18s ease; font-family: inherit; }
+        .filter-pill:hover { transform: translateY(-1px); }
+        .nuevo-btn { transition: all .18s ease; font-family: inherit; }
+        .nuevo-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.2) !important; }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:28, animation:'slideUpFadeIn .35s ease' }}>
         <div>
-          <h1 style={{ fontSize:22, fontWeight:600, color:C.text, marginBottom:4 }}>Libro de Obras Digital</h1>
-          <p style={{ fontSize:13, color:C.gray }}>Comunicación oficial MPF Ingeniería Civil ↔ Río Tinto Mining</p>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+            <div style={{
+              width:42, height:42, borderRadius:12, flexShrink:0,
+              background:`linear-gradient(135deg, ${libro.color} 0%, ${libro.color}bb 100%)`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              boxShadow:`0 4px 14px ${libro.color}40`,
+              transition:'background .3s, box-shadow .3s',
+            }}>
+              {libroActivo === 'comunicaciones' ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+            <div>
+              <h1 style={{ fontSize:24, fontWeight:800, color:'#0F2035', marginBottom:2, letterSpacing:'-0.03em', fontFamily:'Outfit, sans-serif', lineHeight:1.1 }}>
+                Libro de Obras Digital
+              </h1>
+              <p style={{ fontSize:13, color:'#64748b', margin:0 }}>Comunicación oficial MPF Ingeniería Civil ↔ Río Tinto Mining</p>
+            </div>
+          </div>
+          <div style={{ height:3, width:52, borderRadius:2, background:`linear-gradient(90deg, ${libro.color}, ${libro.color}77)`, transition:'background .3s' }} />
         </div>
-        <LogoMPF height={36} />
+        <LogoMPF height={34} />
       </div>
 
-      {/* Selector de libro — tabs estilo profesional */}
-      <div style={{ display:'flex', gap:0, marginBottom:20, background:'#fff', border:`1px solid ${C.border}`, borderRadius:12, padding:4, width:'fit-content' }}>
-        {Object.entries(LIBROS).map(([key, lib]) => (
-          <button key={key} onClick={() => { setLibroActivo(key); setMostrarForm(false); setFiltroEstado('todos') }} style={{
-            padding:'9px 20px', fontSize:13, fontWeight:700, borderRadius:9, cursor:'pointer',
-            border:'none',
-            background: libroActivo===key ? lib.color : 'transparent',
-            color: libroActivo===key ? '#fff' : C.gray,
-            transition:'all .15s',
-          }}>{lib.label}</button>
-        ))}
+      {/* ── Selector de libro — CARD TABS ── */}
+      <div style={{ display:'flex', gap:14, marginBottom:24 }}>
+        {Object.entries(LIBROS).map(([key, lib]) => {
+          const isActive = libroActivo === key
+          const icon = key === 'comunicaciones' ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                stroke={isActive ? '#fff' : lib.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                stroke={isActive ? '#fff' : lib.color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )
+          return (
+            <button
+              key={key}
+              onClick={() => { setLibroActivo(key); setMostrarForm(false); setFiltroEstado('todos') }}
+              className={`libro-tab-btn${isActive ? ' libro-tab-active' : ''}`}
+              style={{
+                flex: 1,
+                padding: '18px 20px',
+                borderRadius: 16,
+                border: isActive ? 'none' : `1.5px solid ${lib.color}28`,
+                background: isActive
+                  ? `linear-gradient(135deg, ${lib.color} 0%, ${lib.color}cc 100%)`
+                  : '#fff',
+                color: isActive ? '#fff' : '#64748b',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: 'inherit',
+                transition: 'all .22s ease',
+                boxShadow: isActive
+                  ? `0 8px 28px ${lib.color}40, 0 2px 8px rgba(0,0,0,0.08)`
+                  : '0 1px 6px rgba(0,0,0,0.05)',
+                transform: isActive ? 'translateY(-3px)' : 'none',
+                position: 'relative',
+                overflow: 'hidden',
+              }}>
+              {/* Shimmer animado en estado activo */}
+              {isActive && (
+                <div style={{
+                  position:'absolute', top:0, left:0, width:'40%', height:'100%',
+                  background:'linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent)',
+                  animation:'tabShimmer 3s ease infinite',
+                  pointerEvents:'none',
+                }} />
+              )}
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, position:'relative' }}>
+                <div style={{
+                  width:38, height:38, borderRadius:11, flexShrink:0,
+                  background: isActive ? 'rgba(255,255,255,0.2)' : `${lib.color}14`,
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  boxShadow: isActive ? 'inset 0 1px 2px rgba(255,255,255,0.2)' : 'none',
+                }}>
+                  {icon}
+                </div>
+                {isActive && stats.pendientes > 0 && (
+                  <span style={{
+                    marginLeft:'auto',
+                    background:'rgba(255,255,255,0.22)',
+                    color:'#fff', fontSize:11, fontWeight:700,
+                    padding:'3px 9px', borderRadius:99,
+                    border:'1px solid rgba(255,255,255,0.3)',
+                    animation:'badgePulse 2.5s ease infinite',
+                  }}>
+                    {stats.pendientes} pend.
+                  </span>
+                )}
+                {!isActive && stats.pendientes > 0 && key !== libroActivo && (
+                  <span style={{
+                    marginLeft:'auto',
+                    background:`${lib.color}15`, color:lib.color,
+                    fontSize:11, fontWeight:700,
+                    padding:'3px 9px', borderRadius:99,
+                    border:`1px solid ${lib.color}30`,
+                  }}>...</span>
+                )}
+              </div>
+              <div style={{ fontSize:15, fontWeight:800, lineHeight:1.2, marginBottom:4, fontFamily:'Outfit, sans-serif', position:'relative' }}>
+                {lib.label}
+              </div>
+              <div style={{ fontSize:11, lineHeight:1.45, opacity: isActive ? 0.78 : 0.55, position:'relative' }}>
+                {key === 'comunicaciones' ? 'Comunicados formales MPF ↔ mandante' : 'Gestión de riesgos y seguridad laboral'}
+              </div>
+            </button>
+          )
+        })}
       </div>
 
-      {/* Stats + botón nuevo */}
+      {/* ── Stats + botón nuevo ── */}
       <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
         {[
-          { label:'Total', value:stats.total, color:C.gray },
-          { label:'Emitidos', value:stats.emitidos, color:C.accent },
-          { label:'Respondidos', value:stats.respondidos, color:C.green },
-          { label:'Cerrados', value:stats.cerrados, color:'#374151' },
-          ...(stats.pendientes > 0 ? [{ label:'Pendientes', value:stats.pendientes, color:'#d97706' }] : []),
+          { label:'TOTAL',       value:stats.total,       gradient:'linear-gradient(135deg, #94a3b8, #64748b)' },
+          { label:'EMITIDOS',    value:stats.emitidos,    gradient:`linear-gradient(135deg, ${libro.color}, ${libro.color}99)` },
+          { label:'RESPONDIDOS', value:stats.respondidos, gradient:'linear-gradient(135deg, #10B981, #059669)' },
+          { label:'CERRADOS',    value:stats.cerrados,    gradient:'linear-gradient(135deg, #374151, #1f2937)' },
+          ...(stats.pendientes > 0 ? [{ label:'PENDIENTES', value:stats.pendientes, gradient:'linear-gradient(135deg, #F59E0B, #d97706)' }] : []),
         ].map(s => (
-          <div key={s.label} style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:10, padding:'8px 16px', textAlign:'center', minWidth:70 }}>
-            <div style={{ fontSize:20, fontWeight:700, color:s.color, lineHeight:1 }}>{s.value}</div>
-            <div style={{ fontSize:10, color:C.gray, marginTop:2 }}>{s.label}</div>
+          <div key={s.label} className="stat-card" style={{
+            background:'#fff', border:'1px solid #e8eef5', borderRadius:11,
+            padding:'10px 16px 10px', textAlign:'center', minWidth:76,
+            boxShadow:'0 1px 6px rgba(0,0,0,0.05)', position:'relative', overflow:'hidden',
+          }}>
+            <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:s.gradient, borderRadius:'11px 11px 0 0' }} />
+            <div style={{ fontSize:22, fontWeight:800, color:'#0F2035', lineHeight:1, fontFamily:'Outfit,sans-serif', marginTop:4 }}>{s.value}</div>
+            <div style={{ fontSize:9, color:'#94a3b8', marginTop:3, fontWeight:700, letterSpacing:'.06em' }}>{s.label}</div>
           </div>
         ))}
         <div style={{ flex:1 }} />
         {(esMpf || session?.rol === 'mandante') && (
-          <button onClick={() => setMostrarForm(!mostrarForm)} style={{
-            padding:'9px 20px', fontSize:13, fontWeight:700,
-            background: mostrarForm ? '#f1f5f9' : libro.color,
+          <button onClick={() => setMostrarForm(!mostrarForm)} className="nuevo-btn" style={{
+            padding:'10px 22px', fontSize:13, fontWeight:700,
+            background: mostrarForm
+              ? '#f1f5f9'
+              : `linear-gradient(135deg, ${libro.color} 0%, ${libro.color}cc 100%)`,
             color: mostrarForm ? C.gray : '#fff',
             border: mostrarForm ? `1px solid ${C.border}` : 'none',
-            borderRadius:10, cursor:'pointer',
+            borderRadius:11, cursor:'pointer',
+            boxShadow: mostrarForm ? 'none' : `0 4px 16px ${libro.color}40`,
           }}>
             {mostrarForm ? '× Cancelar' : '+ Nuevo folio'}
           </button>
@@ -737,39 +909,77 @@ export default function LibroObras() {
         />
       )}
 
-      {/* Barra de búsqueda y filtros */}
-      <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
-        <input
-          value={busqueda} onChange={e => setBusqueda(e.target.value)}
-          placeholder="Buscar por asunto o código..."
-          style={{ flex:'1 1 200px', padding:'8px 12px', fontSize:13, border:`1px solid ${C.border}`, borderRadius:8, outline:'none' }}
-        />
-        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+      {/* ── Barra de búsqueda y filtros ── */}
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+        <div style={{ flex:'1 1 200px', position:'relative' }}>
+          <svg style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}
+            width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          <input
+            value={busqueda} onChange={e => setBusqueda(e.target.value)}
+            placeholder="Buscar por asunto o código..."
+            style={{ width:'100%', padding:'9px 12px 9px 32px', fontSize:13, border:'1.5px solid #e2e8f0', borderRadius:9, outline:'none', boxSizing:'border-box', transition:'border-color .15s', background:'#fff' }}
+          />
+        </div>
+        <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
           {['todos','borrador','emitido','respondido','cerrado'].map(e => (
-            <button key={e} onClick={() => setFiltroEstado(e)} style={{
-              padding:'6px 12px', fontSize:11, fontWeight:700, borderRadius:99, cursor:'pointer',
-              border: filtroEstado===e ? 'none' : `1px solid ${C.border}`,
-              background: filtroEstado===e ? libro.color : 'transparent',
-              color: filtroEstado===e ? '#fff' : C.gray,
-              textTransform:'capitalize',
+            <button key={e} onClick={() => setFiltroEstado(e)} className="filter-pill" style={{
+              padding:'6px 14px', fontSize:11, fontWeight:700, borderRadius:99, cursor:'pointer',
+              border: filtroEstado===e ? 'none' : '1.5px solid #e2e8f0',
+              background: filtroEstado===e
+                ? `linear-gradient(135deg, ${libro.color} 0%, ${libro.color}cc 100%)`
+                : '#fff',
+              color: filtroEstado===e ? '#fff' : '#64748b',
+              boxShadow: filtroEstado===e ? `0 3px 10px ${libro.color}35` : '0 1px 3px rgba(0,0,0,0.04)',
+              transform: filtroEstado===e ? 'translateY(-1px)' : 'none',
             }}>{e === 'todos' ? 'Todos' : ESTADOS[e]?.label}</button>
           ))}
         </div>
       </div>
 
-      {/* Lista */}
+      {/* ── Lista ── */}
       {loading ? (
-        <div style={{ textAlign:'center', padding:'3rem', color:C.gray }}>
-          <div style={{ fontSize:14 }}>Cargando folios...</div>
+        <div style={{ textAlign:'center', padding:'3rem', color:'#94a3b8' }}>
+          <div style={{ display:'flex', justifyContent:'center', gap:6, marginBottom:12 }}>
+            {[0,1,2].map(i => (
+              <div key={i} style={{ width:9, height:9, borderRadius:'50%', background:libro.color, animation:'dotBounce 1.2s ease infinite', animationDelay:`${i*0.2}s` }}/>
+            ))}
+          </div>
+          <div style={{ fontSize:13, fontWeight:500 }}>Cargando folios...</div>
         </div>
       ) : foliosFiltrados.length === 0 ? (
-        <div style={{ textAlign:'center', padding:'3rem', color:C.gray, background:'#fff', border:`1px solid ${C.border}`, borderRadius:12 }}>
-          <div style={{ fontSize:36, marginBottom:8 }}>📂</div>
-          <div style={{ fontSize:15, fontWeight:500 }}>
-            {busqueda ? 'Sin resultados para la búsqueda' : `Sin folios${filtroEstado !== 'todos' ? ` con estado "${ESTADOS[filtroEstado]?.label}"` : ' aún'}`}
+        <div style={{
+          textAlign:'center', padding:'3.5rem 2rem',
+          background:'linear-gradient(135deg, #f8fafc, #f0f4ff)',
+          border:`1.5px dashed ${libro.color}35`, borderRadius:16,
+          animation:'slideUpFadeIn .4s ease',
+        }}>
+          <div style={{
+            width:56, height:56, borderRadius:16, margin:'0 auto 16px',
+            background:`linear-gradient(135deg, ${libro.color}18, ${libro.color}0c)`,
+            border:`2px solid ${libro.color}25`,
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
+            {libroActivo === 'comunicaciones' ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke={libro.color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            ) : (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke={libro.color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
           </div>
-          <div style={{ fontSize:13, marginTop:4 }}>
-            {!busqueda && 'Crea el primer folio con el botón "+ Nuevo folio"'}
+          <div style={{ fontSize:16, fontWeight:700, color:'#0F2035', marginBottom:6, fontFamily:'Outfit,sans-serif' }}>
+            {busqueda ? 'Sin resultados' : filtroEstado !== 'todos' ? `Sin folios "${ESTADOS[filtroEstado]?.label}"` : 'Sin folios todavía'}
+          </div>
+          <div style={{ fontSize:13, color:'#94a3b8', lineHeight:1.6 }}>
+            {busqueda
+              ? `No hay folios que coincidan con "${busqueda}"`
+              : filtroEstado !== 'todos'
+              ? `Prueba con otro filtro o crea un nuevo folio`
+              : 'Crea el primer folio usando el botón "+ Nuevo folio"'}
           </div>
         </div>
       ) : (
