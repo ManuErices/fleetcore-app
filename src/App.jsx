@@ -405,10 +405,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [postInvite, setPostInvite] = useState(false);
 
   const pathname = window.location.pathname;
   const isTrabajadorRoute = pathname.startsWith('/trabajador');
-  const inviteMatch = pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
+  const inviteMatch = !postInvite && pathname.match(/^\/invite\/([a-zA-Z0-9]+)$/);
   const inviteToken = inviteMatch ? inviteMatch[1] : null;
 
   useEffect(() => {
@@ -434,6 +435,13 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleInviteAccepted = () => {
+    window.history.pushState({}, '', '/');
+    setUser(auth.currentUser);
+    setPostInvite(true);
+    // loading ya es false (fue seteado al detectar inviteToken en el useEffect)
+  };
 
   const handleLogout = async () => {
     try {
@@ -462,7 +470,7 @@ export default function App() {
 
   // ── Rutas especiales (sin auth) ───────────────────────────
   if (isTrabajadorRoute) return <TrabajadorApp />;
-  if (inviteToken) return <InviteAccept token={inviteToken} />;
+  if (inviteToken) return <InviteAccept token={inviteToken} onAccepted={handleInviteAccepted} />;
 
   if (loading) {
     return (

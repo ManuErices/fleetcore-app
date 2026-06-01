@@ -286,6 +286,26 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────────────
+    // DOCUMENTOS Y FIRMAS (Módulo de Documentos)
+    // ─────────────────────────────────────────────────────
+    match /documentos/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /pins/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /usuarios/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /folios/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /libros/{docId} {
+      allow read: if isAuth();
+      allow write: if isAnyAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
     // DEFAULT — denegar todo lo no especificado
     // ─────────────────────────────────────────────────────
     match /{document=**} {

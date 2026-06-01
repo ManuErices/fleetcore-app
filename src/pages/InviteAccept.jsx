@@ -19,6 +19,19 @@ import {
   signInWithEmailAndPassword,
   onAuthStateChanged,
 } from "firebase/auth";
+import { hashPin } from "./documentos/lib/firmas.js";
+
+function mapRole(mainRole) {
+  if (mainRole === 'superadmin') return 'admin'
+  if (mainRole === 'admin_contrato') return 'supervisor'
+  if (mainRole === 'revisor_admin') return 'supervisor'
+  if (mainRole === 'revisor') return 'mandante'
+  if (mainRole === 'mandante_admin') return 'mandante'
+  if (mainRole === 'mandante') return 'mandante'
+  if (mainRole === 'operador') return 'operador'
+  return 'supervisor'
+}
+
 
 const ROLES_LABEL = {
   admin_contrato:  "Administrador",
@@ -37,12 +50,12 @@ const MODULOS_LABEL = {
   workfleet:    "WorkFleet",
 };
 
-export default function InviteAccept({ token }) {
+export default function InviteAccept({ token, onAccepted }) {
   const [step,        setStep]        = useState("loading");
   const [invData,     setInvData]     = useState(null);
   const [empresa,     setEmpresa]     = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [form,        setForm]        = useState({ nombre: "", rut: "", email: "", password: "", confirm: "" });
+  const [form,        setForm]        = useState({ nombre: "", rut: "", email: "", password: "", confirm: "", pin: "", confirmPin: "" });
   const [error,       setError]       = useState("");
   const [saving,      setSaving]      = useState(false);
   const [mode,        setMode]        = useState("register");
@@ -83,7 +96,7 @@ export default function InviteAccept({ token }) {
       const email = emailOverride || form.email || currentUser?.email || "";
 
       // Crear/actualizar doc de usuario
-      await setDoc(doc(db, "users", uid), {
+      const userUpdate = {
         empresaId: invData.empresaId,
         role:      invData.rol,
         modulos:   invData.modulos || [],
@@ -91,7 +104,12 @@ export default function InviteAccept({ token }) {
         nombre:    form.nombre || "",
         rut:       form.rut || "",
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      };
+      if (form.pin) {
+        userUpdate.pinHash = await hashPin(form.pin);
+      }
+
+      await setDoc(doc(db, "users", uid), userUpdate, { merge: true });
 
       // Marcar invitación como usada — setDoc con merge evita problemas de cache offline
       await setDoc(doc(db, "invitaciones", token), {
@@ -100,8 +118,40 @@ export default function InviteAccept({ token }) {
         usadaEn:  serverTimestamp(),
       }, { merge: true });
 
+      // Si se definió un PIN de firma, guardarlo en la base de datos de firmas y documentos
+      if (form.pin) {
+        const u = email.split('@')[0].toLowerCase().trim();
+        const pinHash = await hashPin(form.pin);
+
+        // 1. Guardar en 'pins' para firmas
+        await setDoc(doc(db, "pins", u), {
+          hash: pinHash,
+          createdAt: new Date().toISOString(),
+        });
+
+        // 2. Guardar en 'usuarios' para documentos
+        const docRole = mapRole(invData.rol);
+        const empresaNombre = empresa?.nombre || "MPF Ingeniería Civil SpA";
+        await setDoc(doc(db, "usuarios", u), {
+          username: u,
+          nombre: (form.nombre || "").trim(),
+          rut: (form.rut || "").trim(),
+          cargo: "",
+          empresa: empresaNombre,
+          rol: docRole,
+          pinHash,
+          creadoEn: serverTimestamp(),
+        });
+      }
+
       setStep("done");
-      setTimeout(() => { window.location.href = "/"; }, 2500);
+      setTimeout(() => {
+        if (onAccepted) {
+          onAccepted();
+        } else {
+          window.location.href = "/";
+        }
+      }, 2500);
     } catch (e) {
       console.error("Error aceptando invitación:", e);
       setError("Error al procesar la invitación: " + e.message);
@@ -110,7 +160,11 @@ export default function InviteAccept({ token }) {
   };
 
   const handleChange = e => {
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }));
+    let val = e.target.value;
+    if (e.target.name === "pin" || e.target.name === "confirmPin") {
+      val = val.replace(/\D/g, "").slice(0, 4);
+    }
+    setForm(f => ({ ...f, [e.target.name]: val }));
     setError("");
   };
 
@@ -119,6 +173,8 @@ export default function InviteAccept({ token }) {
     if (!form.email.trim())  { setError("Ingresa tu email"); return; }
     if (form.password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres"); return; }
     if (form.password !== form.confirm) { setError("Las contraseñas no coinciden"); return; }
+    if (!form.pin || form.pin.length < 4) { setError("El PIN de firma es obligatorio y debe tener 4 dígitos"); return; }
+    if (form.pin !== form.confirmPin) { setError("Los PINs de firma no coinciden"); return; }
 
     setSaving(true);
     try {
@@ -350,6 +406,18 @@ export default function InviteAccept({ token }) {
                       placeholder="Repite la contraseña"
                       className={inputCls} />
                   </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="PIN de Firma (4 dígitos) *">
+                      <input name="pin" type="password" inputMode="numeric" maxLength={4} value={form.pin} onChange={handleChange}
+                        placeholder="••••"
+                        className={inputCls} />
+                    </Field>
+                    <Field label="Confirmar PIN *">
+                      <input name="confirmPin" type="password" inputMode="numeric" maxLength={4} value={form.confirmPin} onChange={handleChange}
+                        placeholder="••••"
+                        className={inputCls} />
+                    </Field>
+                  </div>
                   {error && <ErrorBanner msg={error} />}
                   <button onClick={handleRegister} disabled={saving}
                     className="w-full py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-black text-sm transition-all disabled:opacity-50 shadow-lg shadow-indigo-500/20">

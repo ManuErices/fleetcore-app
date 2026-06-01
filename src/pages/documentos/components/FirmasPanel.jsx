@@ -1,18 +1,40 @@
 // src/components/FirmasPanel.jsx
 import { useState, useEffect } from 'react'
-import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, getFirmas } from '../lib/firmas.js'
+import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, getFirmas, tienePin, crearPin } from '../lib/firmas.js'
 import { getSession } from '../lib/auth.js'
 
 function PinModal({ session, rolLabel, onSuccess, onClose }) {
-  const [pin,     setPin]     = useState('')
-  const [error,   setError]   = useState('')
-  const [loading, setLoading] = useState(false)
+  const [pin,         setPin]         = useState('')
+  const [confirmPin,  setConfirmPin]  = useState('')
+  const [hasPin,      setHasPin]      = useState(true)
+  const [checkingPin, setCheckingPin] = useState(true)
+  const [error,       setError]       = useState('')
+  const [loading,     setLoading]     = useState(false)
+
+  useEffect(() => {
+    async function check() {
+      try {
+        const tiene = await tienePin(session.usuario)
+        setHasPin(tiene)
+      } catch(e) {
+        console.error("Error al revisar si el usuario tiene PIN:", e)
+      }
+      setCheckingPin(false)
+    }
+    check()
+  }, [session.usuario])
 
   async function handleFirmar() {
     setError('')
     if (!pin) return setError('Ingresa tu PIN')
     setLoading(true)
     try {
+      if (!hasPin) {
+        if (pin.length < 4) { setError('El PIN debe tener exactamente 4 dígitos'); setLoading(false); return }
+        if (pin !== confirmPin) { setError('Los PINs de firma no coinciden'); setLoading(false); return }
+        // Crear el PIN en caliente en la colección 'pins' y 'usuarios'
+        await crearPin(session.usuario, pin)
+      }
       const ok = await verificarPin(session.usuario, pin)
       if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
       onSuccess()
@@ -52,8 +74,12 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
               </svg>
             </div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#0F2035' }}>Firmar documento</div>
-              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{rolLabel}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#0F2035' }}>
+                {checkingPin ? 'Cargando...' : hasPin ? 'Firmar documento' : 'Configurar PIN de firma'}
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                {checkingPin ? 'Espere un momento' : hasPin ? rolLabel : 'Es tu primera firma — Crea tu PIN'}
+              </div>
             </div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8', lineHeight: 1 }}>×</button>
@@ -75,22 +101,48 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
           </div>
         </div>
 
-        {/* PIN */}
-        <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 8 }}>
-          Ingresa tu PIN para confirmar
-        </label>
-        <input
-          type="password" inputMode="numeric" maxLength={8}
-          value={pin} onChange={e => { setPin(e.target.value.replace(/\D/g,'')); setError('') }}
-          placeholder="••••" autoFocus
-          style={{
-            width: '100%', padding: '12px', fontSize: 26, letterSpacing: 12,
-            border: `1.5px solid ${error ? '#EF4444' : '#e2e8f0'}`,
-            borderRadius: 10, boxSizing: 'border-box', outline: 'none',
-            textAlign: 'center', color: '#0F2035', background: '#f8fafc',
-            transition: 'border-color .15s, box-shadow .15s',
-          }}
-        />
+        {checkingPin ? (
+          <div style={{ padding: '20px 0', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Verificando credenciales...</div>
+        ) : (
+          <>
+            {/* PIN */}
+            <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginBottom: 8 }}>
+              {hasPin ? 'Ingresa tu PIN para confirmar' : 'Ingresa tu nuevo PIN (4 dígitos)'}
+            </label>
+            <input
+              type="password" inputMode="numeric" maxLength={4}
+              value={pin} onChange={e => { setPin(e.target.value.replace(/\D/g,'').slice(0, 4)); setError('') }}
+              placeholder="••••" autoFocus
+              style={{
+                width: '100%', padding: '12px', fontSize: 26, letterSpacing: 12,
+                border: `1.5px solid ${error ? '#EF4444' : '#e2e8f0'}`,
+                borderRadius: 10, boxSizing: 'border-box', outline: 'none',
+                textAlign: 'center', color: '#0F2035', background: '#f8fafc',
+                transition: 'border-color .15s, box-shadow .15s',
+              }}
+            />
+
+            {!hasPin && (
+              <>
+                <label style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', display: 'block', marginTop: 14, marginBottom: 8 }}>
+                  Confirma tu nuevo PIN
+                </label>
+                <input
+                  type="password" inputMode="numeric" maxLength={4}
+                  value={confirmPin} onChange={e => { setConfirmPin(e.target.value.replace(/\D/g,'').slice(0, 4)); setError('') }}
+                  placeholder="••••"
+                  style={{
+                    width: '100%', padding: '12px', fontSize: 26, letterSpacing: 12,
+                    border: `1.5px solid ${error ? '#EF4444' : '#e2e8f0'}`,
+                    borderRadius: 10, boxSizing: 'border-box', outline: 'none',
+                    textAlign: 'center', color: '#0F2035', background: '#f8fafc',
+                    transition: 'border-color .15s, box-shadow .15s',
+                  }}
+                />
+              </>
+            )}
+          </>
+        )}
 
         {error && (
           <div style={{
@@ -103,17 +155,17 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
         )}
 
         <button
-          onClick={handleFirmar} disabled={loading}
+          onClick={handleFirmar} disabled={loading || checkingPin}
           style={{
             width: '100%', marginTop: 16, padding: '13px', fontSize: 14, fontWeight: 700,
-            background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0F2035, #2563eb)',
+            background: (loading || checkingPin) ? '#94a3b8' : 'linear-gradient(135deg, #0F2035, #2563eb)',
             color: '#fff', border: 'none', borderRadius: 11,
-            cursor: loading ? 'not-allowed' : 'pointer',
+            cursor: (loading || checkingPin) ? 'not-allowed' : 'pointer',
             fontFamily: 'inherit',
-            boxShadow: loading ? 'none' : '0 4px 14px rgba(37,99,235,0.35)',
+            boxShadow: (loading || checkingPin) ? 'none' : '0 4px 14px rgba(37,99,235,0.35)',
             transition: 'all .15s',
           }}>
-          {loading ? 'Procesando...' : 'Firmar documento'}
+          {loading ? 'Procesando...' : hasPin ? 'Firmar documento' : 'Crear PIN y Firmar'}
         </button>
       </div>
     </div>

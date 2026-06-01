@@ -3,6 +3,7 @@ import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPass
 import { auth, googleProvider } from "../lib/firebase";
 import { doc, setDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { hashPin } from "./documentos/lib/firmas.js";
 import jsQR from "jsqr";
 
 export default function LoginPage() {
@@ -62,7 +63,7 @@ export default function LoginPage() {
   const handleRegister = async (userData) => {
     setLoading(true);
     try {
-      const { email, password, nombre, rut, empresa } = userData;
+      const { email, password, nombre, rut, empresa, pin } = userData;
 
       // 1. Crear usuario en Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -90,6 +91,8 @@ export default function LoginPage() {
         activadoEn:    null,
       });
 
+      const pinHash = await hashPin(pin);
+
       // 4. Crear usuario en /users raíz con empresaId y rol admin_contrato
       await setDoc(doc(db, 'users', user.uid), {
         email,
@@ -99,6 +102,7 @@ export default function LoginPage() {
         role:      'admin_contrato',
         modulos:   [],
         cargo:     '',
+        pinHash,
         createdAt: serverTimestamp(),
       });
 
@@ -111,7 +115,29 @@ export default function LoginPage() {
         role:      'admin_contrato',
         modulos:   [],
         cargo:     '',
+        pinHash,
         createdAt: serverTimestamp(),
+      });
+
+      // 6. Registrar credenciales de firma en el módulo de documentos
+      const u = email.split('@')[0].toLowerCase().trim();
+      
+      // 6.1 Guardar en 'pins' para firmas
+      await setDoc(doc(db, 'pins', u), {
+        hash: pinHash,
+        createdAt: new Date().toISOString(),
+      });
+
+      // 6.2 Guardar en 'usuarios' para documentos
+      await setDoc(doc(db, 'usuarios', u), {
+        username: u,
+        nombre: nombre.trim(),
+        rut: rut.trim(),
+        cargo: '',
+        empresa: empresa.razonSocial,
+        rol: 'admin', // maps to admin
+        pinHash,
+        creadoEn: serverTimestamp(),
       });
 
       setShowRegister(false);
@@ -418,6 +444,8 @@ function RegisterModal({ onRegister, onClose, loading }) {
     email:         '',
     password:      '',
     confirmPassword: '',
+    pin:           '',
+    confirmPin:    '',
     // Datos de la empresa
     empresa: {
       razonSocial: '',
@@ -492,6 +520,8 @@ function RegisterModal({ onRegister, onClose, loading }) {
     if (!formData.email.trim())         { setError('El email es obligatorio'); return; }
     if (formData.password.length < 6)   { setError('La contraseña debe tener al menos 6 caracteres'); return; }
     if (formData.password !== formData.confirmPassword) { setError('Las contraseñas no coinciden'); return; }
+    if (!formData.pin || formData.pin.length < 4) { setError('El PIN de firma es obligatorio y debe tener 4 dígitos'); return; }
+    if (formData.pin !== formData.confirmPin) { setError('Los PINs de firma no coinciden'); return; }
     setStep(2);
   };
 
@@ -579,6 +609,21 @@ function RegisterModal({ onRegister, onClose, loading }) {
               <input type="password" value={formData.confirmPassword}
                 onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
                 placeholder="Repite la contraseña" className="input-modern w-full" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">PIN de Firma (4 dígitos) <span className="text-red-500">*</span></label>
+                <input type="password" inputMode="numeric" maxLength={4} value={formData.pin}
+                  onChange={e => setFormData({ ...formData, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                  placeholder="••••" className="input-modern w-full" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Confirmar PIN <span className="text-red-500">*</span></label>
+                <input type="password" inputMode="numeric" maxLength={4} value={formData.confirmPin}
+                  onChange={e => setFormData({ ...formData, confirmPin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                  placeholder="••••" className="input-modern w-full" />
+              </div>
             </div>
 
             {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
