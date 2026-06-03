@@ -99,7 +99,38 @@ const GRUPO_COLORS = {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadPlanCuentas() {
-  const { cuentas, loadingCuentas, guardarCuenta, saldoCuenta } = useContabilidad();
+  const { cuentas, loadingCuentas, guardarCuenta, eliminarCuenta, cargarCuentas, saldoCuenta } = useContabilidad();
+  const [deduplicando, setDeduplicando] = useState(false);
+  const [resultadoDedup, setResultadoDedup] = useState(null);
+
+  // ── Eliminar cuentas duplicadas (mismo código, distintos ids) ─────────────
+  const deduplicarCuentas = async () => {
+    setDeduplicando(true);
+    setResultadoDedup(null);
+    // Agrupar por código
+    const porCodigo = {};
+    cuentas.forEach(c => {
+      if (!c.codigo) return;
+      if (!porCodigo[c.codigo]) porCodigo[c.codigo] = [];
+      porCodigo[c.codigo].push(c);
+    });
+    let eliminadas = 0;
+    for (const [codigo, lista] of Object.entries(porCodigo)) {
+      if (lista.length <= 1) continue;
+      // Conservar la primera (más antigua), eliminar el resto
+      const aEliminar = lista.slice(1);
+      for (const c of aEliminar) {
+        try {
+          await eliminarCuenta(c.id);
+          eliminadas++;
+        } catch (e) { console.error("Error eliminando cuenta duplicada:", e); }
+      }
+    }
+    await cargarCuentas();
+    setDeduplicando(false);
+    setResultadoDedup(eliminadas);
+    setTimeout(() => setResultadoDedup(null), 4000);
+  };
   const [showModal, setShowModal]   = useState(false);
   const [editando, setEditando]     = useState(null);
   const [busqueda, setBusqueda]     = useState("");
@@ -143,7 +174,25 @@ export default function ContabilidadPlanCuentas() {
           <h1 className="text-xl font-black text-slate-900">Plan de Cuentas</h1>
           <p className="text-xs text-slate-500 mt-0.5">{cuentas.length} cuentas registradas</p>
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
+        <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
+          {/* Botón deduplicar — solo visible si hay duplicados */}
+          {cuentas.length !== new Set(cuentas.map(c => c.codigo)).size && (
+            <button
+              onClick={deduplicarCuentas}
+              disabled={deduplicando}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all"
+            >
+              {deduplicando
+                ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Limpiando...</>
+                : <>🧹 Eliminar duplicadas</>
+              }
+            </button>
+          )}
+          {resultadoDedup !== null && (
+            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200">
+              ✅ {resultadoDedup} cuenta{resultadoDedup !== 1 ? "s" : ""} duplicada{resultadoDedup !== 1 ? "s" : ""} eliminada{resultadoDedup !== 1 ? "s" : ""}
+            </span>
+          )}
           <button
             onClick={() => { setEditando(null); setShowModal(true); }}
             className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white font-bold rounded-xl text-sm shadow-md shadow-purple-200 hover:shadow-lg transition-all"
