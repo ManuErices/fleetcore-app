@@ -4,6 +4,7 @@ import ContabilidadPlanCuentas from "./ContabilidadPlanCuentas";
 import ContabilidadLibroDiario from "./ContabilidadLibroDiario";
 import ContabilidadEstados from "./ContabilidadEstados";
 import ContabilidadTributario from "./ContabilidadTributario";
+import CombustibleModule from "./CombustibleModule";
 
 // ─── Navegación interna ───────────────────────────────────────────────────────
 const NAV_ITEMS = [
@@ -43,6 +44,15 @@ const NAV_ITEMS = [
         d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
     ),
   },
+  {
+    id: "combustible",
+    label: "Combustible",
+    short: "Comb.",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M13 10V3L4 14h7v7l9-11h-7z" />
+    ),
+  },
 ];
 
 // ─── Badge de alertas contables ───────────────────────────────────────────────
@@ -75,6 +85,7 @@ function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
       case "diario":     return <ContabilidadLibroDiario />;
       case "estados":    return <ContabilidadEstados />;
       case "tributario": return <ContabilidadTributario />;
+      case "combustible": return <CombustibleModule />;
       default:           return <ContabilidadPlanCuentas />;
     }
   }
