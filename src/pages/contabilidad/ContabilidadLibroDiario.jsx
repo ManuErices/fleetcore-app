@@ -1,5 +1,23 @@
 import React, { useState, useMemo } from "react";
-import { useContabilidad, PeriodoSelector, TIPOS_MAP, fmt, MESES } from "./ContabilidadContext";
+import { useContabilidad, PeriodoSelector, TIPOS_MAP, fmt, MESES, normalizaRut } from "./ContabilidadContext";
+import ModalImportIConstruct from "./ContabilidadImportIConstruct";
+import ModalExportPDF from "./ContabilidadExportPDF";
+
+// Categorías rápidas para reclasificar asientos importados desde el Libro Diario
+const CATEGORIAS_RAPIDAS = [
+  { label: "Combustible (Ley 18.502)", icon: "⛽" },
+  { label: "Subcontratos",             icon: "🏗️" },
+  { label: "Materiales y Repuestos",   icon: "🔧" },
+  { label: "Transporte y Pasajes",     icon: "✈️" },
+  { label: "Telecomunicaciones",       icon: "📡" },
+  { label: "Seguridad",                icon: "🛡️" },
+  { label: "Servicios Profesionales",  icon: "⚖️" },
+  { label: "Peajes y Movilización",    icon: "🛣️" },
+  { label: "Arriendos",                icon: "🏢" },
+  { label: "Gastos Financieros",       icon: "🏦" },
+  { label: "Gastos Generales",         icon: "📋" },
+  { label: "Gastos Varios",            icon: "🧾" },
+];
 
 // ─── Modal asiento ────────────────────────────────────────────────────────────
 const LINEA_EMPTY = { cuentaId: "", cuentaNombre: "", debe: "", haber: "", descripcion: "" };
@@ -18,8 +36,7 @@ function LineaAsiento({ linea, idx, cuentas, onChange, onRemove, canRemove }) {
       <div className="col-span-5">
         <select value={linea.cuentaId} onChange={e => {
           const c = cuentas.find(x => x.id === e.target.value);
-          set("cuentaId", e.target.value);
-          set("cuentaNombre", c?.nombre || "");
+          onChange(idx, { ...linea, cuentaId: e.target.value, cuentaNombre: c?.nombre || "" });
         }}
           className="w-full px-2 py-1.5 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-500 text-xs">
           <option value="">— Seleccionar cuenta —</option>
@@ -194,6 +211,93 @@ function ModalAsiento({ isOpen, onClose, editando, onSave, cuentas, periodoActiv
   );
 }
 
+// ─── Detalle expandido de asiento con reclasificación rápida ─────────────────
+function AsientoDetalle({ asiento, onElegir }) {
+  const [showReclasif, setShowReclasif] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleReclasificar = async (categ) => {
+    setSaving(true);
+    await onElegir(asiento, categ);
+    setSaving(false);
+    setShowReclasif(false);
+  };
+
+  return (
+    <div className="border-t border-slate-100">
+      {/* Tabla de líneas */}
+      <div className="px-4 pb-3">
+        <table className="w-full mt-2">
+          <thead>
+            <tr className="text-[10px] font-black text-slate-400 uppercase">
+              <th className="text-left py-1.5 pr-2">Cuenta</th>
+              <th className="text-left py-1.5 hidden sm:table-cell">Detalle</th>
+              <th className="text-right py-1.5 px-2">Debe</th>
+              <th className="text-right py-1.5">Haber</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(asiento.lineas || []).map((l, i) => (
+              <tr key={i} className="border-t border-slate-50">
+                <td className="py-1.5 pr-2">
+                  <p className="text-xs font-semibold text-slate-700">{l.cuentaNombre || l.cuentaId}</p>
+                </td>
+                <td className="py-1.5 hidden sm:table-cell">
+                  <p className="text-xs text-slate-400">{l.descripcion}</p>
+                </td>
+                <td className="py-1.5 px-2 text-right">
+                  {parseFloat(l.debe) > 0 && <span className="text-xs font-mono font-bold text-emerald-600">{fmt(l.debe)}</span>}
+                </td>
+                <td className="py-1.5 text-right">
+                  {parseFloat(l.haber) > 0 && <span className="text-xs font-mono font-bold text-red-500">{fmt(l.haber)}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="border-t-2 border-slate-200">
+            <tr>
+              <td colSpan={2} className="py-1.5 text-xs font-black text-slate-500">TOTALES</td>
+              <td className="py-1.5 px-2 text-right text-xs font-black font-mono text-emerald-600">{fmt(asiento.totalDebe)}</td>
+              <td className="py-1.5 text-right text-xs font-black font-mono text-red-500">{fmt(asiento.totalDebe)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* Botón reclasificar (solo asientos automáticos) */}
+        {asiento.tipo === "automatico" && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <button
+              onClick={() => setShowReclasif(!showReclasif)}
+              className="flex items-center gap-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+              </svg>
+              {showReclasif ? "Cancelar" : "Reclasificar cuenta de gasto"}
+            </button>
+
+            {showReclasif && (
+              <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                {CATEGORIAS_RAPIDAS.map(cat => (
+                  <button
+                    key={cat.label}
+                    onClick={() => handleReclasificar(cat)}
+                    disabled={saving}
+                    className="flex items-center gap-1.5 px-2 py-2 rounded-xl border-2 border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 text-left text-[10px] font-bold text-slate-600 transition-all disabled:opacity-50"
+                  >
+                    <span className="text-sm flex-shrink-0">{cat.icon}</span>
+                    <span className="truncate">{cat.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Badge tipo asiento ───────────────────────────────────────────────────────
 const TIPO_COLORS = {
   manual:       "bg-slate-100 text-slate-600",
@@ -205,19 +309,264 @@ const TIPO_COLORS = {
   automatico:   "bg-violet-100 text-violet-700",
 };
 
+// Detecta si un asiento es una Nota de Crédito por su glosa
+const esNotaCredito = (a) => a.glosa?.startsWith("NC —") || a.glosa?.startsWith("NCE —") || (a.origen === "iconstruye" && a.glosa?.startsWith("NC"));
+const esVenta = (a) => a.origen === "rcv_venta" && !esNotaCredito(a);
+
+// ─── Chip de categoría de gasto editable en la lista ──────────────────────────
+// Tipos de cuenta que representan gasto/costo (lado resultado-deudor)
+const TIPOS_GASTO = ["costo", "gasto_adm", "gasto_fin", "otro_resultado"];
+
+// Mapeo categoría → tipo de cuenta (mismo que usa la reclasificación al expandir)
+const TIPO_POR_CATEGORIA = {
+  "Gastos Financieros": "gasto_fin",
+  "Subcontratos": "costo", "Materiales y Repuestos": "costo",
+  "Combustible (Ley 18.502)": "costo", "Combustible/Lubricantes": "costo",
+  "Mantención Vehículos": "costo",
+};
+
+// Línea de gasto del asiento: debe > 0 y que no sea IVA ni impuesto
+function getLineaGasto(asiento) {
+  return (asiento.lineas || [])
+    .map((l, i) => ({ ...l, _idx: i }))
+    .filter(l => parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
+    .sort((a, b) => parseFloat(b.debe) - parseFloat(a.debe))[0] || null;
+}
+
+// Detecta la categoría actual a partir del detalle de la línea de gasto
+function categoriaDeLinea(linea) {
+  const d = linea?.descripcion || "";
+  return CATEGORIAS_RAPIDAS.find(c => d.includes(c.label)) || null;
+}
+
+// Cuenta preferida por categoría (códigos del Plan de Cuentas, en orden de preferencia).
+// Si ninguna existe, cae al primer cuenta del tipo correspondiente.
+const CUENTA_POR_CATEGORIA = {
+  "Combustible (Ley 18.502)": ["5-01-004"],                 // Combustible y Lubricantes
+  "Subcontratos":             ["5-01-002"],                 // Subcontratos
+  "Materiales y Repuestos":   ["5-01-003"],                 // Materiales y Suministros
+  "Transporte y Pasajes":     ["6-01-006", "5-01-007"],     // Pasajes y Traslados / Fletes
+  "Telecomunicaciones":       ["6-01-005"],                 // Telecomunicaciones
+  "Seguridad":                ["5-01-009", "6-01-011"],     // Seguridad Industrial / Oficina
+  "Servicios Profesionales":  ["6-01-002"],                 // Honorarios Profesionales
+  "Peajes y Movilización":    ["6-01-007"],                 // Peajes y Movilización
+  "Arriendos":                ["6-01-003"],                 // Arriendos Oficina
+  "Gastos Financieros":       ["6-02-003", "6-01-017"],     // Comisiones / Gastos Bancarios
+  "Gastos Generales":         ["6-01-019"],                 // Gastos Varios Administración
+  "Gastos Varios":            ["6-01-019"],
+};
+
+// Resuelve la cuenta destino de una categoría: primero por código preferido, luego por tipo
+function cuentaDeCategoria(categ, cuentas) {
+  const activas = cuentas.filter(c => c.activa !== false);
+  const codigos = CUENTA_POR_CATEGORIA[categ.label] || [];
+  for (const cod of codigos) {
+    const c = activas.find(x => x.codigo === cod && TIPOS_GASTO.includes(x.tipo));
+    if (c) return c;
+  }
+  const tipoTarget = TIPO_POR_CATEGORIA[categ.label] || "gasto_adm";
+  return activas.find(c => c.tipo === tipoTarget && TIPOS_GASTO.includes(c.tipo))
+      || activas.find(c => c.tipo === "gasto_adm")
+      || null;
+}
+
+// Extrae proveedor (rut + razón social) de un asiento importado, sin depender de campos _*
+function infoProveedor(asiento) {
+  // RUT desde el importHash: "periodo|RUT|folios"
+  let rut = (asiento.importHash || "").split("|")[1] || "";
+  rut = rut.replace(/^NCE?-/, ""); // por si fuera nota de crédito
+  // Fallback: RUT en el detalle de la línea de contrapartida ("... · RUT 12345-6")
+  if (!rut) {
+    for (const l of asiento.lineas || []) {
+      const m = (l.descripcion || "").match(/RUT\s*([0-9.\-kK]+)/);
+      if (m) { rut = m[1]; break; }
+    }
+  }
+  // Razón social: lo que va antes del primer " · " en la glosa, sin prefijos NC
+  let razonSocial = (asiento.glosa || "").split(" · ")[0].replace(/^NCE?\s*—\s*/, "").trim();
+  return { rut, razonSocial };
+}
+
+// Aplica una categoría al asiento (función pura, reutilizada por el chip y el detalle)
+function aplicarCategoria(asiento, categ, cuentas) {
+  const lineaGasto = (asiento.lineas || []).find(l =>
+    parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""));
+  if (!lineaGasto) return null;
+
+  const nuevaCuenta = cuentaDeCategoria(categ, cuentas);
+  if (!nuevaCuenta) return null;
+
+  const nuevasLineas = (asiento.lineas || []).map(l =>
+    (parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
+      ? { ...l, cuentaId: nuevaCuenta.id, cuentaNombre: nuevaCuenta.nombre,
+          descripcion: `${categ.icon} ${categ.label} — reclasificado` }
+      : l
+  );
+  return {
+    ...asiento,
+    lineas: nuevasLineas,
+    totalDebe: nuevasLineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0),
+  };
+}
+
+function CuentaGastoChip({ asiento, onElegir }) {
+  const [abierto, setAbierto]     = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const lineaGasto = useMemo(() => getLineaGasto(asiento), [asiento]);
+
+  if (!lineaGasto) return null; // ventas/NC u otros asientos sin línea de gasto
+
+  const catActual = categoriaDeLinea(lineaGasto);
+  const icon  = catActual ? catActual.icon : "🏷";
+  const label = catActual ? catActual.label : (lineaGasto.cuentaNombre || "Sin categoría");
+
+  const elegir = async (cat) => {
+    setGuardando(true);
+    await onElegir(asiento, cat);
+    setGuardando(false);
+    setAbierto(false);
+  };
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        onClick={e => { e.stopPropagation(); setAbierto(o => !o); }}
+        title="Click para cambiar la categoría de gasto"
+        className="group inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors max-w-[260px]"
+      >
+        <span className="flex-shrink-0">{icon}</span>
+        <span className="truncate">{label}</span>
+        {guardando
+          ? <span className="w-2.5 h-2.5 border border-amber-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          : <svg className={`w-2.5 h-2.5 flex-shrink-0 opacity-50 transition-transform ${abierto ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>}
+      </button>
+
+      {abierto && (
+        <>
+          {/* Capa para cerrar al hacer click fuera */}
+          <button
+            onClick={e => { e.stopPropagation(); setAbierto(false); }}
+            className="fixed inset-0 z-40 cursor-default"
+            aria-label="Cerrar"
+          />
+          <div
+            onClick={e => e.stopPropagation()}
+            className="absolute left-0 top-full mt-1 z-50 w-[300px] sm:w-[380px] bg-white rounded-xl shadow-xl border border-slate-100 p-2"
+          >
+            <p className="text-[10px] font-black text-slate-400 uppercase px-1 pb-1.5">Categoría de gasto</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {CATEGORIAS_RAPIDAS.map(cat => {
+                const sel = catActual?.label === cat.label;
+                return (
+                  <button
+                    key={cat.label}
+                    disabled={guardando}
+                    onClick={e => { e.stopPropagation(); elegir(cat); }}
+                    className={`flex items-center gap-1.5 px-2 py-2 rounded-lg border-2 text-left text-[10px] font-bold transition-all disabled:opacity-50
+                      ${sel
+                        ? "border-amber-300 bg-amber-50 text-amber-700"
+                        : "border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600"}`}
+                  >
+                    <span className="text-sm flex-shrink-0">{cat.icon}</span>
+                    <span className="truncate">{cat.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadLibroDiario() {
-  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo } = useContabilidad();
-  const [showModal, setShowModal]   = useState(false);
-  const [editando, setEditando]     = useState(null);
-  const [expandido, setExpandido]   = useState(null);
-  const [busqueda, setBusqueda]     = useState("");
-  const [filtroTipo, setFiltroTipo] = useState("todos");
-  const [deletingId, setDeletingId] = useState(null);
+  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto, guardarReglaGasto } = useContabilidad();
+  const [showModal, setShowModal]     = useState(false);
+  const [editando, setEditando]       = useState(null);
+  const [expandido, setExpandido]     = useState(null);
+  const [busqueda, setBusqueda]       = useState("");
+  const [filtroTipo, setFiltroTipo]   = useState("todos");
+  const [ordenCampo, setOrdenCampo]   = useState("fecha");   // fecha|glosa|monto|tipo
+  const [ordenDir, setOrdenDir]       = useState("desc");    // asc|desc
+  const [deletingId, setDeletingId]   = useState(null);
+  const [showImport, setShowImport]   = useState(false);
+  const [showExport, setShowExport]   = useState(false);
+  const [autoClasif, setAutoClasif]   = useState(null);      // {procesando, total, hechos} | null
+
+  // Reclasifica un asiento y aprende la regla para ese proveedor (se aplicará a futuros)
+  const reclasificarYAprender = async (asiento, cat) => {
+    const nuevo = aplicarCategoria(asiento, cat, cuentas);
+    if (!nuevo) return;
+    await guardarAsiento(nuevo);
+    const gl = getLineaGasto(nuevo);
+    const { rut, razonSocial } = infoProveedor(nuevo);
+    if (rut && gl) {
+      await guardarReglaGasto(rut, razonSocial, {
+        cuentaId: gl.cuentaId, cuentaNombre: gl.cuentaNombre,
+        categoriaLabel: cat.label, categoriaIcon: cat.icon,
+      });
+    }
+  };
+
+  // Aplica una regla aprendida directamente a un asiento (sin re-mapear categoría)
+  const aplicarReglaAAsiento = (asiento, regla) => {
+    const nuevasLineas = (asiento.lineas || []).map(l =>
+      (parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
+        ? { ...l, cuentaId: regla.cuentaId, cuentaNombre: regla.cuentaNombre,
+            descripcion: `${regla.categoriaIcon || "🏷"} ${regla.categoriaLabel} — auto (aprendido)` }
+        : l
+    );
+    return { ...asiento, lineas: nuevasLineas,
+      totalDebe: nuevasLineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0) };
+  };
+
+  // Auto-clasifica los asientos del período aplicando las reglas aprendidas por proveedor
+  const autoClasificar = async () => {
+    // Candidatos: asientos con línea de gasto y regla conocida que cambie la cuenta actual
+    const pendientes = asientos.filter(a => {
+      if (esNotaCredito(a) || esVenta(a)) return false;
+      const gl = getLineaGasto(a);
+      if (!gl) return false;
+      const { rut } = infoProveedor(a);
+      const regla = reglasGasto[normalizaRut(rut)];
+      return regla && regla.cuentaId && regla.cuentaId !== gl.cuentaId;
+    });
+    if (pendientes.length === 0) {
+      setAutoClasif({ procesando: false, total: 0, hechos: 0 });
+      setTimeout(() => setAutoClasif(null), 2500);
+      return;
+    }
+    if (!window.confirm(`Se aplicarán reglas aprendidas a ${pendientes.length} asiento(s) del período. ¿Continuar?`)) return;
+    setAutoClasif({ procesando: true, total: pendientes.length, hechos: 0 });
+    let hechos = 0;
+    for (const a of pendientes) {
+      const { rut } = infoProveedor(a);
+      const regla = reglasGasto[normalizaRut(rut)];
+      await guardarAsiento(aplicarReglaAAsiento(a, regla));
+      hechos++;
+      setAutoClasif({ procesando: true, total: pendientes.length, hechos });
+    }
+    setAutoClasif({ procesando: false, total: pendientes.length, hechos });
+    setTimeout(() => setAutoClasif(null), 3500);
+  };
+
+  const esCompra = (a) => a.origen === "iconstruye" && !esNotaCredito(a);
+
+  const toggleOrden = (campo) => {
+    if (ordenCampo === campo) setOrdenDir(d => d === "asc" ? "desc" : "asc");
+    else { setOrdenCampo(campo); setOrdenDir("asc"); }
+  };
 
   const asientosFiltrados = useMemo(() => {
-    return asientos.filter(a => {
+    let lista = asientos.filter(a => {
+      // Filtro por tipo
+      if (filtroTipo === "nota_credito") return esNotaCredito(a);
+      if (filtroTipo === "venta")        return esVenta(a);
+      if (filtroTipo === "compra")       return esCompra(a);
       if (filtroTipo !== "todos" && a.tipo !== filtroTipo) return false;
+      // Búsqueda
       if (busqueda) {
         const b = busqueda.toLowerCase();
         return a.glosa?.toLowerCase().includes(b) ||
@@ -225,12 +574,37 @@ export default function ContabilidadLibroDiario() {
       }
       return true;
     });
-  }, [asientos, filtroTipo, busqueda]);
+
+    // Ordenamiento
+    lista = [...lista].sort((a, b) => {
+      let va, vb;
+      if (ordenCampo === "fecha")  { va = a.fecha  || ""; vb = b.fecha  || ""; }
+      else if (ordenCampo === "glosa") { va = a.glosa || ""; vb = b.glosa || ""; }
+      else if (ordenCampo === "monto") { va = a.totalDebe || 0; vb = b.totalDebe || 0; }
+      else if (ordenCampo === "tipo")  { va = a.tipo  || ""; vb = b.tipo  || ""; }
+      else if (ordenCampo === "origen"){ va = a.origen|| ""; vb = b.origen|| ""; }
+      else { va = ""; vb = ""; }
+      if (va < vb) return ordenDir === "asc" ? -1 :  1;
+      if (va > vb) return ordenDir === "asc" ?  1 : -1;
+      return 0;
+    });
+
+    return lista;
+  }, [asientos, filtroTipo, busqueda, ordenCampo, ordenDir]);
 
   const totales = useMemo(() => ({
     debe:  asientosFiltrados.reduce((s, a) => s + (a.totalDebe || 0), 0),
     count: asientosFiltrados.length,
   }), [asientosFiltrados]);
+
+  // Cuántos asientos del período tienen una regla aprendida que cambiaría su cuenta actual
+  const nPorClasificar = useMemo(() => asientos.filter(a => {
+    if (esNotaCredito(a) || esVenta(a)) return false;
+    const gl = getLineaGasto(a);
+    if (!gl) return false;
+    const regla = reglasGasto[normalizaRut(infoProveedor(a).rut)];
+    return regla && regla.cuentaId && regla.cuentaId !== gl.cuentaId;
+  }).length, [asientos, reglasGasto]);
 
   const handleEliminar = async (id) => {
     if (!window.confirm("¿Eliminar este asiento? Esta acción no se puede deshacer.")) return;
@@ -250,6 +624,37 @@ export default function ContabilidadLibroDiario() {
         </div>
         <div className="flex items-center gap-2 sm:ml-auto">
           <PeriodoSelector />
+          {/* Botón Auto-clasificar (aplica reglas aprendidas por proveedor) */}
+          <button
+            onClick={autoClasificar}
+            disabled={autoClasif?.procesando}
+            title="Aplica las categorías aprendidas a los asientos del período cuyo proveedor ya tiene una regla"
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-500 text-white font-bold rounded-xl text-sm shadow-md shadow-amber-200 hover:shadow-lg transition-all disabled:opacity-60"
+          >
+            {autoClasif?.procesando ? (
+              <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{autoClasif.hechos}/{autoClasif.total}</>
+            ) : autoClasif ? (
+              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>{autoClasif.hechos > 0 ? `${autoClasif.hechos} clasificados` : "Sin pendientes"}</>
+            ) : (
+              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Auto-clasificar{nPorClasificar > 0 ? ` (${nPorClasificar})` : ""}</>
+            )}
+          </button>
+          {/* Botón Exportar PDF */}
+          <button
+            onClick={() => setShowExport(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-teal-700 to-emerald-600 text-white font-bold rounded-xl text-sm shadow-md shadow-teal-200 hover:shadow-lg transition-all"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Exportar PDF
+          </button>
+          {/* Botón Importar iConstruct */}
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-700 to-blue-600 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 hover:shadow-lg transition-all"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            iConstruct
+          </button>
           <button
             onClick={() => { setEditando(null); setShowModal(true); }}
             className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white font-bold rounded-xl text-sm shadow-md shadow-purple-200 hover:shadow-lg transition-all"
@@ -274,22 +679,82 @@ export default function ContabilidadLibroDiario() {
         ))}
       </div>
 
-      {/* Filtros */}
-      <div className="glass-card rounded-xl p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por glosa o cuenta..." className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm" />
+      {/* Filtros + Ordenamiento */}
+      <div className="glass-card rounded-xl p-4 space-y-3">
+        {/* Fila 1: Búsqueda + Tipo */}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar por glosa, proveedor o cuenta..."
+              className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm" />
+            {busqueda && (
+              <button onClick={() => setBusqueda("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            )}
+          </div>
+          <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
+            className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:border-purple-400 bg-white min-w-40">
+            <option value="todos">Todos los tipos</option>
+            <optgroup label="Por origen">
+              <option value="compra">🛒 Compras (RCV/iConstruct)</option>
+              <option value="venta">🔵 Ventas (RCV)</option>
+              <option value="nota_credito">🔴 Notas de Crédito</option>
+            </optgroup>
+            <optgroup label="Por tipo">
+              <option value="automatico">Automático</option>
+              <option value="manual">Manual</option>
+              <option value="ajuste">Ajuste</option>
+              <option value="depreciacion">Depreciación</option>
+              <option value="iva">IVA</option>
+            </optgroup>
+          </select>
         </div>
-        <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:border-purple-400">
-          <option value="todos">Todos los tipos</option>
-          <option value="manual">Manual</option>
-          <option value="ajuste">Ajuste</option>
-          <option value="depreciacion">Depreciación</option>
-          <option value="iva">IVA</option>
-          <option value="automatico">Automático</option>
-        </select>
+
+        {/* Fila 2: Chips de ordenamiento */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordenar:</span>
+          {[
+            { campo: "fecha",  label: "Fecha"     },
+            { campo: "glosa",  label: "Proveedor" },
+            { campo: "monto",  label: "Monto"     },
+            { campo: "tipo",   label: "Tipo"      },
+            { campo: "origen", label: "Origen"    },
+          ].map(({ campo, label }) => {
+            const activo = ordenCampo === campo;
+            return (
+              <button key={campo} onClick={() => toggleOrden(campo)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all
+                  ${activo
+                    ? "border-purple-400 bg-purple-50 text-purple-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}>
+                {label}
+                {activo && (
+                  <svg className={`w-3 h-3 transition-transform ${ordenDir === "desc" ? "rotate-180" : ""}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7"/>
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+          {/* Contador resultados */}
+          <span className="ml-auto text-[11px] text-slate-400">
+            {asientosFiltrados.length} de {asientos.length} asientos
+            {filtroTipo !== "todos" || busqueda ? ` · filtrado` : ""}
+          </span>
+          {/* Limpiar filtros */}
+          {(filtroTipo !== "todos" || busqueda) && (
+            <button onClick={() => { setFiltroTipo("todos"); setBusqueda(""); }}
+              className="text-[10px] font-bold text-purple-600 hover:text-purple-800 px-2 py-1 rounded-lg hover:bg-purple-50 transition-all">
+              Limpiar ×
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Lista de asientos */}
@@ -312,19 +777,37 @@ export default function ContabilidadLibroDiario() {
                 onClick={() => setExpandido(expandido === a.id ? null : a.id)}
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-purple-50/30 transition-colors"
               >
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs font-black">{idx + 1}</span>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={esNotaCredito(a)
+                    ? { background: "linear-gradient(135deg, #db2777, #be185d)" }
+                    : esVenta(a)
+                    ? { background: "linear-gradient(135deg, #1d4ed8, #2563eb)" }
+                    : { background: "linear-gradient(135deg, #7e22ce, #6d28d9)" }}>
+                  <span className="text-white text-xs font-black">
+                    {esNotaCredito(a) ? "NC" : esVenta(a) ? "V" : idx + 1}
+                  </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-bold text-slate-800 truncate">{a.glosa}</p>
+                    {esNotaCredito(a) ? (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 bg-pink-100 text-pink-700">
+                        {a.origen === "rcv_venta" ? "nc emitida" : "nota de crédito"}
+                      </span>
+                    ) : esVenta(a) ? (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 bg-blue-100 text-blue-700">
+                        venta
+                      </span>
+                    ) : (
                     <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${TIPO_COLORS[a.tipo] || "bg-slate-100 text-slate-600"}`}>
                       {a.tipo || "manual"}
                     </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <p className="text-xs text-slate-400">{a.fecha}</p>
                     <p className="text-xs text-slate-400">{a.lineas?.length || 0} líneas</p>
+                    <CuentaGastoChip asiento={a} onElegir={reclasificarYAprender} />
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -351,43 +834,7 @@ export default function ContabilidadLibroDiario() {
 
               {/* Detalle expandido */}
               {expandido === a.id && (
-                <div className="border-t border-slate-100 px-4 pb-3">
-                  <table className="w-full mt-2">
-                    <thead>
-                      <tr className="text-[10px] font-black text-slate-400 uppercase">
-                        <th className="text-left py-1.5 pr-2">Cuenta</th>
-                        <th className="text-left py-1.5 hidden sm:table-cell">Detalle</th>
-                        <th className="text-right py-1.5 px-2">Debe</th>
-                        <th className="text-right py-1.5">Haber</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(a.lineas || []).map((l, i) => (
-                        <tr key={i} className="border-t border-slate-50">
-                          <td className="py-1.5 pr-2">
-                            <p className="text-xs font-semibold text-slate-700">{l.cuentaNombre || l.cuentaId}</p>
-                          </td>
-                          <td className="py-1.5 hidden sm:table-cell">
-                            <p className="text-xs text-slate-400">{l.descripcion}</p>
-                          </td>
-                          <td className="py-1.5 px-2 text-right">
-                            {parseFloat(l.debe) > 0 && <span className="text-xs font-mono font-bold text-emerald-600">{fmt(l.debe)}</span>}
-                          </td>
-                          <td className="py-1.5 text-right">
-                            {parseFloat(l.haber) > 0 && <span className="text-xs font-mono font-bold text-red-500">{fmt(l.haber)}</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="border-t-2 border-slate-200">
-                      <tr>
-                        <td colSpan={2} className="py-1.5 text-xs font-black text-slate-500">TOTALES</td>
-                        <td className="py-1.5 px-2 text-right text-xs font-black font-mono text-emerald-600">{fmt(a.totalDebe)}</td>
-                        <td className="py-1.5 text-right text-xs font-black font-mono text-red-500">{fmt(a.totalDebe)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                <AsientoDetalle asiento={a} onElegir={reclasificarYAprender} />
               )}
             </div>
           ))}
@@ -396,6 +843,21 @@ export default function ContabilidadLibroDiario() {
 
       <ModalAsiento isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }}
         editando={editando} onSave={guardarAsiento} cuentas={cuentas} periodoActivo={periodoActivo} />
+
+      <ModalImportIConstruct
+        isOpen={showImport}
+        onClose={() => setShowImport(false)}
+        cuentas={cuentas}
+        reglasGasto={reglasGasto}
+        guardarAsiento={guardarAsiento}
+        periodoActivo={periodoActivo}
+        buscarHashesExistentes={buscarHashesExistentes}
+        onImportDone={(periodoImportado) => {
+          setShowImport(false);
+          setPeriodoActivo(periodoImportado);
+        }}
+      />
+      <ModalExportPDF isOpen={showExport} onClose={() => setShowExport(false)} />
     </div>
   );
 }
