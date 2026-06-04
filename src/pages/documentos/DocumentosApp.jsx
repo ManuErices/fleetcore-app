@@ -24,6 +24,18 @@ function mapRole(mainRole) {
   return 'supervisor'
 }
 
+const CARGO_POR_ROL = {
+  superadmin:     'Administrador General',
+  admin_contrato: 'Administrador de Contrato',
+  revisor_admin:  'Supervisor',
+  revisor:        'Supervisor',
+  operador:       'Operador',
+  administrativo: 'Administrativo',
+  mandante:       'Mandante',
+  mandante_admin: 'Administrador Mandante',
+  trabajador:     'Trabajador',
+}
+
 export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -47,7 +59,13 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
                 if (empSnap.exists()) empresaNombre = empSnap.data().nombre || empresaNombre
               } catch {}
             }
-            const enriched = { ...existing, rolOriginal: data.role || '', empresaId, empresaNombre }
+            const enriched = {
+              ...existing,
+              rolOriginal: data.role || '',
+              empresaId,
+              empresaNombre,
+              cargo: existing.cargo || data.cargo || CARGO_POR_ROL[data.role] || '',
+            }
             sessionStorage.setItem(SESSION_KEY, JSON.stringify(enriched))
             setSession(enriched)
             if (enriched.rol === 'mandante') setPage('libro')
@@ -68,7 +86,7 @@ export default function DocumentosApp({ user, onBackToSelector, onLogout }) {
           const data = snap.exists() ? snap.data() : {}
           const rol = mapRole(data.role || 'supervisor')
           const nombre = data.nombre || user.displayName || user.email.split('@')[0]
-          const cargo = data.cargo || ''
+          const cargo = data.cargo || CARGO_POR_ROL[data.role] || ''
           const empresa = rol === 'mandante' ? 'Río Tinto Mining' : 'MPF Ingeniería Civil SpA'
           const empresaId = data.empresaId || ''
 

@@ -2,6 +2,29 @@
 import { useState } from 'react'
 import { generarConIA } from '../lib/claude.js'
 import ResultPanel from '../components/ResultPanel.jsx'
+import SearchableDropdown from '../../../components/SearchableDropdown.jsx'
+
+const CONDICIONES_CLIMATICAS = [
+  'Despejado',
+  'Despejado, viento leve',
+  'Despejado, viento moderado',
+  'Despejado, viento fuerte',
+  'Parcialmente nublado',
+  'Parcialmente nublado, viento leve',
+  'Parcialmente nublado, viento moderado',
+  'Nublado',
+  'Nublado, viento moderado',
+  'Nublado, viento fuerte',
+  'Lluvia leve',
+  'Lluvia moderada',
+  'Lluvia intensa',
+  'Llovizna',
+  'Niebla / Neblina',
+  'Nieve',
+  'Granizo',
+  'Caluroso, despejado',
+  'Frío, despejado',
+]
 
 const today = new Date().toISOString().split('T')[0]
 
@@ -217,9 +240,14 @@ Redacta el informe completo con encabezado formal, secciones bien estructuradas,
             <label style={{ display:'block', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', color:'#64748b', marginBottom:5 }}>Supervisor</label>
             <input className="doc-input" style={inp} value={supervisor} onChange={e=>setSupervisor(e.target.value)} placeholder="Nombre supervisor"/>
           </div>
-          <div style={{ flex:'1 1 160px', minWidth:0 }}>
+          <div style={{ flex:'1 1 160px', minWidth:0, position:'relative' }}>
             <label style={{ display:'block', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', color:'#64748b', marginBottom:5 }}>Condiciones climáticas</label>
-            <input className="doc-input" style={inp} value={clima} onChange={e=>setClima(e.target.value)} placeholder="Ej: Despejado, viento moderado"/>
+            <SearchableDropdown
+              value={clima}
+              onChange={setClima}
+              placeholder="Ej: Despejado, viento moderado"
+              options={CONDICIONES_CLIMATICAS}
+            />
           </div>
         </div>
       </div>
@@ -263,9 +291,11 @@ Redacta el informe completo con encabezado formal, secciones bien estructuradas,
       </button>
 
       <ResultPanel
-        texto={result} tipo="informe"
+        texto={result} loading={loading} tipo="informe"
         titulo={`Informe Diario – ${sector||'Sin sector'} – ${fecha}`}
         session={session}
+        fecha={fecha}
+        sector={sector}
       />
     </div>
   )

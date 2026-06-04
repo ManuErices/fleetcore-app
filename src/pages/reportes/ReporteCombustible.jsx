@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, query, getDocs, orderBy, addDoc, doc, getDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import { collection, query, getDocs, orderBy, addDoc, doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { onAuthStateChanged } from "firebase/auth";
@@ -142,11 +142,9 @@ export default function ReporteCombustible() {
         const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
         const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
         const reportesSnap = await getDocs(q);
-        const reportesData = reportesSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        console.log("reportes data:", reportesData);
+        const reportesData = reportesSnap.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(r => !r.deleted);
 
         setReportes(reportesData);
 
@@ -170,18 +168,32 @@ export default function ReporteCombustible() {
       const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
       const q = query(reportesRef, orderBy('fechaCreacion', 'desc'));
       const reportesSnap = await getDocs(q);
-      const reportesData = reportesSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const reportesData = reportesSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(r => !r.deleted);
       setReportes(reportesData);
 
-      // Extraer surtidores únicos
       const surtidoresUnicos = [...new Set(reportesData.map(r => r.repartidorId).filter(Boolean))];
       setSurtidores(surtidoresUnicos);
     } catch (error) {
       console.error("Error recargando reportes:", error);
     }
+  };
+
+  const writeAuditLog = (action, docId, docData) => {
+    const entry = {
+      action,
+      docId,
+      collection: 'reportes_combustible',
+      userId: currentUser?.uid || '',
+      userEmail: currentUser?.email || '',
+      userRole,
+      docData,
+      timestamp: serverTimestamp(),
+    };
+    addDoc(collection(db, 'empresas', empresaId, 'audit_log'), entry).catch(err =>
+      console.error('audit_log write failed:', err)
+    );
   };
 
 
@@ -296,21 +308,54 @@ export default function ReporteCombustible() {
     });
   }, [filtros, reportes, projects, machines, empleados, empresas, estaciones, equiposSurtidores]);
 
-  const handleEliminar = async (id) => {
-    if (!window.confirm("¿Estás seguro de eliminar este reporte?")) return;
+  const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
 
+  const handleEliminar = async (id) => {
+    if (!window.confirm("¿Archivar este reporte? Quedará oculto pero no se borrará definitivamente.")) return;
+
+    const reporte = reportes.find(r => r.id === id);
     try {
       setLoading(true);
-      await deleteDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', id));
-
-      // Recargar usando la función
+      await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', id), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedBy: { uid: currentUser?.uid || '', email: currentUser?.email || '', role: userRole },
+      });
+      writeAuditLog('archive', id, reporte);
       await handleRecargarReportes();
-
-      toast({ type: 'success', message: 'Reporte eliminado exitosamente' });
+      toast({ type: 'success', message: 'Reporte archivado exitosamente' });
       setLoading(false);
     } catch (error) {
-      console.error("Error eliminando:", error);
-      toast({ type: 'error', message: 'Error al eliminar el reporte' });
+      console.error("Error archivando:", error);
+      toast({ type: 'error', message: 'Error al archivar el reporte' });
+      setLoading(false);
+    }
+  };
+
+  const handleEliminarSeleccionados = async () => {
+    if (reportesSeleccionados.length === 0) return;
+    if (!window.confirm(`¿Archivar ${reportesSeleccionados.length} reporte(s) seleccionado(s)?`)) return;
+
+    const reportesAArchivar = reportes.filter(r => reportesSeleccionados.includes(r.id));
+    try {
+      setLoading(true);
+      await Promise.all(
+        reportesAArchivar.map(r =>
+          updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', r.id), {
+            deleted: true,
+            deletedAt: serverTimestamp(),
+            deletedBy: { uid: currentUser?.uid || '', email: currentUser?.email || '', role: userRole },
+          })
+        )
+      );
+      reportesAArchivar.forEach(r => writeAuditLog('archive', r.id, r));
+      setReportesSeleccionados([]);
+      await handleRecargarReportes();
+      toast({ type: 'success', message: `${reportesAArchivar.length} reporte(s) archivado(s)` });
+      setLoading(false);
+    } catch (error) {
+      console.error("Error archivando:", error);
+      toast({ type: 'error', message: 'Error al archivar reportes' });
       setLoading(false);
     }
   };
@@ -906,6 +951,18 @@ export default function ReporteCombustible() {
 
           {/* Fila de acciones de exportación */}
           <div className="flex flex-wrap items-center gap-2">
+            {reportesSeleccionados.length > 0 && (
+              <button
+                onClick={handleEliminarSeleccionados}
+                className="px-3 py-2 rounded-xl bg-gradient-to-r from-slate-600 to-slate-700 hover:from-red-600 hover:to-red-700 text-white font-semibold text-xs transition-all shadow flex items-center gap-1.5"
+                title="Archivar reportes seleccionados (no se borran definitivamente)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8" />
+                </svg>
+                Archivar ({reportesSeleccionados.length})
+              </button>
+            )}
             <button
               onClick={descargarPDFDetallado}
               disabled={reportesSeleccionados.length === 0}
@@ -1084,17 +1141,16 @@ export default function ReporteCombustible() {
                           )}
                         </td>
                         <td className="px-3 py-3 text-center">
-                          {userRole === 'administrador' && !reporte.firmado && (
-                            <button
-                              onClick={() => handleEliminar(reporte.id)}
-                              className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                              Eliminar
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleEliminar(reporte.id)}
+                            className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-red-100 hover:text-red-700 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto"
+                            title="Archivar reporte (no se borra definitivamente)"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8" />
+                            </svg>
+                            Archivar
+                          </button>
                         </td>
                       </tr>
                     ))

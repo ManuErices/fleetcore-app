@@ -160,15 +160,24 @@ export default function PlanTrabajo({ session }) {
   const [supervisor, setSupervisor] = useState('')
   const [cargo, setCargo] = useState('')
 
-  useEffect(() => {
-    console.log('--- PlanTrabajo AutoFill Debug ---')
-    console.log('Session actual:', session)
-    console.log('Supervisor actual:', supervisor)
-    console.log('Cargo actual:', cargo)
+  const CARGO_POR_ROL = {
+    superadmin:     'Administrador General',
+    admin_contrato: 'Administrador de Contrato',
+    revisor_admin:  'Supervisor',
+    revisor:        'Supervisor',
+    operador:       'Operador',
+    administrativo: 'Administrativo',
+    mandante:       'Mandante',
+    mandante_admin: 'Administrador Mandante',
+    trabajador:     'Trabajador',
+  }
 
-    if (session) {
-      if (session.nombre && !supervisor) setSupervisor(session.nombre)
-      if (session.cargo && !cargo) setCargo(session.cargo)
+  useEffect(() => {
+    if (!session) return
+    if (session.nombre && !supervisor) setSupervisor(session.nombre)
+    if (!cargo) {
+      const cargoFinal = session.cargo || CARGO_POR_ROL[session.rolOriginal] || ''
+      if (cargoFinal) setCargo(cargoFinal)
     }
   }, [session])
 
@@ -454,7 +463,7 @@ Redacta con lenguaje técnico formal, sin errores ortográficos. Usa bullets con
       </button>
 
       <ResultPanel
-        texto={result} tipo="plan"
+        texto={result} loading={loading} tipo="plan"
         titulo={tituloDoc}
         session={session}
         fecha={fecha}
