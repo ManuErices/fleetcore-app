@@ -68,16 +68,15 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
 
   // Permisos combinados: rol + módulo + plan
-  // admin_contrato: solo WorkFleet (reportes) + WorkFleet-M
   // ✅ FIX: superadmin nunca bloqueado por plan — bypassa canAccess()
-  const canAccessFleetCore = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
-  const canAccessWorkFleet = isSuperAdmin || isAdminContrato;
-  const canAccessRRHH = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
-  const canAccessReportes = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
-  const canAccessFinanzas = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
-  const canAccessContabilidad = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
-  const canAccessDocumentos = isSuperAdmin || isAdminContrato || isRevisorRole || (userRole === 'administrativo' && hasModulo('fleetcore'));
-  const canAccessWorkFleetM = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
+  const canAccessFleetCore = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+  const canAccessWorkFleet = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'administrativo' && hasModulo('workfleet')) && canAccess('workfleet')) || (userRole === 'operador' && canAccess('workfleet'));
+  const canAccessRRHH = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
+  const canAccessReportes = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
+  const canAccessFinanzas = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
+  const canAccessContabilidad = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
+  const canAccessDocumentos = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || (isRevisorRole && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+  const canAccessWorkFleetM = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'operador' || userRole === 'administrativo') && canAccess('workfleet'));
 
   // Razón de bloqueo para mostrar el mensaje correcto
   const blockReason = (moduleId, roleOk) => {
@@ -221,7 +220,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <AppCard
               onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
               canAccess={canAccessFleetCore}
-              blockReason={blockReason('fleetcore', isSuperAdmin || (userRole === 'administrativo' && hasModulo('fleetcore')))}
+              blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('fleetcore')))}
               requiredPlan="starter"
               glowColor="from-orange-500 to-orange-700"
               borderColor="border-orange-200 hover:border-orange-400"
@@ -235,7 +234,6 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "📊", text: "Dashboard y reportes" },
                 { icon: "🚜", text: "Gestión de equipos" },
                 { icon: "📅", text: "Calendario y logs" },
-                { icon: "⛽", text: "Control de combustible" },
                 { icon: "💰", text: "Remuneraciones y costos" },
                 { icon: "📑", text: "Órdenes de compra" },
               ]}
@@ -245,7 +243,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <AppCard
               onClick={() => handleSelect('rrhh', canAccessRRHH)}
               canAccess={canAccessRRHH}
-              blockReason={blockReason('rrhh', isSuperAdmin || (userRole === 'administrativo' && hasModulo('rrhh')))}
+              blockReason={blockReason('rrhh', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('rrhh')))}
               requiredPlan="pro"
               glowColor="from-emerald-500 to-green-700"
               borderColor="border-emerald-200 hover:border-emerald-400"
@@ -293,7 +291,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <AppCard
               onClick={() => handleSelect('finanzas', canAccessFinanzas)}
               canAccess={canAccessFinanzas}
-              blockReason={blockReason('finanzas', isSuperAdmin || (userRole === 'administrativo' && hasModulo('finanzas')))}
+              blockReason={blockReason('finanzas', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('finanzas')))}
               requiredPlan="enterprise"
               glowColor="from-purple-600 to-violet-700"
               borderColor="border-purple-200 hover:border-purple-400"
@@ -317,7 +315,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <AppCard
               onClick={() => handleSelect('contabilidad', canAccessContabilidad)}
               canAccess={canAccessContabilidad}
-              blockReason={blockReason('contabilidad', isSuperAdmin || (userRole === 'administrativo' && hasModulo('contabilidad')))}
+              blockReason={blockReason('contabilidad', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('contabilidad')))}
               requiredPlan="enterprise"
               glowColor="from-indigo-600 to-blue-700"
               borderColor="border-indigo-200 hover:border-indigo-400"
@@ -341,7 +339,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <AppCard
               onClick={() => handleSelect('documentos', canAccessDocumentos)}
               canAccess={canAccessDocumentos}
-              blockReason={blockReason('documentos', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('fleetcore')))}
+              blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || isRevisorRole || (userRole === 'administrativo' && hasModulo('fleetcore')))}
               requiredPlan="starter"
               glowColor="from-cyan-500 to-teal-700"
               borderColor="border-cyan-200 hover:border-cyan-400"
@@ -375,7 +373,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               <AppCard
                 onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
                 canAccess={canAccessWorkFleetM}
-                blockReason={null}
+                blockReason={blockReason('workfleet', isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo')}
                 requiredPlan="starter"
                 glowColor="from-cyan-500/30 to-blue-500/30"
                 borderColor="border-cyan-400/40"
@@ -390,7 +388,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 ]}
                 buttonClass="from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
                 buttonLabel="Abrir WorkFleet-M"
-                onUpgrade={() => { }}
+                onUpgrade={() => { if (isAdminContrato) { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); } }}
               />
               <AppCard
                 onClick={() => { window.location.href = '/trabajador'; }}

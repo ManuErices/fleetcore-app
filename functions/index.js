@@ -9,6 +9,8 @@ const { defineSecret } = require('firebase-functions/params');
 const admin         = require('firebase-admin');
 const cors          = require('cors')({ origin: true });
 const { MercadoPagoConfig, PreApproval } = require('mercadopago');
+const { WebpayPlus } = require('transbank-sdk');
+const axios = require('axios');
 const { sendEmail } = require('./ses');
 const { sendWhatsapp } = require('./twilio');
 const {
@@ -165,11 +167,166 @@ exports.webhookMercadoPago = onRequest((req, res) => {
 });
 
 // ============================================================
+// POST /createWebpaySubscription
+// ============================================================
+exports.createWebpaySubscription = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { planId, userId, userEmail, priceUf, modules } = req.body;
+
+      if (!userId || !userEmail || !planId || priceUf === undefined) {
+        return res.status(400).json({ error: 'Faltan campos requeridos' });
+      }
+
+      // 1. Obtener valor UF del día
+      let ufRate = 38300;
+      try {
+        const ufRes = await axios.get('https://mindicador.cl/api/uf');
+        if (ufRes.data && ufRes.data.serie && ufRes.data.serie[0]) {
+          ufRate = Math.round(ufRes.data.serie[0].valor);
+        }
+      } catch (ufErr) {
+        console.warn('Error fetching UF:', ufErr.message);
+      }
+
+      const totalClp = Math.round(priceUf * 1.19 * ufRate);
+
+      // 2. Configurar Transbank
+      const tx = new WebpayPlus.Transaction();
+      const buyOrder = "FC-" + Math.floor(Math.random() * 1000000);
+      const sessionId = userId;
+
+      const projectId = admin.apps[0].options.projectId;
+      const region = 'us-central1';
+      const returnUrl = `https://${region}-${projectId}.cloudfunctions.net/webpayConfirm`;
+
+      // 3. Crear la transacción
+      const result = await tx.create(buyOrder, sessionId, totalClp, returnUrl);
+
+      // 4. Guardar intent de pago
+      await db.collection('subscription_intents').doc(userId).set({
+        userId,
+        userEmail,
+        planId,
+        modules: modules || planId.split(','),
+        total: totalClp,
+        token: result.token,
+        gateway: 'webpay',
+        status: 'pending',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return res.status(200).json({
+        success: true,
+        url: result.url,
+        token: result.token,
+      });
+
+    } catch (err) {
+      console.error('createWebpaySubscription error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ============================================================
+// POST/GET /webpayConfirm
+// ============================================================
+exports.webpayConfirm = onRequest((req, res) => {
+  cors(req, res, async () => {
+    const token = req.query.token_ws || req.body?.token_ws;
+    const tbkToken = req.query.TBK_TOKEN || req.body?.TBK_TOKEN;
+
+    const appUrl = process.env.APP_URL || 'https://fleetcore.web.app';
+
+    if (!token && !tbkToken) {
+      return res.redirect(`${appUrl}/payment-result?status=failure&reason=no_token`);
+    }
+
+    try {
+      const tx = new WebpayPlus.Transaction();
+
+      if (tbkToken && !token) {
+        const intentsSnap = await db.collection('subscription_intents')
+          .where('token', '==', tbkToken)
+          .limit(1)
+          .get();
+
+        if (!intentsSnap.empty) {
+          const intentDoc = intentsSnap.docs[0];
+          await intentDoc.ref.set({ status: 'aborted', updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        }
+        return res.redirect(`${appUrl}/payment-result?status=failure&reason=user_abort`);
+      }
+
+      const result = await tx.commit(token);
+
+      const intentsSnap = await db.collection('subscription_intents')
+        .where('token', '==', token)
+        .limit(1)
+        .get();
+
+      if (intentsSnap.empty) {
+        console.error('No se encontró intent para el token:', token);
+        return res.redirect(`${appUrl}/payment-result?status=failure&reason=intent_not_found`);
+      }
+
+      const intentDoc = intentsSnap.docs[0];
+      const { userId, planId, modules, total } = intentDoc.data();
+
+      if (result.response_code === 0) {
+        await intentDoc.ref.set({
+          status: 'success',
+          vci: result.vci,
+          buyOrder: result.buy_order,
+          paymentTypeCode: result.payment_type_code,
+          cardNumber: result.card_detail?.card_number || '',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        await db.collection('subscriptions').doc(userId).set({
+          userId,
+          planId,
+          modules,
+          gateway: 'webpay',
+          status: 'authorized',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        await db.collection('payment_history').add({
+          userId,
+          planId,
+          buyOrder: result.buy_order,
+          gateway: 'webpay',
+          total,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return res.redirect(`${appUrl}/payment-result?status=success`);
+      } else {
+        await intentDoc.ref.set({
+          status: 'rejected',
+          responseCode: result.response_code,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        return res.redirect(`${appUrl}/payment-result?status=failure&reason=rejected&code=${result.response_code}`);
+      }
+
+    } catch (err) {
+      console.error('webpayConfirm error:', err.message);
+      return res.redirect(`${appUrl}/payment-result?status=failure&reason=${encodeURIComponent(err.message)}`);
+    }
+  });
+});
+
+// ============================================================
 // Funciones existentes — CNE, tipo de cambio
 // ============================================================
 
 const { onRequest: onReq } = require('firebase-functions/v2/https');
-const axios   = require('axios');
 const cheerio = require('cheerio');
 
 exports.getFuelPrices = onReq(async (req, res) => {

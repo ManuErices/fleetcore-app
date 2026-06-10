@@ -246,8 +246,8 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /subscriptions/{uid} {
       allow read:           if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
-      allow create:         if isAuth() && request.auth.uid == uid;
-      allow update, delete: if isSuperAdmin();
+      allow create, update: if isAuth() && request.auth.uid == uid;
+      allow delete:         if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────

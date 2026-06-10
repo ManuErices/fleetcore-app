@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { usePlan } from "../hooks/usePlan";
 import { db } from "../lib/firebase";
 import {
   collection, addDoc, getDocs, getDoc, updateDoc, doc,
@@ -51,6 +52,7 @@ function getBaseUrl() {
 }
 
 export default function InviteUserPanel({ empresaId, onClose, soloRevisores = false }) {
+  const { canAccess } = usePlan();
   const [invitaciones, setInvitaciones] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [creating,     setCreating]     = useState(false);
@@ -237,21 +239,43 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {MODULOS_ADMIN.map(m => {
                       const active = form.modulos.includes(m.value);
+                      const isContracted = canAccess(m.value);
                       return (
                         <button key={m.value}
+                          type="button"
+                          disabled={!isContracted}
                           onClick={() => setForm(f => ({
                             ...f,
                             modulos: active
                               ? f.modulos.filter(x => x !== m.value)
                               : [...f.modulos, m.value],
                           }))}
-                          className={`p-3 rounded-xl text-left border-2 transition-all ${active ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                          className={`p-3 rounded-xl text-left border-2 transition-all ${
+                            !isContracted 
+                              ? "border-slate-100 bg-slate-50 opacity-50 cursor-not-allowed" 
+                              : active 
+                                ? "border-blue-500 bg-blue-50" 
+                                : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}>
                           <div className="flex items-center gap-2">
-                            <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center ${active ? "bg-blue-600 border-blue-600" : "border-slate-300"}`}>
+                            <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center ${
+                              !isContracted
+                                ? "border-slate-200 bg-slate-100"
+                                : active 
+                                  ? "bg-blue-600 border-blue-600" 
+                                  : "border-slate-300"
+                            }`}>
                               {active && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                             </div>
                             <div>
-                              <div className={`text-xs font-black ${active ? "text-blue-700" : "text-slate-700"}`}>{m.label}</div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-xs font-black ${!isContracted ? "text-slate-400" : active ? "text-blue-700" : "text-slate-700"}`}>{m.label}</span>
+                                {!isContracted && (
+                                  <span className="text-[8px] bg-red-100 text-red-600 px-1 py-0.5 rounded font-black border border-red-200 uppercase tracking-wide">
+                                    No Contratado
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-[10px] text-slate-400">{m.desc}</div>
                             </div>
                           </div>

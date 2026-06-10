@@ -5,115 +5,109 @@
 // Modelo: precio por módulo individual + descuentos por cantidad
 // ============================================================
 
-// ── Módulos disponibles ───────────────────────────────────────
+// ── Módulos disponibles con precios en UF ───────────────────────
 export const MODULES = {
-  rrhh: {
-    id:          'rrhh',
-    name:        'Recursos Humanos',
-    description: 'Gestión de trabajadores, contratos, remuneraciones y nómina',
-    price:       350000,
-    color:       'emerald',
-    appKey:      'rrhh',
-    features: [
-      'Gestión de trabajadores',
-      'Contratos y anexos',
-      'Remuneraciones y nómina',
-      'Impuestos y previred',
-      'Asistencia y organización',
-      'Reportes de contabilidad',
-    ],
-  },
   finanzas: {
     id:          'finanzas',
-    name:        'Finanzas',
-    description: 'Flujo de caja, costos, activos y análisis financiero',
-    price:       400000,
+    name:        'Finanzas y Contabilidad',
+    description: 'Flujo de caja, costos, activos, plan de cuentas y balances',
+    priceUf:     0,
     color:       'purple',
     appKey:      'finanzas',
+    image:       'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=60',
     features: [
       'Flujo de caja real y proyectado',
       'Costos fijos y variables',
-      'Gestión de activos',
-      'Proveedores y cuentas por pagar',
-      'Créditos y obligaciones',
-      'Reportes y análisis financiero',
+      'Gestión de activos y proveedores',
+      'Plan de cuentas IFRS/SII',
+      'Libro diario y balance 8 columnas',
+      'Estado de Situación Financiera',
     ],
   },
   fleetcore: {
     id:          'fleetcore',
     name:        'Oficina Técnica',
-    description: 'Dashboard, equipos, combustible, órdenes de compra y más',
-    price:       500000,
+    description: 'Dashboard central, equipos, órdenes de compra y logs',
+    priceUf:     3,
     color:       'orange',
     appKey:      'fleetcore',
+    image:       'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?w=600&auto=format&fit=crop&q=60',
     features: [
-      'Dashboard y reportes',
-      'Gestión de equipos',
+      'Dashboard gerencial de flota',
+      'Gestión de equipos y horómetros',
       'Calendario y diario de obra',
-      'Control de combustible',
+      'Órdenes de compra y repuestos',
       'Remuneraciones y costos',
-      'Órdenes de compra',
+    ],
+  },
+  rrhh: {
+    id:          'rrhh',
+    name:        'Recursos Humanos',
+    description: 'Gestión de trabajadores, contratos, asistencia y liquidación',
+    priceUf:     3,
+    color:       'emerald',
+    appKey:      'rrhh',
+    image:       'https://images.unsplash.com/photo-1521791136064-7986c2920216?w=600&auto=format&fit=crop&q=60',
+    features: [
+      'Fichas de trabajadores y cargas',
+      'Contratos, anexos y finiquitos',
+      'Liquidaciones de sueldo y nómina',
+      'Asistencia, turnos y permisos',
+      'Impuestos mensuales y Previred',
+      'Portal de autogestión de trabajadores',
     ],
   },
   workfleet: {
     id:          'workfleet',
-    name:        'WorkFleet',
-    description: 'App móvil para operadores en terreno',
-    price:       700000,
+    name:        'WorkFleet Mobile',
+    description: 'Aplicación para operadores en terreno y reportes',
+    priceUf:     3,
     color:       'blue',
     appKey:      'workfleet',
+    image:       'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=600&auto=format&fit=crop&q=60',
     features: [
-      'App móvil para operadores',
+      'App PWA instalable para operadores',
       'Reporte diario de maquinaria',
-      'Registro de combustible en terreno',
-      'Escaneo QR para login',
-      'Modo offline',
+      'Registro de cargas de combustible',
+      'Escaneo QR para login rápido',
+      'Modo Offline para faenas aisladas',
       'Sincronización automática',
     ],
   },
 };
 
-// ── Descuentos progresivos ────────────────────────────────────
-export const BUNDLE_DISCOUNTS = {
-  1: 0,
-  2: 0.10,
-  3: 0.15,
-  4: 0.25,
-};
-
-// ── Helpers de cálculo ────────────────────────────────────────
-
-export function subtotal(moduleIds) {
-  return moduleIds.reduce((sum, id) => sum + (MODULES[id]?.price || 0), 0);
-}
-
-export function discountRate(count) {
-  return BUNDLE_DISCOUNTS[count] || 0;
-}
-
+// ── Helpers de cálculo en UF y CLP ─────────────────────────────
 export function calculateTotal(moduleIds) {
-  const base     = subtotal(moduleIds);
-  const discount = discountRate(moduleIds.length);
-  const savings  = Math.round(base * discount);
-  const total    = base - savings;
-  return { base, discount, savings, total };
+  const ids = Array.isArray(moduleIds) ? moduleIds : [];
+  
+  // Finanzas es gratis, los otros módulos cuestan 3 UF cada uno
+  const totalUf = ids.reduce((sum, id) => {
+    return sum + (MODULES[id]?.priceUf || 0);
+  }, 0);
+
+  return {
+    totalUf,
+  };
 }
 
-export function formatPrice(amount) {
-  return new Intl.NumberFormat('es-CL', {
-    style:                 'currency',
-    currency:              'CLP',
-    minimumFractionDigits: 0,
-  }).format(amount);
+export function formatPrice(amountUf) {
+  if (amountUf === 0) return 'Gratis';
+  return `${amountUf} UF`;
 }
 
 // ── Compatibilidad con usePlan (espera .modules y .features) ──
 export function buildPlanData(moduleIds = []) {
-  const modules  = { fleetcore: false, workfleet: false, rrhh: false, reportes: false, finanzas: false };
+  const modules  = { fleetcore: false, workfleet: false, rrhh: false, reportes: false, finanzas: false, contabilidad: false };
   const features = [];
   moduleIds.forEach(id => {
     if (id in modules) modules[id] = true;
-    if (id === 'fleetcore') modules.reportes = true;
+    if (id === 'fleetcore' || id === 'workfleet') {
+      modules.reportes = true;
+    }
+    if (id === 'finanzas') {
+      modules.finanzas = true;
+      modules.contabilidad = true; // Finanzas gives access to Contabilidad as well
+    }
     const mod = MODULES[id];
     if (mod) features.push(...mod.features.map(f => `${id}:${f}`));
   });
@@ -132,4 +126,66 @@ export function canAccessModule(planId, moduleId) {
 
 export function hasFeature(planId, featureId) {
   return getPlan(planId).features.includes(featureId);
+}
+
+// ── Estructura de Planes de Suscripción de 3 Tiers ─────────────
+export const PLANS = {
+  free: {
+    id:          'free',
+    name:        'Plan Inicial',
+    priceUf:     0,
+    priceClp:    0,
+    planId:      'workfleet',
+    description: 'Acceso básico para operadores en terreno.',
+    badge:       'Gratis',
+    features: [
+      'App móvil WorkFleet para operadores',
+      'Reporte diario de maquinaria',
+      'Control de combustible básico en terreno',
+      'Escaneo QR para inicio de sesión',
+      'Modo Offline con auto-sincronización',
+      'Hasta 2 maquinarias y 1 operador',
+    ],
+    color: 'slate',
+  },
+  pro: {
+    id:          'pro',
+    name:        'Plan Profesional',
+    priceUf:     10,
+    priceClp:    380000, // Referencia aproximada
+    planId:      'fleetcore,workfleet',
+    description: 'El núcleo de control operativo para tu flota.',
+    badge:       'Recomendado',
+    features: [
+      'Todo lo del Plan Inicial',
+      'Dashboard y reportes en tiempo real',
+      'Gestión de equipos y maquinarias ilimitada',
+      'Órdenes de compra y control de costos',
+      'Reportes consolidados de combustible',
+      'Soporte técnico preferente',
+    ],
+    color: 'blue',
+  },
+  enterprise: {
+    id:          'enterprise',
+    name:        'Plan Minero / Enterprise',
+    priceUf:     25,
+    priceClp:    950000, // Referencia aproximada
+    planId:      'rrhh,finanzas,fleetcore,workfleet',
+    description: 'Gestión corporativa integral de flotas grandes.',
+    badge:       'Completo',
+    features: [
+      'Todo lo del Plan Profesional',
+      'Módulo de Finanzas (Flujo de Caja)',
+      'Módulo de Recursos Humanos (Nóminas y Contratos)',
+      'Gestión de activos y proveedores',
+      'Integraciones a medida vía API/ERP',
+      'Soporte prioritario 24/7',
+    ],
+    color: 'purple',
+  },
+};
+
+export function formatUf(amount) {
+  return amount === 0 ? 'Gratis' : `${amount} UF`;
 }

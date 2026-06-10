@@ -19,6 +19,9 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-slate-50;
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
