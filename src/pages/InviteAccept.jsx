@@ -110,6 +110,7 @@ export default function InviteAccept({ token, onAccepted }) {
       }
 
       await setDoc(doc(db, "users", uid), userUpdate, { merge: true });
+      await setDoc(doc(db, "empresas", invData.empresaId, "users", uid), userUpdate, { merge: true });
 
       // Si el rol es 'trabajador', crear su registro en RRHH y el vínculo del portal
       // para que pueda acceder a /trabajador con sus credenciales reales

@@ -257,7 +257,8 @@ service cloud.firestore {
                     || (isAnyAdmin() && request.resource.data.role == 'trabajador'
                         && request.resource.data.empresaId == userEmpresaId());
       allow update: if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid);
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isAnyAdmin() && resource.data.empresaId == userEmpresaId() && request.resource.data.empresaId == userEmpresaId());
       allow delete: if isSuperAdmin();
     }
 

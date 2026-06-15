@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc,
+  collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where,
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
@@ -2484,13 +2484,17 @@ function UsuariosSection() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'users'));
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'users'));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+    } catch (e) {
+      console.error("Error loading users:", e);
+      setData([]);
+    }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2499,10 +2503,13 @@ function UsuariosSection() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) return;
       try {
-        const snap = await getDocs(collection(db, 'users'));
-        const userDoc = snap.docs.find(d => d.id === user.uid);
-        if (userDoc) setUserRole(userDoc.data().role || '');
-      } catch {}
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          setUserRole(userDoc.data().role || '');
+        }
+      } catch (e) {
+        console.error("Error fetching user role:", e);
+      }
     });
     return () => unsub();
   }, []);
@@ -2551,7 +2558,13 @@ function UsuariosSection() {
         updatedAt: serverTimestamp(),
       };
       if (form.password.trim()) updates.password = form.password.trim();
-      await updateDoc(doc(db, 'users', editId), updates);
+      
+      // Update both root users and company users in parallel
+      await Promise.all([
+        updateDoc(doc(db, 'users', editId), updates),
+        updateDoc(doc(db, 'empresas', empresaId, 'users', editId), updates)
+      ]);
+      
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);

@@ -100,13 +100,13 @@ function CancelBtn({ onClose }) {
 // ─── TrabajadorModal ──────────────────────────────────────────────────────────
 
 function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
-  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
     direccion: '', comuna: '', region: '',
     codigoPais: '+56', telefono: '', email: '',
-    empresa: '', area: '', cargo: '', fechaIngreso: '',
+    empresa: empresa?.nombre || '', area: '', cargo: '', fechaIngreso: '',
     afp: '', prevision: 'FONASA', isapre: '',
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
@@ -115,6 +115,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   const [form,    setForm]    = useState(empty);
   const [saving,  setSaving]  = useState(false);
   const [cargos,  setCargos]  = useState([]);  // desde bandas_salariales
+  const [isCustomCargo, setIsCustomCargo] = useState(false);
 
   // Cargar cargos desde Firestore al abrir
   useEffect(() => {
@@ -127,11 +128,60 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
       .catch(() => setCargos([]));
   }, [isOpen, empresaId]);
 
+  // 1. Inicializar el formulario solo al abrir/cerrar o cambiar editData
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    if (isOpen) {
+      setForm(editData ? { ...empty, ...editData } : { ...empty, empresa: empresa?.nombre || '' });
+    }
   }, [editData, isOpen]);
 
+  // 2. Detectar si el cargo es personalizado (solo al abrir o cuando cargan los cargos de la DB)
+  useEffect(() => {
+    if (isOpen && editData) {
+      const isCustom = editData.cargo && !cargos.includes(editData.cargo);
+      setIsCustomCargo(!!isCustom);
+    } else if (isOpen) {
+      setIsCustomCargo(false);
+    }
+  }, [editData, cargos, isOpen]);
+
+  // 3. Cargar la empresa por defecto si se obtiene el nombre después de abrir
+  useEffect(() => {
+    if (isOpen && !editData && empresa?.nombre && !form.empresa) {
+      setForm(f => ({ ...f, empresa: empresa.nombre }));
+    }
+  }, [empresa, isOpen, editData]);
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleAddCustomCargo = async (customCargo) => {
+    const trimmed = (customCargo || '').trim();
+    if (!trimmed) return;
+    
+    if (!cargos.includes(trimmed)) {
+      // Agregar localmente
+      setCargos(prev => [...prev, trimmed].sort());
+      
+      // Guardar en Firestore en segundo plano
+      try {
+        await addDoc(collection(db, 'empresas', empresaId, 'bandas_salariales'), {
+          nivel: 'N/A',
+          cargo: trimmed,
+          area: form.area || '',
+          sueldoMin: 0,
+          sueldoMax: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error('Error guardando cargo personalizado:', e);
+      }
+    }
+    
+    // Asignar al formulario y desactivar el modo personalizado para mostrar el dropdown
+    set('cargo', trimmed);
+    setIsCustomCargo(false);
+  };
 
   // ── Helpers de validación/formato ──
   function soloLetras(v) {
@@ -170,6 +220,20 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         projectId:   form.projectId   || null,
         updatedAt:   serverTimestamp(),
       };
+
+      // Si se ingresó un cargo personalizado que no existe en el sistema, crearlo en la DB
+      if (form.cargo && form.cargo.trim() && !cargos.includes(form.cargo.trim())) {
+        await addDoc(collection(db, 'empresas', empresaId, 'bandas_salariales'), {
+          nivel: 'N/A',
+          cargo: form.cargo.trim(),
+          area: form.area || '',
+          sueldoMin: 0,
+          sueldoMax: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
       } else {
@@ -282,14 +346,39 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             </select>
           </Field>
           <Field label="Cargo">
-            <select className={inp} value={form.cargo} onChange={e => set('cargo', e.target.value)}>
+            <select className={inp}
+              value={isCustomCargo ? '__otro__' : form.cargo}
+              onChange={e => {
+                if (e.target.value === '__otro__') {
+                  setIsCustomCargo(true);
+                  set('cargo', '');
+                } else {
+                  setIsCustomCargo(false);
+                  set('cargo', e.target.value);
+                }
+              }}>
               <option value="">Seleccionar cargo…</option>
               {cargos.map(c => <option key={c}>{c}</option>)}
               <option value="__otro__">Otro (escribir)</option>
             </select>
-            {form.cargo === '__otro__' && (
-              <input className={inp + ' mt-1.5'} placeholder="Escribe el cargo"
-                onChange={e => set('cargo', e.target.value)} autoFocus />
+            {isCustomCargo && (
+              <div className="flex gap-2 mt-1.5">
+                <input className={inp + ' flex-1'} placeholder="Escribe el cargo"
+                  value={form.cargo}
+                  onChange={e => set('cargo', e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomCargo(form.cargo);
+                    }
+                  }}
+                  autoFocus />
+                <button type="button"
+                  onClick={() => handleAddCustomCargo(form.cargo)}
+                  className="px-3 py-2 bg-purple-600 text-white font-bold rounded-xl text-xs hover:bg-purple-700 transition-colors shadow-sm flex items-center justify-center">
+                  Agregar
+                </button>
+              </div>
             )}
           </Field>
         </div>
@@ -578,18 +667,28 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
 // ─── ContratoModal ────────────────────────────────────────────────────────────
 
 function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
-  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
-    cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
+    cargo: '', jornada: 'Completa (45 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
   };
   const [form, setForm]     = useState(empty);
   const [saving, setSaving] = useState(false);
 
+  // 1. Inicializar formulario al abrir o cambiar editData
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    if (isOpen) {
+      setForm(editData ? { ...empty, ...editData } : { ...empty, empresa: empresa?.nombre || '' });
+    }
   }, [editData, isOpen]);
+
+  // 2. Cargar empresa por defecto si se obtiene después de abrir
+  useEffect(() => {
+    if (isOpen && !editData && empresa?.nombre && !form.empresa) {
+      setForm(f => ({ ...f, empresa: empresa.nombre }));
+    }
+  }, [empresa, isOpen, editData]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
