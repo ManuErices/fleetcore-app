@@ -68,6 +68,8 @@ export default function ControlStep({
   setShowModalEmpresa,
   setShowModalMaquina, setNuevaMaquinaData,
   setShowModalEmpleado, setNuevoEmpleadoData,
+  setShowModalProyecto,
+  setShowModalEstacion,
 }) {
   const [searchRepartidor, setSearchRepartidor] = useState('');
   const [searchEquipo, setSearchEquipo] = useState('');
@@ -112,19 +114,22 @@ export default function ControlStep({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Obra / Proyecto</label>
-                <select
-                  value={datosControl.projectId}
-                  onChange={(e) => {
-                    setDatosControl({ ...datosControl, projectId: e.target.value });
-                    cargarEstaciones(e.target.value);
-                  }}
-                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
-                >
-                  <option value="">Seleccione obra</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name || p.id}</option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={datosControl.projectId}
+                    onChange={(e) => {
+                      setDatosControl({ ...datosControl, projectId: e.target.value });
+                      cargarEstaciones(e.target.value);
+                    }}
+                    className="flex-1 w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                  >
+                    <option value="">Seleccione obra</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={() => setShowModalProyecto(true)} className="px-4 bg-orange-500 text-white rounded-xl font-black shadow-lg shadow-orange-100 hover:bg-orange-400 text-lg">+</button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Fecha</label>
@@ -148,7 +153,7 @@ export default function ControlStep({
                 <span className={datosEntrada.tipoOrigen === 'interno' ? 'text-green-600' : 'text-slate-400'}>
                   <BuildingIcon />
                 </span>
-                <span className={`font-black text-xs uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>MPF (Interno)</span>
+                <span className={`font-black text-xs uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>Interno</span>
               </button>
               <button
                 onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
@@ -273,16 +278,19 @@ export default function ControlStep({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                       <label className="block text-sm font-black text-slate-500 uppercase tracking-widest px-1">Seleccione Estación</label>
-                      <select
-                        value={datosEntrada.origen}
-                        onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
-                        className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-base shadow-sm"
-                      >
-                        <option value="">Seleccione estación</option>
-                        {estacionesLocal.map(est => (
-                          <option key={est.id} value={est.id}>{(est.marca ? est.marca + ' - ' : '') + est.nombre}</option>
-                        ))}
-                      </select>
+                      <div className="flex gap-2">
+                        <select
+                          value={datosEntrada.origen}
+                          onChange={(e) => setDatosEntrada({ ...datosEntrada, origen: e.target.value })}
+                          className="flex-1 w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl focus:border-green-500 font-bold text-slate-700 text-base shadow-sm"
+                        >
+                          <option value="">Seleccione estación</option>
+                          {estacionesLocal.map(est => (
+                            <option key={est.id} value={est.id}>{(est.marca ? est.marca + ' - ' : '') + est.nombre}</option>
+                          ))}
+                        </select>
+                        <button type="button" onClick={() => setShowModalEstacion(true)} className="px-4 bg-green-600 text-white rounded-xl font-black shadow-lg shadow-green-100 hover:bg-green-500 text-lg">+</button>
+                      </div>
                     </div>
 
                     {/* Equipo Surtidor - searchable */}

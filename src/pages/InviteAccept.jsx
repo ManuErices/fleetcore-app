@@ -12,7 +12,7 @@
 import React, { useState, useEffect } from "react";
 import { db, auth } from "../lib/firebase";
 import {
-  doc, setDoc, serverTimestamp, getDocFromServer,
+  doc, setDoc, serverTimestamp, getDocFromServer, collection,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -110,6 +110,28 @@ export default function InviteAccept({ token, onAccepted }) {
       }
 
       await setDoc(doc(db, "users", uid), userUpdate, { merge: true });
+
+      // Si el rol es 'trabajador', crear su registro en RRHH y el vínculo del portal
+      // para que pueda acceder a /trabajador con sus credenciales reales
+      if (invData.rol === 'trabajador') {
+        const nombreParts = (form.nombre || "").trim().split(/\s+/);
+        const trabajadorRef = doc(collection(db, "empresas", invData.empresaId, "trabajadores"));
+        await setDoc(trabajadorRef, {
+          nombre: nombreParts[0] || "",
+          apellidoPaterno: nombreParts.slice(1).join(" ") || "",
+          rut: form.rut || "",
+          email,
+          portalUid: uid,
+          portalEmail: email,
+          estado: "activo",
+          createdAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, "empresas", invData.empresaId, "trabajadores_portal", uid), {
+          trabajadorDocId: trabajadorRef.id,
+          rut: form.rut || "",
+          email,
+        });
+      }
 
       // Marcar invitación como usada — setDoc con merge evita problemas de cache offline
       await setDoc(doc(db, "invitaciones", token), {

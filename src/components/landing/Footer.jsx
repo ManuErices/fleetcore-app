@@ -30,7 +30,7 @@ export default function Footer() {
         </div>
 
         <p className="text-xs text-slate-500 text-center md:text-right">
-          © {new Date().getFullYear()} Todos los derechos reservados. Soporte: <a href="mailto:soporte@mpf.cl" className="text-blue-400 hover:underline">soporte@mpf.cl</a>
+          © {new Date().getFullYear()} Todos los derechos reservados. Soporte: <a href="mailto:soporte@fleetcore.cl" className="text-blue-400 hover:underline">soporte@fleetcore.cl</a>
         </p>
       </div>
     </footer>

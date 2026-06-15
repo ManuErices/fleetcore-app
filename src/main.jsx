@@ -9,8 +9,12 @@ import "./index.css";
 // ========================================
 import { registerServiceWorker } from "./registerSW";
 
-// Registrar Service Worker para funcionalidad offline
-registerServiceWorker();
+// Registrar Service Worker para funcionalidad offline (solo en producción).
+// En dev el SW cachea bundles de Vite y queda obsoleto al recargar,
+// sirviendo CSS/JS desactualizados (causa bugs visuales como el menú de usuario mal posicionado).
+if (import.meta.env.PROD) {
+  registerServiceWorker();
+}
 
 // Utilidad de migración disponible en consola solo en dev
 // Uso: window.__seedMachines('EMPRESA_ID')

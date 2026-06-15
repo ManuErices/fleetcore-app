@@ -4,7 +4,7 @@
 // ============================================================
 
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -41,20 +41,83 @@ export function usePlan() {
       return;
     }
 
-    const ref   = doc(db, 'subscriptions', user.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setSubscription(snap.data());
-      } else {
-        setSubscription({ planId: '', status: 'trial', trialUntil: null });
+    // 1. Escuchar el documento del usuario para obtener el empresaId
+    const userRef = doc(db, 'users', user.uid);
+    let unsubSubscription = null;
+
+    const unsubUser = onSnapshot(userRef, (userSnap) => {
+      if (unsubSubscription) {
+        unsubSubscription();
+        unsubSubscription = null;
       }
-      setLoading(false);
+
+      if (!userSnap.exists()) {
+        setSubscription({ planId: '', status: 'trial', trialUntil: null });
+        setLoading(false);
+        return;
+      }
+
+      const userData = userSnap.data();
+      const empresaId = userData.empresaId;
+
+      if (!empresaId) {
+        // Fallback si no tiene empresaId (por ejemplo, durante EmpresaSetup)
+        const subRef = doc(db, 'subscriptions', user.uid);
+        unsubSubscription = onSnapshot(subRef, (subSnap) => {
+          if (subSnap.exists()) {
+            setSubscription(subSnap.data());
+          } else {
+            setSubscription({ planId: '', status: 'trial', trialUntil: null });
+          }
+          setLoading(false);
+        }, () => {
+          setSubscription({ planId: '', status: 'trial', trialUntil: null });
+          setLoading(false);
+        });
+        return;
+      }
+
+      // 2. Buscar suscripción asociada a la empresa
+      const q = query(
+        collection(db, 'subscriptions'),
+        where('empresaId', '==', empresaId)
+      );
+
+      unsubSubscription = onSnapshot(q, (querySnap) => {
+        if (!querySnap.empty) {
+          // Tomar la primera suscripción activa encontrada para la empresa
+          setSubscription(querySnap.docs[0].data());
+          setLoading(false);
+        } else {
+          // Fallback a subscriptions/{uid}
+          const fallbackRef = doc(db, 'subscriptions', user.uid);
+          getDoc(fallbackRef).then((fallbackSnap) => {
+            if (fallbackSnap.exists()) {
+              setSubscription(fallbackSnap.data());
+            } else {
+              setSubscription({ planId: '', status: 'trial', trialUntil: null });
+            }
+            setLoading(false);
+          }).catch(() => {
+            setSubscription({ planId: '', status: 'trial', trialUntil: null });
+            setLoading(false);
+          });
+        }
+      }, (err) => {
+        console.error('Error escuchando suscripción de empresa:', err);
+        setSubscription({ planId: '', status: 'trial', trialUntil: null });
+        setLoading(false);
+      });
     }, (err) => {
-      console.error('Error cargando suscripción:', err);
-      setSubscription({ planId: '', status: 'trial' });
+      console.error('Error escuchando usuario en usePlan:', err);
+      setSubscription({ planId: '', status: 'trial', trialUntil: null });
       setLoading(false);
     });
-    return unsub;
+
+    return () => {
+      unsubUser();
+      if (unsubSubscription) unsubSubscription();
+    };
   }, [user]);
 
   // ── Estado derivado ─────────────────────────────────────

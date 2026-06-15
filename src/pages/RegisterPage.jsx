@@ -6,6 +6,7 @@ import { db } from "../lib/firebase";
 import { hashPin } from "./documentos/lib/firmas.js";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { calculateTotal } from "../lib/plans";
+import PhoneInput from "../components/ui/PhoneInput";
 
 export default function RegisterPage() {
   const [searchParams] = useSearchParams();
@@ -134,6 +135,7 @@ export default function RegisterPage() {
         telefono: empresa.telefono || '',
         adminEmail: email,
         adminNombre: nombre,
+        adminUid: user.uid,
         plan: 'trial',
         estado: 'pendiente',
         trialDias: 14,
@@ -190,6 +192,7 @@ export default function RegisterPage() {
         // Free module: directly active
         await setDoc(doc(db, 'subscriptions', user.uid), {
           userId: user.uid,
+          empresaId,
           planId: 'finanzas',
           modules: ['finanzas'],
           gateway: 'free',
@@ -206,6 +209,7 @@ export default function RegisterPage() {
         const planIdStr = landingModules.sort().join(',');
         await setDoc(doc(db, 'subscriptions', user.uid), {
           userId: user.uid,
+          empresaId,
           planId: planIdStr,
           modules: landingModules,
           gateway: 'mock_webpay',
@@ -542,18 +546,11 @@ export default function RegisterPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Teléfono
-                </label>
-                <input 
-                  type="tel" 
-                  value={formData.empresa.telefono}
-                  onChange={e => setEmpresa('telefono', e.target.value)}
-                  placeholder="+56 9 1234 5678" 
-                  className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" 
-                />
-              </div>
+              <PhoneInput
+                value={formData.empresa.telefono}
+                onChange={val => setEmpresa('telefono', val)}
+                variant="dark"
+              />
 
               <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl text-xs text-blue-300 font-semibold leading-relaxed">
                 🎁 <strong>Finanzas Gratis Incluido</strong>: Se activará tu cuenta con acceso ilimitado al módulo de Finanzas y Contabilidad. El resto de módulos seleccionados se contratarán a continuación.

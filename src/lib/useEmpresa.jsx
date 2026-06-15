@@ -19,7 +19,7 @@
  */
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
 import { db } from './firebase';
 
 // ─── Contexto ─────────────────────────────────────────────────
@@ -31,6 +31,9 @@ export function EmpresaProvider({ user, children }) {
   const [empresa, setEmpresa] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [subEmpresas, setSubEmpresas] = useState([]);
+  const [subEmpresasLoading, setSubEmpresasLoading] = useState(true);
 
   useEffect(() => {
     if (!user) {
@@ -98,8 +101,59 @@ export function EmpresaProvider({ user, children }) {
     loadEmpresa();
   }, [user]);
 
+  // Listener en tiempo real para sub_empresas
+  useEffect(() => {
+    if (!empresaId) {
+      setSubEmpresas([]);
+      setSubEmpresasLoading(false);
+      return;
+    }
+
+    setSubEmpresasLoading(true);
+    const q = query(
+      collection(db, 'empresas'),
+      where('parentEmpresaId', '==', empresaId),
+      orderBy('nombre')
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setSubEmpresas(list);
+      setSubEmpresasLoading(false);
+    }, (err) => {
+      console.error('Error cargando sub_empresas:', err);
+      setSubEmpresasLoading(false);
+    });
+
+    return () => unsub();
+  }, [empresaId]);
+
+  // Fallbacks para asegurar compatibilidad y correcto onboarding
+  const getActiveSubEmpresas = () => {
+    if (subEmpresas.length > 0) {
+      return subEmpresas;
+    }
+    // Si la subcolección está vacía, hacemos fallback
+    // Para el tenant original 'mpf-maquinaria' (o si el ID contiene 'mpf'), usamos las originales:
+    if (empresaId === 'mpf-maquinaria' || empresaId?.includes('mpf') || !empresaId) {
+      return ['LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor', 'MPF Ingeniería Civil'].map(n => ({ id: n, nombre: n }));
+    }
+    // Para otros, usamos la empresa del tenant como predeterminada
+    return [{ id: 'default', nombre: empresa?.nombre || 'Empresa Principal' }];
+  };
+
+  const activeSubEmpresas = getActiveSubEmpresas();
+  const subEmpresasNames = activeSubEmpresas.map(se => se.nombre);
+
   return (
-    <EmpresaContext.Provider value={{ empresaId, empresa, loading, error }}>
+    <EmpresaContext.Provider value={{
+      empresaId,
+      empresa,
+      loading,
+      subEmpresasLoading,
+      error,
+      subEmpresas: activeSubEmpresas,
+      subEmpresasNames
+    }}>
       {children}
     </EmpresaContext.Provider>
   );

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy,
+  doc, serverTimestamp, query, orderBy, where,
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -57,7 +58,8 @@ const TAB_DEFS = [
   { id: 'maquinas',    label: 'Máquinas',    color: 'purple', icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
   { id: 'actividades', label: 'Actividades', color: 'green',  icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
   { id: 'surtidores',  label: 'Surtidores',  color: 'amber',  icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z' },
-  { id: 'empresas',    label: 'Empresas',    color: 'teal',   icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
+  { id: 'sub_empresas', label: 'Empresas Internas', color: 'teal', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
+  { id: 'empresas_combustible', label: 'Clientes Combustible', color: 'cyan', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
   { id: 'proyectos',   label: 'Proyectos',   color: 'indigo', icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
   { id: 'estaciones',  label: 'Est. Combustible', color: 'cyan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z' },
   { id: 'usuarios',    label: 'Usuarios',    color: 'rose',   icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
@@ -531,7 +533,7 @@ function fmtRut(raw) {
 }
 
 function OperadoresSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -976,7 +978,7 @@ const EMPRESA_PREFIJOS = {
   'CELENOR':   'CE',
 };
 
-const EMPRESAS_LISTA = ['LIFEMED', 'INTOSIM', 'RÍO TINTO', 'GLOBAL', 'CELENOR', 'MPF INGENIERÍA CIVIL'];
+
 
 // Formatea código interno según empresa: MPF→TSTB36 / resto→AB-CD01
 function fmtCodigo(raw, empresa) {
@@ -1009,7 +1011,7 @@ function fmtPatente(raw) {
   return nums ? letras + '-' + nums : letras;
 }
 function MaquinasSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -1503,7 +1505,110 @@ function SurtidoresSection() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SECCIÓN: EMPRESAS
+// SECCIÓN: EMPRESAS INTERNAS
+// ─────────────────────────────────────────────────────────────
+function SubEmpresasSection() {
+  const { empresaId } = useEmpresa();
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [form, setForm] = useState({ nombre: '', rut: '', giro: '', contacto: '' });
+  const [editId, setEditId] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId), orderBy('nombre')));
+      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch { setData([]); }
+    setLoading(false);
+  }, [empresaId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openNew = () => { setForm({ nombre: '', rut: '', giro: '', contacto: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ nombre: row.nombre || '', rut: row.rut || '', giro: row.giro || '', contacto: row.contacto || '' }); setEditId(row.id); setModal(true); };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const p = { nombre: form.nombre.trim(), rut: form.rut.trim(), giro: form.giro.trim(), contacto: form.contacto.trim(), updatedAt: serverTimestamp() };
+      if (editId) await updateDoc(doc(db, 'empresas', editId), p);
+      else await addDoc(collection(db, 'empresas'), { ...p, parentEmpresaId: empresaId, plan: 'sub_empresa', createdAt: serverTimestamp() });
+      setModal(false); load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(false);
+  };
+
+  const del = async () => {
+    try { await deleteDoc(doc(db, 'empresas', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    setConfirm(null);
+  };
+
+  return (
+    <>
+      <SectionCard title="Empresas Internas" subtitle="Empresas internas que componen tu organización (RRHH, Activos)" count={data.length} color="teal" onAdd={openNew} addLabel="Nueva Empresa Interna"
+        icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>}
+      >
+        <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay empresas internas registradas"
+          columns={[
+            { key: 'nombre', label: 'Nombre' },
+            { key: 'rut', label: 'RUT' },
+            { key: 'giro', label: 'Giro' },
+            { key: 'contacto', label: 'Contacto' },
+          ]}
+        />
+      </SectionCard>
+
+      <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Empresa Interna' : 'Nueva Empresa Interna'} color="teal">
+        <div className="space-y-4">
+          <Field label="Nombre" required>
+            <input
+              className={inputCls}
+              value={form.nombre}
+              onChange={e => setForm({ ...form, nombre: e.target.value })}
+              placeholder="Ej: Constructora MPF"
+            />
+          </Field>
+          <Field label="RUT">
+            <input
+              className={inputCls}
+              value={form.rut}
+              onChange={e => setForm({ ...form, rut: fmtRut(e.target.value) })}
+              placeholder="Ej: 77.123.456-7"
+              maxLength={12}
+            />
+          </Field>
+          <Field label="Giro">
+            <input
+              className={inputCls}
+              value={form.giro}
+              onChange={e => setForm({ ...form, giro: e.target.value })}
+              placeholder="Ej: Construcción"
+            />
+          </Field>
+          <Field label="Contacto (correo)">
+            <input
+              className={inputCls}
+              value={form.contacto}
+              onChange={e => setForm({ ...form, contacto: e.target.value.replace(/[^a-zA-Z0-9@._\-+]/g, '') })}
+              placeholder="Ej: contacto@empresa.cl"
+              type="email"
+              inputMode="email"
+            />
+          </Field>
+          <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="teal" />
+        </div>
+      </Modal>
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Empresa Interna" message={`¿Eliminar "${confirm?.nombre}"?`} />
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SECCIÓN: EMPRESAS DE COMBUSTIBLE (CLIENTES)
 // ─────────────────────────────────────────────────────────────
 function EmpresasSection() {
   const { empresaId } = useEmpresa();
@@ -2578,7 +2683,8 @@ function UsuariosSection() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
-export default function AdminPanel() {
+export default function AdminPanel({ onClose }) {
+  const navigate = useNavigate();
   const { empresaId } = useEmpresa();
   const [activeTab, setActiveTab] = useState('operadores');
   const { empresa } = useEmpresa();
@@ -2595,17 +2701,30 @@ export default function AdminPanel() {
       {/* Header negro con tabs integrados — igual que imagen 1 */}
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 shadow-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-black text-white">Administración</h1>
+                <p className="text-xs text-slate-400 mt-0.5">Gestión de datos del sistema WorkFleet</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-white">Administración</h1>
-              <p className="text-xs text-slate-400 mt-0.5">Gestión de datos del sistema WorkFleet</p>
-            </div>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all font-semibold text-sm shadow-md"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Volver
+              </button>
+            )}
           </div>
         </div>
 
@@ -2642,7 +2761,8 @@ export default function AdminPanel() {
         {activeTab === 'maquinas'    && <MaquinasSection />}
         {activeTab === 'actividades' && <ActividadesSection />}
         {activeTab === 'surtidores'  && <SurtidoresSection />}
-        {activeTab === 'empresas'    && <EmpresasSection />}
+        {activeTab === 'sub_empresas'&& <SubEmpresasSection />}
+        {activeTab === 'empresas_combustible' && <EmpresasSection />}
         {activeTab === 'proyectos'   && <ProyectosSection />}
         {activeTab === 'estaciones'  && <EstacionesSection />}
         {activeTab === 'usuarios'              && <UsuariosSection />}

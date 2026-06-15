@@ -15,12 +15,13 @@ import jsPDF from 'jspdf';
  * @param {Object} params.empresaInfo - Información de la empresa (opcional)
  * @returns {Promise<Blob>} Blob del archivo PDF
  */
-export async function generateVoucherPDF({ 
-  reportData, 
-  projectName, 
-  machineInfo, 
+export async function generateVoucherPDF({
+  reportData,
+  projectName,
+  machineInfo,
   operadorInfo,
-  empresaInfo 
+  empresaInfo,
+  tenantInfo
 }) {
   // Crear documento PDF tamaño carta
   const doc = new jsPDF({
@@ -77,13 +78,14 @@ export async function generateVoucherPDF({
   // Información de la empresa (izquierda)
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('MPF Ingeniería Civil SPA', margin, 25);
-  
+  const esMPF = !tenantInfo?.nombre || /mpf/i.test(tenantInfo.nombre);
+  doc.text(tenantInfo?.nombre || 'MPF Ingeniería Civil SPA', margin, 25);
+
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('RUT: 77.158.216-8', margin, 31);
-  doc.text('Av. Pedro Montt 2365, Valdivia', margin, 36);
-  doc.text('www.mpfingenieria.cl', margin, 41);
+  doc.text(`RUT: ${tenantInfo?.rut || '77.158.216-8'}`, margin, 31);
+  doc.text(tenantInfo?.direccion || (esMPF ? 'Av. Pedro Montt 2365, Valdivia' : ''), margin, 36);
+  doc.text(tenantInfo?.website || (esMPF ? 'www.mpfingenieria.cl' : ''), margin, 41);
 
   // Código del documento (derecha del encabezado)
   doc.setFontSize(8);

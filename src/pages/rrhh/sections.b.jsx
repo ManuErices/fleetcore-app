@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
-const { inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
+const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA, PLAN_CUENTAS_DEFAULT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
@@ -23,7 +23,7 @@ const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
 function AnexosSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [anexos,       setAnexos]       = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos,    setContratos]    = useState([]);
@@ -287,7 +287,7 @@ function AnexosSection() {
 }
 
 function ImpuestosSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -748,7 +748,7 @@ function AsistenciaSection() {
           entrada:       toTs(entrada),
           salida:        toTs(salida),
           justificacion: justificacion.trim(),
-          adminEmail:    'admin@mpf.cl',
+          adminEmail:    auth.currentUser?.email || 'admin',
         });
       } catch(e) { setError('Error al guardar: ' + e.message); }
       finally { setSaving(false); }
@@ -1613,7 +1613,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
 }
 
 function OrganizacionSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -1736,7 +1736,7 @@ function OrganizacionSection() {
 }
 
 function ReportesSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -2386,7 +2386,7 @@ function ReportesSection() {
 }
 
 function ContabilidadSection({ initialTab = 'asientos' }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);

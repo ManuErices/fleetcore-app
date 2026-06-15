@@ -7,7 +7,6 @@
 // ============================================================
 
 import React, { useState, useEffect } from "react";
-import SuperAdminPanel from "./SuperAdminPanel.jsx";
 import InviteUserPanel from "./InviteUserPanel.jsx";
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc } from "firebase/firestore";
@@ -18,7 +17,6 @@ import { getPlan, formatPrice } from "../lib/plans";
 export default function AppSelector({ user, onLogout, onSelectApp }) {
   const [userRole, setUserRole] = useState(null);
   const [empresaId, setEmpresaId] = useState(null);
-  const [showSuperAdmin, setShowSuperAdmin] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -101,7 +99,6 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
   return (
     <>
-      {showSuperAdmin && <SuperAdminPanel onClose={() => setShowSuperAdmin(false)} />}
       {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin || isMandanteAdmin} />}
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
@@ -109,7 +106,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
         <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
 
         {/* Header del Menú de Usuario (Esquina superior derecha de la pantalla) */}
-        <div className="absolute top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50 flex items-center justify-end">
+        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50 flex items-center justify-end">
           <div className="relative">
             <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-3 px-3 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 hover:bg-white/20 transition-all shadow-lg">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-inner">
@@ -136,9 +133,9 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                     <div className="text-xs text-blue-300 mt-1 capitalize">{userRole?.replace('_', ' ')}</div>
                   </div>
                   <div className="p-2 space-y-1">
-                    {userRole === 'superadmin' && (
+                    {['superadmin', 'admin_contrato', 'administrativo'].includes(userRole) && (
                       <button
-                        onClick={() => { setShowUserMenu(false); setShowSuperAdmin(true); }}
+                        onClick={() => { setShowUserMenu(false); navigate('/admin'); }}
                         className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-300 hover:bg-white/10 rounded-xl transition-colors text-left"
                       >
                         🛡️ Panel de Admin

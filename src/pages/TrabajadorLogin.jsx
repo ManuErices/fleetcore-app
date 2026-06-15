@@ -17,6 +17,14 @@ function rutToEmail(rut) {
   return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
 }
 
+// Acepta tanto RUT (cuentas creadas desde RRHH como rut@mpf.cl)
+// como un email real (cuentas creadas vía invitación)
+function resolveEmail(input) {
+  const trimmed = input.trim();
+  if (trimmed.includes('@')) return trimmed.toLowerCase();
+  return rutToEmail(trimmed);
+}
+
 export default function TrabajadorLogin() {
   const [rut,      setRut]      = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +38,7 @@ export default function TrabajadorLogin() {
     setError('');
     setLoading(true);
     try {
-      const email = rutToEmail(rut);
+      const email = resolveEmail(rut);
       await signInWithEmailAndPassword(auth, email, password);
       // El componente padre (TrabajadorApp) detecta el cambio de auth
     } catch (err) {
@@ -318,16 +326,19 @@ export default function TrabajadorLogin() {
 
           <form onSubmit={handleLogin} noValidate>
             <div className="field">
-              <label className="field-label">RUT</label>
+              <label className="field-label">RUT o Email</label>
               <div className="field-wrap">
                 <input
                   className="field-input"
                   type="text"
-                  inputMode="numeric"
-                  placeholder="12.345.678-9"
+                  inputMode="text"
+                  placeholder="12.345.678-9 o tu@email.cl"
                   value={rut}
-                  onChange={e => setRut(formatRut(e.target.value))}
-                  maxLength={12}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setRut(val.includes('@') ? val : formatRut(val));
+                  }}
+                  maxLength={40}
                   autoComplete="username"
                   autoFocus
                 />
@@ -372,7 +383,7 @@ export default function TrabajadorLogin() {
 
           <div className="login-footer">
             ¿Problemas para ingresar?<br/>
-            Contacta a <a href="mailto:rrhh@mpf.cl">rrhh@mpf.cl</a> o habla con tu supervisor.
+            Contacta a tu administrador o habla con tu supervisor.
           </div>
 
         </div>

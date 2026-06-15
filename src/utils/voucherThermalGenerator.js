@@ -17,6 +17,7 @@ export function generateThermalVoucher({
   machineInfo,
   operadorInfo,
   empresaInfo,
+  tenantInfo,
   repartidorInfo,
   equipoSurtidorInfo,
   numeroGuiaCorrelativo
@@ -279,14 +280,16 @@ export function generateThermalVoucher({
 <body>
   <div class="voucher-content"><div class="voucher">
     <!-- LOGO -->
+    ${(!tenantInfo?.nombre || /mpf/i.test(tenantInfo.nombre)) ? `
     <div class="center">
-      <img src="${MPF_LOGO_BASE64}" alt="MPF Logo" class="logo">
+      <img src="${MPF_LOGO_BASE64}" alt="Logo" class="logo">
     </div>
-    
+    ` : ''}
+
     <!-- ENCABEZADO -->
     <div class="header center">
-      <div class="bold">MPF INGENIERIA CIVIL SPA</div>
-      <div class="small">RUT: 77.158.216-8</div>
+      <div class="bold">${(tenantInfo?.nombre || 'MPF Ingenieria Civil SPA').toUpperCase()}</div>
+      <div class="small">RUT: ${tenantInfo?.rut || '77.158.216-8'}</div>
     </div>
     
     <div class="center bold">
@@ -303,11 +306,11 @@ export function generateThermalVoucher({
       <div class="bold">SURTIDOR</div>
       <div class="row">
         <span class="label">Empresa:</span>
-        <span>MPF Ingenieria Civil</span>
+        <span>${tenantInfo?.nombre || 'MPF Ingenieria Civil'}</span>
       </div>
       <div class="row">
         <span class="label">RUT:</span>
-        <span>77.158.216-8</span>
+        <span>${tenantInfo?.rut || '77.158.216-8'}</span>
       </div>
       <div class="row">
         <span class="label">Nombre:</span>
@@ -530,6 +533,7 @@ export function generateThermalVoucherText({
   machineInfo,
   operadorInfo,
   empresaInfo,
+  tenantInfo,
   repartidorInfo,
   equipoSurtidorInfo,
   numeroGuiaCorrelativo
@@ -568,15 +572,15 @@ export function generateThermalVoucherText({
   const line = '--------------------------------';
 
   return `
-  MPF INGENIERIA CIVIL SPA
-      RUT: 77.158.216-8
-      
+  ${(tenantInfo?.nombre || 'MPF Ingenieria Civil SPA').toUpperCase()}
+      RUT: ${tenantInfo?.rut || '77.158.216-8'}
+
   GUIA DE DESPACHO N° ${numeroGuia}
 ${line}
 
 SURTIDOR:
-Empresa: MPF Ingenieria Civil
-RUT: 77.158.216-8
+Empresa: ${tenantInfo?.nombre || 'MPF Ingenieria Civil'}
+RUT: ${tenantInfo?.rut || '77.158.216-8'}
 Nombre: ${repartidorInfo?.nombre || reportData.repartidorNombre || 'N/A'}
 Run: ${repartidorInfo?.rut || reportData.repartidorRut || 'N/A'}${equipoSurtidorInfo ? `
 Equipo: ${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}

@@ -7,7 +7,7 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 
 const {
-  inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
+  inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, IMM_2024,
   TASAS, TASAS_AFP, TIPOS_ANEXO, ESTADOS_DIA, UTM_DEFAULT, COLORES_AREA,
   REGIONES_COMUNAS, REGIONES,
@@ -100,7 +100,7 @@ function CancelBtn({ onClose }) {
 // ─── TrabajadorModal ──────────────────────────────────────────────────────────
 
 function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
@@ -578,7 +578,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
 // ─── ContratoModal ────────────────────────────────────────────────────────────
 
 function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
     cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
@@ -1227,7 +1227,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 // ─── HistorialModal ───────────────────────────────────────────────────────────
 
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [tab, setTab] = useState('contratos');
 
   useEffect(() => { setTab('contratos'); }, [trabajador]);

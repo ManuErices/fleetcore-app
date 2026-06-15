@@ -15,6 +15,7 @@
 import React, { useState } from "react";
 import { db } from "../lib/firebase";
 import { collection, addDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import PhoneInput from "../components/ui/PhoneInput";
 
 export default function EmpresaSetup({ user, onComplete, onLogout }) {
   const [step, setStep]       = useState(1); // 1: form, 2: creando, 3: listo
@@ -43,13 +44,6 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
   const handleRutChange = (e) => {
     const formatted = formatRut(e.target.value);
     setForm({ ...form, rut: formatted });
-    setError("");
-  };
-
-  const handleTelefonoChange = (e) => {
-    // Solo números, +, espacios y guiones
-    const clean = e.target.value.replace(/[^0-9+\s-]/g, "");
-    setForm({ ...form, telefono: clean });
     setError("");
   };
 
@@ -219,18 +213,12 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
           </div>
 
           {/* Teléfono */}
-          <div>
-            <label className="block text-xs font-bold text-blue-200 uppercase tracking-widest mb-1.5">
-              Teléfono <span className="text-white/40 font-normal">(opcional)</span>
-            </label>
-            <input
-              name="telefono"
-              value={form.telefono}
-              onChange={handleTelefonoChange}
-              placeholder="Ej: +56 9 1234 5678"
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-blue-400 focus:bg-white/15 transition-all text-sm font-medium"
-            />
-          </div>
+          <PhoneInput
+            value={form.telefono}
+            onChange={val => setForm({ ...form, telefono: val })}
+            label="Teléfono (opcional)"
+            variant="glass"
+          />
 
           {/* Error */}
           {error && (

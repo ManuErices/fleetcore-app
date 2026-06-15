@@ -45,14 +45,19 @@ export function useCombustibleForm(empresaId, onClose) {
   const [showModalEmpresa, setShowModalEmpresa] = useState(false);
   const [showModalMaquina, setShowModalMaquina] = useState(false);
   const [showModalEmpleado, setShowModalEmpleado] = useState(false);
+  const [showModalProyecto, setShowModalProyecto] = useState(false);
+  const [showModalEstacion, setShowModalEstacion] = useState(false);
 
   const [nuevoEquipoSurtidor, setNuevoEquipoSurtidor] = useState({ patente: '', nombre: '', tipo: '', marca: '', modelo: '' });
   const [nuevaEmpresa, setNuevaEmpresa] = useState({ nombre: '', rut: '' });
   const [nuevaMaquinaData, setNuevaMaquinaData] = useState({ patente: '', tipo: '', modelo: '', empresaId: '' });
   const [nuevoEmpleadoData, setNuevoEmpleadoData] = useState({ nombre: '', rut: '', empresaId: '' });
+  const [nuevoProyecto, setNuevoProyecto] = useState({ name: '', codigo: '' });
+  const [nuevaEstacion, setNuevaEstacion] = useState({ nombre: '', marca: '' });
 
   const {
     projects,
+    setProjects,
     machines,
     machinesLocal,
     setMachinesLocal,
@@ -63,6 +68,7 @@ export function useCombustibleForm(empresaId, onClose) {
     setEmpresasLocal,
     estacionesLocal,
     setEstacionesLocal,
+    subEmpresasLocal,
   } = useEmpresaData(empresaId);
 
   const [trabajadoresLocales, setTrabajadoresLocales] = useState([]);
@@ -174,15 +180,21 @@ export function useCombustibleForm(empresaId, onClose) {
     return found ? found.nombre : empresaIdONombre;
   };
 
-  const EMPRESAS_SISTEMA = ['MPF Ingeniería Civil', 'MPF'];
   const esEmpresaInterna = (empresaIdONombre) => {
     if (!empresaIdONombre) return false;
     if (empresaIdONombre === 'MPF') return true;
-    const n = normEmp(resolverNombreEmpresa(empresaIdONombre));
-    return EMPRESAS_SISTEMA.some(na => {
-      const t = normEmp(na);
-      return n.includes(t) || t.includes(n);
-    });
+    const nombre = resolverNombreEmpresa(empresaIdONombre);
+    const n = normEmp(nombre);
+    const nombresInternos = (subEmpresasLocal || []).map(se => normEmp(se.nombre || ''));
+    
+    if (nombresInternos.length === 0) {
+      const EMPRESAS_SISTEMA = ['MPF Ingeniería Civil', 'MPF', 'LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor'];
+      return EMPRESAS_SISTEMA.some(na => {
+        const t = normEmp(na);
+        return n.includes(t) || t.includes(n);
+      });
+    }
+    return nombresInternos.some(t => n.includes(t) || t.includes(n));
   };
   const esMPF = esEmpresaInterna;
 
@@ -379,6 +391,61 @@ export function useCombustibleForm(empresaId, onClose) {
     } catch (error) {
       console.error("Error creando empleado:", error);
       toast({ type: 'error', message: 'Error al crear trabajador' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCrearProyecto = async () => {
+    if (!nuevoProyecto.name.trim()) {
+      toast({ type: 'warning', message: 'El nombre de la obra/proyecto es obligatorio' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'projects'), {
+        name: nuevoProyecto.name.trim(),
+        codigo: nuevoProyecto.codigo.trim(),
+        createdAt: serverTimestamp()
+      });
+      const nuevoProj = { id: docRef.id, name: nuevoProyecto.name.trim(), codigo: nuevoProyecto.codigo.trim() };
+      setProjects(prev => [...prev, nuevoProj]);
+      setDatosControl(prev => ({ ...prev, projectId: docRef.id }));
+      cargarEstaciones(docRef.id);
+      setShowModalProyecto(false);
+      setNuevoProyecto({ name: '', codigo: '' });
+      toast({ type: 'success', message: 'Obra/Proyecto creado y seleccionado' });
+    } catch (error) {
+      console.error("Error creando proyecto:", error);
+      toast({ type: 'error', message: 'Error al crear obra/proyecto' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCrearEstacion = async () => {
+    if (!nuevaEstacion.nombre.trim()) {
+      toast({ type: 'warning', message: 'El nombre de la estación es obligatorio' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const obras = datosControl.projectId ? [datosControl.projectId] : [];
+      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'estaciones_combustible'), {
+        nombre: nuevaEstacion.nombre.trim(),
+        marca: nuevaEstacion.marca.trim(),
+        obras,
+        createdAt: serverTimestamp()
+      });
+      const nuevaEst = { id: docRef.id, nombre: nuevaEstacion.nombre.trim(), marca: nuevaEstacion.marca.trim(), obras };
+      setEstacionesLocal(prev => [...prev, nuevaEst]);
+      setDatosEntrada(prev => ({ ...prev, origen: docRef.id }));
+      setShowModalEstacion(false);
+      setNuevaEstacion({ nombre: '', marca: '' });
+      toast({ type: 'success', message: 'Estación creada y seleccionada' });
+    } catch (error) {
+      console.error("Error creando estación:", error);
+      toast({ type: 'error', message: 'Error al crear estación' });
     } finally {
       setLoading(false);
     }
@@ -625,11 +692,15 @@ export function useCombustibleForm(empresaId, onClose) {
     showModalEmpresa, setShowModalEmpresa,
     showModalMaquina, setShowModalMaquina,
     showModalEmpleado, setShowModalEmpleado,
+    showModalProyecto, setShowModalProyecto,
+    showModalEstacion, setShowModalEstacion,
     // Quick-create form data
     nuevoEquipoSurtidor, setNuevoEquipoSurtidor,
     nuevaEmpresa, setNuevaEmpresa,
     nuevaMaquinaData, setNuevaMaquinaData,
     nuevoEmpleadoData, setNuevoEmpleadoData,
+    nuevoProyecto, setNuevoProyecto,
+    nuevaEstacion, setNuevaEstacion,
     // Form state
     datosControl, setDatosControl,
     datosEntrada, setDatosEntrada,
@@ -645,5 +716,6 @@ export function useCombustibleForm(empresaId, onClose) {
     // Actions
     cargarEstaciones, resetForm, handleClose, handleSubmit,
     handleCrearEquipoSurtidor, handleCrearEmpresa, handleCrearMaquina, handleCrearEmpleado,
+    handleCrearProyecto, handleCrearEstacion,
   };
 }

@@ -19,6 +19,7 @@ import ReportDetallado from "./pages/reportes/ReportDetallado";
 import ReporteWorkFleet from "./pages/reportes/ReporteWorkFleet";
 import ReporteCombustible from "./pages/reportes/ReporteCombustible";
 import AdminPanel from "./pages/reportes/AdminPanel";
+import SuperAdminPanel from "./pages/SuperAdminPanel";
 import RRHH from "./pages/rrhh";
 
 // ── App shells ────────────────────────────────────────────────
@@ -313,7 +314,7 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
               <Route path="/fuel-price" element={<FuelPriceManager />} />
               <Route path="/subcontratos" element={<Subcontratos />} />
               <Route path="/reporte-detallado" element={<ReportDetallado />} />
-              {['superadmin', 'admin_contrato'].includes(userRole) && <Route path="/admin" element={<AdminPanel />} />}
+              {['superadmin', 'admin_contrato', 'administrativo'].includes(userRole) && <Route path="/admin" element={<AdminPanel onClose={() => navigate('/fleetcore')} />} />}
               {['superadmin'].includes(userRole) && <Route path="/rrhh" element={<RRHH />} />}
             </>
           ) : (
@@ -602,6 +603,18 @@ export default function App() {
                 <PricingPage
                   onBack={() => navigate('/')}
                 />
+              } />
+
+              <Route path="/admin" element={
+                <PWAWrapper user={user}>
+                  {userRole === 'superadmin' ? (
+                    <SuperAdminPanel onClose={() => navigate('/')} />
+                  ) : ['admin_contrato', 'administrativo'].includes(userRole) ? (
+                    <AdminPanel onClose={() => navigate('/')} />
+                  ) : (
+                    <Navigate to="/" replace />
+                  )}
+                </PWAWrapper>
               } />
 
               <Route path="/payment-result" element={

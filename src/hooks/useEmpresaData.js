@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
 export function useEmpresaData(empresaId) {
@@ -10,6 +10,7 @@ export function useEmpresaData(empresaId) {
   const [equiposSurtidores, setEquiposSurtidores] = useState([]);
   const [empresasLocal, setEmpresasLocal] = useState([]);
   const [estacionesLocal, setEstacionesLocal] = useState([]);
+  const [subEmpresasLocal, setSubEmpresasLocal] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -18,13 +19,14 @@ export function useEmpresaData(empresaId) {
     const cargar = async () => {
       setLoading(true);
       try {
-        const [pSnap, mSnap, eSnap, eqSnap, empSnap, estSnap] = await Promise.all([
+        const [pSnap, mSnap, eSnap, eqSnap, empSnap, estSnap, subSnap] = await Promise.all([
           getDocs(collection(db, 'empresas', empresaId, 'projects')),
           getDocs(collection(db, 'empresas', empresaId, 'machines')),
           getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
           getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores')),
           getDocs(collection(db, 'empresas', empresaId, 'empresas_combustible')),
-          getDocs(collection(db, 'empresas', empresaId, 'estaciones_combustible'))
+          getDocs(collection(db, 'empresas', empresaId, 'estaciones_combustible')),
+          getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId)))
         ]);
         const loadedProjects = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedMachines = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -32,6 +34,7 @@ export function useEmpresaData(empresaId) {
         const loadedEquipos = eqSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedEmpresas = empSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedEstaciones = estSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const loadedSub = subSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
         setProjects(loadedProjects);
         setMachines(loadedMachines);
@@ -40,6 +43,7 @@ export function useEmpresaData(empresaId) {
         setEquiposSurtidores(loadedEquipos);
         setEmpresasLocal(loadedEmpresas);
         setEstacionesLocal(loadedEstaciones);
+        setSubEmpresasLocal(loadedSub);
       } catch (err) {
         console.error('Error cargando datos de empresa:', err);
       } finally {
@@ -52,6 +56,7 @@ export function useEmpresaData(empresaId) {
 
   return {
     projects,
+    setProjects,
     machines,
     machinesLocal,
     setMachinesLocal,
@@ -62,6 +67,7 @@ export function useEmpresaData(empresaId) {
     setEmpresasLocal,
     estacionesLocal,
     setEstacionesLocal,
+    subEmpresasLocal,
     loading
   };
 }

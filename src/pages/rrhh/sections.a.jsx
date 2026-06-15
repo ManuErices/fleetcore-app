@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { db } from '../../lib/firebase';
+import { db, firebaseConfig } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getAuth, createUserWithEmailAndPassword, fetchSignInMethodsForEmail } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { initializeApp, deleteApp } from 'firebase/app';
 import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
-const { inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
+const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
@@ -24,7 +25,7 @@ const { TrabajadorModal, FichaTrabajador, ContratoModal, LiquidacionModal,
   FiniquitoModal, AnexoModal, HistorialModal, AsistenciaModal } = Modals;
 
 function DashboardSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
   const [mesRef,  setMesRef]  = useState(() => {
@@ -453,7 +454,7 @@ function DashboardSection() {
 }
 
 function TrabajadoresSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [data,    setData]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal,   setModal]   = useState(false);
@@ -954,7 +955,7 @@ function ContratosSection() {
 }
 
 function RemuneracionesSection() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
@@ -1520,8 +1521,6 @@ function PortalTrabajadoresPanel({ trabajadores }) {
   const [busqueda,    setBusqueda]    = useState('');
   const [mostrarLog,  setMostrarLog]  = useState(false);
 
-  const auth = getAuth();
-
   function rutToEmail(rut) {
     return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
   }
@@ -1576,14 +1575,30 @@ function PortalTrabajadoresPanel({ trabajadores }) {
         continue;
       }
 
-      try {
-        // Crear cuenta en Firebase Auth
-        const cred = await createUserWithEmailAndPassword(auth, email, pass);
-        const uid  = cred.user.uid;
+      // Crear la cuenta en una app secundaria de Firebase para no
+      // pisar la sesión del admin (createUserWithEmailAndPassword
+      // inicia sesión automáticamente con la cuenta recién creada).
+      const secondaryApp = initializeApp(firebaseConfig, `worker-account-${Date.now()}-${i}`);
+      const secondaryAuth = getAuth(secondaryApp);
 
-        // 1. Vincular uid al documento del trabajador
+      try {
+        // Crear cuenta en Firebase Auth (app secundaria)
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
+        const uid  = cred.user.uid;
+        await signOut(secondaryAuth);
+
+        // 1. Crear perfil en /users/{uid} con rol 'trabajador' (lo usan las reglas
+        //    de Firestore para validar acceso del portal a su propia data)
+        await setDoc(doc(db, 'users', uid), {
+          empresaId,
+          role: 'trabajador',
+          email,
+          nombre,
+          createdAt: serverTimestamp(),
+        });
+        // 2. Vincular uid al documento del trabajador
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', t.id), { portalUid: uid, portalEmail: email });
-        // 2. Escribir índice uid→firestoreId para que el portal pueda leer el perfil
+        // 3. Escribir índice uid→firestoreId para que el portal pueda leer el perfil
         //    (las reglas no permiten query sobre toda la colección desde el trabajador)
         await setDoc(doc(db, 'empresas', empresaId, 'trabajadores_portal', uid), {
           trabajadorDocId: t.id,
@@ -1598,6 +1613,8 @@ function PortalTrabajadoresPanel({ trabajadores }) {
         } else {
           logs.push({ nombre, rut: t.rut, email, estado: 'error', msg: err.message });
         }
+      } finally {
+        await deleteApp(secondaryApp).catch(() => {});
       }
 
       setResultados([...logs]);

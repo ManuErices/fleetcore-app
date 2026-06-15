@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PhoneInput from '../ui/PhoneInput';
 
 export default function RegisterModal({ onRegister, onClose, loading }) {
   const [formData, setFormData] = useState({
@@ -345,18 +346,11 @@ export default function RegisterModal({ onRegister, onClose, loading }) {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Teléfono
-                  </label>
-                  <input 
-                    type="tel" 
-                    value={formData.empresa.telefono}
-                    onChange={e => setEmpresa('telefono', e.target.value)}
-                    placeholder="+56 9 1234 5678" 
-                    className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm" 
-                  />
-                </div>
+                <PhoneInput
+                  value={formData.empresa.telefono}
+                  onChange={val => setEmpresa('telefono', val)}
+                  variant="dark"
+                />
 
                 {/* Free plan notice in matching blue */}
                 <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-2.5">

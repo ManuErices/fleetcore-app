@@ -2,6 +2,7 @@ import React from 'react';
 import { printThermalVoucher, getNextGuiaNumber } from '../utils/voucherThermalGenerator';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useEmpresa } from '../lib/useEmpresa';
 
 /**
  * Componente para generar e imprimir voucher térmico de entrega de combustible
@@ -19,6 +20,7 @@ export default function VoucherGenerator({
   empresaId,
   onClose
 }) {
+  const { empresa: tenantInfo } = useEmpresa();
   const [printing, setPrinting] = React.useState(false);
   const [numeroGuia, setNumeroGuia] = React.useState(reportData?.numeroGuia || null);
 
@@ -64,6 +66,7 @@ export default function VoucherGenerator({
         machineInfo,
         operadorInfo,
         empresaInfo,
+        tenantInfo,
         repartidorInfo,
         equipoSurtidorInfo,
         numeroGuiaCorrelativo: guiaNum,

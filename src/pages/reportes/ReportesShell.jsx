@@ -28,7 +28,7 @@ export default function ReportesShell({ user, onLogout, onBackToSelector }) {
       .catch(() => {});
   }, [user]);
 
-  const isAdmin = ["superadmin", "admin_contrato"].includes(userRole);
+  const isAdmin = ["superadmin", "admin_contrato", "administrativo"].includes(userRole);
 
   const navItems = [
     { id: "combustible", label: "Reporte Combustible" },

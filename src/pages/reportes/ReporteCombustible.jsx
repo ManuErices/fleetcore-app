@@ -13,7 +13,7 @@ import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherTherm
 import { useToast, ToastContainer } from "../../components/Toast";
 
 export default function ReporteCombustible() {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa: tenantInfo } = useEmpresa();
   const { toast, toasts, removeToast } = useToast();
   const [reportes, setReportes] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -484,6 +484,7 @@ export default function ReporteCombustible() {
       machineInfo: finalMachineInfo,
       operadorInfo: finalOperadorInfo,
       empresaInfo: finalEmpresaInfo,
+      tenantInfo,
       repartidorInfo: finalRepartidorInfo,
       equipoSurtidorInfo: finalEquipoSurtidorInfo,
       numeroGuiaCorrelativo: numeroGuia

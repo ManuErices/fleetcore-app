@@ -236,6 +236,7 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ nombre: "", rut: "", adminEmail: "", plan: "trial", estado: "activo" });
+  const [pending, setPending] = useState({}); // { [empId]: { modulos: [...], status } } cambios sin guardar
 
   const handleCrearEmpresa = async () => {
     if (!form.nombre) return alert("Nombre es requerido");
@@ -285,6 +286,7 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
           planId, status, empresaId: emp.id, creadoEn: serverTimestamp(),
         });
       }
+      setPending(p => { const n = { ...p }; delete n[emp.id]; return n; });
       onRefresh();
     } catch (e) { alert("Error: " + e.message); }
     setSaving(null);
@@ -437,21 +439,33 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
               </div>
 
               {/* Panel expandible */}
-              {isExpanded && (
+              {isExpanded && (() => {
+                const currentStatus = sub?.status || "authorized";
+                const edit = pending[emp.id] || { modulos: modActivos, status: currentStatus };
+                const editMrr = edit.modulos.reduce((s, m) => s + (MODULES[m]?.price || 0), 0);
+                const isDirty = edit.status !== currentStatus
+                  || edit.modulos.length !== modActivos.length
+                  || edit.modulos.some(m => !modActivos.includes(m));
+
+                const updateEdit = (changes) => {
+                  setPending(p => ({ ...p, [emp.id]: { ...edit, ...changes } }));
+                };
+
+                return (
                 <div className="border-t border-slate-100 p-4 bg-slate-50">
                   <h4 className="text-xs font-black text-slate-600 uppercase tracking-wider mb-3">Módulos y plan</h4>
 
                   {/* Toggle de módulos */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
                     {Object.entries(MODULES).map(([id, mod]) => {
-                      const active = modActivos.includes(id);
+                      const active = edit.modulos.includes(id);
                       return (
                         <button key={id}
                           onClick={() => {
                             const nuevo = active
-                              ? modActivos.filter(m => m !== id)
-                              : [...modActivos, id];
-                            setModulos(emp, nuevo, sub?.status || "authorized");
+                              ? edit.modulos.filter(m => m !== id)
+                              : [...edit.modulos, id];
+                            updateEdit({ modulos: nuevo });
                           }}
                           disabled={saving === emp.id}
                           className={`p-3 rounded-xl text-xs font-bold border-2 transition-all text-left ${active
@@ -470,21 +484,40 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
                     <span className="text-xs text-slate-500 font-medium">Estado plan:</span>
                     {["trial", "authorized", "cancelled"].map(s => (
                       <button key={s}
-                        onClick={() => setModulos(emp, modActivos, s)}
+                        onClick={() => updateEdit({ status: s })}
                         disabled={saving === emp.id}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${sub?.status === s ? "bg-indigo-600 text-white" : "bg-white border border-slate-200 text-slate-500 hover:border-indigo-300"}`}>
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${edit.status === s ? "bg-indigo-600 text-white" : "bg-white border border-slate-200 text-slate-500 hover:border-indigo-300"}`}>
                         {s}
                       </button>
                     ))}
-                    {modActivos.length > 0 && (
-                      <span className="ml-auto text-xs font-black text-indigo-700">{fmt(mrr)}/mes</span>
+                    {edit.modulos.length > 0 && (
+                      <span className="ml-auto text-xs font-black text-indigo-700">{fmt(editMrr)}/mes</span>
                     )}
                   </div>
+
+                  {/* Guardar / Descartar cambios */}
+                  {isDirty && (
+                    <div className="flex items-center gap-2 mt-3">
+                      <button
+                        onClick={() => setModulos(emp, edit.modulos, edit.status)}
+                        disabled={saving === emp.id}
+                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg transition-all disabled:opacity-50">
+                        {saving === emp.id ? "Guardando..." : "Guardar cambios"}
+                      </button>
+                      <button
+                        onClick={() => setPending(p => { const n = { ...p }; delete n[emp.id]; return n; })}
+                        disabled={saving === emp.id}
+                        className="px-4 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-500 text-xs font-bold rounded-lg transition-all disabled:opacity-50">
+                        Descartar
+                      </button>
+                    </div>
+                  )}
 
                   {/* Info técnica */}
                   <p className="text-[10px] text-slate-300 mt-3">ID: {emp.id} · Admin UID: {emp.adminUid}</p>
                 </div>
-              )}
+                );
+              })()}
             </div>
           );
         })}

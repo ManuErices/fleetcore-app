@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { printThermalVoucher } from '../../utils/voucherThermalGenerator';
+import { useEmpresa } from '../../lib/useEmpresa';
 
 export default function CombustibleDetalleModal({
   reporte,
@@ -12,6 +13,7 @@ export default function CombustibleDetalleModal({
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
+  const { empresa: tenantInfo } = useEmpresa();
   const isAdmin = userRole === 'administrador';
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState(reporte ? { ...reporte } : {});
@@ -66,6 +68,7 @@ export default function CombustibleDetalleModal({
       projectName,
       machineInfo,
       operadorInfo,
+      tenantInfo,
       repartidorInfo: surtidorInfo || {
         nombre: reporte.repartidorNombre || reporte.surtidorNombre,
         rut: reporte.repartidorRut || reporte.surtidorRut

@@ -14,6 +14,8 @@ import EquipoSurtidorModal from './modals/EquipoSurtidorModal';
 import EmpresaModal from './modals/EmpresaModal';
 import MaquinaModal from './modals/MaquinaModal';
 import EmpleadoModal from './modals/EmpleadoModal';
+import ProyectoModal from './modals/ProyectoModal';
+import EstacionModal from './modals/EstacionModal';
 
 export default function CombustibleForm({ empresaId, onClose }) {
   const f = useCombustibleForm(empresaId, onClose);
@@ -109,6 +111,8 @@ export default function CombustibleForm({ empresaId, onClose }) {
               setNuevaMaquinaData={f.setNuevaMaquinaData}
               setShowModalEmpleado={f.setShowModalEmpleado}
               setNuevoEmpleadoData={f.setNuevoEmpleadoData}
+              setShowModalProyecto={f.setShowModalProyecto}
+              setShowModalEstacion={f.setShowModalEstacion}
             />
           )}
 
@@ -306,6 +310,32 @@ export default function CombustibleForm({ empresaId, onClose }) {
           onClose={() => {
             f.setShowModalEmpleado(false);
             f.setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: '' });
+          }}
+          loading={f.loading}
+        />
+      )}
+
+      {f.showModalProyecto && (
+        <ProyectoModal
+          data={f.nuevoProyecto}
+          setData={f.setNuevoProyecto}
+          onConfirm={f.handleCrearProyecto}
+          onClose={() => {
+            f.setShowModalProyecto(false);
+            f.setNuevoProyecto({ name: '', codigo: '' });
+          }}
+          loading={f.loading}
+        />
+      )}
+
+      {f.showModalEstacion && (
+        <EstacionModal
+          data={f.nuevaEstacion}
+          setData={f.setNuevaEstacion}
+          onConfirm={f.handleCrearEstacion}
+          onClose={() => {
+            f.setShowModalEstacion(false);
+            f.setNuevaEstacion({ nombre: '', marca: '' });
           }}
           loading={f.loading}
         />
