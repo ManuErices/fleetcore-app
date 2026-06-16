@@ -2732,7 +2732,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                               <td className="px-3 py-2 text-red-400">{fmt(c.cesEmpM||0)}</td>
                               <td className="px-3 py-2 font-black text-purple-700">{fmt(c.imponible)}</td>
                               <td className="px-3 py-2">
-                                <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{contrato?.tipoContrato?.includes('Fijo')?'PF':'IND'}</span>
+                                <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{(contrato?.tipoContrato || '').toLowerCase().includes('plazo') ? 'PF' : 'IND'}</span>
                               </td>
                             </tr>
                           );

@@ -26,6 +26,17 @@ const {
 
 // ─── Helpers UI ───────────────────────────────────────────────────────────────
 
+const formatCLP = (val) => {
+  if (val === undefined || val === null || val === '') return '';
+  const num = parseInt(String(val).replace(/\D/g, ''), 10);
+  if (isNaN(num)) return '';
+  return num.toLocaleString('es-CL');
+};
+
+const parseCLP = (val) => {
+  return String(val).replace(/\D/g, '');
+};
+
 function Modal({ isOpen, onClose, title, subtitle, children, maxWidth = 'max-w-2xl' }) {
   useEffect(() => {
     if (isOpen) document.body.style.overflow = 'hidden';
@@ -734,9 +745,9 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
           <Field label="Fecha de inicio" required>
             <input type="date" className={inp} value={form.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
           </Field>
-          <Field label={`Fecha de término ${form.tipoContrato === 'Indefinido' ? '(no aplica)' : ''}`}>
+          <Field label={`Fecha de término ${(form.tipoContrato || '').toLowerCase().includes('indefinido') ? '(no aplica)' : ''}`}>
             <input type="date" className={inp} value={form.fechaFin}
-              disabled={form.tipoContrato === 'Indefinido'}
+              disabled={(form.tipoContrato || '').toLowerCase().includes('indefinido')}
               onChange={e => set('fechaFin', e.target.value)} />
           </Field>
         </div>
@@ -759,13 +770,13 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
         <Divider label="Remuneración base (Art. 42 CT)" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Sueldo base ($)" required>
-            <input type="number" className={inp} value={form.sueldoBase} onChange={e => set('sueldoBase', e.target.value)} placeholder="Ej: 800000" />
+            <input type="text" className={inp} value={formatCLP(form.sueldoBase)} onChange={e => set('sueldoBase', parseCLP(e.target.value))} placeholder="Ej: 800.000" />
           </Field>
           <Field label="Bono colación ($)">
-            <input type="number" className={inp} value={form.bonoColacion} onChange={e => set('bonoColacion', e.target.value)} placeholder="No imponible" />
+            <input type="text" className={inp} value={formatCLP(form.bonoColacion)} onChange={e => set('bonoColacion', parseCLP(e.target.value))} placeholder="No imponible" />
           </Field>
           <Field label="Bono movilización ($)">
-            <input type="number" className={inp} value={form.bonoMovilizacion} onChange={e => set('bonoMovilizacion', e.target.value)} placeholder="No imponible" />
+            <input type="text" className={inp} value={formatCLP(form.bonoMovilizacion)} onChange={e => set('bonoMovilizacion', parseCLP(e.target.value))} placeholder="No imponible" />
           </Field>
         </div>
         {form.sueldoBase && parseInt(form.sueldoBase) < IMM_2026 && (
@@ -912,45 +923,45 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         <Divider label="Haberes imponibles" />
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Field label="Sueldo base ($)" required>
-            <input type="number" className={inp} value={form.sueldoBase} onChange={e => set('sueldoBase', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.sueldoBase)} onChange={e => set('sueldoBase', parseCLP(e.target.value))} />
           </Field>
           <Field label="Bono producción ($)">
-            <input type="number" className={inp} value={form.bonoProduccion} onChange={e => set('bonoProduccion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoProduccion)} onChange={e => set('bonoProduccion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros imponibles ($)">
-            <input type="number" className={inp} value={form.otrosImponibles} onChange={e => set('otrosImponibles', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosImponibles)} onChange={e => set('otrosImponibles', parseCLP(e.target.value))} />
           </Field>
           <Field label="Horas extra">
             <input type="number" className={inp} value={form.horasExtra} onChange={e => set('horasExtra', e.target.value)} />
           </Field>
           <Field label="Valor hora extra ($)">
-            <input type="number" className={inp} value={form.valorHoraExtra} onChange={e => set('valorHoraExtra', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.valorHoraExtra)} onChange={e => set('valorHoraExtra', parseCLP(e.target.value))} />
           </Field>
         </div>
 
         <Divider label="Haberes no imponibles" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Field label="Colación ($)">
-            <input type="number" className={inp} value={form.bonoColacion} onChange={e => set('bonoColacion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoColacion)} onChange={e => set('bonoColacion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Movilización ($)">
-            <input type="number" className={inp} value={form.bonoMovilizacion} onChange={e => set('bonoMovilizacion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoMovilizacion)} onChange={e => set('bonoMovilizacion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Viáticos ($)">
-            <input type="number" className={inp} value={form.viaticos} onChange={e => set('viaticos', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.viaticos)} onChange={e => set('viaticos', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros no imp. ($)">
-            <input type="number" className={inp} value={form.otrosNoImponibles} onChange={e => set('otrosNoImponibles', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosNoImponibles)} onChange={e => set('otrosNoImponibles', parseCLP(e.target.value))} />
           </Field>
         </div>
 
         <Divider label="Descuentos adicionales" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Descuento adicional ($)">
-            <input type="number" className={inp} value={form.descuentoAdicional} onChange={e => set('descuentoAdicional', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.descuentoAdicional)} onChange={e => set('descuentoAdicional', parseCLP(e.target.value))} />
           </Field>
           <Field label="Anticipo ($)">
-            <input type="number" className={inp} value={form.anticipo} onChange={e => set('anticipo', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
           </Field>
         </div>
 
@@ -1079,7 +1090,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             <input type="date" className={inp} value={form.fechaTermino} onChange={e => set('fechaTermino', e.target.value)} />
           </Field>
           <Field label="Última remuneración ($)" required>
-            <input type="number" className={inp} value={form.ultimaRemuneracion} onChange={e => set('ultimaRemuneracion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.ultimaRemuneracion)} onChange={e => set('ultimaRemuneracion', parseCLP(e.target.value))} />
           </Field>
         </div>
         {calc && (
@@ -1099,7 +1110,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             <input type="number" className={inp} value={form.diasFeriadoPendiente} onChange={e => set('diasFeriadoPendiente', e.target.value)} />
           </Field>
           <Field label="Remuneraciones pendientes ($)">
-            <input type="number" className={inp} value={form.remuneracionesPendientes} onChange={e => set('remuneracionesPendientes', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.remuneracionesPendientes)} onChange={e => set('remuneracionesPendientes', parseCLP(e.target.value))} />
           </Field>
           <Field label="Aviso previo (Art. 161 CT)">
             <select className={inp} value={form.pagoAvisoPrevio} onChange={e => set('pagoAvisoPrevio', e.target.value)}>
@@ -1112,10 +1123,10 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
         <Divider label="Descuentos" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo pendiente ($)">
-            <input type="number" className={inp} value={form.anticipoPendiente} onChange={e => set('anticipoPendiente', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.anticipoPendiente)} onChange={e => set('anticipoPendiente', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros descuentos ($)">
-            <input type="number" className={inp} value={form.otrosDescuentos} onChange={e => set('otrosDescuentos', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosDescuentos)} onChange={e => set('otrosDescuentos', parseCLP(e.target.value))} />
           </Field>
         </div>
 
@@ -1254,7 +1265,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
         {form.tipo === 'aumento_sueldo' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Nuevo sueldo base ($)" required>
-              <input type="number" className={inp} value={form.nuevoSueldo} onChange={e => set('nuevoSueldo', e.target.value)} />
+              <input type="text" className={inp} value={formatCLP(form.nuevoSueldo)} onChange={e => set('nuevoSueldo', parseCLP(e.target.value))} />
             </Field>
             {contratoSel?.sueldoBase && form.nuevoSueldo && (
               <div className="flex items-end pb-2.5">

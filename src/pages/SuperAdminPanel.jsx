@@ -12,7 +12,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { db } from "../lib/firebase";
 import {
-  collection, getDocs, doc, updateDoc, setDoc, addDoc,
+  collection, getDocs, doc, updateDoc, setDoc, addDoc, deleteDoc,
   serverTimestamp, query, orderBy, where,
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
@@ -532,41 +532,184 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
   const [saving, setSaving] = useState(null);
 
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "" });
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    role: "mandante",
+    empresaId: "",
+    nombre: "",
+    rut: "",
+    modulos: [],
+  });
 
-  const handleCrearUsuario = async () => {
-    if (!form.email || !form.password) return alert("Email y password requeridos");
-    setSaving("new_usr");
-    let tempApp;
-    try {
-      tempApp = initializeApp(firebaseConfig, "tempApp_" + Date.now());
-      const tempAuth = getAuth(tempApp);
-      const cred = await createUserWithEmailAndPassword(tempAuth, form.email, form.password);
-      await setDoc(doc(db, "users", cred.user.uid), {
-        email: form.email,
-        nombre: form.nombre,
-        rut: form.rut,
-        role: form.role,
-        empresaId: form.empresaId,
-        password: form.password,
-        createdAt: serverTimestamp()
-      });
-      setShowModal(false);
-      setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "" });
-      onRefresh();
-    } catch(e) { 
-      let msg = e.message;
-      if (e.code === 'auth/email-already-in-use') {
-        msg = "Este correo electrónico ya está registrado en el sistema. Si el usuario ya existe, búscalo en la tabla para cambiar su rol o empresa.";
-      } else if (e.code === 'auth/weak-password') {
-        msg = "La contraseña debe tener al menos 6 caracteres.";
-      } else if (e.code === 'auth/invalid-email') {
-        msg = "El formato del correo electrónico no es válido.";
+  const ALL_MODULOS = [
+    { value: 'fleetcore', label: 'Oficina Técnica' },
+    { value: 'rrhh',      label: 'Recursos Humanos' },
+    { value: 'finanzas',  label: 'Finanzas' },
+    { value: 'reportes',  label: 'Work Fleet (Reportes)' },
+    { value: 'workfleet_m', label: 'WorkFleet-M' },
+  ];
+
+  const toggleModulo = (val) => {
+    setForm(f => ({
+      ...f,
+      modulos: f.modulos.includes(val)
+        ? f.modulos.filter(m => m !== val)
+        : [...f.modulos, val],
+    }));
+  };
+
+  const openEdit = (usr) => {
+    setEditId(usr.id);
+    setForm({
+      email: usr.email || "",
+      password: usr.password || "",
+      role: usr.role || "mandante",
+      empresaId: usr.empresaId || "",
+      nombre: usr.nombre || "",
+      rut: usr.rut || "",
+      modulos: usr.modulos || [],
+    });
+    setShowModal(true);
+  };
+
+  const openCreate = () => {
+    setEditId(null);
+    setForm({
+      email: "",
+      password: "",
+      role: "mandante",
+      empresaId: "",
+      nombre: "",
+      rut: "",
+      modulos: [],
+    });
+    setShowModal(true);
+  };
+
+  const handleSaveUsuario = async () => {
+    if (editId) {
+      // EDIT MODE
+      setSaving("save_usr");
+      try {
+        const u = usuarios.find(usr => usr.id === editId);
+        const oldEmpresaId = u?.empresaId || "";
+        const newEmpresaId = form.empresaId || "";
+
+        const updates = {
+          nombre: form.nombre.trim(),
+          rut: form.rut.trim(),
+          role: form.role,
+          empresaId: newEmpresaId,
+          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          updatedAt: serverTimestamp(),
+        };
+        if (form.password && form.password.trim()) {
+          updates.password = form.password.trim();
+        }
+
+        // 1. Update root collection
+        await updateDoc(doc(db, "users", editId), updates);
+
+        // 2. Sync tenant collection: handle company change or creation
+        if (oldEmpresaId && oldEmpresaId !== newEmpresaId) {
+          // Delete from old company subcollection
+          try {
+            await deleteDoc(doc(db, "empresas", oldEmpresaId, "users", editId));
+          } catch (err) {
+            console.error("Error deleting user from old company subcollection:", err);
+          }
+        }
+
+        if (newEmpresaId) {
+          // Merge updates into the new/existing tenant document
+          const fullUserDoc = {
+            ...updates,
+            email: form.email || u?.email || "",
+            createdAt: u?.createdAt || serverTimestamp(),
+          };
+          await setDoc(doc(db, "empresas", newEmpresaId, "users", editId), fullUserDoc, { merge: true });
+        }
+
+        setShowModal(false);
+        setEditId(null);
+        setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "", modulos: [] });
+        onRefresh();
+      } catch (e) {
+        alert("Error al actualizar usuario: " + e.message);
+      } finally {
+        setSaving(null);
       }
-      alert("Error: " + msg); 
+    } else {
+      // CREATE MODE
+      if (!form.email || !form.password) return alert("Email y password requeridos");
+      setSaving("save_usr");
+      let tempApp;
+      try {
+        tempApp = initializeApp(firebaseConfig, "tempApp_" + Date.now());
+        const tempAuth = getAuth(tempApp);
+        const cred = await createUserWithEmailAndPassword(tempAuth, form.email, form.password);
+        const uid = cred.user.uid;
+
+        const newUserData = {
+          email: form.email,
+          nombre: form.nombre.trim(),
+          rut: form.rut.trim(),
+          role: form.role,
+          empresaId: form.empresaId || "",
+          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          password: form.password,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+
+        // Write to root users collection
+        await setDoc(doc(db, "users", uid), newUserData);
+
+        // Write to tenant users collection if empresaId is set
+        if (form.empresaId) {
+          await setDoc(doc(db, "empresas", form.empresaId, "users", uid), newUserData);
+        }
+
+        setShowModal(false);
+        setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "", modulos: [] });
+        onRefresh();
+      } catch (e) {
+        let msg = e.message;
+        if (e.code === 'auth/email-already-in-use') {
+          msg = "Este correo electrónico ya está registrado en el sistema. Si el usuario ya existe, búscalo en la tabla para cambiar su rol o empresa.";
+        } else if (e.code === 'auth/weak-password') {
+          msg = "La contraseña debe tener al menos 6 caracteres.";
+        } else if (e.code === 'auth/invalid-email') {
+          msg = "El formato del correo electrónico no es válido.";
+        }
+        alert("Error: " + msg);
+      } finally {
+        if (tempApp) await deleteApp(tempApp);
+        setSaving(null);
+      }
     }
-    finally {
-      if(tempApp) await deleteApp(tempApp);
+  };
+
+  const handleEliminarUsuario = async (usr) => {
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar al usuario ${usr.email}? Esta acción no se puede deshacer y eliminará su documento de las colecciones de Firestore.`)) {
+      return;
+    }
+    setSaving(usr.id);
+    try {
+      // 1. Delete from root
+      await deleteDoc(doc(db, "users", usr.id));
+
+      // 2. Delete from company if empresaId is present
+      if (usr.empresaId) {
+        await deleteDoc(doc(db, "empresas", usr.empresaId, "users", usr.id));
+      }
+      
+      onRefresh();
+    } catch (e) {
+      alert("Error al eliminar usuario: " + e.message);
+    } finally {
       setSaving(null);
     }
   };
@@ -586,7 +729,15 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
   const cambiarRol = async (uid, role) => {
     setSaving(uid);
     try {
-      await updateDoc(doc(db, "users", uid), { role, updatedAt: serverTimestamp() });
+      const u = usuarios.find(usr => usr.id === uid);
+      const updates = { role, updatedAt: serverTimestamp() };
+
+      await updateDoc(doc(db, "users", uid), updates);
+
+      if (u?.empresaId) {
+        await updateDoc(doc(db, "empresas", u.empresaId, "users", uid), updates);
+      }
+
       onRefresh();
     } catch (e) { alert("Error: " + e.message); }
     setSaving(null);
@@ -598,40 +749,82 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
         title="Usuarios del sistema"
         subtitle={`${usuarios.length} usuarios registrados`}
         action={
-          <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl shadow-sm transition-all">
+          <button onClick={openCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl shadow-sm transition-all">
             Crear Manualmente
           </button>
         }
       />
 
-      {/* Modal Crear Usuario */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Crear Usuario">
-        <Field label="Nombre">
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Juan Pérez" />
-        </Field>
-        <Field label="Email" required>
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="Ej: usuario@empresa.com" />
-        </Field>
-        <Field label="Contraseña" required>
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder="Al menos 6 caracteres" />
-        </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Rol" required>
-            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.role} onChange={e => setForm({...form, role: e.target.value})}>
-              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-              <option value="mandante_admin">mandante_admin</option>
-            </select>
+      {/* Modal Crear / Editar Usuario */}
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editId ? "Editar Usuario" : "Crear Usuario"}>
+        <div className="space-y-4">
+          <Field label="Nombre">
+            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Juan Pérez" />
           </Field>
-          <Field label="Empresa">
-            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.empresaId} onChange={e => setForm({...form, empresaId: e.target.value})}>
-              <option value="">Ninguna</option>
-              {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-            </select>
+          <Field label="RUT">
+            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 12.345.678-9" />
           </Field>
+          <Field label="Email" required>
+            <input
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 disabled:bg-slate-50 disabled:text-slate-500"
+              type="email"
+              value={form.email}
+              onChange={e => setForm({...form, email: e.target.value})}
+              placeholder="Ej: usuario@empresa.com"
+              disabled={!!editId}
+            />
+          </Field>
+          <Field label={editId ? "Nueva Contraseña (opcional)" : "Contraseña"} required={!editId}>
+            <input
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400"
+              type="password"
+              value={form.password}
+              onChange={e => setForm({...form, password: e.target.value})}
+              placeholder={editId ? "Dejar vacío para mantener" : "Al menos 6 caracteres"}
+            />
+            {editId && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                Se guarda en Firestore para poder generar el QR de acceso. Déjalo vacío si no deseas modificarla.
+              </p>
+            )}
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Rol" required>
+              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: e.target.value === 'administrativo' ? form.modulos : []})}>
+                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                <option value="mandante_admin">mandante_admin</option>
+              </select>
+            </Field>
+            <Field label="Empresa">
+              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.empresaId} onChange={e => setForm({...form, empresaId: e.target.value})}>
+                <option value="">Ninguna</option>
+                {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+              </select>
+            </Field>
+          </div>
+
+          {form.role === 'administrativo' && (
+            <Field label="Módulos habilitados" required>
+              <div className="space-y-2 mt-1 max-h-[150px] overflow-y-auto pr-1">
+                {ALL_MODULOS.map(m => (
+                  <label key={m.value} className="flex items-center gap-3 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={form.modulos.includes(m.value)}
+                      onChange={() => toggleModulo(m.value)}
+                      className="w-4 h-4 rounded accent-indigo-600"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">{m.label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          )}
+
+          <button onClick={handleSaveUsuario} disabled={saving === "save_usr"} className="w-full py-2.5 mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
+            {saving === "save_usr" ? (editId ? "Guardando..." : "Creando...") : (editId ? "Guardar Cambios" : "Crear Usuario")}
+          </button>
         </div>
-        <button onClick={handleCrearUsuario} disabled={saving === "new_usr"} className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
-          {saving === "new_usr" ? "Creando..." : "Crear Usuario"}
-        </button>
       </Modal>
 
       <input
@@ -649,11 +842,12 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
               <th className="text-left px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">Empresa</th>
               <th className="text-left px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">Rol</th>
               <th className="text-left px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">Creado</th>
+              <th className="text-right px-4 py-3 text-xs font-black text-slate-500 uppercase tracking-wider">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {filtrados.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400 text-xs">Sin usuarios</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-xs">Sin usuarios</td></tr>
             )}
             {filtrados.map(u => {
               const emp = getEmpresa(u.id);
@@ -666,7 +860,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
                       </div>
                       <div>
                         <div className="font-semibold text-slate-800 text-xs">{u.email}</div>
-                        <div className="text-[10px] text-slate-400">{u.id.slice(0, 8)}...</div>
+                        <div className="text-[10px] text-slate-400">{u.nombre || u.id.slice(0, 8)}...</div>
                       </div>
                     </div>
                   </td>
@@ -687,6 +881,30 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-slate-400">{fmtDate(u.createdAt || u.updatedAt)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => openEdit(u)}
+                        disabled={saving === u.id}
+                        className="p-1 hover:bg-indigo-50 text-indigo-600 rounded transition-colors disabled:opacity-50"
+                        title="Editar"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleEliminarUsuario(u)}
+                        disabled={saving === u.id}
+                        className="p-1 hover:bg-red-50 text-red-600 rounded transition-colors disabled:opacity-50"
+                        title="Eliminar"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

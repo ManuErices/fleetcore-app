@@ -755,9 +755,11 @@ function ContratosSection() {
   };
 
   const tipoBadge = {
-    'Indefinido':    'bg-blue-100 text-blue-700',
-    'Plazo Fijo':    'bg-amber-100 text-amber-700',
-    'Obra o Faena':  'bg-orange-100 text-orange-700',
+    'Indefinido':       'bg-blue-100 text-blue-700',
+    'Plazo Fijo':       'bg-amber-100 text-amber-700',
+    'Plazo fijo':       'bg-amber-100 text-amber-700',
+    'Obra o Faena':     'bg-orange-100 text-orange-700',
+    'Por obra o faena': 'bg-orange-100 text-orange-700',
   };
 
   return (
