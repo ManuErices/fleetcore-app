@@ -17,7 +17,7 @@ import EmpleadoModal from './modals/EmpleadoModal';
 import ProyectoModal from './modals/ProyectoModal';
 import EstacionModal from './modals/EstacionModal';
 
-export default function CombustibleForm({ empresaId, onClose }) {
+export default function CombustibleForm({ empresaId, onClose, isReportesView }) {
   const f = useCombustibleForm(empresaId, onClose);
 
   const stepLabel = {
@@ -100,6 +100,7 @@ export default function CombustibleForm({ empresaId, onClose }) {
               surtidoresPersonas={f.surtidoresPersonas}
               currentUserData={f.currentUserData}
               isAdmin={f.isAdmin}
+              isReportesView={isReportesView}
               cargarEstaciones={f.cargarEstaciones}
               esMPF={f.esMPF}
               empresasMatch={f.empresasMatch}

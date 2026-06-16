@@ -61,6 +61,7 @@ export default function ControlStep({
   trabajadoresLocales,
   surtidoresPersonas,
   currentUserData, isAdmin,
+  isReportesView,
   cargarEstaciones,
   esMPF, empresasMatch, resolverNombreEmpresa,
   setPaso,
@@ -109,9 +110,9 @@ export default function ControlStep({
             {tipoReporte === 'entrada' ? "¿De dónde viene el combustible?" : "¿Quién entrega el combustible?"}
           </h3>
 
-          {/* Obra / Fecha */}
+          {/* Obra / Fecha / Folio */}
           <div className="pt-4 border-t border-slate-100">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid grid-cols-1 ${isReportesView ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
               <div>
                 <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Obra / Proyecto</label>
                 <div className="flex gap-2">
@@ -140,6 +141,18 @@ export default function ControlStep({
                   className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
                 />
               </div>
+              {isReportesView && (
+                <div>
+                  <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Folio (Respaldo)</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 1234"
+                    value={datosControl.folio || ''}
+                    onChange={(e) => setDatosControl({ ...datosControl, folio: e.target.value })}
+                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                  />
+                </div>
+              )}
             </div>
           </div>
 

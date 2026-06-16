@@ -298,8 +298,8 @@ export default function ReporteCombustible() {
           || (machine?.type && machine?.marca ? `${machine.type} - ${machine.marca}` : machine?.modelo || ''),
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
-        operadorNombre: operador?.nombre || '',
-        operadorRut: operador?.rut || '',
+        operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.operadorNombre || '',
+        operadorRut: operador?.rut || r.operadorRut || '',
         receptorNombre: r.datosEntrada?.receptorNombre || '',
         cantidad: cantidad,
         horometroOdometro,
@@ -503,13 +503,13 @@ export default function ReporteCombustible() {
       'Empresa': r.empresaNombre || '',
       'Fecha': r.fecha,
       'N° Reporte': r.numeroReporte,
+      'Folio': r.folio || '',
       'Cod/Patente': r.machinePatente,
       'Máquina': r.machineName,
       'Surtidor': r.surtidorNombre,
       'RUT Surtidor': r.surtidorRut,
-      'Operador': r.operadorNombre,
-      'RUT Operador': r.operadorRut,
-      'Horómetro/Odómetro': r.horometroOdometro,
+      'Receptor': r.operadorNombre,
+      'RUT Receptor': r.operadorRut,
       'Combustible (lts)': r.cantidadLitros,
       'Observaciones': r.observaciones || ''
     }));
@@ -673,7 +673,7 @@ export default function ReporteCombustible() {
         doc.setFont(undefined, 'bold');
         doc.setTextColor(107, 114, 128);
         doc.text('MÁQUINA RECEPTORA', margin, yPos);
-        doc.text('OPERADOR', margin + colWidth, yPos);
+        doc.text('RECEPTOR', margin + colWidth, yPos);
         yPos += 5;
 
         doc.setFont(undefined, 'normal');
@@ -771,16 +771,16 @@ export default function ReporteCombustible() {
     const tableData = reportesFiltrados.map(r => [
       r.fecha,
       r.numeroReporte,
+      r.folio || '-',
       r.empresaNombre || '-',
       r.machinePatente,
       r.surtidorNombre,
       r.operadorNombre,
-      r.horometroOdometro,
       r.cantidadLitros
     ]);
 
     autoTable(doc, {
-      head: [['Fecha', 'N° Reporte', 'Empresa', 'Máquina', 'Surtidor', 'Operador', 'Horómetro', 'Litros']],
+      head: [['Fecha', 'N° Reporte', 'Folio', 'Empresa', 'Máquina', 'Surtidor', 'Receptor', 'Litros']],
       body: tableData,
       startY: 30,
       theme: 'grid',
@@ -1015,27 +1015,26 @@ export default function ReporteCombustible() {
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Tipo</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Folio</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Empresa</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Máquina</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Repartidor</th>
-                    <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Operador</th>
-                    <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Horómetro</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Receptor</th>
                     <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Litros</th>
                     <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firmado</th>
                     <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Ver</th>
-                    <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-orange-100">
                   {loading ? (
                     <tr>
-                      <td colSpan="11" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="12" className="px-4 py-12 text-center text-slate-500">
                         Cargando...
                       </td>
                     </tr>
                   ) : reportesFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan="11" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="12" className="px-4 py-12 text-center text-slate-500">
                         <div className="flex flex-col items-center gap-3">
                           <svg className="w-16 h-16 text-orange-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1089,6 +1088,9 @@ export default function ReporteCombustible() {
                             {reporte.numeroReporte}
                           </div>
                         </td>
+                        <td className="px-3 py-3 text-sm font-semibold text-slate-700">
+                          {reporte.folio || '-'}
+                        </td>
                         <td className="px-3 py-3 text-sm text-slate-700">
                           {reporte.empresaNombre || '-'}
                         </td>
@@ -1100,9 +1102,6 @@ export default function ReporteCombustible() {
                         </td>
                         <td className="px-3 py-3 text-sm text-slate-700">
                           {reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}
-                        </td>
-                        <td className="px-3 py-3 text-sm text-center text-slate-700">
-                          {reporte.horometroOdometro ? Number(reporte.horometroOdometro).toLocaleString('es-CL') : '-'}
                         </td>
                         <td className="px-3 py-3 text-sm text-center font-bold text-orange-600">
                           {Number(reporte.cantidad || 0).toLocaleString('es-CL')} L
@@ -1140,18 +1139,6 @@ export default function ReporteCombustible() {
                           ) : (
                             <span className="text-xs text-slate-300">-</span>
                           )}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          <button
-                            onClick={() => handleEliminar(reporte.id)}
-                            className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-red-100 hover:text-red-700 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto"
-                            title="Archivar reporte (no se borra definitivamente)"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8" />
-                            </svg>
-                            Archivar
-                          </button>
                         </td>
                       </tr>
                     ))
@@ -1204,6 +1191,7 @@ export default function ReporteCombustible() {
             handleRecargarReportes();
           }}
           empresaId={empresaId}
+          isReportesView={true}
         />
 
         {/* Modal de Detalle del Reporte de Combustible */}
@@ -1254,12 +1242,12 @@ export default function ReporteCombustible() {
             onSave={async (editedData) => {
               try {
                 // Guardar los cambios en Firebase
-                const reporteRef = doc(db, 'empresas', empresaId, 'control_combustible', reporteDetalle.id);
+                const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
                 await updateDoc(reporteRef, editedData);
                 console.log('Reporte actualizado:', editedData);
 
                 // Recargar reportes
-                const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
+                const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
                 const q = query(reportesRef, orderBy('fecha', 'desc'));
                 const reportesSnap = await getDocs(q);
                 const reportesData = reportesSnap.docs.map(doc => ({
@@ -1312,7 +1300,7 @@ export default function ReporteCombustible() {
                 }
 
                 // PIN correcto, proceder con la firma
-                const reporteRef = doc(db, 'empresas', empresaId, 'control_combustible', reporteDetalle.id);
+                const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
                 await updateDoc(reporteRef, {
                   firmado: true,
                   firmaAdmin: {
@@ -1325,7 +1313,7 @@ export default function ReporteCombustible() {
                 console.log('Reporte firmado exitosamente');
 
                 // Recargar reportes
-                const reportesRef = collection(db, 'empresas', empresaId, 'control_combustible');
+                const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
                 const q = query(reportesRef, orderBy('fecha', 'desc'));
                 const reportesSnap = await getDocs(q);
                 const reportesData = reportesSnap.docs.map(doc => ({

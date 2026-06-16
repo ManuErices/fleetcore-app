@@ -77,7 +77,8 @@ export function useCombustibleForm(empresaId, onClose) {
     projectId: '',
     fecha: TODAY(),
     repartidorId: '',
-    equipoSurtidorId: ''
+    equipoSurtidorId: '',
+    folio: ''
   });
 
   const [datosEntrada, setDatosEntrada] = useState({
@@ -221,7 +222,7 @@ export function useCombustibleForm(empresaId, onClose) {
     setTipoReporte('');
     setFirmaRepartidor(null);
     setFirmaReceptor(null);
-    setDatosControl({ projectId: '', fecha: TODAY(), repartidorId: '', equipoSurtidorId: '' });
+    setDatosControl({ projectId: '', fecha: TODAY(), repartidorId: '', equipoSurtidorId: '', folio: '' });
     setDatosEntrada({
       origen: '', tipoOrigen: '', destinoCarga: '', numerosDocumento: [''], numeroDocumento: '',
       fechaDocumento: TODAY(), cantidad: '', horometroOdometro: '', machineId: '', operadorId: '',

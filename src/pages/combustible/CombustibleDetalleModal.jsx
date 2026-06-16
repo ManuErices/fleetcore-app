@@ -129,10 +129,23 @@ export default function CombustibleDetalleModal({
           {/* Información General del Reporte */}
           <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-slate-200">
             <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-3">Información General</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <DataField label="Fecha" value={reporte.fecha} />
               <DataField label="Hora" value={reporte.hora || (reporte.fechaCreacion ? new Date(reporte.fechaCreacion).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-')} />
               <DataField label="N° Guía" value={reporte.numeroGuia || '-'} />
+              {isEditing ? (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1">Folio (Respaldo)</div>
+                  <input
+                    type="text"
+                    value={editedData.folio || ''}
+                    onChange={(e) => updateField('folio', e.target.value)}
+                    className="w-full px-3 py-1.5 border-2 border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 font-bold text-slate-700 text-sm"
+                  />
+                </div>
+              ) : (
+                <DataField label="Folio (Respaldo)" value={reporte.folio || '-'} />
+              )}
               <DataField label="Proyecto" value={projectName || reporte.projectId} />
             </div>
           </div>
@@ -268,7 +281,7 @@ export default function CombustibleDetalleModal({
               </div>
               <div className="bg-white rounded-xl p-4 border border-purple-100">
                 <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
-                  {reporte.tipo === 'entrada' ? 'Receptor / Quien recibe' : 'Operador Receptor'}
+                  {reporte.tipo === 'entrada' ? 'Receptor / Quien recibe' : 'Receptor'}
                 </p>
                 <p className="text-sm font-bold text-slate-900">{operadorInfo?.nombre || reporte.operadorNombre || '-'}</p>
                 {operadorInfo?.rut && (
