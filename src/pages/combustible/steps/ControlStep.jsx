@@ -112,8 +112,8 @@ export default function ControlStep({
 
           {/* Obra / Fecha / Folio */}
           <div className="pt-4 border-t border-slate-100">
-            <div className={`grid grid-cols-1 ${isReportesView ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
-              <div>
+            <div className="grid grid-cols-12 gap-4">
+              <div className={`col-span-12 ${isReportesView ? 'md:col-span-8' : 'md:col-span-6'}`}>
                 <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Obra / Proyecto</label>
                 <div className="flex gap-2">
                   <select
@@ -132,7 +132,7 @@ export default function ControlStep({
                   <button type="button" onClick={() => setShowModalProyecto(true)} className="px-4 bg-orange-500 text-white rounded-xl font-black shadow-lg shadow-orange-100 hover:bg-orange-400 text-lg">+</button>
                 </div>
               </div>
-              <div>
+              <div className={`col-span-12 ${isReportesView ? 'sm:col-span-4 md:col-span-4' : 'sm:col-span-6 md:col-span-3'}`}>
                 <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Fecha</label>
                 <input
                   type="date"
@@ -142,8 +142,8 @@ export default function ControlStep({
                 />
               </div>
               {isReportesView && (
-                <div>
-                  <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Folio (Respaldo)</label>
+                <div className="col-span-12 sm:col-span-4 md:col-span-6">
+                  <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">N° Folio</label>
                   <input
                     type="text"
                     placeholder="Ej: 1234"
@@ -153,6 +153,16 @@ export default function ControlStep({
                   />
                 </div>
               )}
+              <div className={`col-span-12 ${isReportesView ? 'sm:col-span-4 md:col-span-6' : 'sm:col-span-6 md:col-span-3'}`}>
+                <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">N° Código</label>
+                <input
+                  type="text"
+                  placeholder="Ej: 527"
+                  value={datosControl.codigo || ''}
+                  onChange={(e) => setDatosControl({ ...datosControl, codigo: e.target.value })}
+                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                />
+              </div>
             </div>
           </div>
 

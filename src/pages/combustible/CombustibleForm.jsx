@@ -299,7 +299,6 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
         />
       )}
 
-      {/* Voucher modal */}
       {f.showVoucherModal && f.lastReportData && (
         <VoucherGenerator
           reportData={f.lastReportData.reportData}
@@ -320,6 +319,11 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
               f.resetForm();
             }
           }}
+          onReset={isReportesView ? () => {
+            f.setShowVoucherModal(false);
+            f.setLastReportData(null);
+            f.resetForm();
+          } : undefined}
         />
       )}
 

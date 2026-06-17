@@ -135,7 +135,7 @@ export default function CombustibleDetalleModal({
               <DataField label="N° Guía" value={reporte.numeroGuia || '-'} />
               {isEditing ? (
                 <div>
-                  <div className="text-xs font-semibold text-slate-500 mb-1">Folio (Respaldo)</div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1">Folio</div>
                   <input
                     type="text"
                     value={editedData.folio || ''}
@@ -145,6 +145,19 @@ export default function CombustibleDetalleModal({
                 </div>
               ) : (
                 <DataField label="Folio (Respaldo)" value={reporte.folio || '-'} />
+              )}
+              {isEditing ? (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1">Código</div>
+                  <input
+                    type="text"
+                    value={editedData.codigo || ''}
+                    onChange={(e) => updateField('codigo', e.target.value)}
+                    className="w-full px-3 py-1.5 border-2 border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 font-bold text-slate-700 text-sm"
+                  />
+                </div>
+              ) : (
+                <DataField label="Código" value={reporte.codigo || '-'} />
               )}
               <DataField label="Proyecto" value={projectName || reporte.projectId} />
             </div>

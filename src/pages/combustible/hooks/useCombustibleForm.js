@@ -9,6 +9,35 @@ import { useEmpresaData } from '../../../hooks/useEmpresaData';
 
 const TODAY = () => new Date().toISOString().split('T')[0];
 
+const getNextCodigoNumber = async (empresaId) => {
+  try {
+    const { collection, query, limit, getDocs } = await import('firebase/firestore');
+    const { db } = await import('../../../lib/firebase');
+
+    if (!empresaId) return 1;
+
+    const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+    const q = query(reportesRef, limit(200));
+    const snapshot = await getDocs(q);
+
+    let lastNum = 0;
+    snapshot.docs.forEach(d => {
+      const val = d.data().codigo;
+      if (val) {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n > lastNum) {
+          lastNum = n;
+        }
+      }
+    });
+
+    return lastNum + 1;
+  } catch (error) {
+    console.error('Error en getNextCodigoNumber:', error);
+    return 1;
+  }
+};
+
 export function useCombustibleForm(empresaId, onClose, isReportesView) {
   const { toast, toasts, removeToast } = useToast();
   const isSubmittingRef = useRef(false);
@@ -77,7 +106,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     fecha: TODAY(),
     repartidorId: '',
     equipoSurtidorId: '',
-    folio: ''
+    folio: '',
+    codigo: ''
   });
 
   const [datosEntrada, setDatosEntrada] = useState({
@@ -221,7 +251,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     setTipoReporte('');
     setFirmaRepartidor(null);
     setFirmaReceptor(null);
-    setDatosControl({ projectId: '', fecha: TODAY(), repartidorId: '', equipoSurtidorId: '', folio: '' });
+    setDatosControl({ projectId: '', fecha: TODAY(), repartidorId: '', equipoSurtidorId: '', folio: '', codigo: '' });
     setDatosEntrada({
       origen: '', tipoOrigen: '', destinoCarga: '', numerosDocumento: [''], numeroDocumento: '',
       fechaDocumento: TODAY(), cantidad: '', horometroOdometro: '', machineId: '', operadorId: '',
@@ -503,6 +533,23 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
 
     try {
       setLoading(true);
+      // Validar o generar código
+      let finalCodigo = datosControl.codigo ? datosControl.codigo.trim() : null;
+      if (finalCodigo) {
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+        const q = query(reportesRef, where('codigo', '==', finalCodigo));
+        const snap = await getDocs(q);
+        const exists = snap.docs.some(d => !d.data().deleted);
+        if (exists) {
+          abort('warning', 'El código ingresado ya existe. Por favor ingresa uno diferente.');
+          return;
+        }
+      } else {
+        const nextCodNum = await getNextCodigoNumber(empresaId);
+        finalCodigo = String(nextCodNum);
+      }
+
       const fecha = new Date();
       const numeroReporte = `COMB-${tipoReporte.toUpperCase()}-${fecha.getFullYear()}${(fecha.getMonth() + 1).toString().padStart(2, '0')}${fecha.getDate().toString().padStart(2, '0')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
       const numeroGuia = await getNextGuiaNumber(empresaId);
@@ -512,6 +559,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         numeroReporte,
         numeroGuia,
         ...datosControl,
+        codigo: finalCodigo,
         fechaCreacion: new Date().toISOString(),
         hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }),
         creadoPor: currentUser?.email || 'unknown',

@@ -318,7 +318,7 @@ export default function ReporteCombustible() {
   const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
 
   const handleEliminar = async (id) => {
-    if (!window.confirm("¿Archivar este reporte? Quedará oculto pero no se borrará definitivamente.")) return;
+    if (!window.confirm("¿Eliminar este reporte? Quedará oculto pero no se borrará definitivamente.")) return;
 
     const reporte = reportes.find(r => r.id === id);
     try {
@@ -328,26 +328,26 @@ export default function ReporteCombustible() {
         deletedAt: serverTimestamp(),
         deletedBy: { uid: currentUser?.uid || '', email: currentUser?.email || '', role: userRole },
       });
-      writeAuditLog('archive', id, reporte);
+      writeAuditLog('delete', id, reporte);
       await handleRecargarReportes();
-      toast({ type: 'success', message: 'Reporte archivado exitosamente' });
+      toast({ type: 'success', message: 'Reporte eliminado exitosamente' });
       setLoading(false);
     } catch (error) {
-      console.error("Error archivando:", error);
-      toast({ type: 'error', message: 'Error al archivar el reporte' });
+      console.error("Error eliminando:", error);
+      toast({ type: 'error', message: 'Error al eliminar el reporte' });
       setLoading(false);
     }
   };
 
   const handleEliminarSeleccionados = async () => {
     if (reportesSeleccionados.length === 0) return;
-    if (!window.confirm(`¿Archivar ${reportesSeleccionados.length} reporte(s) seleccionado(s)?`)) return;
+    if (!window.confirm(`¿Eliminar ${reportesSeleccionados.length} reporte(s) seleccionado(s)?`)) return;
 
-    const reportesAArchivar = reportes.filter(r => reportesSeleccionados.includes(r.id));
+    const reportesAEliminar = reportes.filter(r => reportesSeleccionados.includes(r.id));
     try {
       setLoading(true);
       await Promise.all(
-        reportesAArchivar.map(r =>
+        reportesAEliminar.map(r =>
           updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', r.id), {
             deleted: true,
             deletedAt: serverTimestamp(),
@@ -355,14 +355,14 @@ export default function ReporteCombustible() {
           })
         )
       );
-      reportesAArchivar.forEach(r => writeAuditLog('archive', r.id, r));
+      reportesAEliminar.forEach(r => writeAuditLog('delete', r.id, r));
       setReportesSeleccionados([]);
       await handleRecargarReportes();
-      toast({ type: 'success', message: `${reportesAArchivar.length} reporte(s) archivado(s)` });
+      toast({ type: 'success', message: `${reportesAEliminar.length} reporte(s) eliminado(s)` });
       setLoading(false);
     } catch (error) {
-      console.error("Error archivando:", error);
-      toast({ type: 'error', message: 'Error al archivar reportes' });
+      console.error("Error eliminando:", error);
+      toast({ type: 'error', message: 'Error al eliminar reportes' });
       setLoading(false);
     }
   };
@@ -510,6 +510,7 @@ export default function ReporteCombustible() {
       'Empresa': r.empresaNombre || '',
       'Fecha': r.fecha,
       'N° Reporte': r.numeroReporte,
+      'Código': r.codigo || '',
       'Folio': r.folio || '',
       'Cod/Patente': r.machinePatente,
       'Máquina': r.machineName,
@@ -778,6 +779,7 @@ export default function ReporteCombustible() {
     const tableData = reportesFiltrados.map(r => [
       r.fecha,
       r.numeroReporte,
+      r.codigo || '-',
       r.folio || '-',
       r.empresaNombre || '-',
       r.machinePatente,
@@ -787,7 +789,7 @@ export default function ReporteCombustible() {
     ]);
 
     autoTable(doc, {
-      head: [['Fecha', 'N° Reporte', 'Folio', 'Empresa', 'Máquina', 'Surtidor', 'Receptor', 'Litros']],
+      head: [['Fecha', 'N° Reporte', 'Código', 'Folio', 'Empresa', 'Máquina', 'Surtidor', 'Receptor', 'Litros']],
       body: tableData,
       startY: 30,
       theme: 'grid',
@@ -975,12 +977,12 @@ export default function ReporteCombustible() {
               <button
                 onClick={handleEliminarSeleccionados}
                 className="px-3 py-2 rounded-xl bg-gradient-to-r from-slate-600 to-slate-700 hover:from-red-600 hover:to-red-700 text-white font-semibold text-xs transition-all shadow flex items-center gap-1.5"
-                title="Archivar reportes seleccionados (no se borran definitivamente)"
+                title="Eliminar reportes seleccionados (no se borran definitivamente)"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8" />
                 </svg>
-                Archivar ({reportesSeleccionados.length})
+                Eliminar ({reportesSeleccionados.length})
               </button>
             )}
             <button
@@ -1034,6 +1036,7 @@ export default function ReporteCombustible() {
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Tipo</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
+                    <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Código</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Folio</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Empresa</th>
                     <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Máquina</th>
@@ -1047,13 +1050,13 @@ export default function ReporteCombustible() {
                 <tbody className="divide-y divide-orange-100">
                   {loading ? (
                     <tr>
-                      <td colSpan="12" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="13" className="px-4 py-12 text-center text-slate-500">
                         Cargando...
                       </td>
                     </tr>
                   ) : reportesFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan="12" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="13" className="px-4 py-12 text-center text-slate-500">
                         <div className="flex flex-col items-center gap-3">
                           <svg className="w-16 h-16 text-orange-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1106,6 +1109,9 @@ export default function ReporteCombustible() {
                             </svg>
                             {reporte.numeroReporte}
                           </div>
+                        </td>
+                        <td className="px-3 py-3 text-sm font-semibold text-slate-700">
+                          {reporte.codigo || '-'}
                         </td>
                         <td className="px-3 py-3 text-sm font-semibold text-slate-700">
                           {reporte.folio || '-'}
@@ -1260,6 +1266,19 @@ export default function ReporteCombustible() {
             userRole={userRole}
             onSave={async (editedData) => {
               try {
+                // Validar código si fue editado
+                if (editedData.codigo && editedData.codigo.trim() !== reporteDetalle.codigo) {
+                  const { collection, query, where, getDocs } = await import('firebase/firestore');
+                  const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+                  const q = query(reportesRef, where('codigo', '==', editedData.codigo.trim()));
+                  const snap = await getDocs(q);
+                  const exists = snap.docs.some(d => d.id !== reporteDetalle.id && !d.data().deleted);
+                  if (exists) {
+                    toast({ type: 'error', message: 'El código ingresado ya existe en otro reporte.' });
+                    return;
+                  }
+                }
+
                 // Guardar los cambios en Firebase
                 const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
                 await updateDoc(reporteRef, editedData);

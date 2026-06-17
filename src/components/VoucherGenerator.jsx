@@ -18,7 +18,8 @@ export default function VoucherGenerator({
   equipoSurtidorInfo,
   reporteId,
   empresaId,
-  onClose
+  onClose,
+  onReset
 }) {
   const { empresa: tenantInfo } = useEmpresa();
   const [printing, setPrinting] = React.useState(false);
@@ -235,8 +236,17 @@ export default function VoucherGenerator({
             className="flex-1 px-4 sm:px-6 py-3.5 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
             disabled={printing}
           >
-            Cerrar
+            {onReset ? 'Salir' : 'Cerrar'}
           </button>
+          {onReset && (
+            <button
+              onClick={onReset}
+              className="flex-1 px-4 sm:px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-xl transition-all"
+              disabled={printing}
+            >
+              Crear nuevo Reporte
+            </button>
+          )}
           <button
             onClick={handlePrintVoucher}
             disabled={printing}
@@ -255,7 +265,7 @@ export default function VoucherGenerator({
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
-                <span>Imprimir Voucher Térmico</span>
+                <span>Imprimir Voucher</span>
               </>
             )}
           </button>
