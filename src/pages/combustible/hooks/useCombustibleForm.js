@@ -9,7 +9,7 @@ import { useEmpresaData } from '../../../hooks/useEmpresaData';
 
 const TODAY = () => new Date().toISOString().split('T')[0];
 
-export function useCombustibleForm(empresaId, onClose) {
+export function useCombustibleForm(empresaId, onClose, isReportesView) {
   const { toast, toasts, removeToast } = useToast();
   const isSubmittingRef = useRef(false);
 
@@ -22,7 +22,6 @@ export function useCombustibleForm(empresaId, onClose) {
   const [currentUserData, setCurrentUserData] = useState(null);
   const [userRole, setUserRole] = useState('operador');
   const [isOfflineSave, setIsOfflineSave] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
   const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato' || userRole === 'admin';
   const [surtidoresPersonas, setSurtidoresPersonas] = useState([]);
   const [repartidorSeleccionado, setRepartidorSeleccionado] = useState(null);
@@ -232,7 +231,6 @@ export function useCombustibleForm(empresaId, onClose) {
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
       horometroOdometro: '', cantidadLitros: '', observaciones: '', extraEmails: []
     });
-    setIsSuccess(false);
     setIsOfflineSave(false);
   };
 
@@ -497,7 +495,7 @@ export function useCombustibleForm(empresaId, onClose) {
         abort('warning', 'Completa los campos obligatorios de la entrega (Máquina y Cantidad)');
         return;
       }
-      if (!firmaReceptor) {
+      if (!isReportesView && !firmaReceptor) {
         abort('warning', 'Se requiere foto de identificación del receptor');
         return;
       }
@@ -647,12 +645,14 @@ export function useCombustibleForm(empresaId, onClose) {
             ? { nombre: equipoSurtidorInfo.nombre || '', patente: equipoSurtidorInfo.patente || '', tipo: equipoSurtidorInfo.tipo || '' }
             : null
         });
-        setIsSuccess(true);
-        // No llamamos a resetForm() aquí para que la pantalla de éxito pueda mostrar datos si es necesario
-        // Pero marcamos como éxito para la UI
+        setShowVoucherModal(true);
       } else {
-        setIsSuccess(true);
         toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
+        if (isReportesView) {
+          onClose();
+        } else {
+          resetForm();
+        }
       }
     } catch (error) {
       console.error("Error guardando reporte:", error);
@@ -670,7 +670,7 @@ export function useCombustibleForm(empresaId, onClose) {
     paso, setPaso, tipoReporte, setTipoReporte,
     // Loading
     loading, loadingEquipo, loadingEmpresa,
-    isOfflineSave, isSuccess, setIsSuccess,
+    isOfflineSave,
     // User
     currentUser, currentUserData, userRole, isAdmin,
     surtidoresPersonas, repartidorSeleccionado,

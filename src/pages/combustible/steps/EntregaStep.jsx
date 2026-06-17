@@ -45,6 +45,7 @@ export default function EntregaStep({
   nuevaMaquinaData,
   nuevoEmpleadoData,
   isAdmin,
+  isReportesView,
 }) {
   const [emailInput, setEmailInput] = useState('');
   const [searchMaquina, setSearchMaquina] = useState('');
@@ -57,9 +58,31 @@ export default function EntregaStep({
 
   const canSubmit = !loading
     && !!datosEntrega.cantidadLitros
-    && !!firmaReceptor
+    && (isReportesView || !!firmaReceptor)
     && !!datosEntrega.machineId
     && !!datosEntrega.operadorId;
+
+  React.useEffect(() => {
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          const blob = items[i].getAsFile();
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            setFirmaReceptor(event.target.result);
+          };
+          reader.readAsDataURL(blob);
+          e.preventDefault();
+          break;
+        }
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [setFirmaReceptor]);
 
   const addEmail = () => {
     const val = emailInput.trim();
@@ -301,11 +324,12 @@ export default function EntregaStep({
         </div>
 
         {/* Foto de identificación */}
-        <div className="flex flex-col items-center justify-center py-12 px-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center">
+        <div className="flex flex-col items-center justify-center py-12 px-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center hover:bg-slate-100/50 transition-colors">
           {firmaReceptor ? (
             <div className="relative group/photo inline-block">
               <img src={firmaReceptor} alt="Identificación" className="w-72 h-48 object-cover rounded-2xl border-4 border-white shadow-xl" />
               <button
+                type="button"
                 onClick={() => { setFirmaReceptor(null); setShowModalCamaraReceptor(true); }}
                 className="absolute inset-0 bg-black/60 opacity-0 group-hover/photo:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center gap-2 backdrop-blur-sm"
               >
@@ -314,18 +338,23 @@ export default function EntregaStep({
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setShowModalCamaraReceptor(true)}
-              className="flex flex-col items-center gap-4 group transition-all active:scale-95"
-            >
-              <div className="w-24 h-24 bg-blue-600 group-hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-100 transition-all">
-                <CameraIcon />
-              </div>
-              <span className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
-                Foto de identificación del receptor
-              </span>
-            </button>
+            <div className="flex flex-col items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setShowModalCamaraReceptor(true)}
+                className="flex flex-col items-center gap-4 group transition-all active:scale-95"
+              >
+                <div className="w-24 h-24 bg-blue-600 group-hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-100 transition-all">
+                  <CameraIcon />
+                </div>
+                <span className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
+                  Foto de identificación del receptor {isReportesView && <span className="text-xs text-slate-400 font-bold lowercase tracking-normal"> (opcional)</span>}
+                </span>
+              </button>
+              <p className="text-xs font-semibold text-slate-400 max-w-md">
+                Haz click para abrir la cámara o pega una imagen desde tu portapapeles usando <kbd className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-600 text-[10px] font-mono">Ctrl + V</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-600 text-[10px] font-mono">Cmd + V</kbd>
+              </p>
+            </div>
           )}
         </div>
       </div>

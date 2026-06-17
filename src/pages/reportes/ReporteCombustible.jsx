@@ -39,7 +39,8 @@ export default function ReporteCombustible() {
     proyecto: '',
     maquina: '',
     surtidor: '',
-    receptor: ''
+    receptor: '',
+    folio: ''
   });
 
   // Listas únicas
@@ -247,6 +248,12 @@ export default function ReporteCombustible() {
         ].join(' '));
         return words.every(w => haystack.includes(w));
       });
+    }
+
+    if (filtros.folio) {
+      resultado = resultado.filter(r =>
+        String(r.folio || '').toLowerCase().includes(filtros.folio.toLowerCase())
+      );
     }
 
     // Enriquecer con datos
@@ -897,14 +904,26 @@ export default function ReporteCombustible() {
                 </select>
               </div>
 
-              {/* Operador */}
+              {/* Receptor */}
               <div className="flex-1 min-w-[130px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Operador</label>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Receptor</label>
                 <input
                   type="text"
                   placeholder="Nombre o apellido..."
                   value={filtros.receptor}
                   onChange={(e) => { setFiltros({ ...filtros, receptor: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
+                />
+              </div>
+
+              {/* Folio */}
+              <div className="flex-1 min-w-[100px]">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Folio</label>
+                <input
+                  type="text"
+                  placeholder="Buscar folio..."
+                  value={filtros.folio}
+                  onChange={(e) => { setFiltros({ ...filtros, folio: e.target.value }); setPaginaActual(1); }}
                   className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
                 />
               </div>
@@ -936,9 +955,9 @@ export default function ReporteCombustible() {
                   <span className="px-2.5 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-black">
                     {reportesFiltrados.length}
                   </span>
-                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.receptor || filtros.tipo) && (
+                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.receptor || filtros.tipo || filtros.folio) && (
                     <button
-                      onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '' }); setPaginaActual(1); }}
+                      onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '', folio: '' }); setPaginaActual(1); }}
                       className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs font-bold transition-all"
                       title="Limpiar filtros"
                     >

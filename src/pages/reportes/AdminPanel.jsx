@@ -8,6 +8,7 @@ import {
 import { db, auth } from '../../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEmpresa } from '../../lib/useEmpresa';
+import EmailsSection from './EmailsSection';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable
@@ -63,6 +64,7 @@ const TAB_DEFS = [
   { id: 'proyectos',   label: 'Proyectos',   color: 'indigo', icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
   { id: 'estaciones',  label: 'Est. Combustible', color: 'cyan', icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z' },
   { id: 'usuarios',    label: 'Usuarios',    color: 'rose',   icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
+  { id: 'emails',      label: 'Emails Corporativos', color: 'blue', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
   { id: 'empresas_registro', label: 'Empresas Registradas', color: 'violet', icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' },
 ];
 
@@ -2779,6 +2781,7 @@ export default function AdminPanel({ onClose }) {
         {activeTab === 'proyectos'   && <ProyectosSection />}
         {activeTab === 'estaciones'  && <EstacionesSection />}
         {activeTab === 'usuarios'              && <UsuariosSection />}
+        {activeTab === 'emails'                && <EmailsSection />}
         {activeTab === 'empresas_registro'        && <EmpresasRegistradasSection />}
       </div>
     </div>

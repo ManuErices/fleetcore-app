@@ -18,7 +18,7 @@ import ProyectoModal from './modals/ProyectoModal';
 import EstacionModal from './modals/EstacionModal';
 
 export default function CombustibleForm({ empresaId, onClose, isReportesView }) {
-  const f = useCombustibleForm(empresaId, onClose);
+  const f = useCombustibleForm(empresaId, onClose, isReportesView);
 
   const stepLabel = {
     1: "Selecciona el tipo de movimiento",
@@ -30,10 +30,10 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
     <>
       <ToastContainer toasts={f.toasts} onRemove={f.removeToast} />
 
-      <div className={`bg-white w-full max-w-5xl mx-auto overflow-x-hidden relative ${f.isSuccess ? 'min-h-[60dvh] flex flex-col' : ''}`}>
+      <div className="bg-white w-full max-w-5xl mx-auto overflow-x-hidden relative">
         
-        {/* Form Content - Hides when success */}
-        <div className={f.isSuccess ? 'hidden' : 'block'}>
+        {/* Form Content */}
+        <div>
 
         {/* Header */}
         <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6">
@@ -162,6 +162,7 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
               nuevaMaquinaData={f.nuevaMaquinaData}
               nuevoEmpleadoData={f.nuevoEmpleadoData}
               isAdmin={f.isAdmin}
+              isReportesView={isReportesView}
             />
           )}
         </div>
@@ -193,70 +194,7 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
           </div>
         )}
 
-        {/* Success overlay — Guided experience for operators */}
-        {f.isSuccess && (
-          <div className="flex-1 bg-white z-[300] flex flex-col animate-in fade-in zoom-in duration-300">
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[60dvh]">
-              <div className="w-32 h-32 bg-emerald-100 rounded-full flex items-center justify-center mb-8 shadow-inner">
-                <svg className="w-20 h-20 text-emerald-600 animate-in slide-in-from-bottom-4 fade-in duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              
-              <h2 className="text-4xl font-black text-slate-900 mb-4 uppercase tracking-tight">
-                ¡Registro Guardado!
-              </h2>
-              
-              <div className="bg-slate-50 rounded-[2.5rem] p-8 border-2 border-slate-100 w-full max-w-sm mb-10 shadow-sm">
-                <div className="flex items-center justify-center gap-2 mb-3">
-                  <div className={`w-3 h-3 rounded-full ${f.isOfflineSave ? 'bg-orange-500' : 'bg-emerald-500'} animate-pulse`} />
-                  <p className="text-lg font-black text-slate-800 uppercase tracking-tight">
-                    {f.isOfflineSave ? "Modo Offline" : "Enviado a la Nube"}
-                  </p>
-                </div>
-                <p className="text-sm text-slate-500 font-medium leading-relaxed">
-                  {f.isOfflineSave 
-                    ? "El reporte se guardó correctamente en tu teléfono. Se sincronizará automáticamente cuando vuelvas al campamento."
-                    : "El reporte se ha sincronizado exitosamente con el sistema central."}
-                </p>
-              </div>
 
-              <div className="flex flex-col gap-4 w-full max-w-sm">
-                {f.tipoReporte === 'entrega' && (
-                  <button 
-                    onClick={() => f.setShowVoucherModal(true)}
-                    className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl text-xl shadow-xl shadow-blue-100 mb-2 uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-3"
-                  >
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
-                    Ver Comprobante
-                  </button>
-                )}
-
-                <button 
-                  onClick={() => { f.setIsSuccess(false); f.resetForm(); }}
-                  className="w-full py-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xl shadow-xl shadow-emerald-100 uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  Nuevo Registro
-                </button>
-                
-                <button 
-                  onClick={onClose}
-                  className="w-full py-4 text-slate-400 font-bold text-sm uppercase tracking-widest hover:text-slate-600 transition-colors"
-                >
-                  Salir
-                </button>
-              </div>
-            </div>
-            
-            <div className="p-8 text-center bg-slate-50 border-t border-slate-100">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                FLEETCORE · TECNOLOGÍA PARA LA MINERÍA
-              </p>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Quick-create modals */}
@@ -376,7 +314,11 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
           onClose={() => {
             f.setShowVoucherModal(false);
             f.setLastReportData(null);
-            onClose();
+            if (isReportesView) {
+              onClose();
+            } else {
+              f.resetForm();
+            }
           }}
         />
       )}

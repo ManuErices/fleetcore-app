@@ -329,6 +329,19 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────────────
+    // /domains & /mailboxes — Email Portal
+    // ─────────────────────────────────────────────────────
+    match /domains/{domainName} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
+    }
+
+    match /mailboxes/{mailboxId} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
     // DEFAULT — denegar todo lo no especificado
     // ─────────────────────────────────────────────────────
     match /{document=**} {
