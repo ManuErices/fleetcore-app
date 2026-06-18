@@ -350,20 +350,44 @@ const CUENTA_POR_CATEGORIA = {
   "Seguridad":                ["5-01-009", "6-01-011"],     // Seguridad Industrial / Oficina
   "Servicios Profesionales":  ["6-01-002"],                 // Honorarios Profesionales
   "Peajes y Movilización":    ["6-01-007"],                 // Peajes y Movilización
-  "Arriendos":                ["6-01-003"],                 // Arriendos Oficina
+  "Arriendos":                ["5-01-006", "6-01-003"],     // Arriendo Maquinaria y Equipos / Arriendos Oficina
   "Gastos Financieros":       ["6-02-003", "6-01-017"],     // Comisiones / Gastos Bancarios
   "Gastos Generales":         ["6-01-019"],                 // Gastos Varios Administración
   "Gastos Varios":            ["6-01-019"],
 };
 
-// Resuelve la cuenta destino de una categoría: primero por código preferido, luego por tipo
+// Patrones de nombre por categoría (fallback cuando el código no coincide por migración de plan)
+const NOMBRE_POR_CATEGORIA = {
+  "Combustible (Ley 18.502)": /combustible|lubricante/i,
+  "Subcontratos":             /subcontrato/i,
+  "Materiales y Repuestos":   /materiales|suministro/i,
+  "Transporte y Pasajes":     /pasaje|traslado|flete|transporte/i,
+  "Telecomunicaciones":       /telecomunicacion/i,
+  "Seguridad":                /seguridad/i,
+  "Servicios Profesionales":  /honorario|profesional/i,
+  "Peajes y Movilización":    /peaje|movilización|movilizacion/i,
+  "Arriendos":                /arriendo/i,
+  "Gastos Financieros":       /comision|bancari|financier/i,
+  "Gastos Generales":         /gastos.*varios|gastos.*general/i,
+  "Gastos Varios":            /gastos.*varios|gastos.*general/i,
+};
+
+// Resuelve la cuenta destino de una categoría: primero por código preferido, luego por nombre, luego por tipo
 function cuentaDeCategoria(categ, cuentas) {
   const activas = cuentas.filter(c => c.activa !== false);
   const codigos = CUENTA_POR_CATEGORIA[categ.label] || [];
+  // 1. Buscar por código preferido
   for (const cod of codigos) {
     const c = activas.find(x => x.codigo === cod && TIPOS_GASTO.includes(x.tipo));
     if (c) return c;
   }
+  // 2. Fallback: buscar por nombre (robusto ante planes con códigos renombrados)
+  const patron = NOMBRE_POR_CATEGORIA[categ.label];
+  if (patron) {
+    const c = activas.find(x => TIPOS_GASTO.includes(x.tipo) && patron.test(x.nombre));
+    if (c) return c;
+  }
+  // 3. Fallback por tipo de cuenta
   const tipoTarget = TIPO_POR_CATEGORIA[categ.label] || "gasto_adm";
   return activas.find(c => c.tipo === tipoTarget && TIPOS_GASTO.includes(c.tipo))
       || activas.find(c => c.tipo === "gasto_adm")
@@ -507,6 +531,29 @@ export default function ContabilidadLibroDiario() {
         cuentaId: gl.cuentaId, cuentaNombre: gl.cuentaNombre,
         categoriaLabel: cat.label, categoriaIcon: cat.icon,
       });
+    }
+  };
+
+  // Guarda un asiento y, si es importado con proveedor conocido, actualiza la regla
+  // aprendida si el usuario cambió la cuenta contable manualmente (vía modal de edición).
+  const guardarAsientoYAprender = async (data) => {
+    await guardarAsiento(data);
+    // Solo para asientos automáticos importados con hash de proveedor
+    if (data.tipo === "automatico" && data.importHash) {
+      const { rut, razonSocial } = infoProveedor(data);
+      const gl = getLineaGasto(data);
+      if (rut && gl) {
+        const rutNorm = normalizaRut(rut);
+        const existente = reglasGasto[rutNorm];
+        // Si hay una regla y la cuenta cambió, actualizar la regla con la nueva cuenta
+        if (existente && existente.cuentaId !== gl.cuentaId) {
+          await guardarReglaGasto(rut, razonSocial, {
+            cuentaId: gl.cuentaId, cuentaNombre: gl.cuentaNombre,
+            categoriaLabel: existente.categoriaLabel || "",
+            categoriaIcon: existente.categoriaIcon || "",
+          });
+        }
+      }
     }
   };
 
@@ -842,7 +889,7 @@ export default function ContabilidadLibroDiario() {
       )}
 
       <ModalAsiento isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }}
-        editando={editando} onSave={guardarAsiento} cuentas={cuentas} periodoActivo={periodoActivo} />
+        editando={editando} onSave={guardarAsientoYAprender} cuentas={cuentas} periodoActivo={periodoActivo} />
 
       <ModalImportIConstruct
         isOpen={showImport}
