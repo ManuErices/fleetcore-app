@@ -1199,11 +1199,9 @@ function RemuneracionesSection() {
                       <td className="px-4 py-3 text-sm text-red-500">-{c?`$${(c.sisM+c.cesM).toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3 text-sm text-blue-600">{c&&c.noImponible?`$${c.noImponible.toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3">
-                        {c ? (() => {
-                          const iutRow = calcularIUT(calcularRentaTributable(c), UTM_DEFAULT);
-                          const liqReal = c.liquido - iutRow;
-                          return <span className="font-black text-emerald-600 text-sm">${liqReal.toLocaleString('es-CL')}</span>;
-                        })() : <span>—</span>}
+                        {c
+                          ? <span className="font-black text-emerald-600 text-sm">${c.liquido.toLocaleString('es-CL')}</span>
+                          : <span>—</span>}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado==='pagado'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>
