@@ -224,15 +224,15 @@ function generarPDFContrato(contrato, trabajador) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 function generarPDFLiquidacion(rem, trabajador, contrato) {
-  const calc     = calcularLiquidacion({ ...contrato, ...rem });
-  const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
+  const calc     = calcularLiquidacionConIUT({ ...contrato, ...rem, afp: trabajador?.afp }, UTM_DEFAULT);
+  const iut      = calc.iut || 0;
   const nombre   = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
     : '_______________';
   const mesLabel = labelPeriodo(rem);
   const fmt      = (n) => `$${(n||0).toLocaleString('es-CL')}`;
-  const tasaAfp  = ((TASAS_AFP[trabajador?.afp] || 0.1127) * 100).toFixed(2);
-  const liquidoFinal = calc.liquido - iut;
+  const tasaAfp  = ((TASAS_AFP[trabajador?.afp] || 0.1137) * 100).toFixed(2);
+  const liquidoFinal = calc.liquidoFinal;
   const rentaTrib    = calcularRentaTributable(calc);
   const diasTrab     = rem.diasTrabajados || 30;
   const horasBase    = rem.horasBase || (contrato?.jornada?.includes('45') ? 44 : 45);
