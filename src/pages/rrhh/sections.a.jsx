@@ -1000,7 +1000,7 @@ function RemuneracionesSection() {
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t=>t.id===l.trabajadorId);
     const contrato   = contratos.find(c=>c.id===l.contratoId);
-    const calc       = contrato ? calcularLiquidacion({...contrato,...l}) : null;
+    const calc = contrato ? calcularLiquidacionConIUT({...contrato,...l, afp: trabajador?.afp}, UTM_DEFAULT) : null;
     return { ...l, _trabajador:trabajador, _contrato:contrato, _calc:calc };
   });
 

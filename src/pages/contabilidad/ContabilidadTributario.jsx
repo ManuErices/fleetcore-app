@@ -1,8 +1,75 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { useContabilidad, PeriodoSelector, fmt, fmtM, MESES, MESES_S } from "./ContabilidadContext";
-import { useEmpresa } from "../../lib/useEmpresa";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { useEmpresa } from "../../lib/useEmpresa";
+import { useContabilidad, PeriodoSelector, fmt, fmtM, MESES, MESES_S } from "./ContabilidadContext";
+
+// ─── Tabla vida útil tributaria SII (años) ────────────────────────────────────
+// Resolución SII Exenta N° 43/2002 y circulares complementarias
+const VIDA_UTIL_TRIB = {
+  maquinaria:  10,
+  vehiculo:     7,
+  herramienta:  3,
+  otro:         5,
+};
+
+// ─── Calcula depreciación anual de un activo ──────────────────────────────────
+function calcDepContable(a) {
+  if (a.depreciacionAnual) return parseFloat(a.depreciacionAnual) || 0;
+  const v = parseFloat(a.valorCompra) || 0;
+  const y = parseFloat(a.vidaUtilAnios) || 0;
+  return (!v || !y) ? 0 : v / y;
+}
+
+function calcDepTributaria(a) {
+  const v    = parseFloat(a.valorCompra) || 0;
+  const anos = VIDA_UTIL_TRIB[a.tipo] || 5;
+  return v > 0 ? v / anos : 0;
+}
+
+// ─── Hook: carga activos desde /machines ─────────────────────────────────────
+function useActivos() {
+  const { empresaId } = useEmpresa();
+  const [activos, setActivos] = useState([]);
+
+  const cargar = useCallback(async () => {
+    if (!empresaId) return;
+    try {
+      const snap = await getDocs(collection(db, "empresas", empresaId, "machines"));
+      setActivos(snap.docs
+        .filter(d => d.data().active !== false)
+        .map(d => ({
+          id:                d.id,
+          nombre:            d.data().name || "",
+          tipo:              d.data().tipo || (() => {
+            const type = (d.data().type || "").toLowerCase();
+            const name = (d.data().name || "").toLowerCase();
+            const esVehiculo = [
+              "van","pickup","truck","bus","minibus","suv","sedan","hatchback",
+              "station wagon","camioneta","furgon","furgón","minivan","jeep",
+              "camión","camion","vehículo","vehiculo",
+            ].some(k => type.includes(k)) ||
+            [
+              "camioneta","furgon","furgón","hilux","wingle","poer","maxus",
+              "changan","jac","mitsubishi","toyota","ford","chevrolet",
+              "nissan","hyundai","kia","volkswagen","peugeot partner",
+              "great wall","gwm","jeep","suv",
+            ].some(k => name.includes(k));
+            return esVehiculo ? "vehiculo" : "maquinaria";
+          })(),
+          valorCompra:       d.data().valorCompra || "",
+          vidaUtilAnios:     d.data().vidaUtilAnios || "",
+          depreciacionAnual: d.data().depreciacionAnual || "",
+          fechaCompra:       d.data().fechaCompra || "",
+        }))
+      );
+    } catch (e) { console.error("useActivos:", e); }
+  }, [empresaId]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+  return activos;
+}
+
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 function KpiTrib({ label, value, sub, color = "text-slate-800", bg = "bg-white" }) {
@@ -17,72 +84,38 @@ function KpiTrib({ label, value, sub, color = "text-slate-800", bg = "bg-white" 
 
 function FilaTrib({ label, valor, indent = false, negrita = false, colorValor = "text-slate-700", separador = false }) {
   if (separador) return <tr><td colSpan={2} className="h-px bg-slate-100" /></tr>;
-  const negativo = typeof valor === "number" && valor < 0;
-  const valorMostrar = negativo ? `-${fmt(Math.abs(valor))}` : fmt(valor);
-  const colorFinal = negativo ? "text-red-500 font-semibold" : colorValor;
   return (
     <tr className={negrita ? "bg-slate-50" : "hover:bg-purple-50/10"}>
       <td className={`px-4 py-2 text-sm ${negrita ? "font-black text-slate-800" : "text-slate-600"}`}
         style={{ paddingLeft: indent ? "32px" : "16px" }}>
         {label}
       </td>
-      <td className={`px-4 py-2 text-right text-sm font-mono ${negrita ? "font-black" : "font-semibold"} ${colorFinal}`}>
-        {valorMostrar}
+      <td className={`px-4 py-2 text-right text-sm font-mono ${negrita ? "font-black" : "font-semibold"} ${colorValor}`}>
+        {fmt(valor)}
       </td>
     </tr>
   );
 }
 
 // ─── F29 — Declaración mensual IVA ───────────────────────────────────────────
-function FormularioF29({ cuentas, saldosMap, periodoActivo, imptoUnico = 0, onImportImpto, ieRecuperable = 0 }) {
+function FormularioF29({ cuentas, saldosMap, periodoActivo }) {
   const data = useMemo(() => {
+    // Buscar cuentas de IVA
     const ivaDebitoCuenta  = cuentas.find(c => c.tipo === "iva_debito");
+    const ivaCreditoCuenta = cuentas.find(c => c.tipo === "iva_credito");
     const ppmCuenta        = cuentas.find(c => c.tipo === "ppm");
 
-    const ivaCredCuentas = cuentas.filter(c => c.tipo === "iva_credito" && c.activa !== false);
+    const ivaDebito  = ivaDebitoCuenta  ? Math.abs((saldosMap[ivaDebitoCuenta.id]?.haber  || 0) - (saldosMap[ivaDebitoCuenta.id]?.debe   || 0)) : 0;
+    const ivaCredito = ivaCreditoCuenta ? Math.abs((saldosMap[ivaCreditoCuenta.id]?.debe   || 0) - (saldosMap[ivaCreditoCuenta.id]?.haber  || 0)) : 0;
+    const ppm        = ppmCuenta        ? Math.abs((saldosMap[ppmCuenta.id]?.debe          || 0) - (saldosMap[ppmCuenta.id]?.haber         || 0)) : 0;
 
-    const saldoNeto = (cuentaId) => {
-      const s = saldosMap[cuentaId] || { debe: 0, haber: 0 };
-      return (s.debe || 0) - (s.haber || 0);
-    };
-    const getSaldo = (cuentaId) => saldosMap[cuentaId] || { debe: 0, haber: 0 };
+    const ivaLine1   = ivaDebito;
+    const ivaLine2   = ivaCredito;
+    const ivaLine3   = Math.max(0, ivaLine1 - ivaLine2); // IVA a pagar (o remanente)
+    const remanente  = Math.max(0, ivaLine2 - ivaLine1); // Remanente crédito fiscal
+    const totalF29   = Math.max(0, ivaLine3 - ppm);
 
-    const ivaDebito = ivaDebitoCuenta ? Math.abs(saldoNeto(ivaDebitoCuenta.id)) : 0;
-
-    // Para cada cuenta iva_credito: debe = facturas, haber = NC → neto = CF real
-    const ivaCfDetalle = ivaCredCuentas.map(c => {
-      const s     = getSaldo(c.id);
-      const debe  = s.debe  || 0;
-      const haber = s.haber || 0;
-      const neto  = debe - haber;
-      const esEspec = /específico|especifico/i.test(c.nombre);
-      return { ...c, debe, haber, neto, esEspec };
-    });
-
-    const ivaCfNormal = ivaCfDetalle
-      .filter(c => !c.esEspec)
-      .reduce((sum, c) => sum + Math.max(0, c.neto), 0);
-    const ivaCfEspec  = ivaCfDetalle
-      .filter(c => c.esEspec)
-      .reduce((sum, c) => sum + Math.max(0, c.neto), 0);
-
-    // Total NC recibidas (haber acumulado en cuentas iva_credito)
-    const totalNcIVA = ivaCfDetalle
-      .filter(c => !c.esEspec)
-      .reduce((sum, c) => sum + (c.haber || 0), 0);
-
-    const ivaCredito = ivaCfNormal + ivaCfEspec;
-
-    const ppm       = ppmCuenta ? Math.abs(saldoNeto(ppmCuenta.id)) : 0;
-    const ivaLine1  = ivaDebito;
-    const ivaLine2  = ivaCredito;
-    const ivaLine3  = Math.max(0, ivaLine1 - ivaLine2);
-    const remanente = Math.max(0, ivaLine2 - ivaLine1);
-    // Total F29 = IVA a pagar - PPM - IE Combustible recuperable + Impuesto Único Trabajadores
-    const totalF29  = Math.max(0, ivaLine3 - ppm - ieRecuperable) + imptoUnico;
-
-    return { ivaDebito, ivaCredito, ivaLine3, remanente, ppm, totalF29,
-             ivaCfNormal, ivaCfEspec, totalNcIVA, ivaCfDetalle };
+    return { ivaDebito, ivaCredito, ivaLine3, remanente, ppm, totalF29 };
   }, [cuentas, saldosMap]);
 
   const [anno, mes] = periodoActivo.split("-");
@@ -109,53 +142,12 @@ function FormularioF29({ cuentas, saldosMap, periodoActivo, imptoUnico = 0, onIm
       <table className="w-full border-t border-slate-100">
         <tbody>
           <FilaTrib label="IVA Débito Fiscal (línea 1)" valor={data.ivaDebito} />
+          <FilaTrib label="IVA Crédito Fiscal (línea 20)" valor={data.ivaCredito} indent />
           <FilaTrib separador />
-          <FilaTrib label="IVA Crédito Fiscal bruto (facturas)" valor={data.ivaCfNormal + data.ivaCfEspec + data.totalNcIVA} indent colorValor="text-slate-500" />
-          {data.totalNcIVA > 0 && <FilaTrib label="  (−) Notas de Crédito recibidas" valor={-data.totalNcIVA} indent colorValor="text-red-500" />}
-          <FilaTrib label="IVA Crédito Fiscal neto (línea 20)" valor={data.ivaCredito} indent />
-          {data.ivaCfEspec > 0 && <FilaTrib label="    · IVA CF normal" valor={data.ivaCfNormal} indent colorValor="text-slate-400" />}
-          {data.ivaCfEspec > 0 && <FilaTrib label="    · Imp. Específico Combustible (Ley 18.502)" valor={data.ivaCfEspec} indent colorValor="text-slate-400" />}
-          <FilaTrib separador />
-          <FilaTrib label="IVA a pagar (Línea 1 − Línea 20)" valor={data.ivaLine3} negrita />
+          <FilaTrib label="IVA a pagar (Línea 1 - Línea 20)" valor={data.ivaLine3} negrita />
           {data.remanente > 0 && <FilaTrib label="Remanente Crédito Fiscal (arrastre próx. mes)" valor={data.remanente} colorValor="text-emerald-600" />}
           <FilaTrib separador />
           <FilaTrib label="PPM acumulado período" valor={data.ppm} indent colorValor="text-blue-600" />
-          {/* Línea 26 — Crédito Impuesto Específico Petróleo Diesel */}
-          <tr className="hover:bg-purple-50/10">
-            <td className="px-4 py-2 text-sm text-slate-600" style={{ paddingLeft:"16px" }}>
-              <div className="flex items-center justify-between gap-3">
-                <span>Crédito Imp. Específico Diesel (línea 26)</span>
-                <a href="#combustible"
-                  className="text-[10px] font-black px-2 py-1 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 transition-all flex items-center gap-1 flex-shrink-0">
-                  ⛽ {ieRecuperable > 0 ? "Ver cálculo" : "Ir a Combustible"}
-                </a>
-              </div>
-            </td>
-            <td className="px-4 py-2 text-right text-sm font-mono font-semibold text-orange-600">
-              {ieRecuperable > 0
-                ? <span className="text-emerald-600">−{fmt(ieRecuperable)}</span>
-                : <span className="text-slate-300 text-xs">Sin datos · ve a módulo Combustible</span>}
-            </td>
-          </tr>
-          <FilaTrib separador />
-          {/* Línea 47 — Impuesto Único Trabajadores */}
-          <tr className="hover:bg-purple-50/10">
-            <td className="px-4 py-2 text-sm text-slate-600" style={{ paddingLeft:"16px" }}>
-              <div className="flex items-center justify-between gap-3">
-                <span>Impuesto Único Trabajadores (línea 47)</span>
-                <button onClick={onImportImpto}
-                  className="text-[10px] font-black px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-all flex items-center gap-1 flex-shrink-0">
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-                  </svg>
-                  {imptoUnico > 0 ? "Actualizar" : "Importar Excel"}
-                </button>
-              </div>
-            </td>
-            <td className="px-4 py-2 text-right text-sm font-mono font-semibold text-orange-600">
-              {imptoUnico > 0 ? fmt(imptoUnico) : <span className="text-slate-300 text-xs">Sin datos · importa el Excel</span>}
-            </td>
-          </tr>
           <FilaTrib separador />
           <FilaTrib label="TOTAL A PAGAR F29" valor={data.totalF29} negrita colorValor={data.totalF29 > 0 ? "font-black text-red-700" : "font-black text-emerald-700"} />
         </tbody>
@@ -246,6 +238,8 @@ function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
 
 // ─── F22 — Impuesto Anual a la Renta ─────────────────────────────────────────
 function FormularioF22({ cuentas, saldosMap }) {
+  const activos = useActivos();
+
   const data = useMemo(() => {
     const get = (tipos, porHaber = false) => cuentas
       .filter(c => tipos.includes(c.tipo) && c.activa !== false)
@@ -254,26 +248,24 @@ function FormularioF22({ cuentas, saldosMap }) {
         return s + (porHaber ? Math.abs(sd.haber - sd.debe) : Math.abs(sd.debe - sd.haber));
       }, 0);
 
-    const ingresosBrutos   = get(["ingreso"], true);
-    const costosYGastos    = get(["costo","gasto_adm","gasto_fin","otro_resultado"]);
+    const ingresosBrutos     = get(["ingreso"], true);
+    const costosYGastos      = get(["costo", "gasto_adm", "gasto_fin", "otro_resultado"]);
     const utilidadFinanciera = ingresosBrutos - costosYGastos;
 
-    // Diferencias temporarias (simplificado)
-    const depreciacionContable = get(["otro_resultado"]);
-    const depreciacionTrib     = depreciacionContable * 1.0; // Misma base si no hay ajuste
-    const difTemp              = depreciacionContable - depreciacionTrib; // 0 si iguales
+    // Depreciación desde módulo Activos Fijos
+    const depreciacionContable  = activos.reduce((s, a) => s + calcDepContable(a), 0);
+    const depreciacionTrib      = activos.reduce((s, a) => s + calcDepTributaria(a), 0);
+    const difTemp               = depreciacionContable - depreciacionTrib;
 
-    const rli = utilidadFinanciera - difTemp; // Renta Líquida Imponible
-    const tasaPrimCat = 0.27;
-    const impuesto1Cat = Math.max(0, rli * tasaPrimCat);
-
-    const ppmAcumulado = get(["ppm"]);
-    const retencionesYCreditos = 0;
-    const saldoF22 = Math.max(0, impuesto1Cat - ppmAcumulado - retencionesYCreditos);
-    const devolucion = Math.max(0, ppmAcumulado - impuesto1Cat);
+    const rli           = utilidadFinanciera + depreciacionContable - depreciacionTrib;
+    const tasaPrimCat   = 0.27;
+    const impuesto1Cat  = Math.max(0, rli * tasaPrimCat);
+    const ppmAcumulado  = get(["ppm"]);
+    const saldoF22      = Math.max(0, impuesto1Cat - ppmAcumulado);
+    const devolucion    = Math.max(0, ppmAcumulado - impuesto1Cat);
 
     return { ingresosBrutos, costosYGastos, utilidadFinanciera, depreciacionContable, depreciacionTrib, difTemp, rli, impuesto1Cat, ppmAcumulado, saldoF22, devolucion };
-  }, [cuentas, saldosMap]);
+  }, [cuentas, saldosMap, activos]);
 
   return (
     <div className="glass-card rounded-xl overflow-hidden">
@@ -320,118 +312,161 @@ function FormularioF22({ cuentas, saldosMap }) {
 
 // ─── Diferencias temporarias e impuesto diferido ─────────────────────────────
 function ImpuestoDiferido({ cuentas, saldosMap }) {
-  const data = useMemo(() => {
-    const depContable  = cuentas.filter(c => c.nombre?.toLowerCase().includes("deprecia")).reduce((s, c) => {
-      const sd = saldosMap[c.id] || { debe: 0, haber: 0 };
-      return s + Math.abs(sd.debe - sd.haber);
-    }, 0);
-    const depTributaria = depContable; // Igual hasta que exista kardex detallado
-    const difTemp        = depContable - depTributaria;
-    const activoDiferido = difTemp < 0 ? Math.abs(difTemp) * 0.27 : 0;
-    const pasivoDiferido = difTemp > 0 ? difTemp * 0.27 : 0;
+  const activos = useActivos();
 
-    return { depContable, depTributaria, difTemp, activoDiferido, pasivoDiferido };
-  }, [cuentas, saldosMap]);
+  // Dep. anual total de la flota (contable y tributaria)
+  const { depContableAnual, depTributariaAnual, detalle } = useMemo(() => {
+    let depC = 0, depT = 0;
+    const det = activos
+      .filter(a => parseFloat(a.valorCompra) > 0)
+      .map(a => {
+        const c = calcDepContable(a);
+        const t = calcDepTributaria(a);
+        depC += c;
+        depT += t;
+        return {
+          nombre: a.nombre || a.id,
+          tipo:   a.tipo,
+          vc:     parseFloat(a.valorCompra) || 0,
+          depC:   c,
+          depT:   t,
+          dif:    c - t,
+          vidaC:  parseFloat(a.vidaUtilAnios) || 0,
+          vidaT:  VIDA_UTIL_TRIB[a.tipo] || 5,
+        };
+      });
+    return { depContableAnual: depC, depTributariaAnual: depT, detalle: det };
+  }, [activos]);
+
+  const difTemp        = depContableAnual - depTributariaAnual;
+  const activoDiferido = difTemp < 0 ? Math.abs(difTemp) * 0.27 : 0;
+  const pasivoDiferido = difTemp > 0 ? difTemp * 0.27 : 0;
+
+  const sinActivos = activos.length === 0;
+  const sinValores = activos.length > 0 && depContableAnual === 0 && depTributariaAnual === 0;
 
   return (
     <div className="glass-card rounded-xl overflow-hidden">
-      <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-4 py-3">
-        <p className="text-white font-black text-sm">Impuesto Diferido — NIC 12</p>
-        <p className="text-indigo-200 text-xs">Diferencias temporarias imponibles y deducibles</p>
+      <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-4 py-3 flex items-center justify-between">
+        <div>
+          <p className="text-white font-black text-sm">Impuesto Diferido — NIC 12</p>
+          <p className="text-indigo-200 text-xs">Diferencias temporarias imponibles y deducibles</p>
+        </div>
+        <span className="px-3 py-1 bg-white/20 text-white text-xs font-semibold rounded-full">
+          {activos.length} activo{activos.length !== 1 ? "s" : ""}
+        </span>
       </div>
-      <table className="w-full">
-        <tbody>
-          <FilaTrib label="Depreciación contable acumulada" valor={data.depContable} />
-          <FilaTrib label="Depreciación tributaria acumulada" valor={data.depTributaria} indent colorValor="text-emerald-600" />
-          <FilaTrib separador />
-          <FilaTrib label="Diferencia temporaria" valor={Math.abs(data.difTemp)}
-            negrita colorValor={data.difTemp !== 0 ? "text-amber-600" : "text-slate-400"} />
-          <FilaTrib separador />
-          {data.activoDiferido > 0 && <FilaTrib label="Activo por impuesto diferido (27%)" valor={data.activoDiferido} negrita colorValor="font-black text-emerald-600" />}
-          {data.pasivoDiferido > 0 && <FilaTrib label="Pasivo por impuesto diferido (27%)" valor={data.pasivoDiferido} negrita colorValor="font-black text-red-600" />}
-          {data.difTemp === 0 && <FilaTrib label="Sin diferencias temporarias en el período" valor={0} colorValor="text-slate-300" />}
-        </tbody>
-      </table>
-      <div className="px-4 py-3 bg-indigo-50 border-t border-indigo-100">
-        <p className="text-xs text-indigo-600 font-semibold">Para diferencias temporarias detalladas, registra activos con kardex de depreciación contable vs. tributaria en el módulo de Activos.</p>
-      </div>
+
+      {/* Aviso sin activos registrados */}
+      {sinActivos && (
+        <div className="px-4 py-6 text-center">
+          <p className="text-slate-400 text-sm font-semibold">No hay activos registrados en el módulo de Activos Fijos.</p>
+          <p className="text-slate-400 text-xs mt-1">Agrega activos con valor de compra y vida útil para calcular diferencias temporarias.</p>
+        </div>
+      )}
+
+      {/* Aviso activos sin valor */}
+      {sinValores && (
+        <div className="px-4 py-4">
+          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <p className="text-xs text-amber-700 font-semibold">
+              Hay {activos.length} activo{activos.length !== 1 ? "s" : ""} registrado{activos.length !== 1 ? "s" : ""}, pero ninguno tiene valor de compra ingresado. Edítalos en el módulo de Activos Fijos para calcular las diferencias.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Tabla resumen */}
+      {!sinActivos && !sinValores && (
+        <>
+          <table className="w-full">
+            <tbody>
+              <FilaTrib label="Depreciación contable anual (flota)" valor={depContableAnual} />
+              <FilaTrib label={`Depreciación tributaria anual (SII)`} valor={depTributariaAnual} indent colorValor="text-emerald-600" />
+              <FilaTrib separador />
+              <FilaTrib label="Diferencia temporaria neta"
+                valor={Math.abs(difTemp)}
+                negrita
+                colorValor={difTemp !== 0 ? "text-amber-600" : "text-slate-400"} />
+              <FilaTrib separador />
+              {activoDiferido > 0 && (
+                <FilaTrib label="Activo por impuesto diferido (27%)" valor={activoDiferido} negrita colorValor="font-black text-emerald-600" />
+              )}
+              {pasivoDiferido > 0 && (
+                <FilaTrib label="Pasivo por impuesto diferido (27%)" valor={pasivoDiferido} negrita colorValor="font-black text-red-600" />
+              )}
+              {difTemp === 0 && (
+                <FilaTrib label="Sin diferencias temporarias" valor={0} colorValor="text-slate-300" />
+              )}
+            </tbody>
+          </table>
+
+          {/* Detalle por activo */}
+          {detalle.length > 0 && (
+            <div className="border-t border-slate-100">
+              <div className="px-4 py-2 bg-slate-50">
+                <p className="text-xs font-black text-slate-500 uppercase tracking-wider">Detalle por activo</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="px-4 py-2 text-left font-bold text-slate-500">Activo</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-500">V. Útil Cont.</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-500">V. Útil Trib. SII</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500">Dep. Contable</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500">Dep. Tributaria</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {detalle.map((d, i) => (
+                      <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
+                        <td className="px-4 py-2 font-semibold text-slate-700 max-w-[180px] truncate">{d.nombre}</td>
+                        <td className="px-4 py-2 text-center text-slate-500">{d.vidaC > 0 ? `${d.vidaC} años` : "—"}</td>
+                        <td className="px-4 py-2 text-center text-slate-500">{d.vidaT} años</td>
+                        <td className="px-4 py-2 text-right font-semibold text-slate-700">{fmt(d.depC)}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-emerald-700">{fmt(d.depT)}</td>
+                        <td className={`px-4 py-2 text-right font-bold ${d.dif > 0 ? "text-red-600" : d.dif < 0 ? "text-emerald-600" : "text-slate-300"}`}>
+                          {d.dif !== 0 ? fmt(Math.abs(d.dif)) : "—"}
+                          {d.dif > 0 && <span className="ml-1 text-[10px]">▲</span>}
+                          {d.dif < 0 && <span className="ml-1 text-[10px]">▼</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-indigo-50 border-t-2 border-indigo-200">
+                      <td className="px-4 py-2 font-black text-slate-800" colSpan={3}>TOTAL</td>
+                      <td className="px-4 py-2 text-right font-black text-slate-800">{fmt(depContableAnual)}</td>
+                      <td className="px-4 py-2 text-right font-black text-emerald-700">{fmt(depTributariaAnual)}</td>
+                      <td className={`px-4 py-2 text-right font-black ${difTemp > 0 ? "text-red-700" : difTemp < 0 ? "text-emerald-700" : "text-slate-300"}`}>
+                        {difTemp !== 0 ? fmt(Math.abs(difTemp)) : "—"}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div className="px-4 py-3 bg-indigo-50 border-t border-indigo-100">
+                <p className="text-xs text-indigo-600 font-semibold">
+                  Vida útil tributaria según tabla SII: Maquinaria 10 años · Vehículo 7 años · Herramienta 3 años · Otro 5 años.
+                  Las diferencias generan {pasivoDiferido > 0 ? "un pasivo" : "un activo"} por impuesto diferido bajo NIC 12.
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadTributario() {
-  const { cuentas, asientos, saldos, periodoActivo, guardarAsiento } = useContabilidad();
-  const saldosMap = saldos(periodoActivo);
-  const [vistaActiva, setVistaActiva]   = useState("f29");
-  const [showImptoModal, setShowImpto] = useState(false);
-  const [imptoUnico, setImptoUnico]    = useState(0); // valor del período activo
-  const [ieComBustible, setIEComb]     = useState(0); // IE recuperable combustible
-
-  // Cargar IE combustible para el período activo desde combustible_calculos
-  const { empresaId } = useEmpresa();
-  useEffect(() => {
-    if (!empresaId || !periodoActivo) return;
-    (async () => {
-      try {
-        const snap = await getDocs(query(
-          collection(db, "empresas", empresaId, "combustible_calculos"),
-          where("periodo", "==", periodoActivo)
-        ));
-        setIEComb(snap.empty ? 0 : (snap.docs[0].data().totalIERecuperable || 0));
-      } catch(e) { setIEComb(0); }
-    })();
-  }, [empresaId, periodoActivo]);
-  const importandoRef = React.useRef(false); // protege contra reset del useEffect
-
-  // Cargar impuesto único guardado para este período (buscarlo en asientos cargados)
-  React.useEffect(() => {
-    if (importandoRef.current) return; // no resetear mientras se está importando
-    const asientoImpto = asientos.find(a => a.origen === "impto_unico" && a.periodo === periodoActivo);
-    if (asientoImpto) {
-      setImptoUnico(asientoImpto.montoImptoUnico || asientoImpto.totalDebe || 0);
-    } else {
-      setImptoUnico(0);
-    }
-  }, [asientos, periodoActivo]);
-
-  const handleImportImptoUnico = async (datos) => {
-    importandoRef.current = true; // bloquear reset del useEffect
-    const cuentaRemun   = cuentas.find(c => /remuneraci/i.test(c.nombre) && c.tipo === "pasivo_corriente");
-    const cuentaBanco   = cuentas.find(c => /banco/i.test(c.nombre) && c.tipo === "activo_corriente");
-    const cuentaIRPagar = cuentas.find(c => /impuesto.*renta|renta.*pagar/i.test(c.nombre));
-    const haberCuenta   = cuentaIRPagar || cuentaBanco;
-
-    await guardarAsiento({
-      fecha:   periodoActivo + "-01",
-      glosa:   `Impto. Único Trabajadores — ${datos.nombre} · ${datos.mesAnio}`,
-      tipo:    "automatico",
-      periodo: periodoActivo,
-      origen:  "impto_unico",
-      totalDebe: datos.total,
-      montoImptoUnico: datos.total,
-      lineas: [
-        {
-          cuentaId:     cuentaRemun?.id || "",
-          cuentaNombre: cuentaRemun?.nombre || "Remuneraciones por Pagar",
-          debe:  datos.total,
-          haber: 0,
-          descripcion: `Retención impto. único — ${datos.nombre}`,
-        },
-        {
-          cuentaId:     haberCuenta?.id || "",
-          cuentaNombre: haberCuenta?.nombre || "Banco",
-          debe:  0,
-          haber: datos.total,
-          descripcion: "Pago impto. único al fisco",
-        },
-      ],
-    });
-    // Setear inmediatamente sin esperar cargarAsientos (que puede ser lento)
-    setImptoUnico(datos.total);
-    // Liberar el bloqueo después de que React procese el estado
-    setTimeout(() => { importandoRef.current = false; }, 2000);
-  };
+  const { cuentas, asientos, saldos, periodoActivo } = useContabilidad();
+  const saldosMap = saldos();
+  const [vistaActiva, setVistaActiva] = useState("f29");
 
   const VISTAS = [
     { id: "f29",   label: "F29 — IVA"         },
@@ -473,245 +508,10 @@ export default function ContabilidadTributario() {
         ))}
       </div>
 
-      {vistaActiva === "f29"  && <FormularioF29 cuentas={cuentas} saldosMap={saldosMap} periodoActivo={periodoActivo} imptoUnico={imptoUnico} onImportImpto={() => setShowImpto(true)} ieRecuperable={ieComBustible} />}
+      {vistaActiva === "f29"  && <FormularioF29 cuentas={cuentas} saldosMap={saldosMap} periodoActivo={periodoActivo} />}
       {vistaActiva === "ppm"  && <ModuloPPM cuentas={cuentas} saldosMap={saldosMap} asientos={asientos} periodoActivo={periodoActivo} />}
       {vistaActiva === "f22"  && <FormularioF22 cuentas={cuentas} saldosMap={saldosMap} />}
       {vistaActiva === "dift" && <ImpuestoDiferido cuentas={cuentas} saldosMap={saldosMap} />}
-
-      <ModalImportImptoUnico
-        isOpen={showImptoModal}
-        onClose={() => setShowImpto(false)}
-        periodoActivo={periodoActivo}
-        onImport={handleImportImptoUnico}
-      />
-    </div>
-  );
-}
-
-// ─── Modal importar Impuesto Único Trabajadores ───────────────────────────────
-export function ModalImportImptoUnico({ isOpen, onClose, periodoActivo, onImport }) {
-  const [archivo, setArchivo]     = useState(null);
-  const [empresas, setEmpresas]   = useState([]);   // [{nombre, mesAnio, impUnico, impFin, impReliq, total}]
-  const [seleccionada, setSelec]  = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState("");
-  const [importado, setImportado] = useState(false);
-  const inputRef = React.useRef(null);
-
-  const reset = () => { setArchivo(null); setEmpresas([]); setSelec(null); setError(""); setImportado(false); };
-  const handleClose = () => { reset(); onClose(); };
-
-  const leerArchivo = async (file) => {
-    setLoading(true); setError("");
-    try {
-      // Leer con SheetJS cargado dinámicamente
-      if (!window.XLSX) {
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-          s.onload = res; s.onerror = rej;
-          document.head.appendChild(s);
-        });
-      }
-      const XLSX = window.XLSX;
-      const data = await file.arrayBuffer();
-      const wb   = XLSX.read(data, { type:"array" });
-      const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
-
-      if (!rows.length) { setError("El archivo no contiene datos."); setLoading(false); return; }
-
-      // Columnas esperadas: Empresa, Mes, Impuesto Único, Impuesto Desde Finiquito, Impuesto Reliquidado, Total Impuesto
-      const n = (v) => parseFloat(v) || 0;
-      const lista = rows
-        .filter(r => r["Empresa"] && r["Total Impuesto"] != null)
-        .map(r => ({
-          nombre:    String(r["Empresa"] || "").trim(),
-          mesAnio:   String(r["Mes"] || ""),
-          impUnico:  n(r["Impuesto Único"]),
-          impFin:    n(r["Impuesto Desde Finiquito"]),
-          impReliq:  n(r["Impuesto Reliquidado"]),
-          total:     n(r["Total Impuesto"]),
-        }));
-
-      if (!lista.length) { setError("No se encontraron filas con datos de impuesto."); setLoading(false); return; }
-      setEmpresas(lista);
-      // Pre-seleccionar la que coincida con el nombre de la empresa actual
-      const match = lista.find(e => /mpf ingeniería|mpf ingenieria/i.test(e.nombre));
-      setSelec(match || lista[0]);
-    } catch (e) {
-      setError("Error al leer el archivo: " + e.message);
-    }
-    setLoading(false);
-  };
-
-  const handleImportar = () => {
-    if (!seleccionada) return;
-    onImport(seleccionada);
-    setImportado(true);
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background:"rgba(2,6,23,0.75)", backdropFilter:"blur(6px)" }}>
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden"
-        style={{ fontFamily:"'DM Sans',system-ui,sans-serif" }}>
-
-        {/* Header */}
-        <div className="px-6 pt-6 pb-5 relative overflow-hidden"
-          style={{ background:"linear-gradient(135deg,#0f172a,#1e3a5f,#1d4ed8)" }}>
-          <div className="absolute inset-0 opacity-20"
-            style={{ backgroundImage:"radial-gradient(circle at 80% 20%,#60a5fa,transparent 50%)" }}/>
-          <div className="relative flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
-                style={{ background:"rgba(255,255,255,0.12)" }}>👥</div>
-              <div>
-                <h2 className="text-white font-black text-lg">Importar Impuesto Único</h2>
-                <p className="text-blue-300 text-xs mt-0.5">Resumen de impuestos de trabajadores</p>
-              </div>
-            </div>
-            <button onClick={handleClose}
-              className="w-8 h-8 rounded-xl text-white/60 hover:text-white hover:bg-white/10 flex items-center justify-center transition-all">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {/* Importado */}
-          {importado ? (
-            <div className="py-6 text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl mx-auto bg-emerald-100 flex items-center justify-center text-3xl">✅</div>
-              <p className="font-black text-slate-800">Impuesto único registrado</p>
-              <p className="text-sm text-slate-500">
-                <strong>{seleccionada.nombre}</strong><br/>
-                Total: <strong className="text-indigo-700">{seleccionada.total.toLocaleString("es-CL", {style:"currency",currency:"CLP"})}</strong>
-              </p>
-              <p className="text-xs text-slate-400">Aparecerá en la línea 47 del F29 del período</p>
-              <button onClick={handleClose}
-                className="px-6 py-2.5 rounded-2xl text-white text-sm font-black"
-                style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)" }}>
-                Ver en F29
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Zona de upload */}
-              {!empresas.length && (
-                <div
-                  onClick={() => inputRef.current?.click()}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => { e.preventDefault(); leerArchivo(e.dataTransfer.files[0]); }}
-                  className="border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-2xl p-8 text-center cursor-pointer transition-colors bg-indigo-50/30"
-                >
-                  {loading ? (
-                    <div className="space-y-2">
-                      <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"/>
-                      <p className="text-sm text-slate-500">Leyendo archivo...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-4xl mb-3">📊</div>
-                      <p className="font-black text-slate-700 text-sm">Arrastra el archivo Excel aquí</p>
-                      <p className="text-slate-400 text-xs mt-1">o haz clic para seleccionar</p>
-                      <div className="mt-3 inline-flex px-3 py-1 bg-indigo-100 rounded-full">
-                        <span className="text-[10px] font-black text-indigo-700">resumen_Impuestos.xlsx</span>
-                      </div>
-                    </>
-                  )}
-                  <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden"
-                    onChange={e => leerArchivo(e.target.files[0])} />
-                </div>
-              )}
-
-              {/* Error */}
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
-                  <p className="text-xs text-red-700 font-semibold">⚠ {error}</p>
-                </div>
-              )}
-
-              {/* Selector de empresa */}
-              {empresas.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-xs font-black text-slate-500 uppercase tracking-wider">
-                    {empresas.length} empresa{empresas.length > 1 ? "s" : ""} encontrada{empresas.length > 1 ? "s" : ""} — selecciona la que corresponde importar:
-                  </p>
-
-                  {empresas.map((emp, i) => {
-                    const activa = seleccionada?.nombre === emp.nombre;
-                    return (
-                      <button key={i} onClick={() => setSelec(emp)}
-                        className={`w-full rounded-2xl border-2 p-4 text-left transition-all ${activa ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            {/* Radio visual */}
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${activa ? "border-indigo-500 bg-indigo-500" : "border-slate-300"}`}>
-                              {activa && <div className="w-2 h-2 rounded-full bg-white"/>}
-                            </div>
-                            <div>
-                              <p className={`text-sm font-black ${activa ? "text-indigo-800" : "text-slate-700"}`}>{emp.nombre}</p>
-                              <p className="text-[10px] text-slate-400 mt-0.5">Período: {emp.mesAnio}</p>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className={`text-sm font-black tabular-nums ${activa ? "text-indigo-700" : "text-slate-700"}`}>
-                              {emp.total.toLocaleString("es-CL", {style:"currency",currency:"CLP"})}
-                            </p>
-                            <p className="text-[10px] text-slate-400">Total impuesto</p>
-                          </div>
-                        </div>
-                        {/* Desglose */}
-                        {activa && (emp.impUnico > 0 || emp.impFin > 0 || emp.impReliq > 0) && (
-                          <div className="mt-3 pt-3 border-t border-indigo-100 grid grid-cols-3 gap-2">
-                            {[
-                              { label:"Imp. Único", val:emp.impUnico },
-                              { label:"Finiquito",  val:emp.impFin   },
-                              { label:"Reliquidado",val:emp.impReliq },
-                            ].map(d => d.val > 0 && (
-                              <div key={d.label} className="text-center">
-                                <p className="text-[10px] text-indigo-500 font-bold">{d.label}</p>
-                                <p className="text-xs font-black text-indigo-800 tabular-nums">
-                                  {d.val.toLocaleString("es-CL",{style:"currency",currency:"CLP"})}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                  {/* Info qué hace */}
-                  <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl">
-                    <span className="text-blue-500 flex-shrink-0">ℹ️</span>
-                    <p className="text-[10px] text-blue-700">
-                      El impuesto único se agregará como línea 47 (Impto. Único Trabajadores) en el F29 del período <strong>{periodoActivo}</strong> y se registrará como asiento de remuneraciones.
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button onClick={reset}
-                      className="flex-1 py-2.5 rounded-2xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all">
-                      ← Cambiar archivo
-                    </button>
-                    <button onClick={handleImportar} disabled={!seleccionada}
-                      className="flex-1 py-2.5 rounded-2xl text-white text-sm font-black disabled:opacity-50 transition-all"
-                      style={{ background:"linear-gradient(135deg,#0f172a,#1d4ed8)" }}>
-                      Importar impuesto →
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
