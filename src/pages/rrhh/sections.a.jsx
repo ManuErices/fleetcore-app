@@ -991,6 +991,8 @@ function RemuneracionesSection() {
   const [trabajadores,  setTrabajadores]  = useState([]);
   const [contratos,     setContratos]     = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [generando,     setGenerando]     = useState(false);
+  const [resultadoGen,  setResultadoGen]  = useState(null);
   const [modal,         setModal]         = useState(false);
   const [editData,      setEditData]      = useState(null);
   const [confirm,       setConfirm]       = useState(null);
@@ -1028,7 +1030,68 @@ function RemuneracionesSection() {
     setConfirm(null);
   };
 
-  // Enriquecer liquidaciones
+  // ── Generación masiva de nómina ──
+  const generarNominaMasiva = async () => {
+    if (!filtroMes || !filtroAnio) { alert('Selecciona mes y año antes de generar la nómina.'); return; }
+    const mesLabel = MESES[parseInt(filtroMes)-1];
+    if (!window.confirm(`¿Generar borradores de liquidación para ${mesLabel} ${filtroAnio}?\n\nSolo se crearán para trabajadores activos con contrato vigente que aún no tengan liquidación en este período.`)) return;
+
+    setGenerando(true); setResultadoGen(null);
+    let creados = 0, omitidos = 0, errores = 0;
+
+    // Trabajadores activos con contrato vigente
+    const activos = trabajadores.filter(t => (t.estado || 'activo') === 'activo');
+
+    for (const trab of activos) {
+      try {
+        const contrato = contratos.find(c => c.trabajadorId === trab.id && c.estado === 'vigente');
+        if (!contrato) { omitidos++; continue; }
+
+        // Verificar si ya existe liquidación para este período
+        const yaExiste = liquidaciones.some(l =>
+          l.trabajadorId === trab.id &&
+          l.mes  === filtroMes &&
+          l.anio === filtroAnio
+        );
+        if (yaExiste) { omitidos++; continue; }
+
+        // Crear borrador con datos base del contrato
+        const borrador = {
+          trabajadorId:     trab.id,
+          contratoId:       contrato.id,
+          mes:              filtroMes,
+          anio:             filtroAnio,
+          tipoPeriodo:      'mensual',
+          // Haberes desde contrato
+          sueldoBase:       contrato.sueldoBase       || '0',
+          bonoColacion:     contrato.bonoColacion      || '0',
+          bonoMovilizacion: contrato.bonoMovilizacion  || '0',
+          bonoProduccion:   contrato.bonoProduccion    || '0',
+          viaticos:         contrato.viaticos          || '0',
+          horasExtra:       '0',
+          valorHoraExtra:   contrato.valorHoraExtra    || '0',
+          otrosImponibles:  '0',
+          otrosNoImponibles:'0',
+          diasTrabajados:   '30',
+          descuentoAdicional:'0',
+          anticipo:         '0',
+          glosaDescuento:   '',
+          glosaAnticipo:    '',
+          estado:           'borrador',
+          observaciones:    'Generado automáticamente — revisar antes de aprobar',
+          createdAt:        serverTimestamp(),
+          updatedAt:        serverTimestamp(),
+        };
+
+        await addDoc(collection(db, 'empresas', empresaId, 'remuneraciones'), borrador);
+        creados++;
+      } catch(e) { errores++; console.error(e); }
+    }
+
+    setResultadoGen({ creados, omitidos, errores });
+    setGenerando(false);
+    load(); // Recargar tabla
+  };
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t=>t.id===l.trabajadorId);
     const contrato   = contratos.find(c=>c.id===l.contratoId);
@@ -1113,6 +1176,24 @@ function RemuneracionesSection() {
         ))}
       </div>
 
+      {/* Banner resultado generación masiva */}
+      {resultadoGen && (
+        <div className={`flex items-center justify-between gap-3 rounded-2xl px-5 py-3 mb-3 border ${resultadoGen.errores > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="flex items-center gap-3">
+            <span className="text-xl">{resultadoGen.errores > 0 ? '⚠️' : '✅'}</span>
+            <div>
+              <p className="text-sm font-black text-slate-800">Nómina generada — {MESES[parseInt(filtroMes)-1]} {filtroAnio}</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                <span className="text-emerald-700 font-bold">{resultadoGen.creados} borradores creados</span>
+                {resultadoGen.omitidos > 0 && <span className="ml-2 text-slate-400">{resultadoGen.omitidos} omitidos (ya existían o sin contrato)</span>}
+                {resultadoGen.errores  > 0 && <span className="ml-2 text-red-600 font-bold">{resultadoGen.errores} errores</span>}
+              </p>
+            </div>
+          </div>
+          <button onClick={() => setResultadoGen(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
+        </div>
+      )}
+
       {/* Alerta pendientes */}
       {pendientes > 0 && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-5">
@@ -1145,6 +1226,14 @@ function RemuneracionesSection() {
           <button onClick={openNew} className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{background:"rgba(255,255,255,0.12)", color:"#e0d9ff", border:"1px solid rgba(255,255,255,0.15)"}}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
             + Nueva Liquidación
+          </button>
+          <button onClick={generarNominaMasiva} disabled={generando}
+            className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95 disabled:opacity-50"
+            style={{background:"rgba(16,185,129,0.2)", color:"#6ee7b7", border:"1px solid rgba(16,185,129,0.3)"}}>
+            {generando
+              ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin inline-block"/> Generando…</>
+              : <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Generar Nómina</>
+            }
           </button>
         </div>
 
@@ -1235,8 +1324,12 @@ function RemuneracionesSection() {
                         })() : <span>—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado==='pagado'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>
-                          {row.estado==='pagado'?'Pagado':'Pendiente'}
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          row.estado==='pagado'   ? 'bg-emerald-100 text-emerald-700' :
+                          row.estado==='borrador' ? 'bg-slate-100 text-slate-500' :
+                                                    'bg-amber-100 text-amber-700'
+                        }`}>
+                          {row.estado==='pagado' ? 'Pagado' : row.estado==='borrador' ? 'Borrador' : 'Pendiente'}
                         </span>
                       </td>
                       <td className="px-4 py-3">

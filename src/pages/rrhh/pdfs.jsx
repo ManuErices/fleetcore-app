@@ -130,10 +130,12 @@ function generarPDFContrato(contrato, trabajador) {
       <p>La jornada de trabajo será de <strong>${contrato.jornadaHorasSemanales || '___'} horas semanales</strong>, distribuida de la siguiente manera:</p>
       ${contrato.jornadaDias?.length ? `<p><strong>Días:</strong> ${contrato.jornadaDias.join(', ')}.</p>` : ''}
       ${contrato.jornadaHoraEntrada && contrato.jornadaHoraSalida ? `<p><strong>Horario:</strong> De ${contrato.jornadaHoraEntrada} a ${contrato.jornadaHoraSalida} horas.</p>` : ''}
+      ${contrato.horarioColacion ? `<p><strong>Horario de colación:</strong> ${contrato.horarioColacion}.</p>` : ''}
       ${contrato.jornadaDescripcion ? `<p>${contrato.jornadaDescripcion}</p>` : ''}
       <p>Lo anterior en conformidad con lo establecido en el artículo 22 del Código del Trabajo.</p>
       ` : `
       <p>La jornada de trabajo será: <strong>${contrato.jornada || '45 horas semanales'}</strong>, distribuida de lunes a viernes${contrato.jornada?.includes('Turno') ? ', en régimen de turnos' : ''}, conforme a lo establecido en el artículo 22 del Código del Trabajo.</p>
+      ${contrato.horarioColacion ? `<p>El tiempo de descanso para colación será de <strong>${contrato.horarioColacion}</strong>.</p>` : ''}
       `}
       ${hExtra > 0 ? `<p>Se pactan horas extraordinarias habituales de hasta <strong>${hExtra} horas semanales</strong>, con un recargo mínimo del 50% sobre el valor de la hora ordinaria (Art. 32 CT), con un valor hora extra de <strong>${fmt(contrato.valorHoraExtra)}</strong>.</p>` : ''}
     </div>
@@ -1134,6 +1136,9 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
   // Construir cláusula de modificación según tipo
   let clausulaModif = '';
   switch(anexo.tipo) {
+    case 'conversion_indefinido':
+      clausulaModif = `A contar de la fecha del presente anexo, el contrato de trabajo que vincula a las partes, originalmente celebrado como contrato de plazo fijo con fecha de término ${fmtFecha(contrato?.fechaFin)}, se convierte en un contrato de trabajo de <strong>duración indefinida</strong>, en conformidad con lo dispuesto en el artículo 159 N°4 inciso 2° del Código del Trabajo. En consecuencia, el contrato no tendrá una fecha de término predefinida y solo podrá terminar por las causales establecidas en los artículos 159, 160 y 161 del Código del Trabajo. Las demás cláusulas del contrato original permanecen inalteradas.`;
+      break;
     case 'aumento_sueldo_base':
       clausulaModif = `A contar de la fecha del presente anexo, la remuneración mensual del/la trabajador/a queda establecida en la suma de <strong>${fmt(anexo.sueldoBase)}</strong> pesos brutos mensuales por concepto de sueldo base imponible, reemplazando en este aspecto lo estipulado en el contrato original. Las demás cláusulas del contrato permanecen inalteradas.`;
       break;
