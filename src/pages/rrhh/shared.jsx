@@ -86,6 +86,7 @@ export const TIPOS_ANEXO = [
   { value:'cambio_lugar',           label:'Cambio de lugar de trabajo'          },
   { value:'cambio_empresa',         label:'Cambio de empresa'                   },
   { value:'prorroga',               label:'Prórroga de contrato'                },
+  { value:'conversion_indefinido',  label:'Conversión a contrato indefinido'    },
   { value:'otros_bonos',            label:'Otros bonos/beneficios'              },
   { value:'otro',                   label:'Otro'                                },
 ];

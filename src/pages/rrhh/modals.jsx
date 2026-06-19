@@ -714,6 +714,17 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // Al seleccionar trabajador, pre-rellenar datos desde su ficha
+  const handleTrabajador = (tid) => {
+    const t = (trabajadores || []).find(w => w.id === tid);
+    setForm(f => ({
+      ...f,
+      trabajadorId: tid,
+      cargo:   t?.cargo   || f.cargo,
+      empresa: t?.empresa || f.empresa,
+    }));
+  };
+
   const handleSave = async () => {
     if (!form.trabajadorId || !form.fechaInicio || !form.sueldoBase) {
       alert('Trabajador, fecha de inicio y sueldo base son obligatorios.'); return;
@@ -739,7 +750,7 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
       <div className="space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Trabajador" required>
-            <select className={inp} value={form.trabajadorId} onChange={e => set('trabajadorId', e.target.value)}>
+            <select className={inp} value={form.trabajadorId} onChange={e => handleTrabajador(e.target.value)}>
               <option value="">Seleccionar trabajador…</option>
               {(trabajadores || []).sort((a, b) => a.apellidoPaterno?.localeCompare(b.apellidoPaterno)).map(t => (
                 <option key={t.id} value={t.id}>{t.apellidoPaterno} {t.nombre} — {t.rut}</option>
@@ -776,6 +787,20 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
             <select className={inp} value={form.jornada} onChange={e => set('jornada', e.target.value)}>
               {JORNADAS.map(j => <option key={j}>{j}</option>)}
             </select>
+          </Field>
+        </div>
+
+        {/* Horario de colación */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Horario de colación">
+            <input className={inp} value={form.horarioColacion || ''}
+              onChange={e => set('horarioColacion', e.target.value)}
+              placeholder="Ej: 13:00 a 14:00 hrs" />
+          </Field>
+          <Field label="Lugar de trabajo">
+            <input className={inp} value={form.lugarTrabajo || ''}
+              onChange={e => set('lugarTrabajo', e.target.value)}
+              placeholder="Ej: Santiago, Faena Los Andes…" />
           </Field>
         </div>
 
@@ -962,6 +987,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
           <Field label="Estado">
             <select className={inp} value={form.estado} onChange={e => set('estado', e.target.value)}>
               <option value="pendiente">Pendiente</option>
+              <option value="borrador">Borrador</option>
               <option value="pagado">Pagado</option>
             </select>
           </Field>
@@ -1015,8 +1041,16 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
           <Field label="Descuento adicional ($)">
             <input type="text" className={inp} value={formatCLP(form.descuentoAdicional)} onChange={e => set('descuentoAdicional', parseCLP(e.target.value))} />
           </Field>
+          <Field label="Glosa descuento">
+            <input className={inp} value={form.glosaDescuento || ''} onChange={e => set('glosaDescuento', e.target.value)} placeholder="Ej: Préstamo, uniforme, multa…" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo ($)">
             <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
+          </Field>
+          <Field label="Glosa anticipo">
+            <input className={inp} value={form.glosaAnticipo || ''} onChange={e => set('glosaAnticipo', e.target.value)} placeholder="Ej: Anticipo quincena…" />
           </Field>
         </div>
 
@@ -1086,6 +1120,16 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleTrabajador = (tid) => {
+
+  // Al cambiar causal 159-4 (vencimiento plazo), auto-completar fecha del contrato
+  const handleCausal = (causal) => {
+    setForm(f => {
+      const contratoActual = contratos?.find(c => c.id === f.contratoId);
+      const fechaAuto = causal === '159-4' && contratoActual?.fechaFin
+        ? contratoActual.fechaFin : f.fechaTermino;
+      return { ...f, causal, fechaTermino: fechaAuto };
+    });
+  };
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente')
       || contratos?.find(c => c.trabajadorId === tid);
     setForm(f => ({
@@ -1134,7 +1178,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             </select>
           </Field>
           <Field label="Causal de término" required>
-            <select className={inp} value={form.causal} onChange={e => set('causal', e.target.value)}>
+            <select className={inp} value={form.causal} onChange={e => handleCausal(e.target.value)}>
               <option value="">Seleccionar causal…</option>
               {CAUSALES_TERMINO.map(c => <option key={c.codigo} value={c.codigo}>{c.label}</option>)}
             </select>
@@ -1143,6 +1187,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Fecha de término" required>
             <input type="date" className={inp} value={form.fechaTermino} onChange={e => set('fechaTermino', e.target.value)} />
+            {form.causal === '159-4' && contratoSel?.fechaFin && form.fechaTermino === contratoSel.fechaFin && (
+              <p className="text-[10px] text-violet-600 mt-1">⚡ Auto-completada desde la fecha de vencimiento del contrato</p>
+            )}
           </Field>
           <Field label="Última remuneración ($)" required>
             <input type="text" className={inp} value={formatCLP(form.ultimaRemuneracion)} onChange={e => set('ultimaRemuneracion', parseCLP(e.target.value))} />
@@ -1625,6 +1672,21 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
           <Field label="Nueva fecha de término">
             <input type="date" className={inp} value={form.fechaFin} onChange={e => set('fechaFin', e.target.value)} />
           </Field>
+        )}
+
+        {/* Conversión a indefinido */}
+        {form.tipo === 'conversion_indefinido' && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-2">
+            <p className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">Conversión a contrato indefinido</p>
+            <p className="text-xs text-emerald-700">
+              Conforme al Art. 159 N°4 del Código del Trabajo, el contrato de plazo fijo se convierte en contrato de duración indefinida a contar de la fecha de este anexo.
+            </p>
+            {contratoSel?.fechaFin && (
+              <div className="text-xs font-bold text-emerald-800 bg-emerald-100 rounded-lg px-3 py-2">
+                Contrato actual vence: {contratoSel.fechaFin} · El anexo formaliza la conversión.
+              </div>
+            )}
+          </div>
         )}
 
         {/* Otros bonos */}
