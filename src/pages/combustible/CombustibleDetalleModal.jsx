@@ -129,7 +129,7 @@ export default function CombustibleDetalleModal({
           {/* Información General del Reporte */}
           <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-slate-200">
             <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-3">Información General</h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
               <DataField label="Fecha" value={reporte.fecha} />
               <DataField label="Hora" value={reporte.hora || (reporte.fechaCreacion ? new Date(reporte.fechaCreacion).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-')} />
               <DataField label="N° Guía" value={reporte.numeroGuia || '-'} />
@@ -160,6 +160,7 @@ export default function CombustibleDetalleModal({
                 <DataField label="Código" value={reporte.codigo || '-'} />
               )}
               <DataField label="Proyecto" value={projectName || reporte.projectId} />
+              <DataField label="Creado por" value={reporte.creadoPor || '-'} />
             </div>
           </div>
 
