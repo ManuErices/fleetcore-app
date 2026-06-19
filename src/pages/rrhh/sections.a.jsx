@@ -1522,7 +1522,7 @@ function PortalTrabajadoresPanel({ trabajadores }) {
   const [mostrarLog,  setMostrarLog]  = useState(false);
 
   function rutToEmail(rut) {
-    return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
+    return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@trabajador.app';
   }
   function rutToPass(rut) {
     return rut.replace(/[^0-9kK]/gi, '').toLowerCase();

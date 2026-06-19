@@ -293,6 +293,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
           color: var(--text);
           letter-spacing: 0.2px;
         }
+        .topbar-actions { display: flex; align-items: center; gap: 8px; }
         .btn-logout {
           background: none;
           border: 1px solid var(--border);
@@ -308,6 +309,22 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
           gap: 5px;
         }
         .btn-logout:hover { color: var(--text-2); border-color: var(--text-3); }
+        .btn-back {
+          background: rgba(245,158,11,0.1);
+          border: 1px solid rgba(245,158,11,0.3);
+          border-radius: 8px;
+          color: var(--accent);
+          font-family: var(--sans);
+          font-size: 12px;
+          font-weight: 600;
+          padding: 6px 10px;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        .btn-back:hover { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.5); }
 
         /* ── CONTENIDO ── */
         .content {
@@ -729,10 +746,18 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
             <div className="brand-dot"/>
             <span className="brand-name">FleetCore · Portal</span>
           </div>
-          <button className="btn-logout" onClick={cerrarSesion}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Salir
-          </button>
+          <div className="topbar-actions">
+            {!/(@trabajador\.app|@mpf\.cl)$/i.test(user?.email || '') && (
+              <button className="btn-back" onClick={() => { window.location.href = '/'; }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+                Volver
+              </button>
+            )}
+            <button className="btn-logout" onClick={cerrarSesion}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              Salir
+            </button>
+          </div>
         </div>
 
         {/* CONTENIDO */}
@@ -922,7 +947,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">RUT</span>
-                  <span className="ci-val">{trabajador?.rut || user.email.replace('@mpf.cl','')}</span>
+                  <span className="ci-val">{trabajador?.rut || user.email.replace(/@(trabajador\.app|mpf\.cl)$/, '')}</span>
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">Empresa</span>

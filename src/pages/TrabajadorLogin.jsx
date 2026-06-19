@@ -12,17 +12,18 @@ function formatRut(value) {
   return `${fmt}-${dv}`;
 }
 
-function rutToEmail(rut) {
-  // "12.345.678-9" → "123456789@mpf.cl"
-  return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
-}
+const rutDigits = (rut) => rut.replace(/[^0-9kK]/gi, '').toLowerCase();
 
-// Acepta tanto RUT (cuentas creadas desde RRHH como rut@mpf.cl)
-// como un email real (cuentas creadas vía invitación)
+// Dominio actual para cuentas nuevas
+const toEmail = (rut) => `${rutDigits(rut)}@trabajador.app`;
+// Dominio legacy (cuentas creadas antes del cambio)
+const toLegacyEmail = (rut) => `${rutDigits(rut)}@mpf.cl`;
+
+// Si el usuario escribe un email real, úsalo directo
 function resolveEmail(input) {
   const trimmed = input.trim();
   if (trimmed.includes('@')) return trimmed.toLowerCase();
-  return rutToEmail(trimmed);
+  return toEmail(trimmed);
 }
 
 export default function TrabajadorLogin() {
@@ -39,8 +40,17 @@ export default function TrabajadorLogin() {
     setLoading(true);
     try {
       const email = resolveEmail(rut);
-      await signInWithEmailAndPassword(auth, email, password);
-      // El componente padre (TrabajadorApp) detecta el cambio de auth
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (firstErr) {
+        // Fallback: cuentas legacy creadas con @mpf.cl
+        const isNotFound = firstErr.code === 'auth/user-not-found' || firstErr.code === 'auth/invalid-credential';
+        if (isNotFound && !rut.trim().includes('@')) {
+          await signInWithEmailAndPassword(auth, toLegacyEmail(rut.trim()), password);
+        } else {
+          throw firstErr;
+        }
+      }
     } catch (err) {
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
         setError('RUT o contraseña incorrectos.');
