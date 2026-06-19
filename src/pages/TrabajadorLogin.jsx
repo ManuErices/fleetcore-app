@@ -12,9 +12,18 @@ function formatRut(value) {
   return `${fmt}-${dv}`;
 }
 
-function rutToEmail(rut) {
-  // "12.345.678-9" → "123456789@mpf.cl"
-  return rut.replace(/[^0-9kK]/gi, '').toLowerCase() + '@mpf.cl';
+const rutDigits = (rut) => rut.replace(/[^0-9kK]/gi, '').toLowerCase();
+
+// Dominio actual para cuentas nuevas
+const toEmail = (rut) => `${rutDigits(rut)}@trabajador.app`;
+// Dominio legacy (cuentas creadas antes del cambio)
+const toLegacyEmail = (rut) => `${rutDigits(rut)}@mpf.cl`;
+
+// Si el usuario escribe un email real, úsalo directo
+function resolveEmail(input) {
+  const trimmed = input.trim();
+  if (trimmed.includes('@')) return trimmed.toLowerCase();
+  return toEmail(trimmed);
 }
 
 export default function TrabajadorLogin() {
@@ -30,9 +39,18 @@ export default function TrabajadorLogin() {
     setError('');
     setLoading(true);
     try {
-      const email = rutToEmail(rut);
-      await signInWithEmailAndPassword(auth, email, password);
-      // El componente padre (TrabajadorApp) detecta el cambio de auth
+      const email = resolveEmail(rut);
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (firstErr) {
+        // Fallback: cuentas legacy creadas con @mpf.cl
+        const isNotFound = firstErr.code === 'auth/user-not-found' || firstErr.code === 'auth/invalid-credential';
+        if (isNotFound && !rut.trim().includes('@')) {
+          await signInWithEmailAndPassword(auth, toLegacyEmail(rut.trim()), password);
+        } else {
+          throw firstErr;
+        }
+      }
     } catch (err) {
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
         setError('RUT o contraseña incorrectos.');
@@ -318,16 +336,19 @@ export default function TrabajadorLogin() {
 
           <form onSubmit={handleLogin} noValidate>
             <div className="field">
-              <label className="field-label">RUT</label>
+              <label className="field-label">RUT o Email</label>
               <div className="field-wrap">
                 <input
                   className="field-input"
                   type="text"
-                  inputMode="numeric"
-                  placeholder="12.345.678-9"
+                  inputMode="text"
+                  placeholder="12.345.678-9 o tu@email.cl"
                   value={rut}
-                  onChange={e => setRut(formatRut(e.target.value))}
-                  maxLength={12}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setRut(val.includes('@') ? val : formatRut(val));
+                  }}
+                  maxLength={40}
                   autoComplete="username"
                   autoFocus
                 />
@@ -372,7 +393,7 @@ export default function TrabajadorLogin() {
 
           <div className="login-footer">
             ¿Problemas para ingresar?<br/>
-            Contacta a <a href="mailto:rrhh@mpf.cl">rrhh@mpf.cl</a> o habla con tu supervisor.
+            Contacta a tu administrador o habla con tu supervisor.
           </div>
 
         </div>

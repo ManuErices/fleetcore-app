@@ -8,7 +8,7 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 
 const {
-  inp, EMPRESAS, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
+  inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, IMM_2024,
   TASAS, TASAS_AFP, TIPOS_ANEXO, ESTADOS_DIA, UTM_DEFAULT, COLORES_AREA,
   REGIONES_COMUNAS, REGIONES,
@@ -26,6 +26,17 @@ const {
 } = PDFs;
 
 // ─── Helpers UI ───────────────────────────────────────────────────────────────
+
+const formatCLP = (val) => {
+  if (val === undefined || val === null || val === '') return '';
+  const num = parseInt(String(val).replace(/\D/g, ''), 10);
+  if (isNaN(num)) return '';
+  return num.toLocaleString('es-CL');
+};
+
+const parseCLP = (val) => {
+  return String(val).replace(/\D/g, '');
+};
 
 function Modal({ isOpen, onClose, title, subtitle, children, maxWidth = 'max-w-2xl' }) {
   useEffect(() => {
@@ -101,14 +112,14 @@ function CancelBtn({ onClose }) {
 // ─── TrabajadorModal ──────────────────────────────────────────────────────────
 
 function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
     direccion: '', comuna: '', region: '',
     codigoPais: '+56', telefono: '', email: '',
-    empresa: '', area: '', cargo: '', fechaIngreso: '',
-    afp: '', prevision: 'FONASA', isapre: '', planIsapre: '',
+    empresa: empresa?.nombre || '', area: '', cargo: '', fechaIngreso: '',
+    afp: '', prevision: 'FONASA', isapre: '',
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
     tipo: 'OPERADOR', esSurtidor: false, projectId: null,
@@ -116,6 +127,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   const [form,    setForm]    = useState(empty);
   const [saving,  setSaving]  = useState(false);
   const [cargos,  setCargos]  = useState([]);  // desde bandas_salariales
+  const [isCustomCargo, setIsCustomCargo] = useState(false);
 
   // Cargar cargos desde Firestore al abrir
   useEffect(() => {
@@ -128,11 +140,60 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
       .catch(() => setCargos([]));
   }, [isOpen, empresaId]);
 
+  // 1. Inicializar el formulario solo al abrir/cerrar o cambiar editData
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    if (isOpen) {
+      setForm(editData ? { ...empty, ...editData } : { ...empty, empresa: empresa?.nombre || '' });
+    }
   }, [editData, isOpen]);
 
+  // 2. Detectar si el cargo es personalizado (solo al abrir o cuando cargan los cargos de la DB)
+  useEffect(() => {
+    if (isOpen && editData) {
+      const isCustom = editData.cargo && !cargos.includes(editData.cargo);
+      setIsCustomCargo(!!isCustom);
+    } else if (isOpen) {
+      setIsCustomCargo(false);
+    }
+  }, [editData, cargos, isOpen]);
+
+  // 3. Cargar la empresa por defecto si se obtiene el nombre después de abrir
+  useEffect(() => {
+    if (isOpen && !editData && empresa?.nombre && !form.empresa) {
+      setForm(f => ({ ...f, empresa: empresa.nombre }));
+    }
+  }, [empresa, isOpen, editData]);
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleAddCustomCargo = async (customCargo) => {
+    const trimmed = (customCargo || '').trim();
+    if (!trimmed) return;
+    
+    if (!cargos.includes(trimmed)) {
+      // Agregar localmente
+      setCargos(prev => [...prev, trimmed].sort());
+      
+      // Guardar en Firestore en segundo plano
+      try {
+        await addDoc(collection(db, 'empresas', empresaId, 'bandas_salariales'), {
+          nivel: 'N/A',
+          cargo: trimmed,
+          area: form.area || '',
+          sueldoMin: 0,
+          sueldoMax: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error('Error guardando cargo personalizado:', e);
+      }
+    }
+    
+    // Asignar al formulario y desactivar el modo personalizado para mostrar el dropdown
+    set('cargo', trimmed);
+    setIsCustomCargo(false);
+  };
 
   // ── Helpers de validación/formato ──
   function soloLetras(v) {
@@ -171,6 +232,20 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         projectId:   form.projectId   || null,
         updatedAt:   serverTimestamp(),
       };
+
+      // Si se ingresó un cargo personalizado que no existe en el sistema, crearlo en la DB
+      if (form.cargo && form.cargo.trim() && !cargos.includes(form.cargo.trim())) {
+        await addDoc(collection(db, 'empresas', empresaId, 'bandas_salariales'), {
+          nivel: 'N/A',
+          cargo: form.cargo.trim(),
+          area: form.area || '',
+          sueldoMin: 0,
+          sueldoMax: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
       } else {
@@ -283,14 +358,39 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             </select>
           </Field>
           <Field label="Cargo">
-            <select className={inp} value={form.cargo} onChange={e => set('cargo', e.target.value)}>
+            <select className={inp}
+              value={isCustomCargo ? '__otro__' : form.cargo}
+              onChange={e => {
+                if (e.target.value === '__otro__') {
+                  setIsCustomCargo(true);
+                  set('cargo', '');
+                } else {
+                  setIsCustomCargo(false);
+                  set('cargo', e.target.value);
+                }
+              }}>
               <option value="">Seleccionar cargo…</option>
               {cargos.map(c => <option key={c}>{c}</option>)}
               <option value="__otro__">Otro (escribir)</option>
             </select>
-            {form.cargo === '__otro__' && (
-              <input className={inp + ' mt-1.5'} placeholder="Escribe el cargo"
-                onChange={e => set('cargo', e.target.value)} autoFocus />
+            {isCustomCargo && (
+              <div className="flex gap-2 mt-1.5">
+                <input className={inp + ' flex-1'} placeholder="Escribe el cargo"
+                  value={form.cargo}
+                  onChange={e => set('cargo', e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomCargo(form.cargo);
+                    }
+                  }}
+                  autoFocus />
+                <button type="button"
+                  onClick={() => handleAddCustomCargo(form.cargo)}
+                  className="px-3 py-2 bg-purple-600 text-white font-bold rounded-xl text-xs hover:bg-purple-700 transition-colors shadow-sm flex items-center justify-center">
+                  Agregar
+                </button>
+              </div>
             )}
           </Field>
         </div>
@@ -586,10 +686,10 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
 // ─── ContratoModal ────────────────────────────────────────────────────────────
 
 function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
-    cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
+    cargo: '', jornada: 'Completa (45 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
     // Jornada personalizada (cuando jornada === 'Otro')
     jornadaHorasSemanales: '', jornadaHoraEntrada: '', jornadaHoraSalida: '',
@@ -598,9 +698,19 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
   const [form, setForm]     = useState(empty);
   const [saving, setSaving] = useState(false);
 
+  // 1. Inicializar formulario al abrir o cambiar editData
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    if (isOpen) {
+      setForm(editData ? { ...empty, ...editData } : { ...empty, empresa: empresa?.nombre || '' });
+    }
   }, [editData, isOpen]);
+
+  // 2. Cargar empresa por defecto si se obtiene después de abrir
+  useEffect(() => {
+    if (isOpen && !editData && empresa?.nombre && !form.empresa) {
+      setForm(f => ({ ...f, empresa: empresa.nombre }));
+    }
+  }, [empresa, isOpen, editData]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -646,9 +756,9 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
           <Field label="Fecha de inicio" required>
             <input type="date" className={inp} value={form.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
           </Field>
-          <Field label={`Fecha de término ${form.tipoContrato === 'Indefinido' ? '(no aplica)' : ''}`}>
+          <Field label={`Fecha de término ${(form.tipoContrato || '').toLowerCase().includes('indefinido') ? '(no aplica)' : ''}`}>
             <input type="date" className={inp} value={form.fechaFin}
-              disabled={form.tipoContrato === 'Indefinido'}
+              disabled={(form.tipoContrato || '').toLowerCase().includes('indefinido')}
               onChange={e => set('fechaFin', e.target.value)} />
           </Field>
         </div>
@@ -715,13 +825,13 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
         <Divider label="Remuneración base (Art. 42 CT)" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Sueldo base ($)" required>
-            <input type="number" className={inp} value={form.sueldoBase} onChange={e => set('sueldoBase', e.target.value)} placeholder="Ej: 800000" />
+            <input type="text" className={inp} value={formatCLP(form.sueldoBase)} onChange={e => set('sueldoBase', parseCLP(e.target.value))} placeholder="Ej: 800.000" />
           </Field>
           <Field label="Bono colación ($)">
-            <input type="number" className={inp} value={form.bonoColacion} onChange={e => set('bonoColacion', e.target.value)} placeholder="No imponible" />
+            <input type="text" className={inp} value={formatCLP(form.bonoColacion)} onChange={e => set('bonoColacion', parseCLP(e.target.value))} placeholder="No imponible" />
           </Field>
           <Field label="Bono movilización ($)">
-            <input type="number" className={inp} value={form.bonoMovilizacion} onChange={e => set('bonoMovilizacion', e.target.value)} placeholder="No imponible" />
+            <input type="text" className={inp} value={formatCLP(form.bonoMovilizacion)} onChange={e => set('bonoMovilizacion', parseCLP(e.target.value))} placeholder="No imponible" />
           </Field>
         </div>
         {form.sueldoBase && parseInt(form.sueldoBase) < IMM_2026 && (
@@ -868,45 +978,45 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         <Divider label="Haberes imponibles" />
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Field label="Sueldo base ($)" required>
-            <input type="number" className={inp} value={form.sueldoBase} onChange={e => set('sueldoBase', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.sueldoBase)} onChange={e => set('sueldoBase', parseCLP(e.target.value))} />
           </Field>
           <Field label="Bono producción ($)">
-            <input type="number" className={inp} value={form.bonoProduccion} onChange={e => set('bonoProduccion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoProduccion)} onChange={e => set('bonoProduccion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros imponibles ($)">
-            <input type="number" className={inp} value={form.otrosImponibles} onChange={e => set('otrosImponibles', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosImponibles)} onChange={e => set('otrosImponibles', parseCLP(e.target.value))} />
           </Field>
           <Field label="Horas extra">
             <input type="number" className={inp} value={form.horasExtra} onChange={e => set('horasExtra', e.target.value)} />
           </Field>
           <Field label="Valor hora extra ($)">
-            <input type="number" className={inp} value={form.valorHoraExtra} onChange={e => set('valorHoraExtra', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.valorHoraExtra)} onChange={e => set('valorHoraExtra', parseCLP(e.target.value))} />
           </Field>
         </div>
 
         <Divider label="Haberes no imponibles" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Field label="Colación ($)">
-            <input type="number" className={inp} value={form.bonoColacion} onChange={e => set('bonoColacion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoColacion)} onChange={e => set('bonoColacion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Movilización ($)">
-            <input type="number" className={inp} value={form.bonoMovilizacion} onChange={e => set('bonoMovilizacion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.bonoMovilizacion)} onChange={e => set('bonoMovilizacion', parseCLP(e.target.value))} />
           </Field>
           <Field label="Viáticos ($)">
-            <input type="number" className={inp} value={form.viaticos} onChange={e => set('viaticos', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.viaticos)} onChange={e => set('viaticos', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros no imp. ($)">
-            <input type="number" className={inp} value={form.otrosNoImponibles} onChange={e => set('otrosNoImponibles', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosNoImponibles)} onChange={e => set('otrosNoImponibles', parseCLP(e.target.value))} />
           </Field>
         </div>
 
         <Divider label="Descuentos adicionales" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Descuento adicional ($)">
-            <input type="number" className={inp} value={form.descuentoAdicional} onChange={e => set('descuentoAdicional', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.descuentoAdicional)} onChange={e => set('descuentoAdicional', parseCLP(e.target.value))} />
           </Field>
           <Field label="Anticipo ($)">
-            <input type="number" className={inp} value={form.anticipo} onChange={e => set('anticipo', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
           </Field>
         </div>
 
@@ -1035,7 +1145,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             <input type="date" className={inp} value={form.fechaTermino} onChange={e => set('fechaTermino', e.target.value)} />
           </Field>
           <Field label="Última remuneración ($)" required>
-            <input type="number" className={inp} value={form.ultimaRemuneracion} onChange={e => set('ultimaRemuneracion', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.ultimaRemuneracion)} onChange={e => set('ultimaRemuneracion', parseCLP(e.target.value))} />
           </Field>
         </div>
         {calc && (
@@ -1055,7 +1165,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             <input type="number" className={inp} value={form.diasFeriadoPendiente} onChange={e => set('diasFeriadoPendiente', e.target.value)} />
           </Field>
           <Field label="Remuneraciones pendientes ($)">
-            <input type="number" className={inp} value={form.remuneracionesPendientes} onChange={e => set('remuneracionesPendientes', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.remuneracionesPendientes)} onChange={e => set('remuneracionesPendientes', parseCLP(e.target.value))} />
           </Field>
           <Field label="Aviso previo (Art. 161 CT)">
             <select className={inp} value={form.pagoAvisoPrevio} onChange={e => set('pagoAvisoPrevio', e.target.value)}>
@@ -1068,10 +1178,10 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
         <Divider label="Descuentos" />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo pendiente ($)">
-            <input type="number" className={inp} value={form.anticipoPendiente} onChange={e => set('anticipoPendiente', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.anticipoPendiente)} onChange={e => set('anticipoPendiente', parseCLP(e.target.value))} />
           </Field>
           <Field label="Otros descuentos ($)">
-            <input type="number" className={inp} value={form.otrosDescuentos} onChange={e => set('otrosDescuentos', e.target.value)} />
+            <input type="text" className={inp} value={formatCLP(form.otrosDescuentos)} onChange={e => set('otrosDescuentos', parseCLP(e.target.value))} />
           </Field>
         </div>
 
@@ -1422,7 +1532,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
         {form.tipo === 'aumento_sueldo' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Nuevo sueldo base ($)" required>
-              <input type="number" className={inp} value={form.nuevoSueldo} onChange={e => set('nuevoSueldo', e.target.value)} />
+              <input type="text" className={inp} value={formatCLP(form.nuevoSueldo)} onChange={e => set('nuevoSueldo', parseCLP(e.target.value))} />
             </Field>
             {contratoSel?.sueldoBase && form.nuevoSueldo && (
               <div className="flex items-end pb-2.5">
@@ -1590,7 +1700,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 // ─── HistorialModal ───────────────────────────────────────────────────────────
 
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [tab, setTab] = useState('contratos');
   // Documentos adjuntos
   const [documentos,     setDocumentos]     = useState([]);

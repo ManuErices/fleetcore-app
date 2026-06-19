@@ -25,11 +25,15 @@ function generarPDFContrato(contrato, trabajador) {
   const noImponible= bColacion + bMovil + viaticos;
   const totalBruto = imponible + noImponible;
 
-  const tipoLabel = {
-    'Indefinido':   'INDEFINIDA DURACIÓN',
-    'Plazo Fijo':   'PLAZO FIJO',
-    'Obra o Faena': 'OBRA O FAENA',
-  }[contrato.tipoContrato] || contrato.tipoContrato;
+  const getTipoLabel = (tipo) => {
+    if (!tipo) return 'INDEFINIDA DURACIÓN';
+    const t = tipo.toLowerCase();
+    if (t.includes('indefinido')) return 'INDEFINIDA DURACIÓN';
+    if (t.includes('plazo')) return 'PLAZO FIJO';
+    if (t.includes('obra')) return 'OBRA O FAENA';
+    return tipo.toUpperCase();
+  };
+  const tipoLabel = getTipoLabel(contrato.tipoContrato);
 
   const gratLabel = {
     'legal':       'Gratificación legal anual equivalente al 25% de las remuneraciones devengadas en el año, con tope de 4,75 Ingresos Mínimos Mensuales anuales, conforme al Art. 47 del Código del Trabajo.',
@@ -99,9 +103,9 @@ function generarPDFContrato(contrato, trabajador) {
   <div class="clausula">
     <div class="clausula-titulo"><span class="numero-clausula">SEGUNDA.</span> Naturaleza y Duración del Contrato</div>
     <div class="clausula-body">
-      ${contrato.tipoContrato === 'Indefinido' ? `
+      ${(contrato.tipoContrato || '').toLowerCase().includes('indefinido') ? `
         <p>El presente contrato es de <strong>indefinida duración</strong>, comenzando a regir el <strong>${fmtFecha(contrato.fechaInicio)}</strong>, sin perjuicio de las causales de término establecidas en el Código del Trabajo.</p>
-      ` : contrato.tipoContrato === 'Plazo Fijo' ? `
+      ` : (contrato.tipoContrato || '').toLowerCase().includes('plazo') ? `
         <p>El presente contrato es de <strong>plazo fijo</strong> y tendrá vigencia desde el <strong>${fmtFecha(contrato.fechaInicio)}</strong> hasta el <strong>${fmtFecha(contrato.fechaFin)}</strong>, de conformidad con lo dispuesto en el artículo 159 N°4 del Código del Trabajo.</p>
         <p>Las partes dejan constancia que si el trabajador continúa prestando servicios con conocimiento del empleador, después del vencimiento del plazo, el contrato se transformará en uno de duración indefinida.</p>
       ` : `
@@ -240,7 +244,10 @@ function generarPDFLiquidacion(rem, trabajador, contrato) {
   const rentaTrib    = calcularRentaTributable(calc);
   const diasTrab     = rem.diasTrabajados || 30;
   const horasBase    = rem.horasBase || (contrato?.jornada?.includes('45') ? 44 : 45);
-  const esPF         = contrato?.tipoContrato === 'Plazo Fijo' || contrato?.tipoContrato === 'Obra o Faena';
+  const esPF         = contrato?.tipoContrato && (
+    contrato.tipoContrato.toLowerCase().includes('plazo') || 
+    contrato.tipoContrato.toLowerCase().includes('obra')
+  );
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -1731,7 +1738,7 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
       c.imponible,
       c.imponible + c.noImponible,
       Math.max(0, c.liquido),
-      contrato?.tipoContrato==='Plazo Fijo'?'PF':'IND',
+      (contrato?.tipoContrato || '').toLowerCase().includes('plazo') ? 'PF' : 'IND',
       liq.mes||'',
       liq.anio||'',
     ].join(';'));

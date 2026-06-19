@@ -7,7 +7,6 @@
 // ============================================================
 
 import React, { useState, useEffect } from "react";
-import SuperAdminPanel from "./SuperAdminPanel.jsx";
 import InviteUserPanel from "./InviteUserPanel.jsx";
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc } from "firebase/firestore";
@@ -16,16 +15,16 @@ import { usePlan } from "../hooks/usePlan";
 import { getPlan, formatPrice } from "../lib/plans";
 
 export default function AppSelector({ user, onLogout, onSelectApp }) {
-  const [userRole,    setUserRole]    = useState(null);
-  const [empresaId,   setEmpresaId]   = useState(null);
-  const [showSuperAdmin, setShowSuperAdmin] = useState(false);
-  const [showInvite,      setShowInvite]      = useState(false);
-  const [loading,  setLoading]  = useState(true);
+  const [userRole, setUserRole] = useState(null);
+  const [empresaId, setEmpresaId] = useState(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
   const navigate = useNavigate();
 
   const [userModulos, setUserModulos] = useState([]);
-  const [userCargo,   setUserCargo]   = useState('');
+  const [userCargo, setUserCargo] = useState('');
 
   useEffect(() => {
     const loadUser = async () => {
@@ -33,26 +32,16 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
       try {
         const snap = await getDoc(doc(db, 'users', user.uid));
         const data = snap.exists() ? snap.data() : {};
-        const role    = data.role    || 'operador';
+        const role = data.role || 'operador';
         const modulos = data.modulos || [];
-        const cargo   = data.cargo   || '';
+        const cargo = data.cargo || '';
         setUserRole(role);
         setUserModulos(modulos);
         setUserCargo(cargo);
         // ✅ FIX: cargar empresaId para pasarlo a InviteUserPanel
         if (data.empresaId) setEmpresaId(data.empresaId);
 
-        // Redirección automática según rol
-        if (role === 'mandante') {
-          localStorage.setItem('selectedApp', 'workfleet');
-          onSelectApp('workfleet');
-          return;
-        }
-        if (role === 'operador') {
-          localStorage.setItem('selectedApp', 'workfleet-m');
-          onSelectApp('workfleet-m');
-          return;
-        }
+        // Redirección automática solo para trabajador (usa otra ruta)
         if (role === 'trabajador') {
           window.location.href = '/trabajador';
           return;
@@ -67,20 +56,25 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   }, [user, onSelectApp]);
 
   // ── Helpers de permisos ──────────────────────────────────────
-  const isSuperAdmin    = userRole === 'superadmin';
+  const isSuperAdmin = userRole === 'superadmin';
   const isAdminContrato = userRole === 'admin_contrato';
+  const isRevisorAdmin = userRole === 'revisor_admin';
+  const isRevisor = userRole === 'revisor';
+  const isMandanteAdmin = userRole === 'mandante_admin';
+  const isMandante = userRole === 'mandante';
+  const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
 
   // Permisos combinados: rol + módulo + plan
-  // admin_contrato: solo WorkFleet (reportes) + WorkFleet-M
   // ✅ FIX: superadmin nunca bloqueado por plan — bypassa canAccess()
-  const canAccessFleetCore  = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
-  const canAccessWorkFleet  = isSuperAdmin || isAdminContrato;
-  const canAccessRRHH       = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
-  const canAccessReportes   = isSuperAdmin || isAdminContrato || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
-  const canAccessFinanzas      = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('finanzas'))      && canAccess('finanzas'));
-  const canAccessContabilidad  = isSuperAdmin || ((userRole === 'administrativo' && hasModulo('contabilidad'))  && canAccess('contabilidad'));
-  const canAccessWorkFleetM    = isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo';
+  const canAccessFleetCore = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+  const canAccessWorkFleet = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'administrativo' && hasModulo('workfleet')) && canAccess('workfleet')) || (userRole === 'operador' && canAccess('workfleet'));
+  const canAccessRRHH = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
+  const canAccessReportes = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
+  const canAccessFinanzas = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
+  const canAccessContabilidad = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
+  const canAccessDocumentos = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || (isRevisorRole && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+  const canAccessWorkFleetM = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'operador' || userRole === 'administrativo') && canAccess('workfleet'));
 
   // Razón de bloqueo para mostrar el mensaje correcto
   const blockReason = (moduleId, roleOk) => {
@@ -105,258 +99,322 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
   return (
     <>
-    {showSuperAdmin && <SuperAdminPanel onClose={() => setShowSuperAdmin(false)} />}
-    {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} />}
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
-      <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
+      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin || isMandanteAdmin} />}
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
+        <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
+        <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
 
-      <div className="relative w-full max-w-6xl">
-        {/* Header */}
-        <div className="text-center mb-5 sm:mb-8 animate-fadeInUp">
-
-          {/* Banner de plan activo */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4">
-            <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">Plan</span>
-            <span className="text-sm font-black text-white">{planData.name}</span>
-            {status === 'trial' && (
-              <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 text-xs font-bold rounded-full">Trial</span>
-            )}
-            {!isActive && (
-              <span className="px-2 py-0.5 bg-red-400/20 text-red-300 text-xs font-bold rounded-full">Inactivo</span>
-            )}
-            <button
-              onClick={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-              className="ml-1 text-xs text-blue-300 underline hover:text-white transition-colors"
-            >
-              {isActive ? 'Cambiar plan' : 'Activar plan'}
-            </button>
-          </div>
-
-          <div className="inline-flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 mb-4 sm:mb-6">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg">
-              <span className="text-white text-sm font-bold">
-                {user?.email?.[0]?.toUpperCase() || "U"}
-              </span>
-            </div>
-            <div className="text-left">
-              <div className="text-sm font-semibold text-white">{user?.displayName || user?.email?.split('@')[0]}</div>
-              <div className="text-xs text-blue-200">{user?.email}</div>
-            </div>
-            {userRole === 'superadmin' && (
-            <button
-              onClick={() => setShowSuperAdmin(true)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/30 rounded-xl text-xs font-black text-indigo-200 hover:text-white transition-all"
-              title="Panel de administración"
-            >
-              🛡️ Admin
-            </button>
-          )}
-          {(userRole === 'admin_contrato' || userRole === 'superadmin') && (
-            <button
-              onClick={() => setShowInvite(true)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 rounded-xl text-xs font-black text-emerald-200 hover:text-white transition-all"
-              title="Invitar usuarios"
-            >
-              👥 Invitar
-            </button>
-          )}
-          <button onClick={onLogout} className="ml-4 p-2 hover:bg-white/10 rounded-lg transition-colors" title="Cerrar sesión">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        {/* Header del Menú de Usuario (Esquina superior derecha de la pantalla) */}
+        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50 flex items-center justify-end">
+          <div className="relative">
+            <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-3 px-3 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 hover:bg-white/20 transition-all shadow-lg">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-inner">
+                <span className="text-white text-xs sm:text-sm font-bold">{user?.email?.[0]?.toUpperCase() || "U"}</span>
+              </div>
+              <div className="hidden sm:block text-left mr-2">
+                <div className="text-sm font-semibold text-white">{user?.displayName || user?.email?.split('@')[0]}</div>
+                <div className="text-xs text-blue-200 flex items-center gap-1">
+                  Plan {planData?.name || 'Starter'}
+                  {status === 'trial' && <span className="text-amber-400 font-bold">(Trial)</span>}
+                </div>
+              </div>
+              <svg className={`w-4 h-4 text-white transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-          </div>
 
-          <h1 className="text-2xl sm:text-4xl lg:text-6xl font-black text-white mb-2 sm:mb-4 tracking-tight">
-            Selecciona tu aplicación
-          </h1>
-          <p className="text-sm sm:text-lg text-blue-200 font-medium">
-            Elige la herramienta que necesitas
-          </p>
+            {showUserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/10 z-50 overflow-hidden animate-scaleIn">
+                  <div className="p-4 border-b border-white/10">
+                    <div className="text-sm font-semibold text-white truncate">{user?.email}</div>
+                    <div className="text-xs text-blue-300 mt-1 capitalize">{userRole?.replace('_', ' ')}</div>
+                  </div>
+                  <div className="p-2 space-y-1">
+                    {['superadmin', 'admin_contrato', 'administrativo'].includes(userRole) && (
+                      <button
+                        onClick={() => { setShowUserMenu(false); navigate('/admin'); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                      >
+                        🛡️ Panel de Admin
+                      </button>
+                    )}
+                    {(userRole === 'admin_contrato' || userRole === 'superadmin' || isRevisorAdmin || isMandanteAdmin) && (
+                      <button
+                        onClick={() => { setShowUserMenu(false); setShowInvite(true); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                      >
+                        👥 {(isRevisorAdmin || isMandanteAdmin) ? 'Invitar Equipo' : 'Invitar Usuarios'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowUserMenu(false); localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-300 hover:bg-white/10 rounded-xl transition-colors text-left"
+                    >
+                      ⭐ Cambiar Plan
+                    </button>
+                    <div className="h-px bg-white/10 my-1"></div>
+                    <button
+                      onClick={onLogout}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-400 hover:bg-white/10 rounded-xl transition-colors text-left"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Grid de cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-          <AppCard
-            onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
-            canAccess={canAccessFleetCore}
-            blockReason={blockReason('fleetcore', isSuperAdmin || (userRole === 'administrativo' && hasModulo('fleetcore')))}
-            requiredPlan="starter"
-            glowColor="from-orange-500 to-orange-700"
-            borderColor="border-orange-200 hover:border-orange-400"
-            logoSrc="/logo-workfleet.png"
-            logoAlt="WorkFleet"
-            buttonClass="from-orange-900 to-orange-700 hover:from-orange-800 hover:to-orange-600"
-            buttonLabel="Abrir Oficina Técnica"
-            badgeClass="bg-orange-100 text-orange-700"
-            badgeLabel="Oficina Técnica"
-            features={[
-              { icon: "📊", text: "Dashboard y reportes" },
-              { icon: "🚜", text: "Gestión de equipos" },
-              { icon: "📅", text: "Calendario y logs" },
-              { icon: "⛽", text: "Control de combustible" },
-              { icon: "💰", text: "Remuneraciones y costos" },
-              { icon: "📑", text: "Órdenes de compra" },
-            ]}
-            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-          />
-
-          <AppCard
-            onClick={() => handleSelect('rrhh', canAccessRRHH)}
-            canAccess={canAccessRRHH}
-            blockReason={blockReason('rrhh', isSuperAdmin || (userRole === 'administrativo' && hasModulo('rrhh')))}
-            requiredPlan="pro"
-            glowColor="from-emerald-500 to-green-700"
-            borderColor="border-emerald-200 hover:border-emerald-400"
-            logoSrc="/logo-fleetcore-r.png"
-            logoAlt="FleetCore RRHH"
-            buttonClass="from-emerald-900 to-green-700 hover:from-emerald-800 hover:to-green-600"
-            buttonLabel="Abrir RRHH"
-            badgeClass="bg-emerald-100 text-emerald-700"
-            badgeLabel="Recursos Humanos"
-            features={[
-              { icon: "👥", text: "Gestión de trabajadores" },
-              { icon: "📄", text: "Contratos y anexos" },
-              { icon: "💰", text: "Remuneraciones y nómina" },
-              { icon: "🏛️", text: "Impuestos y previred" },
-              { icon: "📅", text: "Asistencia y organización" },
-              { icon: "📊", text: "Reportes y contabilidad" },
-            ]}
-            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-          />
-
-          <AppCard
-            onClick={() => handleSelect('reportes', canAccessReportes)}
-            canAccess={canAccessReportes}
-            blockReason={blockReason('reportes', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes')))}
-            requiredPlan="pro"
-            glowColor="from-red-600 to-orange-700"
-            borderColor="border-red-200 hover:border-red-400"
-            logoSrc="/wf-logo-movil.svg"
-            logoAlt="Reportes"
-            buttonClass="from-red-900 to-red-700 hover:from-red-800 hover:to-red-600"
-            buttonLabel="Abrir Reportes"
-            badgeClass="bg-red-100 text-red-700"
-            badgeLabel="Finanzas / Reportes"
-            features={[
-              { icon: "📊", text: "Reporte de maquinaria" },
-              { icon: "⛽", text: "Reporte de combustible" },
-              { icon: "📈", text: "Análisis de producción" },
-              { icon: "🔍", text: "Detalle por equipo" },
-              { icon: "📅", text: "Histórico por período" },
-              { icon: "⚙️", text: "Panel de administración" },
-            ]}
-            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-          />
-
-          <AppCard
-            onClick={() => handleSelect('finanzas', canAccessFinanzas)}
-            canAccess={canAccessFinanzas}
-            blockReason={blockReason('finanzas', isSuperAdmin || (userRole === 'administrativo' && hasModulo('finanzas')))}
-            requiredPlan="enterprise"
-            glowColor="from-purple-600 to-violet-700"
-            borderColor="border-purple-200 hover:border-purple-400"
-            logoSrc="/logo-fleetcore-f.png"
-            logoAlt="FleetCore Finanzas"
-            buttonClass="from-purple-900 to-violet-700 hover:from-purple-800 hover:to-violet-600"
-            buttonLabel="Abrir Finanzas"
-            badgeClass="bg-purple-100 text-purple-700"
-            badgeLabel="Finanzas"
-            features={[
-              { icon: "💵", text: "Flujo de caja real y proyectado" },
-              { icon: "📦", text: "Costos fijos y variables" },
-              { icon: "🏗️", text: "Gestión de activos" },
-              { icon: "🤝", text: "Proveedores y cuentas por pagar" },
-              { icon: "🏦", text: "Créditos y obligaciones" },
-              { icon: "📈", text: "Reportes y análisis financiero" },
-            ]}
-            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-          />
-
-          <AppCard
-            onClick={() => handleSelect('contabilidad', canAccessContabilidad)}
-            canAccess={canAccessContabilidad}
-            blockReason={blockReason('contabilidad', isSuperAdmin || (userRole === 'administrativo' && hasModulo('contabilidad')))}
-            requiredPlan="enterprise"
-            glowColor="from-indigo-600 to-blue-700"
-            borderColor="border-indigo-200 hover:border-indigo-400"
-            logoSrc="/logo-fleetcore-f.png"
-            logoAlt="FleetCore Contabilidad"
-            buttonClass="from-indigo-900 to-blue-700 hover:from-indigo-800 hover:to-blue-600"
-            buttonLabel="Abrir Contabilidad"
-            badgeClass="bg-indigo-100 text-indigo-700"
-            badgeLabel="Contabilidad"
-            features={[
-              { icon: "📒", text: "Plan de cuentas IFRS/SII" },
-              { icon: "✏️", text: "Libro diario y asientos" },
-              { icon: "📊", text: "Balance 8 columnas" },
-              { icon: "🏛️", text: "ESF y Estado de Resultados" },
-              { icon: "🧾", text: "F29, F22 y PPM" },
-              { icon: "⚖️", text: "Impuesto diferido NIC 12" },
-            ]}
-            onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-          />
-        </div>
-
-
-        {/* ── Aplicaciones Móviles ── */}
-        <div className="mt-10 mb-4">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="h-px flex-1 bg-white/20" />
-            <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>
-            <div className="h-px flex-1 bg-white/20" />
+        <div className="relative w-full max-w-6xl pt-8 sm:pt-0">
+          {/* Título Principal */}
+          <div className="text-center mb-8 sm:mb-12 animate-fadeInUp mt-14 sm:mt-0">
+            <h1 className="text-2xl sm:text-4xl lg:text-6xl font-black text-white mb-2 sm:mb-4 tracking-tight">
+              {isRevisorRole ? 'Bienvenido a FleetCore-I' : 'Selecciona tu aplicación'}
+            </h1>
+            <p className="text-sm sm:text-lg text-blue-200 font-medium">
+              {isRevisorRole ? 'Portal de revisión de documentos e informes' : 'Elige la herramienta que necesitas'}
+            </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+
+          {/* Grid de cards */}
+          {/* Vista exclusiva para roles revisor */}
+          {isRevisorRole && (
+            <div className="max-w-sm mx-auto w-full">
+              <AppCard
+                onClick={() => handleSelect('documentos', true)}
+                canAccess={true}
+                blockReason={null}
+                requiredPlan="starter"
+                glowColor="from-cyan-500 to-teal-700"
+                borderColor="border-cyan-200 hover:border-cyan-400"
+                logoSrc="/logo-fleetcore-i.svg"
+                logoAlt="FleetCore-I"
+                buttonClass="from-cyan-900 to-teal-700 hover:from-cyan-800 hover:to-teal-600"
+                buttonLabel="Abrir FleetCore-I"
+                badgeClass="bg-cyan-100 text-cyan-700"
+                badgeLabel="FleetCore-I"
+                features={[
+                  { icon: "📋", text: "Plan de trabajo con IA" },
+                  { icon: "📝", text: "Informe diario de obra" },
+                  { icon: "📚", text: "Libro de obras y comunicaciones" },
+                  { icon: "🗂️", text: "Historial de documentos" },
+                  { icon: "✍️", text: "Firma digital por roles" },
+                  { icon: "🤖", text: "Redacción asistida por IA" },
+                ]}
+                onUpgrade={() => { }}
+              />
+            </div>
+          )}
+
+          <div className={isRevisorRole ? 'hidden' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'}>
             <AppCard
-              onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
-              canAccess={canAccessWorkFleetM}
-              blockReason={null}
+              onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
+              canAccess={canAccessFleetCore}
+              blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('fleetcore')))}
               requiredPlan="starter"
-              glowColor="from-cyan-500/30 to-blue-500/30"
-              borderColor="border-cyan-400/40"
-              logoSrc="/wf-logo.svg"
-              logoAlt="WorkFleet Mobile"
-              badgeClass="bg-cyan-500/20 text-cyan-300 border border-cyan-400/30"
-              badgeLabel="Operadores"
+              glowColor="from-orange-500 to-orange-700"
+              borderColor="border-orange-200 hover:border-orange-400"
+              logoSrc="/logo-workfleet.png"
+              logoAlt="WorkFleet"
+              buttonClass="from-orange-900 to-orange-700 hover:from-orange-800 hover:to-orange-600"
+              buttonLabel="Abrir Oficina Técnica"
+              badgeClass="bg-orange-100 text-orange-700"
+              badgeLabel="Oficina Técnica"
               features={[
-                { icon: "🚜", text: "Reporte de maquinaria" },
-                { icon: "⛽", text: "Reporte de combustible" },
-                { icon: "📱", text: "Optimizado para móvil" },
+                { icon: "📊", text: "Dashboard y reportes" },
+                { icon: "🚜", text: "Gestión de equipos" },
+                { icon: "📅", text: "Calendario y logs" },
+                { icon: "💰", text: "Remuneraciones y costos" },
+                { icon: "📑", text: "Órdenes de compra" },
               ]}
-              buttonClass="from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
-              buttonLabel="Abrir WorkFleet-M"
-              onUpgrade={() => {}}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
             />
+
             <AppCard
-              onClick={() => { window.location.href = '/trabajador'; }}
-              canAccess={true}
-              blockReason={null}
-              requiredPlan="starter"
-              glowColor="from-emerald-500/30 to-teal-500/30"
-              borderColor="border-emerald-400/40"
+              onClick={() => handleSelect('rrhh', canAccessRRHH)}
+              canAccess={canAccessRRHH}
+              blockReason={blockReason('rrhh', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('rrhh')))}
+              requiredPlan="pro"
+              glowColor="from-emerald-500 to-green-700"
+              borderColor="border-emerald-200 hover:border-emerald-400"
               logoSrc="/logo-fleetcore-r.png"
-              logoAlt="Portal Trabajadores"
-              badgeClass="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
-              badgeLabel="Trabajadores"
+              logoAlt="FleetCore RRHH"
+              buttonClass="from-emerald-900 to-green-700 hover:from-emerald-800 hover:to-green-600"
+              buttonLabel="Abrir RRHH"
+              badgeClass="bg-emerald-100 text-emerald-700"
+              badgeLabel="Recursos Humanos"
               features={[
-                { icon: "💰", text: "Mis remuneraciones" },
-                { icon: "📄", text: "Contratos y documentos" },
-                { icon: "📅", text: "Asistencia y permisos" },
+                { icon: "👥", text: "Gestión de trabajadores" },
+                { icon: "📄", text: "Contratos y anexos" },
+                { icon: "💰", text: "Remuneraciones y nómina" },
+                { icon: "🏛️", text: "Impuestos y previred" },
+                { icon: "📅", text: "Asistencia y organización" },
+                { icon: "📊", text: "Reportes y contabilidad" },
               ]}
-              buttonClass="from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
-              buttonLabel="Abrir Portal"
-              onUpgrade={() => {}}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+            />
+
+            <AppCard
+              onClick={() => handleSelect('reportes', canAccessReportes)}
+              canAccess={canAccessReportes}
+              blockReason={blockReason('reportes', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes')))}
+              requiredPlan="pro"
+              glowColor="from-red-600 to-orange-700"
+              borderColor="border-red-200 hover:border-red-400"
+              logoSrc="/wf-logo-movil.svg"
+              logoAlt="Reportes"
+              buttonClass="from-red-900 to-red-700 hover:from-red-800 hover:to-red-600"
+              buttonLabel="Abrir Reportes"
+              badgeClass="bg-red-100 text-red-700"
+              badgeLabel="Finanzas / Reportes"
+              features={[
+                { icon: "📊", text: "Reporte de maquinaria" },
+                { icon: "⛽", text: "Reporte de combustible" },
+                { icon: "📈", text: "Análisis de producción" },
+                { icon: "🔍", text: "Detalle por equipo" },
+                { icon: "📅", text: "Histórico por período" },
+                { icon: "⚙️", text: "Panel de administración" },
+              ]}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+            />
+
+            <AppCard
+              onClick={() => handleSelect('finanzas', canAccessFinanzas)}
+              canAccess={canAccessFinanzas}
+              blockReason={blockReason('finanzas', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('finanzas')))}
+              requiredPlan="enterprise"
+              glowColor="from-purple-600 to-violet-700"
+              borderColor="border-purple-200 hover:border-purple-400"
+              logoSrc="/logo-fleetcore-f.png"
+              logoAlt="FleetCore Finanzas"
+              buttonClass="from-purple-900 to-violet-700 hover:from-purple-800 hover:to-violet-600"
+              buttonLabel="Abrir Finanzas"
+              badgeClass="bg-purple-100 text-purple-700"
+              badgeLabel="Finanzas"
+              features={[
+                { icon: "💵", text: "Flujo de caja real y proyectado" },
+                { icon: "📦", text: "Costos fijos y variables" },
+                { icon: "🏗️", text: "Gestión de activos" },
+                { icon: "🤝", text: "Proveedores y cuentas por pagar" },
+                { icon: "🏦", text: "Créditos y obligaciones" },
+                { icon: "📈", text: "Reportes y análisis financiero" },
+              ]}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+            />
+
+            <AppCard
+              onClick={() => handleSelect('contabilidad', canAccessContabilidad)}
+              canAccess={canAccessContabilidad}
+              blockReason={blockReason('contabilidad', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('contabilidad')))}
+              requiredPlan="enterprise"
+              glowColor="from-indigo-600 to-blue-700"
+              borderColor="border-indigo-200 hover:border-indigo-400"
+              logoSrc="/logo-fleetcore-f.png"
+              logoAlt="FleetCore Contabilidad"
+              buttonClass="from-indigo-900 to-blue-700 hover:from-indigo-800 hover:to-blue-600"
+              buttonLabel="Abrir Contabilidad"
+              badgeClass="bg-indigo-100 text-indigo-700"
+              badgeLabel="Contabilidad"
+              features={[
+                { icon: "📒", text: "Plan de cuentas IFRS/SII" },
+                { icon: "✏️", text: "Libro diario y asientos" },
+                { icon: "📊", text: "Balance 8 columnas" },
+                { icon: "🏛️", text: "ESF y Estado de Resultados" },
+                { icon: "🧾", text: "F29, F22 y PPM" },
+                { icon: "⚖️", text: "Impuesto diferido NIC 12" },
+              ]}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+            />
+
+            <AppCard
+              onClick={() => handleSelect('documentos', canAccessDocumentos)}
+              canAccess={canAccessDocumentos}
+              blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || isRevisorRole || (userRole === 'administrativo' && hasModulo('fleetcore')))}
+              requiredPlan="starter"
+              glowColor="from-cyan-500 to-teal-700"
+              borderColor="border-cyan-200 hover:border-cyan-400"
+              logoSrc="/logo-fleetcore-i.svg"
+              logoAlt="FleetCore-I"
+              buttonClass="from-cyan-900 to-teal-700 hover:from-cyan-800 hover:to-teal-600"
+              buttonLabel="Abrir FleetCore-I"
+              badgeClass="bg-cyan-100 text-cyan-700"
+              badgeLabel="FleetCore-I"
+              features={[
+                { icon: "📋", text: "Plan de trabajo con IA" },
+                { icon: "📝", text: "Informe diario de obra" },
+                { icon: "📚", text: "Libro de obras y comunicaciones" },
+                { icon: "🗂️", text: "Historial de documentos" },
+                { icon: "✍️", text: "Firma digital por roles" },
+                { icon: "🤖", text: "Redacción asistida por IA" },
+              ]}
+              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
             />
           </div>
-        </div>
 
-        <div className="mt-8 text-center text-blue-200 text-sm">
-          <p>Puedes cambiar de aplicación en cualquier momento desde el menú de usuario</p>
+
+          {/* ── Aplicaciones Móviles ── */}
+          <div className={`mt-10 mb-4 ${isRevisorRole ? 'hidden' : ''}`}>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="h-px flex-1 bg-white/20" />
+              <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>
+              <div className="h-px flex-1 bg-white/20" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+              <AppCard
+                onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
+                canAccess={canAccessWorkFleetM}
+                blockReason={blockReason('workfleet', isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo')}
+                requiredPlan="starter"
+                glowColor="from-cyan-500/30 to-blue-500/30"
+                borderColor="border-cyan-400/40"
+                logoSrc="/wf-logo.svg"
+                logoAlt="WorkFleet Mobile"
+                badgeClass="bg-cyan-500/20 text-cyan-300 border border-cyan-400/30"
+                badgeLabel="Operadores"
+                features={[
+                  { icon: "🚜", text: "Reporte de maquinaria" },
+                  { icon: "⛽", text: "Reporte de combustible" },
+                  { icon: "📱", text: "Optimizado para móvil" },
+                ]}
+                buttonClass="from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
+                buttonLabel="Abrir WorkFleet-M"
+                onUpgrade={() => { if (isAdminContrato) { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); } }}
+              />
+              <AppCard
+                onClick={() => { window.location.href = '/trabajador'; }}
+                canAccess={true}
+                blockReason={null}
+                requiredPlan="starter"
+                glowColor="from-emerald-500/30 to-teal-500/30"
+                borderColor="border-emerald-400/40"
+                logoSrc="/logo-fleetcore-r.png"
+                logoAlt="Portal Trabajadores"
+                badgeClass="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
+                badgeLabel="Trabajadores"
+                features={[
+                  { icon: "💰", text: "Mis remuneraciones" },
+                  { icon: "📄", text: "Contratos y documentos" },
+                  { icon: "📅", text: "Asistencia y permisos" },
+                ]}
+                buttonClass="from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500"
+                buttonLabel="Abrir Portal"
+                onUpgrade={() => { }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-8 text-center text-blue-200 text-sm">
+            <p>Puedes cambiar de aplicación en cualquier momento desde el menú de usuario</p>
+          </div>
         </div>
       </div>
-    </div>
     </>
   );
 }

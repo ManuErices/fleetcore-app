@@ -37,6 +37,11 @@ service cloud.firestore {
       return isAuth() && userRole() == 'admin_contrato';
     }
 
+    // Mandante admin — puede gestionar usuarios mandante de su empresa
+    function isMandanteAdmin() {
+      return isAuth() && userRole() == 'mandante_admin';
+    }
+
     // Cualquier admin (superadmin o admin_contrato)
     function isAnyAdmin() {
       return isSuperAdmin() || isAdminContrato();
@@ -83,13 +88,15 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
 
     match /empresas/{empresaId} {
-      allow read:  if isSuperAdmin()
-                   || (isAuth() && userEmpresaId() == empresaId);
-      // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún)
+      allow read:  if isAuth();
+      // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún);
+      // O un administrador/usuario autorizado puede crear una sub-empresa
       allow create: if isSuperAdmin()
-                    || (isAuth() && !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-                        || (isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('empresaId', null) == null));
-      allow update, delete: if isSuperAdmin();
+                    || (isAuth() && !exists(/databases/$(database)/documents/users/$(request.auth.uid)))
+                    || (isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('empresaId', null) == null)
+                    || (isAuth() && request.resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
+      allow update, delete: if isSuperAdmin()
+                            || (isAuth() && resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
 
       // ── USUARIOS DE LA EMPRESA ──────────────────────────
       match /users/{uid} {
@@ -108,12 +115,20 @@ service cloud.firestore {
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && resource.data.portalUid == request.auth.uid;
+        // Trabajador crea su propio registro al aceptar una invitación
+        allow create: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && request.resource.data.portalUid == request.auth.uid;
       }
 
       match /trabajadores_portal/{uid} {
         allow read:  if isAuth() && request.auth.uid == uid;
         allow write: if isSuperAdmin()
                      || (canWriteEmpresa(empresaId));
+        // Trabajador crea su propio vínculo al aceptar una invitación
+        allow create: if isAuth() && request.auth.uid == uid
+                    && belongsToEmpresa(empresaId)
+                    && isTrabajador();
       }
 
       // ── CONTRATOS, ANEXOS, FINIQUITOS ───────────────────
@@ -219,6 +234,13 @@ service cloud.firestore {
       match /guias_despacho/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /proveedores_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /solicitudes_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+
+      // ── CONTABILIDAD Y COMBUSTIBLE ASOCIADOS ────────────
+      match /chart_of_accounts/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /journal_entries/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /reglas_gasto/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /combustible_calculos/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /combustible_maquinaria/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
     }
 
     // ─────────────────────────────────────────────────────
@@ -227,10 +249,16 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
       allow read:   if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid);
-      allow create: if isAuth() && request.auth.uid == uid;  // Registro inicial — sin rol aún
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId());
+      allow create: if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid)  // Registro inicial — sin rol aún
+                    // Admin de la empresa crea la cuenta de portal de un trabajador
+                    || (isAnyAdmin() && request.resource.data.role == 'trabajador'
+                        && request.resource.data.empresaId == userEmpresaId());
       allow update: if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid);
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isAnyAdmin() && resource.data.empresaId == userEmpresaId() && request.resource.data.empresaId == userEmpresaId());
       allow delete: if isSuperAdmin();
     }
 
@@ -238,9 +266,11 @@ service cloud.firestore {
     // /subscriptions — usePlan hook lee/escucha el plan activo
     // ─────────────────────────────────────────────────────
     match /subscriptions/{uid} {
-      allow read:           if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
-      allow create:         if isAuth() && request.auth.uid == uid;
-      allow update, delete: if isSuperAdmin();
+      allow read:           if isSuperAdmin()
+                            || (isAuth() && request.auth.uid == uid)
+                            || (isAuth() && resource.data.empresaId == userEmpresaId());
+      allow create, update: if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
+      allow delete:         if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
@@ -267,12 +297,48 @@ service cloud.firestore {
       allow read: if true;
       // superadmin puede crear cualquier invitación
       // admin_contrato puede crear invitaciones solo para su empresa
+      // mandante_admin puede crear invitaciones de rol mandante para su empresa
       allow create: if isSuperAdmin()
-                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId());
+                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId())
+                    || (isMandanteAdmin() && request.resource.data.empresaId == userEmpresaId()
+                        && request.resource.data.rol == 'mandante');
       // Cualquier usuario autenticado puede marcar una invitación como usada (al aceptarla)
       allow update: if isAuth();
       // Solo admins pueden revocar
       allow delete: if isAnyAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // DOCUMENTOS Y FIRMAS (Módulo de Documentos)
+    // ─────────────────────────────────────────────────────
+    match /documentos/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /pins/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /usuarios/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /folios/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /libros/{docId} {
+      allow read: if isAuth();
+      allow write: if isAnyAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /domains & /mailboxes — Email Portal
+    // ─────────────────────────────────────────────────────
+    match /domains/{domainName} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
+    }
+
+    match /mailboxes/{mailboxId} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────

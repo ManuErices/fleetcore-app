@@ -1,169 +1,178 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
-const GRADIENTS = {
-  green: 'from-green-600 to-emerald-600',
-  blue: 'from-blue-600 to-indigo-600',
-};
-
-export default function CameraCapture({ onCapture, onClose, color = 'green', title = 'Foto de Identificación' }) {
+export default function CameraCapture({ onCapture, onClose, title = "Capturar Foto", color = "blue" }) {
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const [capturedPhoto, setCapturedPhoto] = useState(null);
-  const [cameraError, setCameraError] = useState(null);
-  const [cameraReady, setCameraReady] = useState(false);
 
-  const gradient = GRADIENTS[color] || GRADIENTS.green;
-
-  useEffect(() => {
-    startCamera();
-    return () => stopCamera();
-  }, []);
+  const colors = {
+    blue: "from-blue-600 to-indigo-600",
+    green: "from-green-600 to-emerald-600",
+    amber: "from-amber-600 to-orange-600"
+  };
 
   const startCamera = async () => {
-    setCameraError(null);
-    setCameraReady(false);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
+      setError(null);
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        setStreaming(true);
       }
-    } catch {
-      setCameraError('No se pudo acceder a la cámara. Verifica los permisos del navegador.');
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      setError("No se pudo acceder a la cámara. Asegúrate de dar los permisos necesarios.");
     }
   };
 
   const stopCamera = () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setStreaming(false);
   };
 
-  const handleCapture = () => {
+  const takePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
-    // Mirror para efecto selfie natural
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0);
-    setCapturedPhoto(canvas.toDataURL('image/jpeg', 0.85));
+    const context = canvas.getContext("2d");
+
+    const MAX_DIM = 600;
+    const sw = video.videoWidth || 1280;
+    const sh = video.videoHeight || 720;
+    const scale = Math.min(1, MAX_DIM / Math.max(sw, sh));
+    canvas.width = Math.round(sw * scale);
+    canvas.height = Math.round(sh * scale);
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const photoData = canvas.toDataURL("image/jpeg", 0.5);
+    onCapture(photoData);
     stopCamera();
+    onClose();
   };
 
-  const handleRetake = () => {
-    setCapturedPhoto(null);
+  useEffect(() => {
     startCamera();
-  };
+    
+    // Prevenir doble scroll al abrir el modal
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      stopCamera();
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
 
-  const handleConfirm = () => {
-    onCapture(capturedPhoto);
-    onClose();
-  };
-
-  const handleClose = () => {
-    stopCamera();
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-lg w-full sm:my-auto">
+  const modalContent = (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300" style={{ zIndex: 99999 }}>
+      <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[90dvh]">
         {/* Header */}
-        <div className={`bg-gradient-to-r ${gradient} text-white p-5 sm:p-6 rounded-t-3xl sm:rounded-t-2xl`}>
-          <div className="flex justify-between items-start">
-            <div>
-              <h3 className="text-lg sm:text-xl font-black">📷 {title}</h3>
-              <p className="text-white/80 text-sm mt-0.5">Mira a la cámara y presiona Sacar foto</p>
-            </div>
-            <button onClick={handleClose} className="p-2 hover:bg-white/20 rounded-lg transition-all flex-shrink-0">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        <div className={`bg-gradient-to-r ${colors[color] || colors.blue} p-6 flex items-center justify-between`}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-            </button>
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-white uppercase tracking-tight">{title}</h3>
+              <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">Captura de validación</p>
+            </div>
           </div>
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all text-white"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
-        {/* Body */}
-        <div className="p-5 sm:p-6 space-y-4">
-          {cameraError ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
-                <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        {/* Content */}
+        <div className="p-6 flex flex-col items-center">
+          {error ? (
+            <div className="bg-red-50 border-2 border-red-100 p-8 rounded-3xl text-center space-y-4">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
-              <p className="text-red-600 font-semibold text-sm">{cameraError}</p>
-              <button
+              <p className="text-red-800 font-bold">{error}</p>
+              <button 
                 onClick={startCamera}
-                className="mt-4 px-6 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
+                className="px-6 py-2 bg-red-600 text-white rounded-xl font-black text-sm uppercase"
               >
                 Reintentar
               </button>
             </div>
-          ) : capturedPhoto ? (
-            <div className="space-y-4">
-              <img
-                src={capturedPhoto}
-                alt="Foto capturada"
-                className="w-full rounded-xl object-cover max-h-72"
-              />
-              <div className="flex gap-3">
-                <button
-                  onClick={handleRetake}
-                  className="flex-1 px-4 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all"
-                >
-                  🔄 Tomar de nuevo
-                </button>
-                <button
-                  onClick={handleConfirm}
-                  className={`flex-1 px-4 py-3 bg-gradient-to-r ${gradient} text-white font-bold rounded-xl transition-all shadow-lg`}
-                >
-                  ✓ Confirmar
-                </button>
-              </div>
-            </div>
           ) : (
-            <div className="space-y-4">
-              {/* Preview cámara */}
-              <div className="relative bg-black rounded-xl overflow-hidden aspect-[4/3]">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  onCanPlay={() => setCameraReady(true)}
-                  className="w-full h-full object-cover"
-                  style={{ transform: 'scaleX(-1)' }}
-                />
-                {!cameraReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                    <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-                  </div>
-                )}
-                {/* Guía de encuadre */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-36 h-44 border-2 border-white/60 rounded-full" />
+            <div className="relative w-full aspect-square md:aspect-video bg-slate-900 rounded-3xl overflow-hidden shadow-inner group">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              {!streaming && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
                 </div>
+              )}
+              {/* Overlay guides */}
+              <div className="absolute inset-0 pointer-events-none border-[3rem] border-black/40">
+                <div className="w-full h-full border-2 border-white/50 rounded-2xl"></div>
               </div>
-              <button
-                onClick={handleCapture}
-                disabled={!cameraReady}
-                className={`w-full py-4 bg-gradient-to-r ${gradient} disabled:from-slate-300 disabled:to-slate-400 text-white font-black rounded-xl transition-all shadow-lg hover:shadow-xl disabled:cursor-not-allowed text-base`}
-              >
-                📷 Sacar foto
-              </button>
             </div>
           )}
+
+          {/* Hidden canvas for capture */}
+          <canvas ref={canvasRef} className="hidden" />
+
+          {/* Footer Controls */}
+          <div className="mt-8 flex items-center justify-center gap-6 w-full">
+            <button
+              onClick={onClose}
+              className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-xs tracking-widest"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={takePhoto}
+              disabled={!streaming}
+              className={`flex-[2] py-4 bg-gradient-to-r ${colors[color] || colors.blue} text-white font-black rounded-2xl transition-all uppercase text-xs tracking-widest shadow-xl shadow-blue-100 active:scale-95 disabled:grayscale disabled:opacity-50`}
+            >
+              Capturar Foto
+            </button>
+          </div>
         </div>
 
-        <canvas ref={canvasRef} className="hidden" />
+        <div className="bg-slate-50 p-4 text-center">
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
+            Asegúrate de que la identificación sea legible
+          </p>
+        </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 }

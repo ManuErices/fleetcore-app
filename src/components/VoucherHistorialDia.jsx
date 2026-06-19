@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { printThermalVoucher } from '../utils/voucherThermalGenerator';
+import { useEmpresa } from '../lib/useEmpresa';
 
 /**
  * VoucherHistorialDia
@@ -9,6 +10,7 @@ import { printThermalVoucher } from '../utils/voucherThermalGenerator';
  * Permite reimprimir cualquiera de ellos.
  */
 export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, repartidorNombre, userRole = 'operador', projects = [], machines = [], empleados = [], empresaId }) {
+  const { empresa: tenantInfo } = useEmpresa();
   const [reportes, setReportes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [imprimiendoId, setImprimiendoId] = useState(null);
@@ -102,6 +104,7 @@ export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, rep
           rut: operadorInfo.rut || ''
         },
         empresaInfo,
+        tenantInfo,
         repartidorInfo: repartidorInfoObj,
         equipoSurtidorInfo: equipoSurtidorInfo ? {
           patente: equipoSurtidorInfo.patente || '',

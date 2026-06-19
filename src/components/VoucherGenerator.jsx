@@ -2,6 +2,7 @@ import React from 'react';
 import { printThermalVoucher, getNextGuiaNumber } from '../utils/voucherThermalGenerator';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useEmpresa } from '../lib/useEmpresa';
 
 /**
  * Componente para generar e imprimir voucher térmico de entrega de combustible
@@ -17,8 +18,10 @@ export default function VoucherGenerator({
   equipoSurtidorInfo,
   reporteId,
   empresaId,
-  onClose
+  onClose,
+  onReset
 }) {
+  const { empresa: tenantInfo } = useEmpresa();
   const [printing, setPrinting] = React.useState(false);
   const [numeroGuia, setNumeroGuia] = React.useState(reportData?.numeroGuia || null);
 
@@ -34,7 +37,22 @@ export default function VoucherGenerator({
     try {
       setPrinting(true);
 
-      // Generar número de guía SOLO al momento de imprimir, si no hay uno ya
+      // ABRIR VENTANA DE FORMA SÍNCRONA para evitar bloqueos de popups en iOS/Safari
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        alert("Por favor, permite las ventanas emergentes en tu navegador para imprimir.");
+        setPrinting(false);
+        return;
+      }
+
+      printWindow.document.write(`
+        <html><head><title>Generando Comprobante...</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 40px; background: #f8fafc;">
+          <h3 style="color: #475569;">Generando voucher, por favor espera...</h3>
+        </body></html>
+      `);
+
+      // Generar número de guía si no existe
       let guiaNum = numeroGuia;
       if (!guiaNum) {
         guiaNum = await getNextGuiaNumber(empresaId);
@@ -42,34 +60,31 @@ export default function VoucherGenerator({
         console.log('📋 Número de guía generado al imprimir:', guiaNum);
       }
 
-      // Imprimir voucher térmico con número correlativo
-      printThermalVoucher({
+      // Generar e imprimir
+      await printThermalVoucher({
         reportData,
         projectName,
         machineInfo,
         operadorInfo,
         empresaInfo,
+        tenantInfo,
         repartidorInfo,
         equipoSurtidorInfo,
-        numeroGuiaCorrelativo: guiaNum
+        numeroGuiaCorrelativo: guiaNum,
+        printWindow // Pasamos la ventana ya abierta
       });
 
-      // Guardar numeroGuia en el reporte de Firebase con la ruta CORRECTA
+      // Guardar numeroGuia en Firebase
       if (reporteId && guiaNum && empresaId) {
         try {
           await updateDoc(doc(db, 'empresas', empresaId, 'reportes_combustible', reporteId), {
             numeroGuia: guiaNum
           });
-          console.log('✅ numeroGuia guardado en reporte:', reporteId, '→', guiaNum);
         } catch (err) {
           console.error('⚠️ No se pudo guardar numeroGuia:', err);
         }
-      } else {
-        console.warn('⚠️ Falta reporteId o empresaId para guardar numeroGuia:', { reporteId, empresaId, guiaNum });
       }
 
-      // Opcional: mostrar un toast o mensaje en la UI en lugar de un alert
-      // alert(`✅ Voucher N° ${guiaNum.toString().padStart(3, '0')} enviado a impresión`);
       setPrinting(false);
 
     } catch (error) {
@@ -80,7 +95,7 @@ export default function VoucherGenerator({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div className="fixed inset-0 z-[400] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-2xl w-full flex flex-col" style={{ maxHeight: "95dvh" }}>
         {/* Header */}
         <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 sm:p-6 flex-shrink-0 rounded-t-3xl sm:rounded-t-2xl">
@@ -125,7 +140,7 @@ export default function VoucherGenerator({
               </div>
               <div>
                 <span className="text-slate-600">Cantidad:</span>
-                <span className="ml-2 font-semibold text-green-600">{reportData.cantidadLitros} Lts</span>
+                <span className="ml-2 font-semibold text-green-600">{Number(reportData.cantidadLitros).toLocaleString('es-CL')} Lts</span>
               </div>
               <div>
                 <span className="text-slate-600">Vehículo:</span>
@@ -221,8 +236,17 @@ export default function VoucherGenerator({
             className="flex-1 px-4 sm:px-6 py-3.5 bg-slate-200 hover:bg-slate-300 active:bg-slate-400 text-slate-700 font-bold rounded-xl transition-all"
             disabled={printing}
           >
-            Cerrar
+            {onReset ? 'Salir' : 'Cerrar'}
           </button>
+          {onReset && (
+            <button
+              onClick={onReset}
+              className="flex-1 px-4 sm:px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-xl transition-all"
+              disabled={printing}
+            >
+              Crear nuevo Reporte
+            </button>
+          )}
           <button
             onClick={handlePrintVoucher}
             disabled={printing}
@@ -241,7 +265,7 @@ export default function VoucherGenerator({
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                 </svg>
-                <span>Imprimir Voucher Térmico</span>
+                <span>Imprimir Voucher</span>
               </>
             )}
           </button>

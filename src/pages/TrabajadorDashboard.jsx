@@ -31,7 +31,7 @@ function claveDoc(uid, anio, mes) {
   return `${uid}_${anio}_${fmt2(mes+1)}`;
 }
 
-export default function TrabajadorDashboard({ user, trabajador }) {
+export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
   const now   = new Date();
   const anio  = now.getFullYear();
   const mes   = now.getMonth(); // 0-indexed
@@ -64,8 +64,9 @@ export default function TrabajadorDashboard({ user, trabajador }) {
 
   // Escucha en tiempo real el documento de asistencia del mes actual
   useEffect(() => {
+    if (!empresaId) return;
     const docId = claveDoc(user.uid, anio, mes);
-    const ref   = doc(db, 'asistencia', docId);
+    const ref   = doc(db, 'empresas', empresaId, 'asistencia', docId);
     const unsub = onSnapshot(ref, snap => {
       if (snap.exists()) {
         const data = snap.data();
@@ -77,17 +78,17 @@ export default function TrabajadorDashboard({ user, trabajador }) {
       }
     });
     return unsub;
-  }, [user.uid, anio, mes, diaKey]);
+  }, [empresaId, user.uid, anio, mes, diaKey]);
 
   // Cargar liquidaciones del trabajador
   // trabajadorId en remuneraciones = id del documento Firestore, NO el uid de Auth
   useEffect(() => {
     if (tab !== 'docs') return;
     const firestoreId = trabajador?.id;
-    if (!firestoreId) { setLoadingLiqs(false); return; }
+    if (!firestoreId || !empresaId) { setLoadingLiqs(false); return; }
     setLoadingLiqs(true);
     const q = query(
-      collection(db, 'remuneraciones'),
+      collection(db, 'empresas', empresaId, 'remuneraciones'),
       where('trabajadorId', '==', firestoreId),
       orderBy('anio', 'desc'),
       limit(12)
@@ -95,7 +96,7 @@ export default function TrabajadorDashboard({ user, trabajador }) {
     getDocs(q).then(snap => {
       setLiquidaciones(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => {}).finally(() => setLoadingLiqs(false));
-  }, [tab, trabajador?.id]);
+  }, [tab, trabajador?.id, empresaId]);
 
   // Obtener GPS en background (no bloqueante)
   function obtenerGPS() {
@@ -110,14 +111,14 @@ export default function TrabajadorDashboard({ user, trabajador }) {
   }
 
   async function marcar() {
-    if (marcando) return;
+    if (marcando || !empresaId) return;
     setMarcando(true);
     setFeedback(null);
     try {
       const gps    = await obtenerGPS();
       const mesStr = fmt2(mes + 1); // "03" — string, coincide con filtros del admin
       const docId  = claveDoc(user.uid, anio, mes);
-      const ref    = doc(db, 'asistencia', docId);
+      const ref    = doc(db, 'empresas', empresaId, 'asistencia', docId);
       const snap   = await getDoc(ref);
 
       const regHoy    = snap.exists() ? (snap.data().registros?.[diaKey] || {}) : {};
@@ -292,6 +293,7 @@ export default function TrabajadorDashboard({ user, trabajador }) {
           color: var(--text);
           letter-spacing: 0.2px;
         }
+        .topbar-actions { display: flex; align-items: center; gap: 8px; }
         .btn-logout {
           background: none;
           border: 1px solid var(--border);
@@ -307,6 +309,22 @@ export default function TrabajadorDashboard({ user, trabajador }) {
           gap: 5px;
         }
         .btn-logout:hover { color: var(--text-2); border-color: var(--text-3); }
+        .btn-back {
+          background: rgba(245,158,11,0.1);
+          border: 1px solid rgba(245,158,11,0.3);
+          border-radius: 8px;
+          color: var(--accent);
+          font-family: var(--sans);
+          font-size: 12px;
+          font-weight: 600;
+          padding: 6px 10px;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        .btn-back:hover { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.5); }
 
         /* ── CONTENIDO ── */
         .content {
@@ -728,10 +746,18 @@ export default function TrabajadorDashboard({ user, trabajador }) {
             <div className="brand-dot"/>
             <span className="brand-name">FleetCore · Portal</span>
           </div>
-          <button className="btn-logout" onClick={cerrarSesion}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Salir
-          </button>
+          <div className="topbar-actions">
+            {!/(@trabajador\.app|@mpf\.cl)$/i.test(user?.email || '') && (
+              <button className="btn-back" onClick={() => { window.location.href = '/'; }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+                Volver
+              </button>
+            )}
+            <button className="btn-logout" onClick={cerrarSesion}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              Salir
+            </button>
+          </div>
         </div>
 
         {/* CONTENIDO */}
@@ -890,7 +916,7 @@ export default function TrabajadorDashboard({ user, trabajador }) {
                         <div>
                           <div className="liq-periodo">{MESES[(l.mes||1)-1]} {l.anio}</div>
                           <div style={{fontSize:11,color:'var(--text-3)',marginTop:2,fontFamily:'var(--mono)'}}>
-                            {l.empresa || 'MPF Ingeniería Civil'}
+                            {l.empresa || trabajador?.empresa || ''}
                           </div>
                         </div>
                         <div style={{textAlign:'right'}}>
@@ -921,11 +947,11 @@ export default function TrabajadorDashboard({ user, trabajador }) {
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">RUT</span>
-                  <span className="ci-val">{trabajador?.rut || user.email.replace('@mpf.cl','')}</span>
+                  <span className="ci-val">{trabajador?.rut || user.email.replace(/@(trabajador\.app|mpf\.cl)$/, '')}</span>
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">Empresa</span>
-                  <span className="ci-val">{trabajador?.empresa || 'MPF Ingeniería Civil'}</span>
+                  <span className="ci-val">{trabajador?.empresa || '—'}</span>
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">Cargo</span>

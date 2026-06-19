@@ -7,6 +7,9 @@ export default function CombustibleAnalytics({ reportesFiltrados }) {
   const noFirmados = totalReportes - firmados;
   let totalLitros = 0, litrosEntradas = 0, litrosEntregas = 0;
   let cntEntradas = 0, cntEntregas = 0;
+  let hoyEntradas = 0, hoySalidas = 0, hoyReportes = 0;
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const porMaquina = {};
   const porOperador = {};
   const porFecha = {};
@@ -37,6 +40,12 @@ export default function CombustibleAnalytics({ reportesFiltrados }) {
     const proy = r.projectName || 'Sin proyecto';
     if (!porProyecto[proy]) porProyecto[proy] = 0;
     porProyecto[proy] += litros;
+
+    if (fecha === todayStr) {
+      hoyReportes++;
+      if (r.tipo === 'entrada') hoyEntradas += litros;
+      else hoySalidas += litros;
+    }
   });
 
   const pctFirmados = Math.round((firmados / totalReportes) * 100);
@@ -106,17 +115,26 @@ export default function CombustibleAnalytics({ reportesFiltrados }) {
 
           {/* ── Fila 1: KPIs grandes ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* Total litros */}
+            {/* Movimientos del Día */}
             <div className="rounded-2xl p-5 text-white relative overflow-hidden col-span-2 lg:col-span-1"
               style={{ background: 'linear-gradient(135deg,#ea580c 0%,#c2410c 100%)' }}>
               <div className="absolute -right-4 -top-4 w-24 h-24 rounded-full opacity-20"
                 style={{ background: 'rgba(255,255,255,0.3)' }} />
-              <div className="text-xs font-bold uppercase tracking-widest text-orange-200 mb-2">Total Combustible</div>
-              <div className="text-4xl font-black tracking-tight">{totalLitros.toLocaleString('es-CL')}</div>
-              <div className="text-orange-200 text-sm font-semibold mt-0.5">litros gestionados</div>
+              <div className="text-xs font-bold uppercase tracking-widest text-orange-200 mb-2">Movimientos Hoy</div>
+              <div className="flex gap-4 items-end">
+                <div>
+                   <div className="text-3xl font-black tracking-tight">{hoyEntradas.toLocaleString('es-CL')}</div>
+                   <div className="text-orange-200 text-xs font-semibold uppercase">Lts Entrada</div>
+                </div>
+                <div className="text-xl font-black text-orange-300 pb-1">vs</div>
+                <div>
+                   <div className="text-3xl font-black tracking-tight">{hoySalidas.toLocaleString('es-CL')}</div>
+                   <div className="text-orange-200 text-xs font-semibold uppercase">Lts Salida</div>
+                </div>
+              </div>
               <div className="mt-3 pt-3 border-t border-orange-400/40 flex justify-between text-xs text-orange-200">
-                <span>{totalReportes} reportes</span>
-                <span>≈ {(totalLitros / totalReportes).toFixed(0)} L/rep</span>
+                <span>{hoyReportes} reportes hoy</span>
+                <span>Bal: {(hoyEntradas - hoySalidas) > 0 ? '+' : ''}{(hoyEntradas - hoySalidas).toLocaleString('es-CL')} L</span>
               </div>
             </div>
 

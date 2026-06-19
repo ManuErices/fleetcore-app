@@ -17,6 +17,7 @@ export function generateThermalVoucher({
   machineInfo,
   operadorInfo,
   empresaInfo,
+  tenantInfo,
   repartidorInfo,
   equipoSurtidorInfo,
   numeroGuiaCorrelativo
@@ -83,22 +84,6 @@ export function generateThermalVoucher({
   const fechaFormateada = formatDate(reportData.fecha || '');
   const cantidadFormateada = formatCantidad(reportData.cantidadLitros);
 
-  // Generar sección de firmas
-  const firmaReceptorImg = reportData.firmaReceptor || null;
-  const firmaLineaHTML = firmaReceptorImg
-    ? `<img src="${firmaReceptorImg}" class="firma-img" alt="Firma receptor" />`
-    : `<div class="firma-line"></div>`;
-
-  const firmasSectionHTML = `
-    <!-- FIRMA RECEPTOR -->
-    <div class="firma-section-single">
-      <div class="firma-box">
-        ${firmaLineaHTML}
-        <div class="small firma-label">FIRMA</div>
-        <div class="small firma-rol">RECEPTOR</div>
-      </div>
-    </div>
-    `;
 
   // Generar HTML del voucher
   const voucherHTML = `
@@ -191,9 +176,10 @@ export function generateThermalVoucher({
       width: auto;
       max-width: 100%;
       height: auto;
-      max-height: 15mm;
+      max-height: 35mm;
       object-fit: contain;
       margin: 0 auto 1mm auto;
+      filter: grayscale(100%) contrast(1.5) brightness(1.1);
     }
     
     .small {
@@ -294,14 +280,16 @@ export function generateThermalVoucher({
 <body>
   <div class="voucher-content"><div class="voucher">
     <!-- LOGO -->
+    ${(!tenantInfo?.nombre || /mpf/i.test(tenantInfo.nombre)) ? `
     <div class="center">
-      <img src="${MPF_LOGO_BASE64}" alt="MPF Logo" class="logo">
+      <img src="${MPF_LOGO_BASE64}" alt="Logo" class="logo">
     </div>
-    
+    ` : ''}
+
     <!-- ENCABEZADO -->
     <div class="header center">
-      <div class="bold">MPF INGENIERIA CIVIL SPA</div>
-      <div class="small">RUT: 77.158.216-8</div>
+      <div class="bold">${(tenantInfo?.nombre || 'MPF Ingenieria Civil SPA').toUpperCase()}</div>
+      <div class="small">RUT: ${tenantInfo?.rut || '77.158.216-8'}</div>
     </div>
     
     <div class="center bold">
@@ -312,22 +300,50 @@ export function generateThermalVoucher({
     </div>
     
     <div class="line"></div>
-    
-    <!-- DATOS DEL CLIENTE -->
+
+    <!-- SURTIDOR -->
     <div class="section">
-      <div class="bold">EMPRESA:</div>
-      <div>${empresaInfo?.nombre || projectName || 'N/A'}</div>
+      <div class="bold">SURTIDOR</div>
+      <div class="row">
+        <span class="label">Empresa:</span>
+        <span>${tenantInfo?.nombre || 'MPF Ingenieria Civil'}</span>
+      </div>
       <div class="row">
         <span class="label">RUT:</span>
-        <span>${empresaInfo?.rut || 'N/A'}</span>
+        <span>${tenantInfo?.rut || '77.158.216-8'}</span>
       </div>
+      <div class="row">
+        <span class="label">Nombre:</span>
+        <span>${formatNombreCorto(repartidorInfo?.nombre || reportData.repartidorNombre)}</span>
+      </div>
+      <div class="row">
+        <span class="label">Run:</span>
+        <span>${formatRun(repartidorInfo?.rut || reportData.repartidorRut)}</span>
+      </div>
+      ${equipoSurtidorInfo ? `
+      <div class="tipo-maquina-izquierda">
+        <div class="label">Equipo Surtidor:</div>
+        <div>${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}</div>
+      </div>
+      <div class="row">
+        <span class="label">Patente:</span>
+        <span class="bold">${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
+      </div>` : ''}
     </div>
-    
+
     <div class="line"></div>
-    
+
     <!-- RECEPTOR -->
     <div class="section">
       <div class="bold">RECEPTOR</div>
+      <div class="row">
+        <span class="label">Empresa:</span>
+        <span>${empresaInfo?.nombre || projectName || 'N/A'}</span>
+      </div>
+      <div class="row">
+        <span class="label">RUT:</span>
+        <span>${empresaInfo?.rut || (empresaInfo?.nombre && /mpf/i.test(empresaInfo.nombre) ? '77.158.216-8' : 'N/A')}</span>
+      </div>
       <div class="row">
         <span class="label">Nombre:</span>
         <span>${formatNombreCorto(operadorInfo?.nombre)}</span>
@@ -348,30 +364,6 @@ export function generateThermalVoucher({
       <div class="row">
         <span class="label">Horometro/Km:</span>
         <span>${reportData.horometroOdometro}</span>
-      </div>` : ''}
-    </div>
-
-    <div class="line"></div>
-
-    <!-- SURTIDOR -->
-    <div class="section">
-      <div class="bold">SURTIDOR</div>
-      <div class="row">
-        <span class="label">Nombre:</span>
-        <span>${formatNombreCorto(repartidorInfo?.nombre || reportData.repartidorNombre)}</span>
-      </div>
-      <div class="row">
-        <span class="label">Run:</span>
-        <span>${formatRun(repartidorInfo?.rut || reportData.repartidorRut)}</span>
-      </div>
-      ${equipoSurtidorInfo ? `
-      <div class="tipo-maquina-izquierda">
-        <div class="label">Equipo Surtidor:</div>
-        <div>${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}</div>
-      </div>
-      <div class="row">
-        <span class="label">Patente:</span>
-        <span class="bold">${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}</span>
       </div>` : ''}
     </div>
 
@@ -408,9 +400,7 @@ export function generateThermalVoucher({
     </div>
     
     <div class="line"></div>
-    
-    ${firmasSectionHTML}
-    
+
   </div></div><!-- fin voucher-content -->
   
   <!-- BARRA STICKY DE ACCIONES -->
@@ -429,27 +419,70 @@ export function generateThermalVoucher({
  * Abre el voucher en una nueva ventana para imprimir
  * @param {Object} params - Parámetros del voucher
  */
-export function printThermalVoucher(params) {
+export async function printThermalVoucher(params) {
   const html = generateThermalVoucher(params);
 
-  // Crear una nueva ventana
-  const printWindow = window.open('', '_blank', 'width=400,height=600');
+  if (params.printWindow) {
+    const { printWindow } = params;
+    try {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
 
-  if (!printWindow) {
-    alert('Por favor permite las ventanas emergentes para imprimir el voucher');
-    return;
+      printWindow.onload = function () {
+        setTimeout(() => {
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch (e) {
+            console.error('Error al imprimir:', e);
+          }
+        }, 500);
+      };
+      
+      // Fallback in case onload doesn't fire when writing to an already open window
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (e) {
+          console.error('Error al imprimir:', e);
+        }
+      }, 1000);
+    } catch (err) {
+      console.error('Error escribiendo en ventana de impresión:', err);
+    }
+  } else {
+    // Fallback original (iframe) si no se pasa printWindow
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    iframe.contentWindow.document.open();
+    iframe.contentWindow.document.write(html);
+    iframe.contentWindow.document.close();
+
+    iframe.onload = function () {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } catch (e) {
+          console.error('Error al imprimir:', e);
+        }
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 10000);
+      }, 500);
+    };
   }
-
-  // Escribir el HTML en la nueva ventana
-  printWindow.document.write(html);
-  printWindow.document.close();
-
-  // Esperar a que cargue y luego abrir el diálogo de impresión
-  printWindow.onload = function () {
-    setTimeout(() => {
-      printWindow.print();
-    }, 250);
-  };
 }
 
 /**
@@ -461,7 +494,7 @@ export function printThermalVoucher(params) {
 export async function getNextGuiaNumber(empresaId) {
   console.log('🔢 getNextGuiaNumber llamado con empresaId:', empresaId);
   try {
-    const { collection, query, orderBy, limit, getDocs } = await import('firebase/firestore');
+    const { collection, query, limit, getDocs } = await import('firebase/firestore');
     const { db } = await import('../lib/firebase');
 
     if (!empresaId) {
@@ -469,16 +502,16 @@ export async function getNextGuiaNumber(empresaId) {
       return 1;
     }
 
-    // Buscar el mayor numeroGuia ya usado en reportes_combustible
+    // Buscar el mayor numeroGuia ya usado en reportes_combustible (sin orderBy para evitar índice compuesto)
     const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-    const q = query(reportesRef, orderBy('numeroGuia', 'desc'), limit(1));
+    const q = query(reportesRef, limit(200));
     const snapshot = await getDocs(q);
 
     let lastNum = 0;
-    if (!snapshot.empty) {
-      const data = snapshot.docs[0].data();
-      lastNum = data.numeroGuia || 0;
-    }
+    snapshot.docs.forEach(d => {
+      const n = d.data().numeroGuia || 0;
+      if (n > lastNum) lastNum = n;
+    });
 
     const nextNumber = lastNum + 1;
     console.log('✅ Último numeroGuia encontrado:', lastNum, '→ próximo:', nextNumber);
@@ -500,6 +533,7 @@ export function generateThermalVoucherText({
   machineInfo,
   operadorInfo,
   empresaInfo,
+  tenantInfo,
   repartidorInfo,
   equipoSurtidorInfo,
   numeroGuiaCorrelativo
@@ -538,26 +572,27 @@ export function generateThermalVoucherText({
   const line = '--------------------------------';
 
   return `
-  MPF INGENIERIA CIVIL SPA
-      RUT: 77.158.216-8
-      
+  ${(tenantInfo?.nombre || 'MPF Ingenieria Civil SPA').toUpperCase()}
+      RUT: ${tenantInfo?.rut || '77.158.216-8'}
+
   GUIA DE DESPACHO N° ${numeroGuia}
 ${line}
 
-EMPRESA:
-${empresaInfo?.nombre || projectName || 'N/A'}
-RUT: ${empresaInfo?.rut || 'N/A'}
-
-Tipo Maquina: ${machineInfo?.type || machineInfo?.nombre || 'N/A'}
-Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}${reportData.horometroOdometro ? `
-Horometro/Km: ${reportData.horometroOdometro}` : ''}
-${line}
-
 SURTIDOR:
+Empresa: ${tenantInfo?.nombre || 'MPF Ingenieria Civil'}
+RUT: ${tenantInfo?.rut || '77.158.216-8'}
 Nombre: ${repartidorInfo?.nombre || reportData.repartidorNombre || 'N/A'}
 Run: ${repartidorInfo?.rut || reportData.repartidorRut || 'N/A'}${equipoSurtidorInfo ? `
 Equipo: ${equipoSurtidorInfo.nombre || equipoSurtidorInfo.name || 'N/A'}
 Patente: ${equipoSurtidorInfo.patente || equipoSurtidorInfo.code || 'N/A'}` : ''}
+${line}
+
+RECEPTOR:
+Empresa: ${empresaInfo?.nombre || projectName || 'N/A'}
+RUT: ${empresaInfo?.rut || (empresaInfo?.nombre && /mpf/i.test(empresaInfo.nombre) ? '77.158.216-8' : 'N/A')}
+Tipo Maquina: ${machineInfo?.type || machineInfo?.nombre || 'N/A'}
+Maquina: ${machineInfo?.code || machineInfo?.patente || 'N/A'}${reportData.horometroOdometro ? `
+Horometro/Km: ${reportData.horometroOdometro}` : ''}
 ${line}
 
 Fecha Emision: ${fechaFormateada}

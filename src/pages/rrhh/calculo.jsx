@@ -82,7 +82,10 @@ function calcularLiquidacion(rem) {
   const tasaAfp = TASAS_AFP[rem.afp] || 0.1137;
   const afpM  = Math.round(imponible * tasaAfp);
   const salM  = Math.round(imponible * TASAS.salud);
-  const esCt  = rem.tipoContrato === 'Plazo Fijo' || rem.tipoContrato === 'Obra o Faena';
+  const esCt  = rem.tipoContrato && (
+    rem.tipoContrato.toLowerCase().includes('plazo') || 
+    rem.tipoContrato.toLowerCase().includes('obra')
+  );
   // CEV AFC: indefinido 0.9%, plazo fijo/obra 0.6%
   const cesM  = Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
   // SIS: cargo empleador (solo referencial, no descuenta al trabajador)
@@ -150,7 +153,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   // ── Indemnización por años de servicio (Art. 163 CT) ──
   const tieneIndemnizacion = CAUSALES_CON_INDEMNIZACION.includes(causal)
-    && (contrato?.tipoContrato === 'Indefinido' || !contrato?.tipoContrato)
+    && (!contrato?.tipoContrato || contrato.tipoContrato.toLowerCase().includes('indefinido'))
     && anios >= 1;
   const aniosIndemnizacion = Math.min(anios, TOPE_ANIOS_INDEMNIZACION);
   // Base indemnización = última remuneración mensual imponible (tope 90 UF ≈ referencial)
@@ -367,9 +370,10 @@ function generarTXTPrevired(liquidaciones, mes, anio) {
   // Tipo contrato Previred: D=indefinido, P=plazo fijo, O=obra
   const tipoCtto = (tipo) => {
     if (!tipo) return 'D';
-    if (tipo.includes('Indefinido')) return 'D';
-    if (tipo.includes('Plazo'))      return 'P';
-    if (tipo.includes('Obra'))       return 'O';
+    const t = tipo.toLowerCase();
+    if (t.includes('indefinido')) return 'D';
+    if (t.includes('plazo'))      return 'P';
+    if (t.includes('obra'))       return 'O';
     return 'D';
   };
 
@@ -378,7 +382,10 @@ function generarTXTPrevired(liquidaciones, mes, anio) {
 
     const [rutNum, dv] = splitRut(trab.rut);
     const esIsapre     = trab.prevision === 'Isapre' || (trab.prevision && trab.prevision !== 'FONASA');
-    const esPF         = contrato.tipoContrato === 'Plazo Fijo' || contrato.tipoContrato === 'Obra o Faena';
+    const esPF         = contrato.tipoContrato && (
+      contrato.tipoContrato.toLowerCase().includes('plazo') || 
+      contrato.tipoContrato.toLowerCase().includes('obra')
+    );
     const codAfp       = COD_AFP[trab.afp] || '05';
     const codJornada   = COD_JORNADA[contrato.jornada] || '07';
     const diasTrab     = calc.diasTrab ?? 30;

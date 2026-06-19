@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { printThermalVoucher } from '../../utils/voucherThermalGenerator';
+import { useEmpresa } from '../../lib/useEmpresa';
 
 export default function CombustibleDetalleModal({
   reporte,
@@ -11,6 +13,7 @@ export default function CombustibleDetalleModal({
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
+  const { empresa: tenantInfo } = useEmpresa();
   const isAdmin = userRole === 'administrador';
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState(reporte ? { ...reporte } : {});
@@ -55,22 +58,59 @@ export default function CombustibleDetalleModal({
     }));
   };
 
+  const handlePrint = () => {
+    printThermalVoucher({
+      reportData: {
+        ...reporte,
+        cantidadLitros: reporte.cantidadLitros ?? reporte.datosEntrega?.cantidadLitros ?? reporte.datosEntrada?.cantidad,
+        horometroOdometro: reporte.horometroOdometro || reporte.datosEntrega?.horometroOdometro || reporte.datosEntrada?.horometroOdometro || ''
+      },
+      projectName,
+      machineInfo,
+      operadorInfo,
+      tenantInfo,
+      repartidorInfo: surtidorInfo || {
+        nombre: reporte.repartidorNombre || reporte.surtidorNombre,
+        rut: reporte.repartidorRut || reporte.surtidorRut
+      },
+      numeroGuiaCorrelativo: reporte.numeroGuia
+    });
+  };
+
+  const tipoLabel = reporte.tipo === 'entrada' ? 'ENTRADA' : reporte.tipo === 'entrega' ? 'ENTREGA' : (reporte.tipo || '').toUpperCase();
+  const tipoColor = reporte.tipo === 'entrada' ? 'bg-green-500' : 'bg-blue-500';
+  const headerGradient = reporte.tipo === 'entrada' ? 'from-green-600 to-emerald-600' : 'from-blue-600 to-indigo-600';
+
+  const cantidadDisplay = reporte.cantidadLitros
+    ?? reporte.datosEntrega?.cantidadLitros
+    ?? reporte.datosEntrada?.cantidad;
+  const horometroDisplay = reporte.horometroOdometro
+    || reporte.datosEntrega?.horometroOdometro
+    || reporte.datosEntrada?.horometroOdometro;
+  const empresaProveedora = reporte.empresaProveedora || reporte.empresa;
+
+  const TIPO_ORIGEN_LABELS = { estacion: 'Estación de Combustible', externo: 'Empresa Externa', interno: 'MPF Interno' };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4 sm:p-6 flex flex-col">
+        <div className={`bg-gradient-to-r ${headerGradient} text-white p-4 sm:p-6 flex flex-col`}>
           <div className="sm:hidden w-10 h-1 bg-white/40 rounded-full mx-auto mb-3"></div>
           <div className="flex items-start sm:items-center justify-between gap-3">
             <div>
-              <h2 className="text-base sm:text-2xl font-black flex items-center gap-2">
-                <svg className="w-5 h-5 sm:w-8 sm:h-8 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`${tipoColor} text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full`}>{tipoLabel}</span>
+                <span className="text-white/60 text-xs font-semibold">N° {reporte.numeroGuia || reporte.numeroReporte}</span>
+              </div>
+              <h2 className="text-base sm:text-xl font-black flex items-center gap-2">
+                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span className="truncate">Detalle de Combustible</span><span className="hidden sm:inline"> de Reporte</span>
+                <span className="truncate">Detalle de Combustible</span>
               </h2>
-              <p className="text-orange-100 text-sm mt-1">
-                N° {reporte.numeroReporte} - {reporte.fecha}
+              <p className="text-white/70 text-sm mt-0.5">
+                {reporte.fecha}{reporte.hora ? ` · ${reporte.hora}` : ''}
               </p>
             </div>
             <button
@@ -87,33 +127,55 @@ export default function CombustibleDetalleModal({
         {/* Content */}
         <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-6">
           {/* Información General del Reporte */}
-          <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-orange-200">
-            <h3 className="text-lg font-black text-orange-900 mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-              Información General
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <DataField label="Fecha de Registro" value={reporte.fecha} />
+          <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-slate-200">
+            <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-3">Información General</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
+              <DataField label="Fecha" value={reporte.fecha} />
               <DataField label="Hora" value={reporte.hora || (reporte.fechaCreacion ? new Date(reporte.fechaCreacion).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }) : '-')} />
-              <DataField label="N° de Reporte" value={reporte.numeroReporte} />
+              <DataField label="N° Guía" value={reporte.numeroGuia || '-'} />
+              {isEditing ? (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1">Folio</div>
+                  <input
+                    type="text"
+                    value={editedData.folio || ''}
+                    onChange={(e) => updateField('folio', e.target.value)}
+                    className="w-full px-3 py-1.5 border-2 border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 font-bold text-slate-700 text-sm"
+                  />
+                </div>
+              ) : (
+                <DataField label="Folio (Respaldo)" value={reporte.folio || '-'} />
+              )}
+              {isEditing ? (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-1">Código</div>
+                  <input
+                    type="text"
+                    value={editedData.codigo || ''}
+                    onChange={(e) => updateField('codigo', e.target.value)}
+                    className="w-full px-3 py-1.5 border-2 border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 font-bold text-slate-700 text-sm"
+                  />
+                </div>
+              ) : (
+                <DataField label="Código" value={reporte.codigo || '-'} />
+              )}
               <DataField label="Proyecto" value={projectName || reporte.projectId} />
+              <DataField label="Creado por" value={reporte.creadoPor || '-'} />
             </div>
           </div>
 
-          {/* Información de la Máquina */}
-          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border-2 border-blue-200">
+          {/* Vehículo / Máquina */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-blue-200">
             <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
                 <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
               </svg>
-              Información del Vehículo/Máquina
+              Vehículo / Máquina {reporte.tipo === 'entrada' ? 'Receptor' : ''}
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <DataField label="Patente" value={machineInfo?.patente || reporte.machinePatente} />
-              <DataField label="Nombre/Modelo" value={
+              <DataField label="Patente / Código" value={machineInfo?.patente || machineInfo?.code || reporte.machinePatente} />
+              <DataField label="Nombre / Modelo" value={
                 machineInfo?.nombre || machineInfo?.name
                 || (machineInfo?.type && machineInfo?.marca ? `${machineInfo.type} - ${machineInfo.marca}` : machineInfo?.modelo)
                 || reporte.machineName
@@ -136,68 +198,85 @@ export default function CombustibleDetalleModal({
                   />
                 </div>
               ) : (
-                <DataField label="Horómetro/Odómetro" value={reporte.horometroOdometro || '-'} />
+                <DataField label="Horómetro/Odómetro" value={horometroDisplay ? Number(horometroDisplay).toLocaleString('es-CL') : '-'} />
               )}
             </div>
           </div>
 
-          {/* Información del Combustible */}
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-6 mb-6 border-2 border-green-200">
+          {/* Detalle de Combustible */}
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-green-200">
             <h3 className="text-lg font-black text-green-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clipRule="evenodd" />
               </svg>
               Detalle de Combustible
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
-              {isEditing ? (
-                <>
-                  <div>
-                    <div className="text-xs font-semibold text-slate-500 mb-1">Cantidad (Litros)</div>
+            <div className="space-y-4 min-w-0">
+              {/* Cantidad destacada */}
+              <div className="bg-white rounded-xl p-4 border-2 border-green-300 flex items-center gap-4">
+                <span className="text-3xl">⛽</span>
+                <div>
+                  <div className="text-xs font-semibold text-green-700 mb-0.5">Cantidad {reporte.tipo === 'entrada' ? 'Recibida' : 'Entregada'}</div>
+                  {isEditing ? (
                     <input
                       type="number"
                       step="0.01"
-                      value={editedData.cantidadLitros}
+                      value={editedData.cantidadLitros ?? cantidadDisplay}
                       onChange={(e) => updateField('cantidadLitros', e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
+                      className="w-40 px-3 py-1 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500 text-xl font-black"
                     />
-                  </div>
+                  ) : (
+                    <div className="text-2xl sm:text-3xl font-black text-green-600 flex items-baseline gap-2">
+                      {cantidadDisplay != null ? Number(cantidadDisplay).toLocaleString('es-CL') : '-'}
+                      <span className="text-base text-green-500">Litros</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Origen / Empresa proveedora */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {isEditing ? (
                   <div>
-                    <div className="text-xs font-semibold text-slate-500 mb-1">Empresa</div>
+                    <div className="text-xs font-semibold text-slate-500 mb-1">Empresa Proveedora</div>
                     <input
                       type="text"
-                      value={editedData.empresa}
-                      onChange={(e) => updateField('empresa', e.target.value)}
+                      value={editedData.empresaProveedora ?? editedData.empresa ?? empresaProveedora}
+                      onChange={(e) => updateField('empresaProveedora', e.target.value)}
                       className="w-full px-3 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500"
                     />
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-white rounded-lg p-4 border-2 border-green-300">
-                    <div className="text-xs font-semibold text-green-700 mb-1">Cantidad Suministrada</div>
-                    <div className="text-2xl sm:text-3xl font-black text-green-600 flex items-baseline gap-2">
-                      {reporte.cantidadLitros}
-                      <span className="text-lg text-green-500">Litros</span>
-                    </div>
-                  </div>
-                  <DataField label="Empresa Proveedora" value={reporte.empresa || '-'} />
-                  {reporte.numerosDocumento?.length > 0 && (
-                    <div>
-                      <div className="text-xs font-semibold text-slate-500 mb-1">N° Documentos</div>
-                      <div className="text-sm font-bold text-slate-900">{reporte.numerosDocumento.join(', ')}</div>
-                    </div>
-                  )}
-                  {!reporte.numerosDocumento && reporte.numeroDocumento && (
-                    <DataField label="N° Documento" value={reporte.numeroDocumento} />
-                  )}
-                </>
-              )}
+                ) : (
+                  <>
+                    <DataField
+                      label={reporte.tipo === 'entrada' ? 'Empresa / Origen Proveedor' : 'Empresa Receptora'}
+                      value={empresaProveedora || reporte.datosEntrega?.empresa || '-'}
+                    />
+                    {reporte.datosEntrada?.tipoOrigen && (
+                      <DataField
+                        label="Tipo de Origen"
+                        value={TIPO_ORIGEN_LABELS[reporte.datosEntrada.tipoOrigen] || reporte.datosEntrada.tipoOrigen}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Documentos */}
+              {(() => {
+                const docs = reporte.datosEntrada?.numerosDocumento || reporte.numerosDocumento;
+                const doc = reporte.datosEntrada?.numeroDocumento || reporte.numeroDocumento;
+                if (docs?.length > 0) return (
+                  <div><div className="text-xs font-semibold text-slate-500 mb-1">N° Documentos / Guías</div><div className="text-sm font-bold text-slate-900">{docs.join(', ')}</div></div>
+                );
+                if (doc) return <DataField label="N° Documento" value={doc} />;
+                return null;
+              })()}
             </div>
           </div>
 
           {/* Personal Involucrado */}
-          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 mb-6 border-2 border-purple-200">
+          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6 border-2 border-purple-200">
             <h3 className="text-lg font-black text-purple-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
@@ -205,45 +284,78 @@ export default function CombustibleDetalleModal({
               Personal Involucrado
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <DataField label="Surtidor" value={surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'} />
+              <div className="bg-white rounded-xl p-4 border border-purple-100">
+                <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
+                  {reporte.tipo === 'entrada' ? 'Surtidor / Quien entrega' : 'Surtidor / Quien entrega'}
+                </p>
+                <p className="text-sm font-bold text-slate-900">{surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'}</p>
                 {(surtidorInfo?.rut || reporte.repartidorRut) && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
                 )}
               </div>
-              <div>
-                <DataField label="Operador" value={operadorInfo?.nombre || reporte.operadorNombre || '-'} />
+              <div className="bg-white rounded-xl p-4 border border-purple-100">
+                <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
+                  {reporte.tipo === 'entrada' ? 'Receptor / Quien recibe' : 'Receptor'}
+                </p>
+                <p className="text-sm font-bold text-slate-900">{operadorInfo?.nombre || reporte.operadorNombre || '-'}</p>
                 {operadorInfo?.rut && (
-                  <p className="text-xs text-slate-500 mt-1">RUT: {operadorInfo.rut}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">RUT: {operadorInfo.rut}</p>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Firma del Receptor */}
-          {reporte.firmaReceptor && (
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border-2 border-blue-200">
-              <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-                Firma del Receptor
-              </h3>
-              <div className="flex flex-col items-center gap-2">
-                <div className="bg-white border-2 border-blue-200 rounded-lg p-3 w-full max-w-xs">
-                  <img
-                    src={reporte.firmaReceptor}
-                    alt="Firma del receptor"
-                    className="w-full h-auto max-h-32 object-contain mx-auto"
-                  />
+          {/* Firmas y Fotos de Respaldo */}
+          {(reporte.firmaReceptor || reporte.firmaRepartidor) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {reporte.firmaReceptor && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border-2 border-blue-200">
+                  <h3 className="text-lg font-black text-blue-900 mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                    Firma/Foto Receptor
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="bg-white border-2 border-blue-200 rounded-lg p-3 w-full">
+                      <img
+                        src={reporte.firmaReceptor}
+                        alt="Firma del receptor"
+                        className="w-full h-auto max-h-64 object-contain mx-auto"
+                      />
+                    </div>
+                    <div className="w-full border-t-2 border-blue-300 pt-2 text-center">
+                      <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RECEPTOR</p>
+                      <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.operadorNombre || 'N/A'}</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="w-full max-w-xs border-t-2 border-blue-300 pt-2 text-center">
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">FIRMA RECEPTOR</p>
-                  {reporte.operadorNombre && (
-                    <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.operadorNombre}</p>
-                  )}
+              )}
+
+              {reporte.firmaRepartidor && (
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-6 border-2 border-orange-200">
+                  <h3 className="text-lg font-black text-orange-900 mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Firma/Foto Surtidor
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="bg-white border-2 border-orange-200 rounded-lg p-3 w-full">
+                      <img
+                        src={reporte.firmaRepartidor}
+                        alt="Firma del repartidor"
+                        className="w-full h-auto max-h-64 object-contain mx-auto"
+                      />
+                    </div>
+                    <div className="w-full border-t-2 border-orange-300 pt-2 text-center">
+                      <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">SURTIDOR</p>
+                      <p className="text-sm font-bold text-slate-700 mt-0.5">{reporte.repartidorNombre || reporte.surtidorNombre || 'N/A'}</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -377,6 +489,15 @@ export default function CombustibleDetalleModal({
                     Firmar y Validar
                   </button>
                   <button
+                    onClick={handlePrint}
+                    className="flex-1 px-3 sm:px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    Imprimir Voucher
+                  </button>
+                  <button
                     onClick={onClose}
                     className="px-3 sm:px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
                   >
@@ -386,12 +507,23 @@ export default function CombustibleDetalleModal({
               )}
             </div>
           ) : (
-            <button
-              onClick={onClose}
-              className="w-full px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
-            >
-              Cerrar
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handlePrint}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                Imprimir Voucher
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl"
+              >
+                Cerrar
+              </button>
+            </div>
           )}
         </div>
       </div>

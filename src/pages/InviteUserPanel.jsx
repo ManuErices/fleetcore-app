@@ -10,18 +10,33 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { usePlan } from "../hooks/usePlan";
 import { db } from "../lib/firebase";
 import {
-  collection, addDoc, getDocs, updateDoc, doc,
-  serverTimestamp, query, orderBy, where,
+  collection, addDoc, getDocs, getDoc, updateDoc, doc,
+  serverTimestamp, query, where,
 } from "firebase/firestore";
 
 const ROLES = [
-  { value: "admin_contrato",  label: "Administrador",   desc: "Acceso completo a la empresa" },
-  { value: "administrativo",  label: "Administrativo",  desc: "Acceso a módulos asignados" },
-  { value: "operador",        label: "Operador",        desc: "Solo WorkFleet móvil" },
-  { value: "mandante",        label: "Mandante",        desc: "Solo lectura de reportes" },
-  { value: "trabajador",      label: "Trabajador",      desc: "Portal de trabajador" },
+  { value: "admin_contrato",  label: "Administrador",        desc: "Acceso completo a la empresa" },
+  { value: "administrativo",  label: "Administrativo",       desc: "Acceso a módulos asignados" },
+  { value: "operador",        label: "Operador",             desc: "Solo WorkFleet móvil" },
+  { value: "mandante",        label: "Mandante",             desc: "Solo lectura de reportes" },
+  { value: "trabajador",      label: "Trabajador",           desc: "Portal de trabajador" },
+  { value: "revisor_admin",   label: "Revisor Admin",        desc: "FleetCore-I: gestiona revisores" },
+  { value: "revisor",         label: "Revisor",              desc: "FleetCore-I: solo lectura de documentos" },
+];
+
+const ROLES_REVISOR = [
+  { value: "revisor",  label: "Revisor",  desc: "Solo lectura de documentos en FleetCore-I" },
+];
+
+const MODULOS_ADMIN = [
+  { value: "fleetcore",    label: "Oficina Técnica",  desc: "Dashboard, equipos, combustible" },
+  { value: "reportes",     label: "Reportes",         desc: "Informes y análisis" },
+  { value: "rrhh",         label: "RRHH",             desc: "Trabajadores, contratos, nómina" },
+  { value: "finanzas",     label: "Finanzas",         desc: "Flujo de caja y activos" },
+  { value: "contabilidad", label: "Contabilidad",     desc: "Libro diario y balances" },
 ];
 
 const EXPIRACION_DIAS = [1, 3, 7, 30];
@@ -36,16 +51,19 @@ function getBaseUrl() {
   return window.location.origin;
 }
 
-export default function InviteUserPanel({ empresaId, onClose }) {
+export default function InviteUserPanel({ empresaId, onClose, soloRevisores = false }) {
+  const { canAccess } = usePlan();
   const [invitaciones, setInvitaciones] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [creating,     setCreating]     = useState(false);
   const [copied,       setCopied]       = useState(null);
   const [showForm,     setShowForm]     = useState(false);
+  const rolesDisponibles = soloRevisores ? ROLES_REVISOR : ROLES;
   const [form, setForm] = useState({
     emailDestino: "",
-    rol:          "administrativo",
+    rol:          soloRevisores ? "revisor" : "administrativo",
     diasExpira:   7,
+    modulos:      [],
   });
 
   const cargar = useCallback(async () => {
@@ -82,10 +100,20 @@ export default function InviteUserPanel({ empresaId, onClose }) {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + form.diasExpira);
 
+      // Leer nombre de empresa para incluirlo en la invitación (InviteAccept no puede leer el doc directamente)
+      let empresaNombre = '';
+      try {
+        const empSnap = await getDoc(doc(db, 'empresas', empresaId));
+        if (empSnap.exists()) empresaNombre = empSnap.data().nombre || '';
+      } catch {}
+
       const ref = await addDoc(collection(db, "invitaciones"), {
         empresaId,
+        empresaNombre,
         rol:          form.rol,
+        modulos:      form.rol === 'administrativo' ? form.modulos : [],
         emailDestino: form.emailDestino.trim() || null,
+        diasExpira:   form.diasExpira,
         usada:        false,
         creadaEn:     serverTimestamp(),
         expiresAt,
@@ -93,7 +121,7 @@ export default function InviteUserPanel({ empresaId, onClose }) {
 
       await cargar();
       setShowForm(false);
-      setForm({ emailDestino: "", rol: "administrativo", diasExpira: 7 });
+      setForm({ emailDestino: "", rol: "administrativo", diasExpira: 7, modulos: [] });
 
       // Auto-copiar el link
       const link = `${getBaseUrl()}/invite/${ref.id}`;
@@ -140,7 +168,7 @@ export default function InviteUserPanel({ empresaId, onClose }) {
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between"
           style={{ background: "linear-gradient(135deg, #065f46 0%, #047857 100%)", borderRadius: "16px 16px 0 0" }}>
           <div>
-            <h2 className="text-base font-black text-white">Invitar usuarios</h2>
+            <h2 className="text-base font-black text-white">{soloRevisores ? 'Invitar revisores' : 'Invitar usuarios'}</h2>
             <p className="text-xs text-emerald-200 mt-0.5">{activas.length} invitación{activas.length !== 1 ? "es" : ""} activa{activas.length !== 1 ? "s" : ""}</p>
           </div>
           <button onClick={onClose}
@@ -190,9 +218,9 @@ export default function InviteUserPanel({ empresaId, onClose }) {
                   Rol que tendrá *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {ROLES.map(r => (
+                  {rolesDisponibles.map(r => (
                     <button key={r.value}
-                      onClick={() => setForm(f => ({ ...f, rol: r.value }))}
+                      onClick={() => setForm(f => ({ ...f, rol: r.value, modulos: [] }))}
                       className={`p-3 rounded-xl text-left border-2 transition-all ${form.rol === r.value ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
                       <div className={`text-xs font-black ${form.rol === r.value ? "text-emerald-700" : "text-slate-700"}`}>{r.label}</div>
                       <div className="text-[10px] text-slate-400 mt-0.5">{r.desc}</div>
@@ -200,6 +228,63 @@ export default function InviteUserPanel({ empresaId, onClose }) {
                   ))}
                 </div>
               </div>
+
+              {/* Módulos (solo para rol administrativo) */}
+              {form.rol === 'administrativo' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Módulos que podrá acceder
+                  </label>
+                  <p className="text-[10px] text-slate-400 mb-2">WorkFleet Móvil siempre incluido</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {MODULOS_ADMIN.map(m => {
+                      const active = form.modulos.includes(m.value);
+                      const isContracted = canAccess(m.value);
+                      return (
+                        <button key={m.value}
+                          type="button"
+                          disabled={!isContracted}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            modulos: active
+                              ? f.modulos.filter(x => x !== m.value)
+                              : [...f.modulos, m.value],
+                          }))}
+                          className={`p-3 rounded-xl text-left border-2 transition-all ${
+                            !isContracted 
+                              ? "border-slate-100 bg-slate-50 opacity-50 cursor-not-allowed" 
+                              : active 
+                                ? "border-blue-500 bg-blue-50" 
+                                : "border-slate-200 bg-white hover:border-slate-300"
+                          }`}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center ${
+                              !isContracted
+                                ? "border-slate-200 bg-slate-100"
+                                : active 
+                                  ? "bg-blue-600 border-blue-600" 
+                                  : "border-slate-300"
+                            }`}>
+                              {active && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-xs font-black ${!isContracted ? "text-slate-400" : active ? "text-blue-700" : "text-slate-700"}`}>{m.label}</span>
+                                {!isContracted && (
+                                  <span className="text-[8px] bg-red-100 text-red-600 px-1 py-0.5 rounded font-black border border-red-200 uppercase tracking-wide">
+                                    No Contratado
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400">{m.desc}</div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Expiración */}
               <div>

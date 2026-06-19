@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import TrabajadorLogin     from './TrabajadorLogin';
 import TrabajadorDashboard from './TrabajadorDashboard';
@@ -9,66 +9,72 @@ import TrabajadorDashboard from './TrabajadorDashboard';
  * TrabajadorApp
  * ─────────────
  * Punto de entrada del portal de trabajadores.
- * Rutar en tu app: <Route path="/trabajador/*" element={<TrabajadorApp />} />
- *
- * Flujo:
- *   1. Escucha Firebase Auth
- *   2. Si hay usuario autenticado → busca su perfil en Firestore (collection 'trabajadores', doc = uid)
- *   3. Muestra Login o Dashboard según estado
- *
- * Creación de cuentas (desde panel admin FleetCore):
- *   createUserWithEmailAndPassword(auth, rutSinPuntosGuion + '@mpf.cl', rutSinPuntosGuion)
- *   Luego el trabajador puede cambiar su contraseña desde el portal.
+ * Acceso: cualquier usuario con una entrada en trabajadores_portal/{uid}, sin restricción de rol.
+ * Si el índice falta, se intenta auto-crear buscando por portalUid en la colección trabajadores.
  */
 
 export default function TrabajadorApp() {
   const [estado,     setEstado]     = useState('loading'); // loading | guest | logged
   const [user,       setUser]       = useState(null);
   const [trabajador, setTrabajador] = useState(null);
+  const [empresaId,  setEmpresaId]  = useState(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
         setUser(null);
         setTrabajador(null);
+        setEmpresaId(null);
         setEstado('guest');
         return;
       }
 
-      // Verificar que sea una cuenta de trabajador (@mpf.cl)
-      // Esto evita que el admin (Google Auth) acceda al portal de trabajadores
-      if (!firebaseUser.email?.endsWith('@mpf.cl')) {
-        setUser(null);
-        setTrabajador(null);
-        setEstado('guest');
-        return;
-      }
-
-      setUser(firebaseUser);
-
-      // Buscar perfil del trabajador usando su email (rut@mpf.cl → rut sin puntos/guión)
-      // Estrategia: el docId del trabajador en Firestore NO es el uid de Auth,
-      // pero al crear la cuenta guardamos portalUid en el doc.
-      // Como las reglas bloquean getDocs sobre toda la colección,
-      // usamos el email para derivar el RUT y buscamos por el campo 'rut' formateado,
-      // o simplemente guardamos un doc índice en 'trabajadores_portal/{uid}' al crear cuenta.
-      // Solución más simple: guardar el firestoreId en un doc separado al crear la cuenta.
       try {
-        // Leer el índice uid→firestoreId que PortalTrabajadoresPanel escribe al crear cuenta
-        const idxSnap = await getDoc(doc(db, 'trabajadores_portal', firebaseUser.uid));
+        const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+        const userData = userSnap.exists() ? userSnap.data() : null;
+
+        // Cualquier usuario con empresaId puede acceder al portal — sin restricción de rol
+        if (!userData?.empresaId) {
+          setUser(null); setTrabajador(null); setEmpresaId(null);
+          setEstado('guest');
+          return;
+        }
+
+        setUser(firebaseUser);
+        const empId = userData.empresaId;
+        setEmpresaId(empId);
+
+        // 1. Buscar índice trabajadores_portal/{uid}
+        const idxRef  = doc(db, 'empresas', empId, 'trabajadores_portal', firebaseUser.uid);
+        const idxSnap = await getDoc(idxRef);
+
         if (idxSnap.exists()) {
+          // Índice encontrado → cargar perfil directamente
           const firestoreId = idxSnap.data().trabajadorDocId;
-          const tSnap = await getDoc(doc(db, 'trabajadores', firestoreId));
-          if (tSnap.exists()) {
-            setTrabajador({ id: tSnap.id, ...tSnap.data() });
+          const tSnap = await getDoc(doc(db, 'empresas', empId, 'trabajadores', firestoreId));
+          setTrabajador(tSnap.exists() ? { id: tSnap.id, ...tSnap.data() } : null);
+        } else {
+          // 2. Índice no existe → buscar en trabajadores por portalUid y auto-crear
+          const q     = query(collection(db, 'empresas', empId, 'trabajadores'), where('portalUid', '==', firebaseUser.uid));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            const tDoc = qSnap.docs[0];
+            await setDoc(idxRef, {
+              trabajadorDocId: tDoc.id,
+              rut:   tDoc.data().rut   || '',
+              email: firebaseUser.email || '',
+              autoCreated: true,
+              createdAt: serverTimestamp(),
+            });
+            setTrabajador({ id: tDoc.id, ...tDoc.data() });
           } else {
             setTrabajador(null);
           }
-        } else {
-          setTrabajador(null);
         }
       } catch {
-        setTrabajador(null);
+        setUser(null); setEmpresaId(null); setTrabajador(null);
+        setEstado('guest');
+        return;
       }
 
       setEstado('logged');
@@ -122,5 +128,5 @@ export default function TrabajadorApp() {
     return <TrabajadorLogin />;
   }
 
-  return <TrabajadorDashboard user={user} trabajador={trabajador} />;
+  return <TrabajadorDashboard user={user} trabajador={trabajador} empresaId={empresaId} />;
 }
