@@ -3,7 +3,7 @@ import { initializeFirestore, getFirestore, persistentLocalCache, persistentMult
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyByzRUHnLrxAaZOS9Dap1Kl0ZH5STWWzKE",
   authDomain: "mpf-maquinaria.firebaseapp.com",
   projectId: "mpf-maquinaria",
@@ -35,35 +35,31 @@ try {
 }
 
 // ============================================
-// AHORA SÍ EXPORTAR
+// EXPORTS PRINCIPALES
 // ============================================
-export const db = firestoreInstance;
-export const auth = getAuth(app);
+export const db             = firestoreInstance;
+export const auth           = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const storage = getStorage(app);
+export const storage        = getStorage(app);   // ← AGREGADO para subida de documentos
 
 // ============================================
 // PERSISTENCIA DE SESIÓN (AUTH)
 // ============================================
-// Mantener la sesión por 20 días mínimo, incluso sin internet
 setPersistence(auth, browserLocalPersistence)
   .then(() => {
     console.log("🔐 PERSISTENCIA DE SESIÓN HABILITADA");
     console.log("📱 Tu sesión se mantendrá por 20 días sin internet");
     
-    // Guardar timestamp de último login para tracking
     auth.onAuthStateChanged((user) => {
       if (user) {
         const lastLogin = localStorage.getItem('lastLogin');
         const now = Date.now();
         
         if (!lastLogin) {
-          // Primera vez, guardar timestamp
           localStorage.setItem('lastLogin', now.toString());
-          localStorage.setItem('sessionDuration', '20'); // 20 días
+          localStorage.setItem('sessionDuration', '20');
           console.log("✅ Sesión iniciada - válida por 20 días");
         } else {
-          // Verificar si han pasado más de 20 días
           const daysPassed = (now - parseInt(lastLogin)) / (1000 * 60 * 60 * 24);
           const daysRemaining = Math.max(0, 20 - Math.floor(daysPassed));
           
@@ -84,9 +80,6 @@ setPersistence(auth, browserLocalPersistence)
 // UTILIDADES DE SESIÓN
 // ============================================
 
-/**
- * Obtiene los días restantes de la sesión offline
- */
 export function getSessionDaysRemaining() {
   const lastLogin = localStorage.getItem('lastLogin');
   if (!lastLogin) return null;
@@ -103,9 +96,6 @@ export function getSessionDaysRemaining() {
   };
 }
 
-/**
- * Renueva el timestamp de sesión (llamar cuando se conecta a internet)
- */
 export function renewSession() {
   if (auth.currentUser) {
     localStorage.setItem('lastLogin', Date.now().toString());
@@ -119,9 +109,6 @@ export function renewSession() {
 // ESTADO DE CONEXIÓN
 // ============================================
 
-/**
- * Hook para monitorear el estado de conexión
- */
 export function onConnectionStateChange(callback) {
   const handleOnline = () => {
     console.log("🌐 CONEXIÓN RESTAURADA - Sincronizando...");
@@ -136,19 +123,14 @@ export function onConnectionStateChange(callback) {
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
   
-  // Estado inicial
   callback(navigator.onLine);
   
-  // Cleanup
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
   };
 }
 
-/**
- * Obtiene el estado actual de conexión
- */
 export function isOnline() {
   return navigator.onLine;
 }
@@ -157,9 +139,6 @@ export function isOnline() {
 // INFORMACIÓN DE SINCRONIZACIÓN
 // ============================================
 
-/**
- * Estima el tamaño del caché offline
- */
 export async function getCacheSize() {
   if ('storage' in navigator && 'estimate' in navigator.storage) {
     const estimate = await navigator.storage.estimate();
@@ -174,9 +153,6 @@ export async function getCacheSize() {
   return null;
 }
 
-/**
- * Limpia el caché offline (usar con cuidado)
- */
 export async function clearOfflineCache() {
   if ('indexedDB' in window) {
     try {
@@ -196,9 +172,6 @@ export async function clearOfflineCache() {
   return false;
 }
 
-/**
- * Verifica si el modo offline está habilitado
- */
 export function isOfflineEnabled() {
   return offlineEnabled;
 }

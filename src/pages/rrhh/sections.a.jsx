@@ -460,12 +460,35 @@ function TrabajadoresSection() {
   const [editData,setEditData]= useState(null);
   const [confirm, setConfirm] = useState(null);
   const [ficha,   setFicha]   = useState(null);
+  const [historial,    setHistorial]    = useState(null);
+  const [hContratos,   setHContratos]   = useState([]);
+  const [hAnexos,      setHAnexos]      = useState([]);
+  const [hLiquidaciones, setHLiquidaciones] = useState([]);
+  const [hFiniquitos,  setHFiniquitos]  = useState([]);
   const [busqueda,      setBusqueda]      = useState('');
   const [filtroArea,    setFiltroArea]    = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [filtroEstado,  setFiltroEstado]  = useState('activo');
   const [pagina, setPagina] = useState(1);
   const POR_PAGINA = 10;
+
+  // Cargar datos relacionados cuando se abre el historial
+  const openHistorial = useCallback(async (trabajador) => {
+    setHistorial(trabajador);
+    if (!empresaId || !trabajador) return;
+    try {
+      const [cSnap, aSnap, rSnap, fSnap] = await Promise.all([
+        getDocs(collection(db, 'empresas', empresaId, 'contratos')),
+        getDocs(collection(db, 'empresas', empresaId, 'anexos')),
+        getDocs(collection(db, 'empresas', empresaId, 'remuneraciones')),
+        getDocs(collection(db, 'empresas', empresaId, 'finiquitos')),
+      ]);
+      setHContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setHAnexos(aSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setHLiquidaciones(rSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setHFiniquitos(fSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch(e) { console.error(e); }
+  }, [empresaId]);
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -633,6 +656,9 @@ function TrabajadoresSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
+                          <button onClick={()=>openHistorial(row)} className="p-1.5 bg-violet-50 hover:bg-violet-100 text-violet-600 rounded-lg transition-colors" title="Ver historial completo">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                          </button>
                           <button onClick={()=>generarPDFContrato(row, row._trabajador)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar contrato PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                           </button>
@@ -669,6 +695,9 @@ function TrabajadoresSection() {
       <TrabajadorModal isOpen={modal} onClose={()=>setModal(false)} editData={editData} onSaved={load} />
       <ConfirmDialog isOpen={!!confirm} onClose={()=>setConfirm(null)} onConfirm={handleDelete} nombre={confirm?`${confirm.nombre} ${confirm.apellidoPaterno}`:''} />
       <FichaTrabajador trabajador={ficha} onEdit={()=>openEdit(ficha)} onClose={()=>setFicha(null)} />
+      <HistorialModal isOpen={!!historial} onClose={()=>setHistorial(null)}
+        trabajador={historial} contratos={hContratos} anexos={hAnexos}
+        liquidaciones={hLiquidaciones} finiquitos={hFiniquitos} />
     </>
   );
 }
@@ -1000,7 +1029,7 @@ function RemuneracionesSection() {
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t=>t.id===l.trabajadorId);
     const contrato   = contratos.find(c=>c.id===l.contratoId);
-    const calc = contrato ? calcularLiquidacionConIUT({...contrato,...l, afp: trabajador?.afp}, UTM_DEFAULT) : null;
+    const calc       = contrato ? calcularLiquidacion({...contrato,...l}) : null;
     return { ...l, _trabajador:trabajador, _contrato:contrato, _calc:calc };
   });
 
@@ -1196,9 +1225,11 @@ function RemuneracionesSection() {
                       <td className="px-4 py-3 text-sm text-red-500">-{c?`$${(c.sisM+c.cesM).toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3 text-sm text-blue-600">{c&&c.noImponible?`$${c.noImponible.toLocaleString('es-CL')}`:'—'}</td>
                       <td className="px-4 py-3">
-                        {c
-                          ? <span className="font-black text-emerald-600 text-sm">${c.liquido.toLocaleString('es-CL')}</span>
-                          : <span>—</span>}
+                        {c ? (() => {
+                          const iutRow = calcularIUT(calcularRentaTributable(c), UTM_DEFAULT);
+                          const liqReal = c.liquido - iutRow;
+                          return <span className="font-black text-emerald-600 text-sm">${liqReal.toLocaleString('es-CL')}</span>;
+                        })() : <span>—</span>}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado==='pagado'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>
@@ -1266,6 +1297,7 @@ function FiniquitosSection() {
   const [finiquitos,   setFiniquitos]   = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos,    setContratos]    = useState([]);
+  const [remuneraciones, setRemuneraciones] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [modal,        setModal]        = useState(false);
   const [editData,     setEditData]     = useState(null);
@@ -1280,14 +1312,16 @@ function FiniquitosSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const [fSnap, tSnap, cSnap] = await Promise.all([
+      const [fSnap, tSnap, cSnap, rSnap] = await Promise.all([
         getDocs(query(collection(db,'empresas',empresaId,'finiquitos'), orderBy('createdAt','desc'))),
         getDocs(collection(db,'empresas',empresaId,'trabajadores')),
         getDocs(collection(db,'empresas',empresaId,'contratos')),
+        getDocs(collection(db,'empresas',empresaId,'remuneraciones')),
       ]);
       setFiniquitos(fSnap.docs.map(d=>({id:d.id,...d.data()})));
       setTrabajadores(tSnap.docs.map(d=>({id:d.id,...d.data()})));
       setContratos(cSnap.docs.map(d=>({id:d.id,...d.data()})));
+      setRemuneraciones(rSnap.docs.map(d=>({id:d.id,...d.data()})));
     } catch { setFiniquitos([]); }
     setLoading(false);
   }, [empresaId]);
@@ -1486,7 +1520,7 @@ function FiniquitosSection() {
         )}
       </div>
 
-      <FiniquitoModal isOpen={modal} onClose={()=>setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} onSaved={load} />
+      <FiniquitoModal isOpen={modal} onClose={()=>setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} remuneraciones={remuneraciones} onSaved={load} />
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={()=>setConfirm(null)} />

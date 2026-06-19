@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { useContabilidad, PeriodoSelector, TIPOS_MAP, fmt, MESES, normalizaRut } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
+import * as XLSX from "xlsx";
 
 // Categorías rápidas para reclasificar asientos importados desde el Libro Diario
 const CATEGORIAS_RAPIDAS = [
@@ -504,9 +505,318 @@ function CuentaGastoChip({ asiento, onElegir }) {
   );
 }
 
+// ─── Helpers honorarios ───────────────────────────────────────────────────────
+function excelDateToISO(serial) {
+  if (!serial || isNaN(serial)) return new Date().toISOString().slice(0, 10);
+  return new Date(Math.floor(serial - 25569) * 86400 * 1000).toISOString().slice(0, 10);
+}
+
+// ─── Modal Importar Honorarios SII ───────────────────────────────────────────
+function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActivo }) {
+  const fileRef = useRef(null);
+  const [filas, setFilas]         = useState([]);
+  const [modo, setModo]           = useState("consolidado");
+  const [paso, setPaso]           = useState(1);
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState("");
+  const [ctaHonorarios, setCtaHonorarios] = useState("");
+  const [ctaRetencion, setCtaRetencion]   = useState("");
+  const [ctaLiquido, setCtaLiquido]       = useState("");
+
+  // Pre-seleccionar cuentas: primero por código fijo, luego por nombre como fallback
+  React.useEffect(() => {
+    if (!cuentas.length || !isOpen) return;
+    const porCodigo = (cod) => cuentas.find(c => c.codigo === cod);
+    // Busca por nombre restringiendo el tipo para evitar falsos matches
+    const porNombreGasto  = (terminos) => cuentas.find(c =>
+      ["gasto_adm","costo","otro_resultado"].includes(c.tipo) &&
+      terminos.some(t => c.nombre?.toLowerCase().includes(t.toLowerCase()))
+    );
+    const porNombrePasivo = (terminos) => cuentas.find(c =>
+      ["pasivo_corriente","pasivo_no_corriente"].includes(c.tipo) &&
+      terminos.some(t => c.nombre?.toLowerCase().includes(t.toLowerCase()))
+    );
+    // DEBE: cuenta de gasto de honorarios
+    const hon = porCodigo("6-01-004") || porNombreGasto(["honorario"]);
+    // HABER retención: pasivo retención
+    const ret = porCodigo("2-01-004") || porNombrePasivo(["retenci"]);
+    // HABER líquido: pasivo honorarios líquidos
+    const liq = porCodigo("2-01-005") || porNombrePasivo(["líquido", "liquido", "honorario"]);
+    if (hon) setCtaHonorarios(v => v || hon.id);
+    if (ret) setCtaRetencion(v => v || ret.id);
+    if (liq) setCtaLiquido(v => v || liq.id);
+  }, [cuentas, isOpen]);
+
+  const resetear = useCallback(() => {
+    setFilas([]); setPaso(1); setError(""); setSaving(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }, []);
+
+  // ¿Las 3 cuentas necesarias ya están resueltas automáticamente?
+  // Si es así, no hace falta mostrar el paso 3 — se importa directo.
+  const cuentasAutoResueltas = (hon, ret, liq) => {
+    // hon y liq son obligatorias; ret es opcional (si no hay retención en el archivo)
+    return !!(hon && liq);
+  };
+
+  // return null DESPUÉS de todos los hooks
+  if (!isOpen) return null;
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb  = XLSX.read(ev.target.result, { type: "array" });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        let headerIdx = -1;
+        for (let i = 0; i < raw.length; i++) {
+          if (raw[i].some(c => String(c).toLowerCase().includes("bruto"))) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) { setError("No se encontró la fila de encabezados (columna 'Brutos')."); return; }
+        const headers = raw[headerIdx].map(h => String(h).trim().toLowerCase());
+        const iCol = (name) => headers.findIndex(h => h.includes(name.toLowerCase()));
+        const iN = iCol("n°"), iEst = iCol("estado"), iFecha = iCol("fecha");
+        const iRut = iCol("rut"), iNombre = iCol("nombre");
+        const iBruto = iCol("bruto"), iRet = iCol("retenido"), iPagado = iCol("pagado");
+        if (iBruto === -1) { setError("Columna 'Brutos' no encontrada."); return; }
+        const registros = [];
+        for (let i = headerIdx + 1; i < raw.length; i++) {
+          const row = raw[i];
+          const bruto = parseFloat(row[iBruto] || 0);
+          if (!bruto) continue;
+          if (String(row[iEst] || "").toUpperCase() === "ANU") continue;
+          registros.push({
+            n: String(row[iN] || "").trim(),
+            estado: String(row[iEst] || "").toUpperCase(),
+            fecha: typeof row[iFecha] === "number" ? excelDateToISO(row[iFecha]) : String(row[iFecha] || "").trim(),
+            rut: String(row[iRut] || "").trim(),
+            nombre: String(row[iNombre] || "").trim(),
+            bruto: Math.round(bruto),
+            retenido: Math.round(parseFloat(row[iRet]  || 0)),
+            pagado:   Math.round(parseFloat(row[iPagado] || 0)),
+          });
+        }
+        if (!registros.length) { setError("No se encontraron boletas vigentes en el archivo."); return; }
+        setFilas(registros);
+        setPaso(2);
+      } catch (err) { setError("Error leyendo el archivo: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const totales = filas.reduce(
+    (acc, f) => ({ bruto: acc.bruto + f.bruto, retenido: acc.retenido + f.retenido, pagado: acc.pagado + f.pagado }),
+    { bruto: 0, retenido: 0, pagado: 0 }
+  );
+
+  const buildAsientos = () => {
+    const ctaHonNombre = cuentas.find(c => c.id === ctaHonorarios)?.nombre || "Honorarios";
+    const ctaRetNombre = cuentas.find(c => c.id === ctaRetencion)?.nombre  || "Retención Honorarios x Pagar";
+    const ctaLiqNombre = cuentas.find(c => c.id === ctaLiquido)?.nombre    || "Honorarios Líquidos x Pagar";
+    if (modo === "consolidado") {
+      const fechaAsiento = filas[filas.length - 1]?.fecha || new Date().toISOString().slice(0, 10);
+      const [anio, mes] = fechaAsiento.split("-");
+      const lineas = [{ cuentaId: ctaHonorarios, cuentaNombre: ctaHonNombre, debe: totales.bruto, haber: "", descripcion: `Honorarios ${filas.length} prestadores` }];
+      if (totales.retenido > 0) lineas.push({ cuentaId: ctaRetencion, cuentaNombre: ctaRetNombre, debe: "", haber: totales.retenido, descripcion: "Retención 10.75% SII" });
+      lineas.push({ cuentaId: ctaLiquido, cuentaNombre: ctaLiqNombre, debe: "", haber: totales.pagado, descripcion: "Honorarios líquidos por pagar" });
+      return [{ fecha: fechaAsiento, glosa: `Honorarios recibidos — ${mes}/${anio} (${filas.length} boletas)`, tipo: "honorarios", periodo: `${anio}-${mes}`, totalDebe: totales.bruto, origen: "importacion_honorarios", lineas }];
+    } else {
+      return filas.map(f => {
+        const [anio, mes] = f.fecha.split("-");
+        const lineas = [{ cuentaId: ctaHonorarios, cuentaNombre: ctaHonNombre, debe: f.bruto, haber: "", descripcion: `Boleta N°${f.n} — ${f.nombre}` }];
+        if (f.retenido > 0) lineas.push({ cuentaId: ctaRetencion, cuentaNombre: ctaRetNombre, debe: "", haber: f.retenido, descripcion: `Retención ${f.rut}` });
+        lineas.push({ cuentaId: ctaLiquido, cuentaNombre: ctaLiqNombre, debe: "", haber: f.pagado, descripcion: `Líquido ${f.nombre.split(" ")[0]}` });
+        return { fecha: f.fecha, glosa: `Honorarios — ${f.nombre} (${f.rut})`, tipo: "honorarios", periodo: `${anio}-${mes}`, totalDebe: f.bruto, origen: "importacion_honorarios", lineas };
+      });
+    }
+  };
+
+  const handleImportar = async () => {
+    if (!ctaHonorarios || !ctaLiquido) { setError("Debes seleccionar la cuenta de Honorarios y la cuenta de Pago."); return; }
+    setSaving(true); setError("");
+    try {
+      for (const a of buildAsientos()) await onSave(a);
+      onClose(); resetear();
+    } catch (err) { setError("Error guardando: " + err.message); }
+    setSaving(false);
+  };
+
+  const cuentasGasto  = cuentas.filter(c => c.activa !== false && ["gasto_adm","costo","otro_resultado"].includes(c.tipo));
+  const cuentasPasivo = cuentas.filter(c => c.activa !== false && ["pasivo_corriente","pasivo_no_corriente"].includes(c.tipo));
+  const cuentasTodas  = cuentas.filter(c => c.activa !== false);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-5 text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-lg">📋</div>
+            <div>
+              <h2 className="font-black text-base">Importar Honorarios SII</h2>
+              <p className="text-white/70 text-xs">Boletas recibidas — período {periodoActivo}</p>
+            </div>
+          </div>
+          <button onClick={() => { onClose(); resetear(); }} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        {/* Pasos */}
+        <div className="flex border-b border-slate-100">
+          {[{ n: 1, label: "Cargar archivo" }, { n: 2, label: "Revisar datos" }, { n: 3, label: "Mapear cuentas" }].map(s => (
+            <div key={s.n} className={`flex-1 py-2.5 text-center text-xs font-bold ${paso === s.n ? "text-emerald-700 border-b-2 border-emerald-600" : "text-slate-400"}`}>
+              <span className={`inline-flex w-5 h-5 rounded-full mr-1 items-center justify-center text-[10px] font-black ${paso > s.n ? "bg-emerald-100 text-emerald-600" : paso === s.n ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                {paso > s.n ? "✓" : s.n}
+              </span>
+              {s.label}
+            </div>
+          ))}
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Paso 1 */}
+          {paso === 1 && (
+            <div className="space-y-4">
+              <div className="p-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
+                <p className="font-black">¿Cómo obtener el archivo?</p>
+                <ol className="list-decimal list-inside space-y-0.5 text-emerald-700">
+                  <li>SII → Mi SII → Servicios online</li>
+                  <li>Boletas de Honorarios Electrónicas → Honorarios Recibidos</li>
+                  <li>Selecciona el período y descarga el Excel (.xlsx)</li>
+                </ol>
+              </div>
+              <label className="flex flex-col items-center gap-3 p-8 border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-2xl cursor-pointer transition-colors group">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50 group-hover:bg-emerald-100 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                </div>
+                <div className="text-center">
+                  <p className="font-bold text-slate-700">Seleccionar archivo Excel</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Archivo .xlsx de Honorarios Recibidos del SII</p>
+                </div>
+                <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
+              </label>
+              {error && <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl"><svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><p className="text-xs text-red-700 font-semibold">{error}</p></div>}
+            </div>
+          )}
+          {/* Paso 2 */}
+          {paso === 2 && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                {[{ label: "Boletas", value: filas.length, color: "text-slate-800" }, { label: "Total Bruto", value: fmt(totales.bruto), color: "text-emerald-700" }, { label: "Retención", value: fmt(totales.retenido), color: "text-amber-600" }].map(k => (
+                  <div key={k.label} className="bg-slate-50 rounded-xl p-3 text-center">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">{k.label}</p>
+                    <p className={`text-sm font-black mt-0.5 ${k.color}`}>{k.value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="border-2 border-slate-100 rounded-xl overflow-hidden">
+                <div className="max-h-56 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr className="text-[10px] font-black text-slate-500 uppercase">
+                        <th className="px-3 py-2 text-left">Nombre</th>
+                        <th className="px-3 py-2 text-left">Fecha</th>
+                        <th className="px-3 py-2 text-right">Bruto</th>
+                        <th className="px-3 py-2 text-right">Retención</th>
+                        <th className="px-3 py-2 text-right">Líquido</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {filas.map((f, i) => (
+                        <tr key={i} className="hover:bg-slate-50">
+                          <td className="px-3 py-2"><p className="font-semibold text-slate-700 truncate max-w-32">{f.nombre}</p><p className="text-[10px] text-slate-400">{f.rut}</p></td>
+                          <td className="px-3 py-2 text-slate-500">{f.fecha}</td>
+                          <td className="px-3 py-2 text-right font-mono text-slate-700">{fmt(f.bruto)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-amber-600">{f.retenido > 0 ? fmt(f.retenido) : "—"}</td>
+                          <td className="px-3 py-2 text-right font-mono text-emerald-700">{fmt(f.pagado)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+                      <tr className="font-black text-xs">
+                        <td colSpan={2} className="px-3 py-2 text-slate-600">TOTALES ({filas.length} boletas)</td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-800">{fmt(totales.bruto)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-amber-700">{fmt(totales.retenido)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-emerald-800">{fmt(totales.pagado)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-600 mb-2">¿Cómo registrar los asientos?</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[{ id: "consolidado", label: "Consolidado", desc: "1 asiento con el total del mes" }, { id: "detallado", label: "Detallado", desc: "1 asiento por cada prestador" }].map(m => (
+                    <button key={m.id} onClick={() => setModo(m.id)} className={`p-3 rounded-xl border-2 text-left transition-all ${modo === m.id ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"}`}>
+                      <p className={`text-xs font-black ${modo === m.id ? "text-emerald-700" : "text-slate-700"}`}>{m.label}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{m.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Paso 3 */}
+          {paso === 3 && (
+            <div className="space-y-4">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                <p className="text-xs text-amber-700 font-semibold">Asiento: <strong>Debe</strong> Honorarios (bruto) / <strong>Haber</strong> Retención x Pagar + Líquido x Pagar.</p>
+              </div>
+              {[
+                { label: "Cuenta Honorarios (gasto) *", hint: "Gasto bruto — DEBE", val: ctaHonorarios, set: setCtaHonorarios, lista: cuentasGasto },
+                ...(totales.retenido > 0 ? [{ label: "Retención Honorarios x Pagar", hint: "Pasivo retención 10.75% — HABER", val: ctaRetencion, set: setCtaRetencion, lista: cuentasPasivo }] : []),
+                { label: "Honorarios Líquidos x Pagar *", hint: "Monto pagado — HABER", val: ctaLiquido, set: setCtaLiquido, lista: cuentasTodas },
+              ].map(f => (
+                <div key={f.label}>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">{f.label}</label>
+                  <p className="text-[10px] text-slate-400 mb-1.5">{f.hint}</p>
+                  <select value={f.val} onChange={e => f.set(e.target.value)} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 text-sm">
+                    <option value="">— Seleccionar cuenta —</option>
+                    {f.lista.map(c => <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>)}
+                  </select>
+                </div>
+              ))}
+              {error && <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl"><svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><p className="text-xs text-red-700 font-semibold">{error}</p></div>}
+            </div>
+          )}
+        </div>
+        {/* Footer */}
+        <div className="px-5 pb-5 flex gap-3">
+          <button onClick={() => { onClose(); resetear(); }} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">Cancelar</button>
+          {paso > 1 && <button onClick={() => setPaso(p => p - 1)} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm flex items-center gap-1.5"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>Atrás</button>}
+          <div className="flex-1" />
+          {paso < 3 && filas.length > 0 && (() => {
+            // Si las cuentas ya están auto-resueltas, desde el paso 2 se importa directo
+            const autoOk = cuentasAutoResueltas(ctaHonorarios, ctaRetencion, ctaLiquido);
+            if (paso === 2 && autoOk) {
+              return (
+                <button onClick={handleImportar} disabled={saving}
+                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">
+                  {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>Importar {modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}</>}
+                </button>
+              );
+            }
+            return (
+              <button onClick={() => setPaso(p => p + 1)}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">
+                Siguiente<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              </button>
+            );
+          })()}
+          {paso === 3 && <button onClick={handleImportar} disabled={saving} className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">{saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>Importar {modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}</>}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadLibroDiario() {
-  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto, guardarReglaGasto } = useContabilidad();
+  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto } = useContabilidad();
+  const reglasGasto = _reglasGasto || {};
   const [showModal, setShowModal]     = useState(false);
   const [editando, setEditando]       = useState(null);
   const [expandido, setExpandido]     = useState(null);
@@ -515,8 +825,24 @@ export default function ContabilidadLibroDiario() {
   const [ordenCampo, setOrdenCampo]   = useState("fecha");   // fecha|glosa|monto|tipo
   const [ordenDir, setOrdenDir]       = useState("desc");    // asc|desc
   const [deletingId, setDeletingId]   = useState(null);
-  const [showImport, setShowImport]   = useState(false);
-  const [showExport, setShowExport]   = useState(false);
+  const [showImport, setShowImport]     = useState(false);
+  const [showExport, setShowExport]     = useState(false);
+  const [showHonModal, setShowHonModal] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
+  const importMenuRef = useRef(null);
+
+  // Cerrar el dropdown al hacer click fuera del contenedor
+  React.useEffect(() => {
+    if (!showImportMenu) return;
+    const handler = (e) => {
+      if (importMenuRef.current && !importMenuRef.current.contains(e.target)) {
+        setShowImportMenu(false);
+      }
+    };
+    // setTimeout para no capturar el mismo click que abrió el menú
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 0);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [showImportMenu]);
   const [autoClasif, setAutoClasif]   = useState(null);      // {procesando, total, hechos} | null
 
   // Reclasifica un asiento y aprende la regla para ese proveedor (se aplicará a futuros)
@@ -694,14 +1020,46 @@ export default function ContabilidadLibroDiario() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             Exportar PDF
           </button>
-          {/* Botón Importar iConstruct */}
-          <button
-            onClick={() => setShowImport(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-700 to-blue-600 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 hover:shadow-lg transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-            iConstruct
-          </button>
+          {/* Botón Importar — dropdown unificado */}
+          <div className="relative" ref={importMenuRef}>
+            <button
+              onClick={() => setShowImportMenu(v => !v)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-700 to-blue-600 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 hover:shadow-lg transition-all"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+              Importar
+              <svg className={`w-3.5 h-3.5 transition-transform ${showImportMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {showImportMenu && (
+              <div className="absolute right-0 top-full mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-100 z-30 overflow-hidden">
+                <button
+                  onClick={() => { setShowImportMenu(false); setShowImport(true); }}
+                  className="flex items-center gap-3 w-full px-4 py-3 hover:bg-indigo-50 transition-colors text-left"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-slate-800">iConstruct / iConstruye</p>
+                    <p className="text-[10px] text-slate-400">Compras, ventas, NC</p>
+                  </div>
+                </button>
+                <div className="border-t border-slate-100" />
+                <button
+                  onClick={() => { setShowImportMenu(false); setShowHonModal(true); }}
+                  className="flex items-center gap-3 w-full px-4 py-3 hover:bg-emerald-50 transition-colors text-left"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-slate-800">Honorarios SII</p>
+                    <p className="text-[10px] text-slate-400">Boletas recibidas (.xlsx)</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => { setEditando(null); setShowModal(true); }}
             className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white font-bold rounded-xl text-sm shadow-md shadow-purple-200 hover:shadow-lg transition-all"
@@ -753,6 +1111,7 @@ export default function ContabilidadLibroDiario() {
               <option value="nota_credito">🔴 Notas de Crédito</option>
             </optgroup>
             <optgroup label="Por tipo">
+              <option value="honorarios">📋 Honorarios SII</option>
               <option value="automatico">Automático</option>
               <option value="manual">Manual</option>
               <option value="ajuste">Ajuste</option>
@@ -905,6 +1264,13 @@ export default function ContabilidadLibroDiario() {
         }}
       />
       <ModalExportPDF isOpen={showExport} onClose={() => setShowExport(false)} />
+      <ModalImportarHonorarios
+        isOpen={showHonModal}
+        onClose={() => setShowHonModal(false)}
+        cuentas={cuentas}
+        onSave={guardarAsiento}
+        periodoActivo={periodoActivo}
+      />
     </div>
   );
 }

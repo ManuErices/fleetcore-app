@@ -126,52 +126,150 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const { anios, meses, dias, totalMeses } = calcularAntiguedad(fechaIng, fechaTerm);
 
   // ── Feriado proporcional (Art. 73 CT) ──
-  // 15 días hábiles por año. Proporcional = (15/12) × meses del año en curso
-  const diasTrabajadosAnio = (new Date(fechaTerm).getMonth() - new Date(new Date(fechaTerm).getFullYear(), 0, 0).getMonth()) + 1;
-  const feriadoPropDias    = Math.round((15 / 12) * diasTrabajadosAnio * 10) / 10;
+  // 15 días hábiles anuales. Proporcional = (15/12) × meses trabajados en el año de término
+  const dtTerm             = new Date(fechaTerm);
+  const mesesEnAnioActual  = dtTerm.getMonth() + 1; // 1–12
+  const diasEnMesActual    = dtTerm.getDate();
+  // Fracción del mes actual: días trabajados / 30
+  const fraccionMesActual  = Math.min(1, diasEnMesActual / 30);
+  const mesesFeriado       = mesesEnAnioActual - 1 + fraccionMesActual;
+  const feriadoPropDias    = Math.round((15 / 12) * mesesFeriado * 10) / 10;
   const feriadoPropMonto   = Math.round(ult / 30 * feriadoPropDias);
-  const feriadoPendiente   = parseInt(fin.diasFeriadoPendiente||0);
+  const feriadoPendiente   = parseInt(fin.diasFeriadoPendiente || 0);
   const feriadoPendMonto   = Math.round(ult / 30 * feriadoPendiente);
   const totalFeriado       = feriadoPropMonto + feriadoPendMonto;
 
-  // ── Meses trabajados en año en curso (para gratificación proporcional) ──
-  const mesesAnioActual    = new Date(fechaTerm).getMonth() + 1;
-  const gratPropMonto      = Math.round(IMM_2024 * 0.25 / 12 * mesesAnioActual);
+  // ── Gratificación proporcional (Art. 50 CT) ──
+  // 25% de lo devengado en el año, tope 4.75 IMM anual. Proporcional a meses.
+  // Usamos IMM_2026 vigente
+  const gratAnualTope      = IMM_2026 * 4.75;
+  const gratPropMonto      = Math.round(gratAnualTope / 12 * mesesFeriado);
+
+  // ── Remuneración del mes en curso (proporcional si no está pagada) ──
+  const remMesEnCurso      = parseInt(fin.remMesEnCurso || 0);
 
   // ── Indemnización por años de servicio (Art. 163 CT) ──
-  // Solo art. 161 (necesidades empresa) con contrato indefinido >= 1 año
   const tieneIndemnizacion = CAUSALES_CON_INDEMNIZACION.includes(causal)
     && (contrato?.tipoContrato === 'Indefinido' || !contrato?.tipoContrato)
     && anios >= 1;
   const aniosIndemnizacion = Math.min(anios, TOPE_ANIOS_INDEMNIZACION);
+  // Base indemnización = última remuneración mensual imponible (tope 90 UF ≈ referencial)
   const indemMonto         = tieneIndemnizacion ? ult * aniosIndemnizacion : 0;
 
-  // ── Aviso previo (Art. 161 CT) ── si no se dio aviso 30 días antes
+  // ── Indemnización sustitutiva aviso previo (Art. 161 CT) ──
   const indемAvisoPrevio   = fin.pagoAvisoPrevio === 'si' ? ult : 0;
 
-  // ── Remuneraciones pendientes ──
-  const remPendiente       = parseInt(fin.remuneracionesPendientes||0);
+  // ── Remuneraciones pendientes (períodos anteriores no pagados) ──
+  const remPendiente       = parseInt(fin.remuneracionesPendientes || 0);
 
-  // ── Descuentos ──
-  const anticipoPend       = parseInt(fin.anticipoPendiente||0);
-  const otrosDescuentos    = parseInt(fin.otrosDescuentos||0);
+  // ── Otros haberes manuales ──
+  const otrosHaberes       = parseInt(fin.otrosHaberes || 0);
+
+  // ── Descuentos previsionales del mes de término ──
+  // Sobre la remuneración del mes en curso (si se está liquidando aquí)
+  const tasaAfp  = TASAS_AFP[trabajador?.afp] || TASAS.afp;
+  const descAfp  = fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * tasaAfp) : parseInt(fin.descAfp || 0);
+  const descSalud= fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * TASAS.salud) : parseInt(fin.descSalud || 0);
+  const esCt     = contrato?.tipoContrato === 'Plazo Fijo' || contrato?.tipoContrato === 'Obra o Faena';
+  const descCes  = fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab)) : parseInt(fin.descCes || 0);
+  const totalDescPrev = descAfp + descSalud + descCes;
+
+  // ── Otros descuentos ──
+  const anticipoPend       = parseInt(fin.anticipoPendiente || 0);
+  const otrosDescuentos    = parseInt(fin.otrosDescuentos || 0);
 
   // ── Totales ──
-  const totalHaberes  = totalFeriado + gratPropMonto + indemMonto + indемAvisoPrevio + remPendiente;
-  const totalDescuentos = anticipoPend + otrosDescuentos;
-  const totalFiniquito = totalHaberes - totalDescuentos;
+  const totalHaberes    = totalFeriado + gratPropMonto + remMesEnCurso + remPendiente + indemMonto + indемAvisoPrevio + otrosHaberes;
+  const totalDescuentos = totalDescPrev + anticipoPend + otrosDescuentos;
+  const totalFiniquito  = totalHaberes - totalDescuentos;
 
   return {
     anios, meses, dias, totalMeses,
+    mesesEnAnioActual, mesesFeriado,
     feriadoPropDias, feriadoPropMonto,
     feriadoPendiente, feriadoPendMonto, totalFeriado,
-    mesesAnioActual, gratPropMonto,
+    gratPropMonto, gratAnualTope,
+    remMesEnCurso, remPendiente, otrosHaberes,
     tieneIndemnizacion, aniosIndemnizacion, indemMonto,
     indемAvisoPrevio,
-    remPendiente,
+    descAfp, descSalud, descCes, totalDescPrev,
     anticipoPend, otrosDescuentos, totalDescuentos,
     totalHaberes, totalFiniquito,
     ultimaRemuneracion: ult,
+  };
+}
+
+// ── Auto-relleno de haberes del finiquito desde remuneraciones del sistema ──
+function calcularHaberesDesdeRemuneraciones(trabajadorId, contratos, remuneraciones, fechaTermino) {
+  if (!trabajadorId || !fechaTermino) return {};
+
+  const contrato = contratos?.find(c => c.trabajadorId === trabajadorId && c.estado === 'vigente')
+    || contratos?.find(c => c.trabajadorId === trabajadorId);
+
+  if (!contrato) return {};
+
+  const dtTerm = new Date(fechaTermino);
+  const anioTerm = dtTerm.getFullYear();
+  const mesTerm  = dtTerm.getMonth() + 1;
+
+  // Liquidaciones del trabajador
+  const liqs = (remuneraciones || []).filter(r => r.trabajadorId === trabajadorId || r.contratoId === contrato.id);
+
+  // ── 1. Última remuneración (mes anterior al término) ──
+  const mesAnterior = mesTerm === 1 ? 12 : mesTerm - 1;
+  const anioAnterior = mesTerm === 1 ? anioTerm - 1 : anioTerm;
+  const liqMesAnt = liqs
+    .filter(r => parseInt(r.mes) === mesAnterior && parseInt(r.anio) === anioAnterior)
+    .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0];
+
+  const ultimaRemuneracion = liqMesAnt?.sueldoBase || contrato.sueldoBase || '';
+
+  // ── 2. Remuneración del mes en curso (si no está liquidada) ──
+  const liqMesActual = liqs.find(r => parseInt(r.mes) === mesTerm && parseInt(r.anio) === anioTerm);
+  let remMesEnCurso = 0;
+  if (!liqMesActual && ultimaRemuneracion) {
+    // Proporcional: días trabajados en el mes hasta la fecha de término
+    const diasTrab = dtTerm.getDate();
+    remMesEnCurso = Math.round(parseInt(ultimaRemuneracion) * diasTrab / 30);
+  }
+
+  // ── 3. Feriado legal acumulado no gozado ──
+  // Reconstruir desde registros de asistencia si hay o desde fecha de ingreso
+  const fechaIng = contrato.fechaInicio || '';
+  let diasFeriadoPendiente = 0;
+  if (fechaIng) {
+    const { anios: aniosTot, totalMeses } = calcularAntiguedad(fechaIng, fechaTermino);
+    // Días devengados totales: 15 días/año × años completos + proporcional
+    const diasDevengados = Math.floor(15 * (totalMeses / 12));
+    // Días usados: buscar en liquidaciones o asumir 0 (campo diasFeriadoUsado)
+    const diasUsados = liqs.reduce((s, r) => s + (parseInt(r.diasFeriadoUsado) || 0), 0);
+    diasFeriadoPendiente = Math.max(0, diasDevengados - diasUsados);
+  }
+
+  // ── 4. Remuneraciones de meses anteriores sin pagar ──
+  // Detectar meses del año con estado distinto a 'pagado'
+  const mesesSinPagar = liqs.filter(r => {
+    const anioR = parseInt(r.anio);
+    const mesR  = parseInt(r.mes);
+    return r.estado !== 'pagado'
+      && (anioR < anioTerm || (anioR === anioTerm && mesR < mesTerm));
+  });
+  const remuneracionesPendientes = mesesSinPagar.reduce((s, r) => {
+    const calc = calcularLiquidacion(r);
+    return s + Math.max(0, calc.liquido);
+  }, 0);
+
+  return {
+    ultimaRemuneracion: String(ultimaRemuneracion),
+    diasFeriadoPendiente: String(diasFeriadoPendiente),
+    remuneracionesPendientes: String(Math.round(remuneracionesPendientes)),
+    remMesEnCurso: String(remMesEnCurso),
+    _mesesSinPagarDetalle: mesesSinPagar.map(r => ({
+      mes: r.mes, anio: r.anio, estado: r.estado,
+      liquido: Math.max(0, calcularLiquidacion(r).liquido),
+    })),
+    _liqMesAnt: liqMesAnt ? { mes: liqMesAnt.mes, anio: liqMesAnt.anio } : null,
+    _remMesActualYaPagada: !!liqMesActual,
   };
 }
 function calcularIUT(renImponible, utm) {
@@ -385,7 +483,7 @@ function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, calcularAntiguedad, calcularFiniquito,
+  calcularLiquidacion, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDiarias, analizarDia, resumenSemana, diasDelMes,
   generarTXTPrevired, exportarAsistenciaCSV };

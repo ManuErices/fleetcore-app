@@ -1,5 +1,5 @@
-import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT } from './shared';
-import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo } from './calculo';
+import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
+import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
 
 function generarPDFContrato(contrato, trabajador) {
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
@@ -122,7 +122,15 @@ function generarPDFContrato(contrato, trabajador) {
   <div class="clausula">
     <div class="clausula-titulo"><span class="numero-clausula">CUARTA.</span> Jornada de Trabajo</div>
     <div class="clausula-body">
+      ${contrato.jornada === 'Otro' ? `
+      <p>La jornada de trabajo será de <strong>${contrato.jornadaHorasSemanales || '___'} horas semanales</strong>, distribuida de la siguiente manera:</p>
+      ${contrato.jornadaDias?.length ? `<p><strong>Días:</strong> ${contrato.jornadaDias.join(', ')}.</p>` : ''}
+      ${contrato.jornadaHoraEntrada && contrato.jornadaHoraSalida ? `<p><strong>Horario:</strong> De ${contrato.jornadaHoraEntrada} a ${contrato.jornadaHoraSalida} horas.</p>` : ''}
+      ${contrato.jornadaDescripcion ? `<p>${contrato.jornadaDescripcion}</p>` : ''}
+      <p>Lo anterior en conformidad con lo establecido en el artículo 22 del Código del Trabajo.</p>
+      ` : `
       <p>La jornada de trabajo será: <strong>${contrato.jornada || '45 horas semanales'}</strong>, distribuida de lunes a viernes${contrato.jornada?.includes('Turno') ? ', en régimen de turnos' : ''}, conforme a lo establecido en el artículo 22 del Código del Trabajo.</p>
+      `}
       ${hExtra > 0 ? `<p>Se pactan horas extraordinarias habituales de hasta <strong>${hExtra} horas semanales</strong>, con un recargo mínimo del 50% sobre el valor de la hora ordinaria (Art. 32 CT), con un valor hora extra de <strong>${fmt(contrato.valorHoraExtra)}</strong>.</p>` : ''}
     </div>
   </div>
@@ -220,15 +228,15 @@ function generarPDFContrato(contrato, trabajador) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 function generarPDFLiquidacion(rem, trabajador, contrato) {
-  const calc     = calcularLiquidacionConIUT({ ...contrato, ...rem, afp: trabajador?.afp }, UTM_DEFAULT);
-  const iut      = calc.iut || 0;
+  const calc     = calcularLiquidacion({ ...contrato, ...rem });
+  const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
   const nombre   = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
     : '_______________';
   const mesLabel = labelPeriodo(rem);
   const fmt      = (n) => `$${(n||0).toLocaleString('es-CL')}`;
-  const tasaAfp  = ((TASAS_AFP[trabajador?.afp] || 0.1137) * 100).toFixed(2);
-  const liquidoFinal = calc.liquidoFinal;
+  const tasaAfp  = ((TASAS_AFP[trabajador?.afp] || 0.1127) * 100).toFixed(2);
+  const liquidoFinal = calc.liquido - iut;
   const rentaTrib    = calcularRentaTributable(calc);
   const diasTrab     = rem.diasTrabajados || 30;
   const horasBase    = rem.horasBase || (contrato?.jornada?.includes('45') ? 44 : 45);
@@ -1025,18 +1033,22 @@ function generarPDFFiniquito(fin, trabajador, contrato) {
   <table class="tabla-liq">
     <thead><tr><th>Concepto</th><th>Detalle</th><th style="text-align:right">Monto</th></tr></thead>
     <tbody>
-      <tr><td>Última remuneración mensual base</td><td>Sueldo mes en curso</td><td>${fmt(calc.ultimaRemuneracion)}</td></tr>
-      ${calc.feriadoPropMonto ? `<tr><td>Feriado proporcional (Art. 73 CT)</td><td>${calc.feriadoPropDias} días hábiles</td><td>${fmt(calc.feriadoPropMonto)}</td></tr>` : ''}
-      ${calc.feriadoPendiente ? `<tr><td>Feriado pendiente acumulado</td><td>${calc.feriadoPendiente} días</td><td>${fmt(calc.feriadoPendMonto)}</td></tr>` : ''}
-      ${calc.gratPropMonto ? `<tr><td>Gratificación proporcional</td><td>${calc.mesesAnioActual} meses año en curso</td><td>${fmt(calc.gratPropMonto)}</td></tr>` : ''}
-      ${calc.remPendiente ? `<tr><td>Remuneraciones pendientes</td><td>Períodos adeudados</td><td>${fmt(calc.remPendiente)}</td></tr>` : ''}
+      ${calc.remMesEnCurso > 0 ? `<tr><td>Remuneración mes de término (proporcional)</td><td>Días trabajados hasta el ${fmtF(fin.fechaTermino)}</td><td>${fmt(calc.remMesEnCurso)}</td></tr>` : ''}
+      ${calc.remPendiente > 0 ? `<tr><td>Remuneraciones períodos anteriores pendientes</td><td>Períodos adeudados</td><td>${fmt(calc.remPendiente)}</td></tr>` : ''}
+      ${calc.feriadoPropMonto ? `<tr><td>Feriado proporcional (Art. 73 CT)</td><td>${calc.feriadoPropDias} días hábiles — ${calc.mesesFeriado?.toFixed(1)} meses</td><td>${fmt(calc.feriadoPropMonto)}</td></tr>` : ''}
+      ${calc.feriadoPendiente ? `<tr><td>Feriado acumulado pendiente (Art. 73 CT)</td><td>${calc.feriadoPendiente} días</td><td>${fmt(calc.feriadoPendMonto)}</td></tr>` : ''}
+      ${calc.gratPropMonto ? `<tr><td>Gratificación proporcional (Art. 50 CT)</td><td>${calc.mesesFeriado?.toFixed(1)} meses año en curso</td><td>${fmt(calc.gratPropMonto)}</td></tr>` : ''}
       ${calc.tieneIndemnizacion ? `<tr><td><strong>Indemnización por años de servicio (Art. 163 CT)</strong></td><td>${calc.aniosIndemnizacion} año${calc.aniosIndemnizacion!==1?'s':''} × ${fmt(calc.ultimaRemuneracion)}</td><td><strong>${fmt(calc.indemMonto)}</strong></td></tr>` : ''}
       ${calc.indемAvisoPrevio ? `<tr><td>Indemnización sustitutiva aviso previo (Art. 161 CT)</td><td>Equivalente a 1 mes de remuneración</td><td>${fmt(calc.indемAvisoPrevio)}</td></tr>` : ''}
+      ${calc.otrosHaberes > 0 ? `<tr><td>${fin.glosaOtrosHaberes||'Otros haberes'}</td><td></td><td>${fmt(calc.otrosHaberes)}</td></tr>` : ''}
     </tbody>
     <tfoot>
       <tr class="subtotal-row"><td colspan="2">Total Haberes</td><td>${fmt(calc.totalHaberes)}</td></tr>
+      ${calc.descAfp > 0 ? `<tr><td colspan="2" class="descuento">Descuento AFP (${trabajador?.afp||'—'})</td><td class="descuento">-${fmt(calc.descAfp)}</td></tr>` : ''}
+      ${calc.descSalud > 0 ? `<tr><td colspan="2" class="descuento">Descuento Salud (7%)</td><td class="descuento">-${fmt(calc.descSalud)}</td></tr>` : ''}
+      ${calc.descCes > 0 ? `<tr><td colspan="2" class="descuento">Descuento AFC</td><td class="descuento">-${fmt(calc.descCes)}</td></tr>` : ''}
       ${calc.anticipoPend ? `<tr><td colspan="2" class="descuento">Descuento: anticipo de remuneraciones</td><td class="descuento">-${fmt(calc.anticipoPend)}</td></tr>` : ''}
-      ${calc.otrosDescuentos ? `<tr><td colspan="2" class="descuento">Otros descuentos (${fin.glosaDescuento||'varios'})</td><td class="descuento">-${fmt(calc.otrosDescuentos)}</td></tr>` : ''}
+      ${calc.otrosDescuentos ? `<tr><td colspan="2" class="descuento">Otros descuentos (${fin.glosaOtrosDesc||fin.glosaDescuento||'varios'})</td><td class="descuento">-${fmt(calc.otrosDescuentos)}</td></tr>` : ''}
     </tfoot>
   </table>
 
@@ -1115,14 +1127,37 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
   // Construir cláusula de modificación según tipo
   let clausulaModif = '';
   switch(anexo.tipo) {
+    case 'aumento_sueldo_base':
+      clausulaModif = `A contar de la fecha del presente anexo, la remuneración mensual del/la trabajador/a queda establecida en la suma de <strong>${fmt(anexo.sueldoBase)}</strong> pesos brutos mensuales por concepto de sueldo base imponible, reemplazando en este aspecto lo estipulado en el contrato original. Las demás cláusulas del contrato permanecen inalteradas.`;
+      break;
+    case 'aumento_haberes':
+      clausulaModif = `A contar de la fecha del presente anexo, los haberes del/la trabajador/a quedan establecidos de la siguiente forma: ${[
+        anexo.sueldoBase        ? `Sueldo base imponible: <strong>${fmt(anexo.sueldoBase)}</strong>` : '',
+        anexo.bonoColacion      ? `Bono de colación (no imponible): <strong>${fmt(anexo.bonoColacion)}</strong>` : '',
+        anexo.bonoMovilizacion  ? `Bono de movilización (no imponible): <strong>${fmt(anexo.bonoMovilizacion)}</strong>` : '',
+        anexo.viaticos          ? `Viáticos (no imponible): <strong>${fmt(anexo.viaticos)}</strong>` : '',
+      ].filter(Boolean).join('; ')}. Estos montos reemplazan los estipulados en el contrato original. Las demás cláusulas permanecen inalteradas.`;
+      break;
     case 'aumento_sueldo':
-      clausulaModif = `A contar de la fecha del presente anexo, la remuneración mensual del/la trabajador/a queda establecida en la suma de <strong>${fmt(anexo.sueldoBase)}</strong> pesos brutos mensuales${anexo.bonoProduccion?`, más un bono de producción de <strong>${fmt(anexo.bonoProduccion)}</strong>`:''}, reemplazando en este aspecto lo estipulado en el contrato original. Las demás cláusulas del contrato permanecen inalteradas.`;
+      clausulaModif = `A contar de la fecha del presente anexo, la remuneración mensual del/la trabajador/a queda establecida en la suma de <strong>${fmt(anexo.nuevoSueldo || anexo.sueldoBase)}</strong> pesos brutos mensuales${anexo.bonoProduccion?`, más un bono de producción de <strong>${fmt(anexo.bonoProduccion)}</strong>`:''}, reemplazando en este aspecto lo estipulado en el contrato original. Las demás cláusulas del contrato permanecen inalteradas.`;
       break;
     case 'cambio_cargo':
       clausulaModif = `A contar de la fecha del presente anexo, el/la trabajador/a desempeñará el cargo de <strong>${anexo.cargo||'_______________'}</strong>${anexo.centroCosto?`, en el centro de costo "${anexo.centroCosto}"`:''}.${anexo.funciones?` Sus funciones serán: ${anexo.funciones}.`:''} Esta modificación no implica menoscabo para el/la trabajador/a en conformidad al artículo 12 del Código del Trabajo.`;
       break;
     case 'cambio_jornada':
-      clausulaModif = `A contar de la fecha del presente anexo, la jornada de trabajo del/la trabajador/a queda establecida como <strong>${anexo.jornada||'_______________'}</strong>, modificándose la jornada pactada originalmente en el contrato.`;
+      clausulaModif = `A contar de la fecha del presente anexo, la jornada de trabajo del/la trabajador/a queda establecida de la siguiente manera: ${
+        anexo.jornada && anexo.jornada !== 'Otro'
+          ? `<strong>${anexo.jornada}</strong>`
+          : `<strong>${anexo.jornadaHorasSemanales || '___'} horas semanales</strong>`
+      }${
+        anexo.jornadaDias?.length ? `, los días ${anexo.jornadaDias.join(', ')}` : ''
+      }${
+        anexo.jornadaHoraEntrada && anexo.jornadaHoraSalida
+          ? `, en horario de ${anexo.jornadaHoraEntrada} a ${anexo.jornadaHoraSalida} horas`
+          : ''
+      }. ${
+        anexo.jornadaDescripcion ? anexo.jornadaDescripcion + ' ' : ''
+      }Esta modificación se efectúa de conformidad con el artículo 12 del Código del Trabajo y no implica menoscabo para el/la trabajador/a.`;
       break;
     case 'cambio_lugar':
       clausulaModif = `A contar de la fecha del presente anexo, el lugar de prestación de los servicios queda establecido en <strong>${anexo.lugarTrabajo||'_______________'}</strong>. Esta modificación se realiza por necesidades de la empresa y no implica menoscabo para el/la trabajador/a.`;
@@ -1143,6 +1178,7 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
       break;
     default:
       clausulaModif = anexo.otroDetalle || anexo.descripcion || 'Las partes acuerdan la modificación descrita en la cláusula precedente, manteniéndose inalteradas las demás estipulaciones del contrato original.';
+      break;
   }
 
   const html = `<!DOCTYPE html>

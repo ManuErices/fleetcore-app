@@ -78,14 +78,16 @@ export const TRAMOS_IUT = [
 ];
 
 export const TIPOS_ANEXO = [
-  { value:'aumento_sueldo',  label:'Aumento de sueldo'       },
-  { value:'cambio_cargo',    label:'Cambio de cargo'          },
-  { value:'cambio_jornada',  label:'Cambio de jornada'        },
-  { value:'cambio_lugar',    label:'Cambio de lugar de trabajo'},
-  { value:'cambio_empresa',  label:'Cambio de empresa'        },
-  { value:'prorroga',        label:'Prórroga de contrato'     },
-  { value:'otros_bonos',     label:'Otros bonos/beneficios'   },
-  { value:'otro',            label:'Otro'                     },
+  { value:'aumento_sueldo_base',    label:'Aumento de sueldo base'              },
+  { value:'aumento_haberes',        label:'Aumento sueldo base + no imponibles' },
+  { value:'aumento_sueldo',         label:'Aumento de sueldo (general)'         },
+  { value:'cambio_cargo',           label:'Cambio de cargo'                     },
+  { value:'cambio_jornada',         label:'Cambio de jornada'                   },
+  { value:'cambio_lugar',           label:'Cambio de lugar de trabajo'          },
+  { value:'cambio_empresa',         label:'Cambio de empresa'                   },
+  { value:'prorroga',               label:'Prórroga de contrato'                },
+  { value:'otros_bonos',            label:'Otros bonos/beneficios'              },
+  { value:'otro',                   label:'Otro'                                },
 ];
 
 export const ESTADOS_DIA = {

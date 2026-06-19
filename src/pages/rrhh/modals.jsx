@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { db } from '../../lib/firebase';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { db, storage } from '../../lib/firebase';
 import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
@@ -107,7 +108,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     direccion: '', comuna: '', region: '',
     codigoPais: '+56', telefono: '', email: '',
     empresa: '', area: '', cargo: '', fechaIngreso: '',
-    afp: '', prevision: 'FONASA', isapre: '',
+    afp: '', prevision: 'FONASA', isapre: '', planIsapre: '',
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
     tipo: 'OPERADOR', esSurtidor: false, projectId: null,
@@ -315,7 +316,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             </select>
           </Field>
           <Field label="Previsión de salud">
-            <select className={inp} value={form.prevision} onChange={e => set('prevision', e.target.value)}>
+            <select className={inp} value={form.prevision} onChange={e => { set('prevision', e.target.value); if (e.target.value !== 'Isapre') { set('isapre', ''); set('planIsapre', ''); } }}>
               <option>FONASA</option>
               <option>Isapre</option>
             </select>
@@ -329,6 +330,13 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             </Field>
           )}
         </div>
+        {form.prevision === 'Isapre' && (
+          <Field label="Plan de Isapre">
+            <input className={inp} value={form.planIsapre || ''}
+              onChange={e => set('planIsapre', e.target.value)}
+              placeholder="Ej: Plan Familia 3 UF, Plan Libre Elección…" />
+          </Field>
+        )}
 
         <Divider label="Observaciones" />
         <Field label="Observaciones">
@@ -583,6 +591,9 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
     cargo: '', jornada: 'Completa (45 hrs)', empresa: '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
+    // Jornada personalizada (cuando jornada === 'Otro')
+    jornadaHorasSemanales: '', jornadaHoraEntrada: '', jornadaHoraSalida: '',
+    jornadaDias: [], jornadaDescripcion: '',
   };
   const [form, setForm]     = useState(empty);
   const [saving, setSaving] = useState(false);
@@ -657,6 +668,50 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
             </select>
           </Field>
         </div>
+
+        {/* Campos adicionales cuando jornada es "Otro" */}
+        {form.jornada === 'Otro' && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-4 space-y-3">
+            <p className="text-[11px] font-black text-violet-600 uppercase tracking-widest">Detalle de jornada especial (Art. 22 CT)</p>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Horas semanales">
+                <input type="number" className={inp} value={form.jornadaHorasSemanales}
+                  onChange={e => set('jornadaHorasSemanales', e.target.value)}
+                  placeholder="Ej: 36" min="1" max="45" />
+              </Field>
+              <Field label="Hora entrada">
+                <input type="time" className={inp} value={form.jornadaHoraEntrada}
+                  onChange={e => set('jornadaHoraEntrada', e.target.value)} />
+              </Field>
+              <Field label="Hora salida">
+                <input type="time" className={inp} value={form.jornadaHoraSalida}
+                  onChange={e => set('jornadaHoraSalida', e.target.value)} />
+              </Field>
+            </div>
+            <div>
+              <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Días de trabajo</label>
+              <div className="flex gap-2 flex-wrap">
+                {['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'].map(dia => (
+                  <label key={dia} className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox"
+                      checked={(form.jornadaDias || []).includes(dia)}
+                      onChange={e => {
+                        const dias = form.jornadaDias || [];
+                        set('jornadaDias', e.target.checked ? [...dias, dia] : dias.filter(d => d !== dia));
+                      }}
+                      className="rounded" />
+                    <span className="text-xs font-bold text-slate-600">{dia.slice(0,3)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <Field label="Descripción adicional (opcional)">
+              <input className={inp} value={form.jornadaDescripcion}
+                onChange={e => set('jornadaDescripcion', e.target.value)}
+                placeholder="Ej: Turno rotativo, jornada excepcional Art. 27 CT…" />
+            </Field>
+          </div>
+        )}
         <Divider label="Remuneración base (Art. 42 CT)" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Sueldo base ($)" required>
@@ -1071,6 +1126,113 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
   );
 }
 
+// ─── SubirDocumentoAnexo ──────────────────────────────────────────────────────
+function SubirDocumentoAnexo({ empresaId, trabajadorId, urlActual, nombreActual, onChange }) {
+  const [progreso,   setProgreso]   = useState(null); // 0-100 mientras sube
+  const [error,      setError]      = useState('');
+  const inputRef = useRef(null);
+
+  const TIPOS_PERMITIDOS = ['application/pdf','image/png','image/jpeg','image/jpg',
+    'application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+  const MAX_MB = 10;
+
+  const handleArchivo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+
+    if (!TIPOS_PERMITIDOS.includes(file.type)) {
+      setError('Solo se permiten PDF, Word o imágenes JPG/PNG.'); return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setError(`El archivo supera los ${MAX_MB} MB.`); return;
+    }
+    if (!empresaId || !trabajadorId) {
+      setError('Selecciona primero un trabajador.'); return;
+    }
+
+    const ruta = `empresas/${empresaId}/anexos/${trabajadorId}/${Date.now()}_${file.name}`;
+    const storageRef = ref(storage, ruta);
+    const task = uploadBytesResumable(storageRef, file);
+
+    setProgreso(0);
+    task.on('state_changed',
+      snap => setProgreso(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+      err  => { setError('Error al subir: ' + err.message); setProgreso(null); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        onChange(url, file.name);
+        setProgreso(null);
+      }
+    );
+  };
+
+  const handleEliminar = () => {
+    onChange('', '');
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest">
+        Documento adjunto (PDF, Word, imagen — máx. {MAX_MB} MB)
+      </label>
+
+      {/* Archivo ya subido */}
+      {urlActual ? (
+        <div className="flex items-center gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+          <svg className="w-8 h-8 text-violet-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-violet-800 truncate">{nombreActual || 'Documento adjunto'}</p>
+            <a href={urlActual} target="_blank" rel="noreferrer"
+              className="text-xs text-violet-500 hover:text-violet-700 font-semibold">
+              Ver documento →
+            </a>
+          </div>
+          <button onClick={handleEliminar}
+            className="w-7 h-7 rounded-lg bg-red-100 hover:bg-red-200 flex items-center justify-center text-red-500 transition-colors flex-shrink-0"
+            title="Quitar documento">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        /* Zona de subida */
+        <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 hover:border-violet-400 rounded-xl px-4 py-6 cursor-pointer transition-colors bg-white hover:bg-violet-50/30">
+          <svg className="w-8 h-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          </svg>
+          <div className="text-center">
+            <p className="text-sm font-bold text-slate-500">Haz clic para subir</p>
+            <p className="text-xs text-slate-400 mt-0.5">PDF, Word, JPG o PNG</p>
+          </div>
+          <input ref={inputRef} type="file" className="hidden"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            onChange={handleArchivo} />
+        </label>
+      )}
+
+      {/* Barra de progreso */}
+      {progreso !== null && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-slate-500">
+            <span>Subiendo…</span><span>{progreso}%</span>
+          </div>
+          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full bg-violet-500 rounded-full transition-all"
+              style={{ width: `${progreso}%` }} />
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-red-600 font-bold">{error}</p>}
+    </div>
+  );
+}
+
 // ─── AnexoModal ───────────────────────────────────────────────────────────────
 
 function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAnexo, onSaved }) {
@@ -1078,8 +1240,29 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
   const empty = {
     trabajadorId: '', contratoId: '', tipo: '',
     fechaAnexo: new Date().toISOString().split('T')[0],
-    descripcion: '', nuevoSueldo: '', nuevoCargo: '',
-    nuevaJornada: '', nuevaEmpresa: '', nuevaFechaFin: '',
+    descripcion: '',
+    // Aumento sueldo base
+    sueldoBase: '',
+    // Aumento haberes (sueldo + no imponibles)
+    bonoColacion: '', bonoMovilizacion: '', viaticos: '',
+    // Aumento general
+    nuevoSueldo: '', bonoProduccion: '',
+    // Cargo
+    nuevoCargo: '', centroCosto: '', funciones: '',
+    // Jornada
+    jornada: '', jornadaHorasSemanales: '', jornadaHoraEntrada: '',
+    jornadaHoraSalida: '', jornadaDias: [], jornadaDescripcion: '',
+    // Lugar
+    lugarTrabajo: '',
+    // Empresa
+    nuevaEmpresa: '',
+    // Prórroga
+    fechaFin: '',
+    // Otros bonos
+    bonoColacionOtros: '', bonoMovilizacionOtros: '', viaticosOtros: '',
+    horasExtra: '', valorHoraExtra: '',
+    // Otro (con documento)
+    otroDetalle: '', urlDocumento: '', nombreDocumento: '',
     estado: 'vigente',
   };
   const [form,   setForm]   = useState(empty);
@@ -1091,9 +1274,29 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // Auto fecha = día siguiente al vencimiento del contrato
+  const handleContrato = (cid) => {
+    const contrato = contratos?.find(c => c.id === cid);
+    let fechaAnexo = form.fechaAnexo;
+    if (contrato?.fechaFin) {
+      const siguiente = new Date(contrato.fechaFin);
+      siguiente.setDate(siguiente.getDate() + 1);
+      fechaAnexo = siguiente.toISOString().split('T')[0];
+    }
+    set('contratoId', cid);
+    setForm(f => ({ ...f, contratoId: cid, fechaAnexo }));
+  };
+
   const handleTrabajador = (tid) => {
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
     setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato?.id || '' }));
+    if (contrato?.fechaFin) {
+      const siguiente = new Date(contrato.fechaFin);
+      siguiente.setDate(siguiente.getDate() + 1);
+      setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato.id, fechaAnexo: siguiente.toISOString().split('T')[0] }));
+    } else {
+      setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato?.id || '' }));
+    }
   };
 
   const handleSave = async () => {
@@ -1115,6 +1318,9 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 
   const contratoSel   = contratos?.find(c => c.id === form.contratoId);
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
+  const fmt = n => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '';
+
+  const DIAS_SEMANA = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}
@@ -1122,6 +1328,8 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
       subtitle="Modificación contractual · Art. 11 Código del Trabajo"
       maxWidth="max-w-2xl">
       <div className="space-y-5">
+
+        {/* ── Datos base ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Trabajador" required>
             <select className={inp} value={form.trabajadorId} onChange={e => handleTrabajador(e.target.value)}>
@@ -1132,14 +1340,15 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
             </select>
           </Field>
           <Field label="Contrato" required>
-            <select className={inp} value={form.contratoId} onChange={e => set('contratoId', e.target.value)}>
+            <select className={inp} value={form.contratoId} onChange={e => handleContrato(e.target.value)}>
               <option value="">Seleccionar contrato…</option>
               {(contratos || []).filter(c => c.trabajadorId === form.trabajadorId).map(c => (
-                <option key={c.id} value={c.id}>{c.tipoContrato} — {c.empresa} ({c.estado})</option>
+                <option key={c.id} value={c.id}>{c.tipoContrato} — {c.empresa} ({c.estado}){c.fechaFin ? ` · vence ${c.fechaFin}` : ''}</option>
               ))}
             </select>
           </Field>
         </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Tipo de anexo" required>
             <select className={inp} value={form.tipo} onChange={e => set('tipo', e.target.value)}>
@@ -1149,9 +1358,67 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
           </Field>
           <Field label="Fecha del anexo" required>
             <input type="date" className={inp} value={form.fechaAnexo} onChange={e => set('fechaAnexo', e.target.value)} />
+            {contratoSel?.fechaFin && (
+              <p className="text-[10px] text-violet-600 mt-1">
+                ⚡ Auto-calculada: día siguiente al vencimiento ({contratoSel.fechaFin})
+              </p>
+            )}
           </Field>
         </div>
 
+        {/* ══ CAMPOS POR TIPO ══ */}
+
+        {/* Aumento sueldo base */}
+        {form.tipo === 'aumento_sueldo_base' && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+            <p className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">Nuevo sueldo base imponible</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Sueldo base anterior ($)">
+                <input type="number" className={inp} value={contratoSel?.sueldoBase || ''} disabled
+                  style={{opacity:0.6, background:'#f1f5f9'}} />
+              </Field>
+              <Field label="Nuevo sueldo base ($)" required>
+                <input type="number" className={inp} value={form.sueldoBase}
+                  onChange={e => set('sueldoBase', e.target.value)} placeholder="Ej: 850000" />
+              </Field>
+            </div>
+            {contratoSel?.sueldoBase && form.sueldoBase && (
+              <div className="text-xs font-bold text-emerald-700 bg-emerald-100 rounded-lg px-3 py-2">
+                Variación: +${(parseInt(form.sueldoBase)-parseInt(contratoSel.sueldoBase)).toLocaleString('es-CL')}
+                {' '}(+{Math.round(((parseInt(form.sueldoBase)-parseInt(contratoSel.sueldoBase))/parseInt(contratoSel.sueldoBase))*100)}%)
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Aumento sueldo base + no imponibles */}
+        {form.tipo === 'aumento_haberes' && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
+            <p className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">Sueldo base + haberes no imponibles</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Nuevo sueldo base ($)" required>
+                <input type="number" className={inp} value={form.sueldoBase}
+                  onChange={e => set('sueldoBase', e.target.value)} placeholder="Imponible" />
+              </Field>
+              <Field label="Bono colación ($)">
+                <input type="number" className={inp} value={form.bonoColacion}
+                  onChange={e => set('bonoColacion', e.target.value)} placeholder="No imponible" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Bono movilización ($)">
+                <input type="number" className={inp} value={form.bonoMovilizacion}
+                  onChange={e => set('bonoMovilizacion', e.target.value)} placeholder="No imponible" />
+              </Field>
+              <Field label="Viáticos ($)">
+                <input type="number" className={inp} value={form.viaticos}
+                  onChange={e => set('viaticos', e.target.value)} placeholder="No imponible" />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        {/* Aumento general (compatibilidad) */}
         {form.tipo === 'aumento_sueldo' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Nuevo sueldo base ($)" required>
@@ -1160,26 +1427,80 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
             {contratoSel?.sueldoBase && form.nuevoSueldo && (
               <div className="flex items-end pb-2.5">
                 <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5 w-full">
-                  Variación: +${(parseInt(form.nuevoSueldo) - parseInt(contratoSel.sueldoBase)).toLocaleString('es-CL')}
-                  {' '}(+{Math.round(((parseInt(form.nuevoSueldo) - parseInt(contratoSel.sueldoBase)) / parseInt(contratoSel.sueldoBase)) * 100)}%)
+                  Variación: +${(parseInt(form.nuevoSueldo)-parseInt(contratoSel.sueldoBase)).toLocaleString('es-CL')}
+                  {' '}(+{Math.round(((parseInt(form.nuevoSueldo)-parseInt(contratoSel.sueldoBase))/parseInt(contratoSel.sueldoBase))*100)}%)
                 </div>
               </div>
             )}
           </div>
         )}
+
+        {/* Cambio cargo */}
         {form.tipo === 'cambio_cargo' && (
-          <Field label="Nuevo cargo">
-            <input className={inp} value={form.nuevoCargo} onChange={e => set('nuevoCargo', e.target.value)} placeholder="Nuevo cargo o función" />
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Nuevo cargo">
+              <input className={inp} value={form.nuevoCargo} onChange={e => set('nuevoCargo', e.target.value)} placeholder="Nuevo cargo o función" />
+            </Field>
+            <Field label="Centro de costo">
+              <input className={inp} value={form.centroCosto} onChange={e => set('centroCosto', e.target.value)} placeholder="Área o proyecto" />
+            </Field>
+          </div>
         )}
+
+        {/* Cambio jornada — CON DETALLE */}
         {form.tipo === 'cambio_jornada' && (
-          <Field label="Nueva jornada">
-            <select className={inp} value={form.nuevaJornada} onChange={e => set('nuevaJornada', e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {JORNADAS.map(j => <option key={j}>{j}</option>)}
-            </select>
-          </Field>
+          <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-4 space-y-3">
+            <p className="text-[11px] font-black text-violet-600 uppercase tracking-widest">Nueva jornada (Art. 22 CT)</p>
+            <Field label="Tipo de jornada">
+              <select className={inp} value={form.jornada} onChange={e => set('jornada', e.target.value)}>
+                <option value="">Seleccionar…</option>
+                {JORNADAS.map(j => <option key={j}>{j}</option>)}
+              </select>
+            </Field>
+            {(form.jornada === 'Otro' || form.jornada === '') && (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Horas semanales">
+                    <input type="number" className={inp} value={form.jornadaHorasSemanales}
+                      onChange={e => set('jornadaHorasSemanales', e.target.value)} placeholder="Ej: 36" />
+                  </Field>
+                  <Field label="Hora entrada">
+                    <input type="time" className={inp} value={form.jornadaHoraEntrada}
+                      onChange={e => set('jornadaHoraEntrada', e.target.value)} />
+                  </Field>
+                  <Field label="Hora salida">
+                    <input type="time" className={inp} value={form.jornadaHoraSalida}
+                      onChange={e => set('jornadaHoraSalida', e.target.value)} />
+                  </Field>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Días de trabajo</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {DIAS_SEMANA.map(dia => (
+                      <label key={dia} className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox"
+                          checked={(form.jornadaDias || []).includes(dia)}
+                          onChange={e => {
+                            const dias = form.jornadaDias || [];
+                            set('jornadaDias', e.target.checked ? [...dias, dia] : dias.filter(d => d !== dia));
+                          }}
+                          className="rounded" />
+                        <span className="text-xs font-bold text-slate-600">{dia.slice(0,3)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+            <Field label="Descripción de la jornada (para el documento)">
+              <textarea className={inp} rows={2} value={form.jornadaDescripcion}
+                onChange={e => set('jornadaDescripcion', e.target.value)}
+                placeholder="Ej: De lunes a viernes de 08:00 a 17:00 hrs con 1 hora de colación…" />
+            </Field>
+          </div>
         )}
+
+        {/* Cambio empresa */}
         {form.tipo === 'cambio_empresa' && (
           <Field label="Nueva empresa">
             <select className={inp} value={form.nuevaEmpresa} onChange={e => set('nuevaEmpresa', e.target.value)}>
@@ -1188,17 +1509,59 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
             </select>
           </Field>
         )}
+
+        {/* Prórroga */}
         {form.tipo === 'prorroga' && (
           <Field label="Nueva fecha de término">
-            <input type="date" className={inp} value={form.nuevaFechaFin} onChange={e => set('nuevaFechaFin', e.target.value)} />
+            <input type="date" className={inp} value={form.fechaFin} onChange={e => set('fechaFin', e.target.value)} />
           </Field>
         )}
 
-        <Field label="Descripción / detalle">
-          <textarea className={inp} rows={3} value={form.descripcion}
-            onChange={e => set('descripcion', e.target.value)}
-            placeholder="Describe los cambios o condiciones del anexo…" />
-        </Field>
+        {/* Otros bonos */}
+        {form.tipo === 'otros_bonos' && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Field label="Colación ($)">
+              <input type="number" className={inp} value={form.bonoColacionOtros} onChange={e => set('bonoColacionOtros', e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Movilización ($)">
+              <input type="number" className={inp} value={form.bonoMovilizacionOtros} onChange={e => set('bonoMovilizacionOtros', e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Viáticos ($)">
+              <input type="number" className={inp} value={form.viaticosOtros} onChange={e => set('viaticosOtros', e.target.value)} placeholder="0" />
+            </Field>
+            <Field label="Hrs extra/sem">
+              <input type="number" className={inp} value={form.horasExtra} onChange={e => set('horasExtra', e.target.value)} placeholder="0" />
+            </Field>
+          </div>
+        )}
+
+        {/* Otro — con texto y subida a Storage */}
+        {form.tipo === 'otro' && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Detalle de la modificación</p>
+            <Field label="Descripción del anexo (aparecerá en el documento)">
+              <textarea className={inp} rows={3} value={form.otroDetalle}
+                onChange={e => set('otroDetalle', e.target.value)}
+                placeholder="Describe con precisión la modificación acordada…" />
+            </Field>
+            <SubirDocumentoAnexo
+              empresaId={empresaId}
+              trabajadorId={form.trabajadorId}
+              urlActual={form.urlDocumento}
+              nombreActual={form.nombreDocumento}
+              onChange={(url, nombre) => setForm(f => ({ ...f, urlDocumento: url, nombreDocumento: nombre }))}
+            />
+          </div>
+        )}
+
+        {/* Descripción adicional (todos los tipos excepto "otro") */}
+        {form.tipo && form.tipo !== 'otro' && (
+          <Field label="Notas adicionales (opcional)">
+            <textarea className={inp} rows={2} value={form.descripcion}
+              onChange={e => set('descripcion', e.target.value)}
+              placeholder="Observaciones o condiciones adicionales…" />
+          </Field>
+        )}
 
         <Field label="Estado">
           <select className={inp} value={form.estado} onChange={e => set('estado', e.target.value)}>
@@ -1208,8 +1571,8 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
         </Field>
 
         <div className="flex justify-between items-center pt-2">
-          {editData && trabajadorSel && contratoSel && (
-            <button onClick={() => generarPDFAnexo(form, trabajadorSel, contratoSel)}
+          {trabajadorSel && contratoSel && form.tipo && (
+            <button onClick={() => generarPDFAnexo(form, contratoSel, trabajadorSel, nroAnexo || 1)}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
               📄 Vista previa PDF
             </button>
@@ -1229,8 +1592,27 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
   const { empresaId } = useEmpresa();
   const [tab, setTab] = useState('contratos');
+  // Documentos adjuntos
+  const [documentos,     setDocumentos]     = useState([]);
+  const [loadingDocs,    setLoadingDocs]    = useState(false);
+  const [subiendoDoc,    setSubiendoDoc]    = useState(false);
+  const [progresoDoc,    setProgresoDoc]    = useState(null);
+  const [errorDoc,       setErrorDoc]       = useState('');
+  const inputDocRef = useRef(null);
 
-  useEffect(() => { setTab('contratos'); }, [trabajador]);
+  useEffect(() => { setTab('contratos'); setDocumentos([]); setErrorDoc(''); }, [trabajador]);
+
+  // Cargar documentos del trabajador desde Firestore
+  useEffect(() => {
+    if (!isOpen || !trabajador || !empresaId || tab !== 'documentos') return;
+    setLoadingDocs(true);
+    getDocs(query(
+      collection(db, 'empresas', empresaId, 'documentos_trabajadores'),
+      orderBy('createdAt', 'desc')
+    )).then(snap => {
+      setDocumentos(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => d.trabajadorId === trabajador.id));
+    }).catch(console.error).finally(() => setLoadingDocs(false));
+  }, [isOpen, trabajador, empresaId, tab]);
 
   if (!trabajador || !isOpen) return null;
 
@@ -1250,6 +1632,62 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
     aumento_sueldo: 'bg-emerald-100 text-emerald-700', cambio_cargo: 'bg-blue-100 text-blue-700',
     cambio_jornada: 'bg-purple-100 text-purple-700',   prorroga: 'bg-amber-100 text-amber-700',
     cambio_empresa: 'bg-indigo-100 text-indigo-700',   otro: 'bg-slate-100 text-slate-600',
+    aumento_sueldo_base: 'bg-emerald-100 text-emerald-700',
+    aumento_haberes: 'bg-teal-100 text-teal-700',
+  };
+
+  // Subir documento a Storage
+  const handleSubirDocumento = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorDoc('');
+    const TIPOS_OK = ['application/pdf','image/png','image/jpeg','application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!TIPOS_OK.includes(file.type)) { setErrorDoc('Solo PDF, Word o imágenes.'); return; }
+    if (file.size > 15 * 1024 * 1024)  { setErrorDoc('Máximo 15 MB.'); return; }
+
+    setSubiendoDoc(true); setProgresoDoc(0);
+    try {
+      const ruta = `empresas/${empresaId}/documentos/${trabajador.id}/${Date.now()}_${file.name}`;
+      const storageRef = ref(storage, ruta);
+      const task = uploadBytesResumable(storageRef, file);
+      task.on('state_changed',
+        snap => setProgresoDoc(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+        err  => { setErrorDoc('Error: ' + err.message); setSubiendoDoc(false); setProgresoDoc(null); },
+        async () => {
+          const url = await getDownloadURL(task.snapshot.ref);
+          const nuevoDoc = {
+            trabajadorId: trabajador.id,
+            nombre: file.name,
+            url,
+            tipo: file.type,
+            tamaño: file.size,
+            ruta,
+            createdAt: serverTimestamp(),
+          };
+          await addDoc(collection(db, 'empresas', empresaId, 'documentos_trabajadores'), nuevoDoc);
+          setDocumentos(prev => [{ ...nuevoDoc, id: Date.now().toString(), createdAt: { seconds: Date.now()/1000 } }, ...prev]);
+          setSubiendoDoc(false); setProgresoDoc(null);
+          if (inputDocRef.current) inputDocRef.current.value = '';
+        }
+      );
+    } catch(err) { setErrorDoc('Error: ' + err.message); setSubiendoDoc(false); setProgresoDoc(null); }
+  };
+
+  const handleEliminarDoc = async (docItem) => {
+    if (!confirm(`¿Eliminar "${docItem.nombre}"?`)) return;
+    try {
+      await deleteDoc(doc(db, 'empresas', empresaId, 'documentos_trabajadores', docItem.id));
+      if (docItem.ruta) { try { await deleteObject(ref(storage, docItem.ruta)); } catch {} }
+      setDocumentos(prev => prev.filter(d => d.id !== docItem.id));
+    } catch(err) { alert('Error al eliminar: ' + err.message); }
+  };
+
+  const iconoTipoDoc = (tipo) => {
+    if (tipo?.includes('pdf'))   return '📄';
+    if (tipo?.includes('image')) return '🖼';
+    if (tipo?.includes('word') || tipo?.includes('document')) return '📝';
+    return '📎';
   };
 
   const TABS = [
@@ -1257,6 +1695,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
     { id: 'anexos',       label: `Anexos (${misAnexos.length})` },
     { id: 'liquidaciones',label: `Liquidaciones (${misLiquidaciones.length})` },
     { id: 'finiquitos',   label: `Finiquitos (${misFiniquitos.length})` },
+    { id: 'documentos',   label: `Documentos (${documentos.length})` },
   ];
 
   return (
@@ -1266,24 +1705,25 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
       maxWidth="max-w-3xl">
       <div className="space-y-4">
 
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-2">
           {[
             { label: 'Contratos',    value: misContratos.length,     color: 'text-indigo-600' },
             { label: 'Anexos',       value: misAnexos.length,        color: 'text-purple-600' },
             { label: 'Liquidaciones',value: misLiquidaciones.length, color: 'text-emerald-600' },
             { label: 'Finiquitos',   value: misFiniquitos.length,    color: 'text-rose-600' },
+            { label: 'Documentos',   value: documentos.length,       color: 'text-blue-600' },
           ].map(({ label, value, color }) => (
-            <div key={label} className="rounded-xl border border-slate-100 px-3 py-3 text-center bg-white shadow-sm">
-              <p className={`text-2xl font-black ${color}`}>{value}</p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{label}</p>
+            <div key={label} className="rounded-xl border border-slate-100 px-2 py-3 text-center bg-white shadow-sm">
+              <p className={`text-xl font-black ${color}`}>{value}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{label}</p>
             </div>
           ))}
         </div>
 
-        <div className="flex border-b border-slate-100">
+        <div className="flex border-b border-slate-100 overflow-x-auto">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-xs font-bold transition-colors border-b-2 -mb-px ${
+              className={`px-4 py-2.5 text-xs font-bold transition-colors border-b-2 -mb-px whitespace-nowrap ${
                 tab === t.id ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-400 hover:text-slate-600'
               }`}>
               {t.label}
@@ -1293,6 +1733,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
 
         <div className="min-h-[200px]">
 
+          {/* ── CONTRATOS ── */}
           {tab === 'contratos' && (
             <div className="space-y-2">
               {misContratos.length === 0 ? (
@@ -1307,7 +1748,13 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                       <span className="text-sm font-bold text-slate-700">{c.tipoContrato}</span>
                       {c.cargo && <span className="text-sm text-slate-400">· {c.cargo}</span>}
                     </div>
-                    <span className="text-xs font-bold text-slate-700">{fmt(c.sueldoBase)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-700">{fmt(c.sueldoBase)}</span>
+                      <button onClick={() => generarPDFContrato(c, trabajador)}
+                        className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF contrato">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                      </button>
+                    </div>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">{c.fechaInicio} — {c.fechaFin || 'Indefinido'} · {c.empresa}</p>
                 </div>
@@ -1315,12 +1762,14 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
             </div>
           )}
 
+          {/* ── ANEXOS ── */}
           {tab === 'anexos' && (
             <div className="space-y-2">
               {misAnexos.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-8">Sin anexos registrados</p>
               ) : misAnexos.map((a, i) => {
                 const tipoLabel = TIPOS_ANEXO.find(t => t.value === a.tipo)?.label || a.tipo;
+                const contratoA = misContratos.find(c => c.id === a.contratoId);
                 return (
                   <div key={a.id} className="rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50/60 transition-colors">
                     <div className="flex items-center justify-between">
@@ -1328,10 +1777,24 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                         <span className="text-[10px] font-black text-slate-400">N°{misAnexos.length - i}</span>
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${tipoBadge[a.tipo] || 'bg-slate-100 text-slate-600'}`}>{tipoLabel}</span>
                       </div>
-                      <span className="text-xs text-slate-400">{a.fechaAnexo}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">{a.fechaAnexo}</span>
+                        {/* Si tipo=otro con doc propio → abrir ese archivo; si no → PDF FleetCore */}
+                        {a.tipo === 'otro' && a.urlDocumento ? (
+                          <a href={a.urlDocumento} target="_blank" rel="noreferrer"
+                            className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors" title="Ver documento adjunto">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                          </a>
+                        ) : (
+                          <button onClick={() => generarPDFAnexo(a, contratoA, trabajador, misAnexos.length - i)}
+                            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF anexo">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {a.descripcion  && <p className="text-xs text-slate-500 mt-1.5">{a.descripcion}</p>}
-                    {a.nuevoSueldo  && <p className="text-xs font-bold text-emerald-600 mt-1">Nuevo sueldo: {fmt(a.nuevoSueldo)}</p>}
+                    {(a.nuevoSueldo || a.sueldoBase) && <p className="text-xs font-bold text-emerald-600 mt-1">Nuevo sueldo: {fmt(a.nuevoSueldo || a.sueldoBase)}</p>}
                     {a.nuevoCargo   && <p className="text-xs font-bold text-blue-600 mt-1">Nuevo cargo: {a.nuevoCargo}</p>}
                   </div>
                 );
@@ -1339,6 +1802,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
             </div>
           )}
 
+          {/* ── LIQUIDACIONES ── */}
           {tab === 'liquidaciones' && (
             <div className="space-y-2">
               {misLiquidaciones.length === 0 ? (
@@ -1350,11 +1814,15 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                   <div key={l.id} className="rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50/60 transition-colors">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-slate-700">{labelPeriodo(l)}</span>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${l.estado === 'pagado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                           {l.estado || 'pendiente'}
                         </span>
                         <span className="text-sm font-black text-emerald-600">{calc ? fmt(calc.liquido) : '—'}</span>
+                        {c && <button onClick={() => generarPDFLiquidacion(l, c, trabajador)}
+                          className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF liquidación">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        </button>}
                       </div>
                     </div>
                     {calc && (
@@ -1368,6 +1836,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
             </div>
           )}
 
+          {/* ── FINIQUITOS ── */}
           {tab === 'finiquitos' && (
             <div className="space-y-2">
               {misFiniquitos.length === 0 ? (
@@ -1381,7 +1850,13 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                   <div key={f.id} className="rounded-xl border border-rose-100 bg-rose-50/30 px-4 py-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-600">{causalLabel}</span>
-                      <span className="text-sm font-black text-emerald-600">{calcF ? fmt(calcF.totalFiniquito) : '—'}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-emerald-600">{calcF ? fmt(calcF.totalFiniquito) : '—'}</span>
+                        <button onClick={() => generarPDFFiniquito(f, trabajador, contratoF)}
+                          className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF finiquito">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        </button>
+                      </div>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1">
                       F. término: {f.fechaTermino} ·
@@ -1394,6 +1869,73 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
               })}
             </div>
           )}
+
+          {/* ── DOCUMENTOS ── */}
+          {tab === 'documentos' && (
+            <div className="space-y-3">
+              {/* Uploader */}
+              <label className={`flex items-center gap-3 border-2 border-dashed rounded-xl px-4 py-3 cursor-pointer transition-colors ${subiendoDoc ? 'border-violet-300 bg-violet-50/30' : 'border-slate-200 hover:border-violet-400 hover:bg-violet-50/20'}`}>
+                <svg className="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  {progresoDoc !== null ? (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-slate-500">
+                        <span>Subiendo…</span><span>{progresoDoc}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${progresoDoc}%` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-sm font-bold text-slate-500">
+                      {subiendoDoc ? 'Procesando…' : 'Agregar documento (PDF, Word, imagen — máx. 15 MB)'}
+                    </span>
+                  )}
+                </div>
+                <input ref={inputDocRef} type="file" className="hidden"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                  onChange={handleSubirDocumento} disabled={subiendoDoc} />
+              </label>
+              {errorDoc && <p className="text-xs text-red-600 font-bold">{errorDoc}</p>}
+
+              {/* Lista documentos */}
+              {loadingDocs ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-6 h-6 rounded-full animate-spin" style={{border:'2px solid rgba(124,58,237,0.15)',borderTopColor:'#7c3aed'}} />
+                </div>
+              ) : documentos.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-6">Sin documentos adjuntos</p>
+              ) : (
+                <div className="space-y-2">
+                  {documentos.map(d => (
+                    <div key={d.id} className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50/60 transition-colors">
+                      <span className="text-xl flex-shrink-0">{iconoTipoDoc(d.tipo)}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-700 truncate">{d.nombre}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {d.tamaño ? `${(d.tamaño / 1024).toFixed(0)} KB · ` : ''}
+                          {d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toLocaleDateString('es-CL') : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <a href={d.url} target="_blank" rel="noreferrer"
+                          className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors" title="Ver / descargar">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        </a>
+                        <button onClick={() => handleEliminarDoc(d)}
+                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors" title="Eliminar">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
     </Modal>
