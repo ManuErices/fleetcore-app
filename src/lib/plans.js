@@ -101,7 +101,7 @@ export function buildPlanData(moduleIds = []) {
   const features = [];
   moduleIds.forEach(id => {
     if (id in modules) modules[id] = true;
-    if (id === 'fleetcore' || id === 'workfleet') {
+    if (id === 'workfleet') {
       modules.reportes = true;
     }
     if (id === 'finanzas') {
@@ -116,11 +116,22 @@ export function buildPlanData(moduleIds = []) {
 
 // planId = módulos separados por coma: "rrhh,finanzas,workfleet"
 export function getPlan(planId) {
-  const moduleIds = planId ? planId.split(',').filter(Boolean) : [];
+  let moduleStr = planId || '';
+  if (planId === 'free' || planId === 'starter' || planId === 'trial') {
+    moduleStr = 'workfleet';
+  } else if (PLANS[planId]) {
+    moduleStr = PLANS[planId].planId;
+  }
+
+  const moduleIds = moduleStr ? moduleStr.split(',').filter(Boolean) : [];
+  if (!moduleIds.includes('finanzas')) {
+    moduleIds.unshift('finanzas');
+  }
   return buildPlanData(moduleIds);
 }
 
 export function canAccessModule(planId, moduleId) {
+  if (moduleId === 'finanzas' || moduleId === 'contabilidad') return true;
   return getPlan(planId).modules[moduleId] === true;
 }
 
@@ -188,4 +199,12 @@ export const PLANS = {
 
 export function formatUf(amount) {
   return amount === 0 ? 'Gratis' : `${amount} UF`;
+}
+
+export function getPlanTier(activeModules = []) {
+  if (!activeModules.length) return { label: 'Sin plan', id: 'none' };
+  const allFour = ['finanzas', 'fleetcore', 'rrhh', 'workfleet'].every(m => activeModules.includes(m));
+  if (allFour) return { label: 'Enterprise', id: 'enterprise' };
+  if (activeModules.length >= 2) return { label: 'Pro', id: 'pro' };
+  return { label: 'Básico', id: 'basic' };
 }

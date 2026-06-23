@@ -338,7 +338,7 @@ function FolioModal({ folio, session, onUpdate, onClose }) {
         usuario: session.usuario,
         nombre:  session.nombre,
         cargo:   session.cargo || '',
-      })
+      }, session.empresaId)
       setModal(null); onUpdate()
     } catch(e) { alert(e.message) }
     setLoading(false)
@@ -353,12 +353,12 @@ function FolioModal({ folio, session, onUpdate, onClose }) {
         usuario:   session.usuario,
         nombre:    session.nombre,
         rol:       session.rol,
-      })
+      }, session.empresaId)
       await firmarRespuesta(folio.id, {
         usuario: session.usuario,
         nombre:  session.nombre,
         cargo:   session.cargo || '',
-      })
+      }, session.empresaId)
       setModal(null); setRespuesta(''); onUpdate()
     } catch(e) { alert(e.message) }
     setLoading(false)
@@ -371,7 +371,7 @@ function FolioModal({ folio, session, onUpdate, onClose }) {
         usuario: session.usuario,
         nombre:  session.nombre,
         cargo:   session.cargo || '',
-      })
+      }, session.empresaId)
       setModal(null); onUpdate()
     } catch(e) { alert(e.message) }
     setLoading(false)
@@ -557,6 +557,7 @@ Redacta en tono formal y técnico. Solo el cuerpo del folio. Máximo 180 palabra
       const { id, codigo } = await crearFolio({
         libro, tipo, asunto, contenido,
         usuario: session.usuario, nombre: session.nombre, rol: session.rol,
+        empresaId: session.empresaId,
       })
       onCreado(codigo)
     } catch(e) { alert('Error al crear folio: ' + e.message) }
@@ -714,7 +715,7 @@ export default function LibroObras() {
   async function cargar() {
     setLoading(true)
     try {
-      const data = await obtenerFolios(libroActivo)
+      const data = await obtenerFolios(libroActivo, session?.empresaId)
       setFolios(data)
     } catch(e) { console.error(e) }
     setLoading(false)
@@ -722,9 +723,8 @@ export default function LibroObras() {
 
   async function recargarYVerFolio(folioId) {
     await cargar()
-    // Recargar el folio actualizado para el modal
     try {
-      const f = await getFolio(folioId)
+      const f = await getFolio(folioId, session?.empresaId)
       if (f) setFolioDetalle(f)
     } catch {}
   }

@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { ContabilidadProvider, useContabilidad } from "./ContabilidadContext";
+import UserMenuDropdown from "../../components/UserMenuDropdown";
+import { useEmpresa } from "../../lib/useEmpresa";
 import ContabilidadPlanCuentas from "./ContabilidadPlanCuentas";
 import ContabilidadLibroDiario from "./ContabilidadLibroDiario";
 import ContabilidadEstados from "./ContabilidadEstados";
@@ -73,9 +75,10 @@ function AlertasBadge() {
 }
 
 // ─── Inner app ────────────────────────────────────────────────────────────────
-function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
+function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout }) {
   const [activeView, setActiveView] = useState("plan");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { empresa } = useEmpresa();
 
   const currentNav = NAV_ITEMS.find(n => n.id === activeView);
 
@@ -95,23 +98,17 @@ function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
 
       {/* ── Sidebar desktop ── */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 shadow-sm sticky top-0 h-screen">
-        <div className="flex items-center justify-center px-4 py-5 border-b border-slate-100">
-          <img src="/logo-fleetcore-f.png" alt="FleetCore Contabilidad" className="h-28 w-auto object-contain" />
-        </div>
-
-        {/* Badge módulo */}
-        <div className="px-4 py-3 border-b border-slate-100">
-          <div className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-50 to-violet-50 rounded-xl border border-purple-100">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center">
-              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
+        <div className="flex flex-col items-center px-4 py-4 border-b border-slate-100 gap-3">
+          <img src="/logo-fleetcore-f.png" alt="FleetCore Contabilidad" className="h-20 w-auto object-contain" />
+          {empresa && (
+            <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
+              {empresa.logoUrl
+                ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain flex-shrink-0" />
+                : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600 flex-shrink-0">{empresa.nombre?.[0]}</div>
+              }
+              <span className="text-xs font-semibold text-slate-700 truncate">{empresa.nombre}</span>
             </div>
-            <div>
-              <p className="text-[10px] font-black text-purple-600 uppercase tracking-wider leading-none">Módulo</p>
-              <p className="text-xs font-black text-slate-800">Contabilidad</p>
-            </div>
-          </div>
+          )}
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -130,32 +127,14 @@ function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
           })}
         </nav>
 
-        <div className="px-4 py-4 border-t border-slate-100">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center text-white text-xs font-black">
-              {user?.email?.[0]?.toUpperCase() || "U"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-bold text-slate-800 truncate">{user?.displayName || user?.email?.split("@")[0]}</div>
-              <div className="text-[10px] text-slate-400 truncate">{user?.email}</div>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onBackToSelector}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-600 transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-              Menú
-            </button>
-            <button onClick={onLogout}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-red-50 hover:text-red-600 rounded-lg text-xs font-semibold text-slate-600 transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Salir
-            </button>
-          </div>
+        <div className="px-3 py-3 border-t border-slate-100">
+          <UserMenuDropdown
+            user={user}
+            userRole={userRole}
+            onLogout={onLogout}
+            onBackToSelector={onBackToSelector}
+            placement="top-left"
+          />
         </div>
       </aside>
 
@@ -206,18 +185,23 @@ function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
                 <div className="text-sm font-black text-slate-800 leading-tight">Fleet<span className="text-purple-700">Core-C</span></div>
                 <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase">{currentNav?.label}</div>
               </div>
+              {empresa && (
+                <div className="hidden sm:flex items-center gap-1.5 ml-1 pl-3 border-l border-slate-200">
+                  {empresa.logoUrl
+                    ? <img src={empresa.logoUrl} alt="" className="w-4 h-4 rounded object-contain" />
+                    : <div className="w-4 h-4 rounded bg-slate-200 flex items-center justify-center text-[8px] font-black text-slate-500">{empresa.nombre?.[0]}</div>
+                  }
+                  <span className="text-xs font-semibold text-slate-600 max-w-[100px] truncate">{empresa.nombre}</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={onBackToSelector} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-              <button onClick={onLogout} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
+              <UserMenuDropdown
+                user={user}
+                userRole={userRole}
+                onLogout={onLogout}
+                onBackToSelector={onBackToSelector}
+              />
             </div>
           </div>
         </header>

@@ -585,7 +585,7 @@ export default function Consolidado() {
                       {formatCurrency(consolidadoTotal.costosOperacionalesDirectos)}
                     </div>
                     <div className="text-xs text-slate-500">
-                      {((consolidadoTotal.costosOperacionalesDirectos / consolidadoTotal.totalCostos) * 100).toFixed(1)}% del total
+                      {consolidadoTotal.totalCostos > 0 ? ((consolidadoTotal.costosOperacionalesDirectos / consolidadoTotal.totalCostos) * 100).toFixed(1) : "0.0"}% del total
                     </div>
                   </div>
                   <svg 
@@ -674,7 +674,7 @@ export default function Consolidado() {
                       {formatCurrency(consolidadoTotal.costosIndirectos)}
                     </div>
                     <div className="text-xs text-slate-500">
-                      {((consolidadoTotal.costosIndirectos / consolidadoTotal.totalCostos) * 100).toFixed(1)}% del total
+                      {consolidadoTotal.totalCostos > 0 ? ((consolidadoTotal.costosIndirectos / consolidadoTotal.totalCostos) * 100).toFixed(1) : "0.0"}% del total
                     </div>
                   </div>
                   <svg 

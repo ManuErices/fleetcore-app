@@ -3,6 +3,7 @@ import ReportDetallado from '../reportes/ReportDetallado';
 import CombustiblePage from '../combustible/CombustiblePage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import UserMenuDropdown from '../../components/UserMenuDropdown';
 
 function getSaludo() {
   const h = new Date().getHours();
@@ -31,7 +32,7 @@ function SubHeader({ titulo, onBack, accent }) {
   );
 }
 
-export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
+export default function OperadoresApp({ user, userRole, onLogout, onBackToSelector }) {
   const [vista, setVista] = useState('loading');
   const [esSurtidor, setEsSurtidor] = useState(false);
   const [esSuperAdmin, setEsSuperAdmin] = useState(false);
@@ -49,19 +50,15 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
           // Buscar esSurtidor en el doc de usuario O en trabajadores
           if (data.role === 'superadmin') {
             setEsSuperAdmin(true);
-            setVista('menu');
           } else if (data.esSurtidor === true || data.cargo === 'surtidor') {
             setEsSurtidor(true);
-            setVista('menu');
-          } else {
-            // No es surtidor → ir directo a maquinaria
-            setVista('maquinaria');
           }
+          setVista('home');
         } else {
-          setVista('maquinaria');
+          setVista('home');
         }
       } catch {
-        setVista('maquinaria');
+        setVista('home');
       }
     })();
   }, [user]);
@@ -77,8 +74,8 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
   if (vista === 'maquinaria') {
     return (
       <div className="min-h-screen bg-white">
-        <SubHeader titulo="Reporte Maquinaria" onBack={() => setVista('menu')} accent="#818CF8" />
-        <ReportDetallado onClose={() => setVista('menu')} />
+        <SubHeader titulo="Reporte Maquinaria" onBack={() => setVista('home')} accent="#818CF8" />
+        <ReportDetallado onClose={() => setVista('home')} />
       </div>
     );
   }
@@ -86,8 +83,8 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
   if (vista === 'combustible') {
     return (
       <div className="min-h-screen bg-white">
-        <SubHeader titulo="Reporte Combustible" onBack={() => setVista('menu')} accent="#FB923C" />
-        <CombustiblePage onClose={() => setVista('menu')} />
+        <SubHeader titulo="Reporte Combustible" onBack={() => setVista('home')} accent="#FB923C" />
+        <CombustiblePage onClose={() => setVista('home')} />
       </div>
     );
   }
@@ -127,18 +124,13 @@ export default function OperadoresApp({ user, onLogout, onBackToSelector }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onBackToSelector}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95"
-            style={{ background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            Cambiar app
-          </button>
-          <button onClick={onLogout}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-95"
-            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="rgba(255,255,255,0.5)" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-          </button>
+          <UserMenuDropdown
+            user={user}
+            userRole={userRole}
+            onLogout={onLogout}
+            onBackToSelector={onBackToSelector}
+            theme="dark"
+          />
         </div>
       </header>
 

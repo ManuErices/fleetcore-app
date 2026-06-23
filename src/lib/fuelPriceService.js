@@ -66,31 +66,25 @@ async function getUSDtoCLP() {
 /**
  * Guarda precios en Firebase para caché
  */
-async function savePricesToFirebase(prices) {
+async function savePricesToFirebase(prices, empresaId) {
+  if (!empresaId) return;
   try {
-    const docRef = doc(db, 'fuelPrices', 'latest');
+    const docRef = doc(db, 'empresas', empresaId, 'fuelPrices', 'latest');
     await setDoc(docRef, {
       ...prices,
       cachedAt: new Date().toISOString()
     });
-    console.log("💾 Precios guardados en Firebase");
   } catch (error) {
     console.error("Error guardando precios en Firebase:", error);
   }
 }
 
-/**
- * Obtiene precios cacheados de Firebase
- */
-async function getCachedPrices() {
+async function getCachedPrices(empresaId) {
+  if (!empresaId) return null;
   try {
-    const docRef = doc(db, 'fuelPrices', 'latest');
+    const docRef = doc(db, 'empresas', empresaId, 'fuelPrices', 'latest');
     const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      console.log("📦 Precios encontrados en caché");
-      return docSnap.data();
-    }
+    if (docSnap.exists()) return docSnap.data();
     return null;
   } catch (error) {
     console.error("Error obteniendo caché:", error);
@@ -119,33 +113,20 @@ function isRecentEnough(lastUpdated) {
  * 2. Precios internacionales (estimado desde WTI)
  * 3. Valores por defecto
  */
-export async function fetchFuelPrices() {
-  console.log("🔄 Obteniendo precios de combustible...");
-  
-  // Primero revisar caché (más rápido)
-  const cachedPrice = await getCachedPrices();
+export async function fetchFuelPrices(empresaId) {
+  const cachedPrice = await getCachedPrices(empresaId);
   if (cachedPrice && isRecentEnough(cachedPrice.lastUpdated || cachedPrice.cachedAt)) {
-    console.log("✅ Usando precios en caché (recientes)");
     return cachedPrice;
   }
-  
-  // Si caché es viejo o no existe, obtener nuevos precios
-  console.log("🌍 Obteniendo precios internacionales...");
+
   const intlPrice = await getInternationalOilPrice();
   if (intlPrice) {
-    console.log("✅ Precios obtenidos desde mercado internacional");
-    await savePricesToFirebase(intlPrice);
+    await savePricesToFirebase(intlPrice, empresaId);
     return intlPrice;
   }
-  
-  // Si todo falla, usar caché viejo si existe
-  if (cachedPrice) {
-    console.warn("⚠️ Usando caché antiguo (API falló)");
-    return cachedPrice;
-  }
-  
-  // Último fallback: valores por defecto
-  console.warn("⚠️ Usando valores por defecto");
+
+  if (cachedPrice) return cachedPrice;
+
   return {
     diesel: 950,
     gasolina93: 1050,
@@ -161,28 +142,24 @@ export async function fetchFuelPrices() {
 // ============================================
 
 import { useState, useEffect } from 'react';
+import { useEmpresa } from './useEmpresa';
 
-/**
- * Hook para obtener precios de combustible en componentes
- * 
- * @param {boolean} autoRefresh - Si debe actualizar automáticamente cada hora
- * @returns {Object} { prices, loading, error, refresh }
- */
 export function useFuelPrices(autoRefresh = false) {
+  const { empresaId } = useEmpresa();
   const [prices, setPrices] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const loadPrices = async () => {
+    if (!empresaId) return;
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchFuelPrices();
+      const data = await fetchFuelPrices(empresaId);
       setPrices(data);
     } catch (err) {
       console.error("Error en useFuelPrices:", err);
       setError(err.message);
-      // Usar valores por defecto en caso de error
       setPrices({
         diesel: 950,
         gasolina93: 1050,
@@ -198,13 +175,11 @@ export function useFuelPrices(autoRefresh = false) {
 
   useEffect(() => {
     loadPrices();
-
-    // Auto-refresh cada hora si está habilitado
     if (autoRefresh) {
-      const interval = setInterval(loadPrices, 60 * 60 * 1000); // 1 hora
+      const interval = setInterval(loadPrices, 60 * 60 * 1000);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh]);
+  }, [autoRefresh, empresaId]);
 
   return {
     prices,

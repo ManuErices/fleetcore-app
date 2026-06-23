@@ -456,7 +456,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 
 // ─── FichaTrabajador ──────────────────────────────────────────────────────────
 
-function FichaTrabajador({ trabajador, onEdit, onClose }) {
+function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
   const { empresaId } = useEmpresa();
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -665,18 +665,29 @@ function FichaTrabajador({ trabajador, onEdit, onClose }) {
           </div>
         )}
 
-        <div className="px-6 py-4 border-t border-slate-100 flex gap-2 flex-shrink-0 bg-slate-50/60">
-          <button onClick={onEdit}
-            className="flex-1 py-2.5 text-white font-bold text-sm rounded-xl transition-all active:scale-95"
-            style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow: '0 4px 12px rgba(124,58,237,0.25)' }}>
-            ✏️ Editar datos
-          </button>
-          {contratoVigente && (
-            <button onClick={() => generarPDFContrato(contratoVigente, trabajador)}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
-              📄 PDF
+        <div className="px-6 py-4 border-t border-slate-100 flex flex-col gap-2 flex-shrink-0 bg-slate-50/60">
+          {onVerPerfil && (
+            <button onClick={() => { onClose(); onVerPerfil(trabajador); }}
+              className="w-full py-2.5 text-sm font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow: '0 4px 12px rgba(124,58,237,0.25)', color: '#fff' }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Ver perfil completo
             </button>
           )}
+          <div className="flex gap-2">
+            <button onClick={onEdit}
+              className="flex-1 py-2.5 text-slate-700 font-bold text-sm rounded-xl transition-all active:scale-95 bg-slate-200 hover:bg-slate-300">
+              ✏️ Editar datos
+            </button>
+            {contratoVigente && (
+              <button onClick={() => generarPDFContrato(contratoVigente, trabajador)}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
+                📄 PDF
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

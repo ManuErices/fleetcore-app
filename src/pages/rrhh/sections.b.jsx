@@ -912,8 +912,17 @@ function AsistenciaSection() {
 
   // ── Vista HISTORIAL ──
   const enriquecidos = historial.map(r => {
-    const trabajador = trabajadores.find(t => t.id === r.trabajadorId || t.portalUid === r.trabajadorId);
-    const contrato   = contratos.find(c => c.trabajadorId === (trabajador?.id));
+    let trabajador = trabajadores.find(t => t.id === r.trabajadorId || t.portalUid === r.trabajadorId);
+    // Fallback: match by nombre/email when portalUid isn't linked yet
+    if (!trabajador && r.trabajadorNombre) {
+      const nombreDoc = r.trabajadorNombre.trim().toLowerCase();
+      trabajador = trabajadores.find(t => {
+        const nombreT = `${t.nombre || ''} ${t.apellidoPaterno || ''}`.trim().toLowerCase();
+        const emailPrefix = (t.email || '').split('@')[0].toLowerCase();
+        return nombreT === nombreDoc || (emailPrefix && emailPrefix === nombreDoc);
+      });
+    }
+    const contrato = contratos.find(c => c.trabajadorId === trabajador?.id);
     return { ...r, _trabajador: trabajador, _contrato: contrato };
   }).filter(r => {
     const q = busqueda.toLowerCase();

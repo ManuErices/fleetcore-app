@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Logo de empresa — solo admin_contrato o superadmin de esa empresa
+    match /empresas/{empresaId}/logo {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && (
+                     // Superadmin siempre puede
+                     firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'superadmin'
+                     // Admin de esa empresa puede
+                     || (
+                       firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin_contrato'
+                       && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.empresaId == empresaId
+                     )
+                   );
+    }
+
+    // Documentos y archivos de empresa (contratos, pasajes, fotos combustible, etc.)
+    match /empresas/{empresaId}/{allPaths=**} {
+      allow read: if request.auth != null
+                  && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.empresaId == empresaId;
+      allow write: if request.auth != null
+                   && (
+                     firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'superadmin'
+                     || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.empresaId == empresaId
+                   );
+    }
+
+    // Archivos globales de la app (sin segmentación por empresa)
+    match /{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}

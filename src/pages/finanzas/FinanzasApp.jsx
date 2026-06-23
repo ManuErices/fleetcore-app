@@ -8,6 +8,8 @@ import FinanzasObras from "./FinanzasObras";
 import FinanzasReportes from "./FinanzasReportes";
 import { FinanzasProvider, NotificacionesBtn, useFinanzas } from "./FinanzasContext";
 import NotificacionesDrawer from "./NotificacionesDrawer";
+import UserMenuDropdown from "../../components/UserMenuDropdown";
+import { useEmpresa } from "../../lib/useEmpresa";
 
 const NAV_ITEMS = [
   {
@@ -69,10 +71,11 @@ const NAV_ITEMS = [
   },
 ];
 
-function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
+function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
   const [activeView, setActiveView] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { alertas } = useFinanzas();
+  const { empresa } = useEmpresa();
 
   // Badge para Activos: docs vencidos/por vencer + activos sin datos financieros
   const badgeActivos = alertas.filter(a =>
@@ -102,9 +105,18 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
 
       {/* ── Sidebar desktop ── */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 shadow-sm sticky top-0 h-screen">
-        {/* Logo */}
-        <div className="flex items-center justify-center px-4 py-5 border-b border-slate-100">
-          <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-28 w-auto object-contain" />
+        {/* Logo + empresa */}
+        <div className="flex flex-col items-center px-4 py-4 border-b border-slate-100 gap-3">
+          <img src="/logo-fleetcore-f.png" alt="FleetCore Finanzas" className="h-20 w-auto object-contain" />
+          {empresa && (
+            <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200">
+              {empresa.logoUrl
+                ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain flex-shrink-0" />
+                : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600 flex-shrink-0">{empresa.nombre?.[0]}</div>
+              }
+              <span className="text-xs font-semibold text-slate-700 truncate">{empresa.nombre}</span>
+            </div>
+          )}
         </div>
 
         {/* Nav */}
@@ -139,37 +151,17 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
         </nav>
 
         {/* Footer usuario */}
-        <div className="px-4 py-4 border-t border-slate-100">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center text-white text-xs font-black">
-              {user?.email?.[0]?.toUpperCase() || "U"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-bold text-slate-800 truncate">{user?.displayName || user?.email?.split("@")[0]}</div>
-              <div className="text-[10px] text-slate-400 truncate">{user?.email}</div>
-            </div>
-          </div>
-          <div className="flex gap-2">
+        <div className="px-3 py-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 mb-2">
             <NotificacionesBtn />
-            <button
-              onClick={onBackToSelector}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-600 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-              Menú
-            </button>
-            <button
-              onClick={onLogout}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-red-50 hover:text-red-600 rounded-lg text-xs font-semibold text-slate-600 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Salir
-            </button>
           </div>
+          <UserMenuDropdown
+            user={user}
+            userRole={userRole}
+            onLogout={onLogout}
+            onBackToSelector={onBackToSelector}
+            placement="top-left"
+          />
         </div>
       </aside>
 
@@ -242,19 +234,24 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
                 </div>
                 <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase">{currentNav?.label}</div>
               </div>
+              {empresa && (
+                <div className="hidden sm:flex items-center gap-1.5 ml-1 pl-3 border-l border-slate-200">
+                  {empresa.logoUrl
+                    ? <img src={empresa.logoUrl} alt="" className="w-4 h-4 rounded object-contain" />
+                    : <div className="w-4 h-4 rounded bg-slate-200 flex items-center justify-center text-[8px] font-black text-slate-500">{empresa.nombre?.[0]}</div>
+                  }
+                  <span className="text-xs font-semibold text-slate-600 max-w-[100px] truncate">{empresa.nombre}</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <NotificacionesBtn />
-              <button onClick={onBackToSelector} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-              <button onClick={onLogout} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
+              <UserMenuDropdown
+                user={user}
+                userRole={userRole}
+                onLogout={onLogout}
+                onBackToSelector={onBackToSelector}
+              />
             </div>
           </div>
         </header>

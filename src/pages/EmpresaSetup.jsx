@@ -12,9 +12,9 @@
  *   5. onComplete() → App recarga EmpresaProvider → usuario entra normal
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
-import { collection, addDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, doc, setDoc, getDoc, query, where, getDocs, serverTimestamp } from "firebase/firestore";
 import PhoneInput from "../components/ui/PhoneInput";
 
 export default function EmpresaSetup({ user, onComplete, onLogout }) {
@@ -26,6 +26,67 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
     telefono:  "",
     industria: "",
   });
+
+  // ── Auto-vincular empresa pre-creada por superadmin ──────────
+  useEffect(() => {
+    let active = true;
+    const checkExistingEmpresa = async () => {
+      if (!user?.email) return;
+      try {
+        const q = query(
+          collection(db, "empresas"),
+          where("adminEmail", "==", user.email)
+        );
+        const querySnapshot = await getDocs(q);
+        if (!active) return;
+        
+        if (!querySnapshot.empty) {
+          const empresaDoc = querySnapshot.docs[0];
+          const empresaId = empresaDoc.id;
+
+          setStep(2);
+
+          // 1. Vincular en el documento del usuario
+          await setDoc(doc(db, "users", user.uid), {
+            empresaId: empresaId,
+            role:      "admin_contrato",
+            email:     user.email,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          // 2. Vincular en el documento de la empresa (actualizar adminUid)
+          await setDoc(doc(db, "empresas", empresaId), {
+            adminUid: user.uid,
+          }, { merge: true });
+
+          // 3. Asegurar que exista el documento de suscripción
+          const subRef = doc(db, "subscriptions", empresaId);
+          const subSnap = await getDoc(subRef);
+          if (!subSnap.exists()) {
+            await setDoc(subRef, {
+              planId:    "",
+              status:    "trial",
+              trialUntil: null,
+              empresaId: empresaId,
+              creadoEn:  serverTimestamp(),
+            });
+          }
+
+          if (active) {
+            setStep(3);
+            setTimeout(() => {
+              if (active) onComplete();
+            }, 1500);
+          }
+        }
+      } catch (err) {
+        console.error("Error checking existing empresa:", err);
+      }
+    };
+
+    checkExistingEmpresa();
+    return () => { active = false; };
+  }, [user, onComplete]);
 
   // ── Helpers de formato ──────────────────────────────────────
   const formatRut = (value) => {
@@ -95,7 +156,7 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
       }, { merge: true });
 
       // 3. Crear documento de suscripción trial
-      await setDoc(doc(db, "subscriptions", user.uid), {
+      await setDoc(doc(db, "subscriptions", empresaRef.id), {
         planId:    "",
         status:    "trial",
         trialUntil: null,

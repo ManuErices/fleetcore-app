@@ -320,22 +320,22 @@ export default function InviteAccept({ token, onAccepted }) {
 
   return (
     <Screen>
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-xl">
 
         {/* Badge empresa */}
-        <div className="text-center mb-7">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl mb-5">
-            <span className="text-indigo-300 text-xs font-bold tracking-wide uppercase">Invitación</span>
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2 px-5 py-2 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl mb-5">
+            <span className="text-indigo-300 text-sm font-black tracking-widest uppercase">Invitación</span>
           </div>
-          <h1 className="text-3xl font-black text-white mb-1 leading-tight">
+          <h1 className="text-4xl font-black text-white mb-2 leading-tight tracking-tight">
             {empresa?.nombre || 'FleetCore'}
           </h1>
-          <div className="flex items-center justify-center gap-2 mt-2 flex-wrap">
-            <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-black border ${roleBadgeCls(invData?.rol)}`}>
+          <div className="flex items-center justify-center gap-2.5 mt-3 flex-wrap">
+            <span className={`inline-flex px-3 py-1.5 rounded-full text-xs font-black border ${roleBadgeCls(invData?.rol)}`}>
               {ROLES_LABEL[invData?.rol] || invData?.rol}
             </span>
             {modulos.length > 0 && modulos.map(m => (
-              <span key={m} className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 border border-blue-400/30 text-blue-300">
+              <span key={m} className="inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/20 border border-blue-400/30 text-blue-300">
                 {MODULOS_LABEL[m] || m}
               </span>
             ))}
@@ -343,7 +343,7 @@ export default function InviteAccept({ token, onAccepted }) {
         </div>
 
         {/* Card */}
-        <div className="bg-slate-800/80 backdrop-blur-xl border border-slate-600/40 rounded-2xl p-6 shadow-2xl space-y-4">
+        <div className="bg-slate-800/80 backdrop-blur-xl border border-slate-600/40 rounded-2xl p-8 shadow-2xl space-y-6">
 
           {/* Ya tiene sesión */}
           {currentUser && step === "register" && (
@@ -489,16 +489,16 @@ function roleBadgeCls(rol) {
   return map[rol] || "bg-white/10 border-white/20 text-white/70";
 }
 
-const inputCls = "w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-sm transition-all";
+const inputCls = "w-full px-4 py-3.5 rounded-xl bg-white border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-base transition-all";
 
 // ── Componentes UI ─────────────────────────────────────────────
 
 function Screen({ children }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 flex items-center justify-center px-4 py-8 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 flex items-center justify-center px-6 py-10 relative overflow-hidden">
       <div className="absolute top-0 right-0 w-[700px] h-[700px] bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
-      <div className="relative z-10">
+      <div className="relative z-10 w-full flex justify-center">
         {children}
       </div>
     </div>
@@ -507,9 +507,9 @@ function Screen({ children }) {
 
 function Loading({ text }) {
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-      <p className="text-white/50 text-sm">{text}</p>
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+      <p className="text-white/60 text-base font-semibold">{text}</p>
     </div>
   );
 }
@@ -517,7 +517,7 @@ function Loading({ text }) {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-widest mb-1.5">{label}</label>
+      <label className="block text-[12px] font-extrabold text-slate-300 uppercase tracking-widest mb-2">{label}</label>
       {children}
     </div>
   );

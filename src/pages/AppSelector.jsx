@@ -13,14 +13,16 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { usePlan } from "../hooks/usePlan";
 import { getPlan, formatPrice } from "../lib/plans";
+import UserMenuDropdown from "../components/UserMenuDropdown";
+import { useEmpresa } from "../lib/useEmpresa";
 
-export default function AppSelector({ user, onLogout, onSelectApp }) {
-  const [userRole, setUserRole] = useState(null);
+export default function AppSelector({ user, userRole: initialUserRole, onLogout, onSelectApp }) {
+  const [userRole, setUserRole] = useState(initialUserRole || 'operador');
   const [empresaId, setEmpresaId] = useState(null);
+  const { empresa } = useEmpresa();
   const [showInvite, setShowInvite] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [loading, setLoading] = useState(true);
-  const { canAccess, planData, isActive, status, loading: planLoading } = usePlan();
+  const { canAccess, activeModules, isActive, status, loading: planLoading } = usePlan();
   const navigate = useNavigate();
 
   const [userModulos, setUserModulos] = useState([]);
@@ -64,6 +66,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
   const isMandante = userRole === 'mandante';
   const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
+  const isAdmin = isSuperAdmin || isAdminContrato;
 
   // Permisos combinados: rol + módulo + plan
   // ✅ FIX: superadmin nunca bloqueado por plan — bypassa canAccess()
@@ -99,77 +102,33 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
   return (
     <>
-      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={isRevisorAdmin || isMandanteAdmin} />}
+      {showInvite && <InviteUserPanel empresaId={empresaId} onClose={() => setShowInvite(false)} soloRevisores={false} />}
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center px-3 py-4 sm:p-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
         <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-blue-500/20 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-purple-500/20 rounded-full blur-3xl" />
 
-        {/* Header del Menú de Usuario (Esquina superior derecha de la pantalla) */}
-        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50 flex items-center justify-end">
-          <div className="relative">
-            <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-3 px-3 py-2 bg-white/10 backdrop-blur-sm rounded-2xl border border-white/20 hover:bg-white/20 transition-all shadow-lg">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-inner">
-                <span className="text-white text-xs sm:text-sm font-bold">{user?.email?.[0]?.toUpperCase() || "U"}</span>
-              </div>
-              <div className="hidden sm:block text-left mr-2">
-                <div className="text-sm font-semibold text-white">{user?.displayName || user?.email?.split('@')[0]}</div>
-                <div className="text-xs text-blue-200 flex items-center gap-1">
-                  Plan {planData?.name || 'Starter'}
-                  {status === 'trial' && <span className="text-amber-400 font-bold">(Trial)</span>}
-                </div>
-              </div>
-              <svg className={`w-4 h-4 text-white transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showUserMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-800/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/10 z-50 overflow-hidden animate-scaleIn">
-                  <div className="p-4 border-b border-white/10">
-                    <div className="text-sm font-semibold text-white truncate">{user?.email}</div>
-                    <div className="text-xs text-blue-300 mt-1 capitalize">{userRole?.replace('_', ' ')}</div>
-                  </div>
-                  <div className="p-2 space-y-1">
-                    {['superadmin', 'admin_contrato', 'administrativo'].includes(userRole) && (
-                      <button
-                        onClick={() => { setShowUserMenu(false); navigate('/admin'); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-300 hover:bg-white/10 rounded-xl transition-colors text-left"
-                      >
-                        🛡️ Panel de Admin
-                      </button>
-                    )}
-                    {(userRole === 'admin_contrato' || userRole === 'superadmin' || isRevisorAdmin || isMandanteAdmin) && (
-                      <button
-                        onClick={() => { setShowUserMenu(false); setShowInvite(true); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-emerald-300 hover:bg-white/10 rounded-xl transition-colors text-left"
-                      >
-                        👥 {(isRevisorAdmin || isMandanteAdmin) ? 'Invitar Equipo' : 'Invitar Usuarios'}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => { setShowUserMenu(false); localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-300 hover:bg-white/10 rounded-xl transition-colors text-left"
-                    >
-                      ⭐ Cambiar Plan
-                    </button>
-                    <div className="h-px bg-white/10 my-1"></div>
-                    <button
-                      onClick={onLogout}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-400 hover:bg-white/10 rounded-xl transition-colors text-left"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                      </svg>
-                      Cerrar Sesión
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+        {/* Menú de usuario unificado */}
+        <div className="fixed top-4 right-4 sm:top-6 sm:right-6 lg:right-8 z-50">
+          <UserMenuDropdown
+            user={user}
+            userRole={userRole}
+            onLogout={onLogout}
+            onAdminPanel={() => navigate('/admin')}
+            onInviteUsers={() => setShowInvite(true)}
+            onGoToPricing={() => {
+              localStorage.setItem('selectedApp', 'admin');
+              if (isSuperAdmin) {
+                navigate('/admin');
+              } else if (isAdminContrato) {
+                navigate('/admin?tab=mi_plan');
+              } else {
+                localStorage.setItem('selectedApp', 'pricing');
+                onSelectApp('pricing');
+              }
+            }}
+            theme="dark"
+          />
         </div>
 
         <div className="relative w-full max-w-6xl pt-8 sm:pt-0">
@@ -181,6 +140,15 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
             <p className="text-sm sm:text-lg text-blue-200 font-medium">
               {isRevisorRole ? 'Portal de revisión de documentos e informes' : 'Elige la herramienta que necesitas'}
             </p>
+            {empresa && (
+              <div className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-full bg-white/10 border border-white/20 backdrop-blur-sm">
+                {empresa.logoUrl
+                  ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
+                  : <div className="w-5 h-5 rounded bg-white/20 flex items-center justify-center text-[9px] font-black text-white">{empresa.nombre?.[0]}</div>
+                }
+                <span className="text-sm font-semibold text-white/90">{empresa.nombre}</span>
+              </div>
+            )}
           </div>
 
           {/* Grid de cards */}
@@ -191,7 +159,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 onClick={() => handleSelect('documentos', true)}
                 canAccess={true}
                 blockReason={null}
-                requiredPlan="starter"
+                isAdmin={isAdmin}
                 glowColor="from-cyan-500 to-teal-700"
                 borderColor="border-cyan-200 hover:border-cyan-400"
                 logoSrc="/logo-fleetcore-i.svg"
@@ -218,7 +186,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
               onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
               canAccess={canAccessFleetCore}
               blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('fleetcore')))}
-              requiredPlan="starter"
+              isAdmin={isAdmin}
               glowColor="from-orange-500 to-orange-700"
               borderColor="border-orange-200 hover:border-orange-400"
               logoSrc="/logo-workfleet.png"
@@ -234,14 +202,18 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "💰", text: "Remuneraciones y costos" },
                 { icon: "📑", text: "Órdenes de compra" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
 
             <AppCard
               onClick={() => handleSelect('rrhh', canAccessRRHH)}
               canAccess={canAccessRRHH}
               blockReason={blockReason('rrhh', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('rrhh')))}
-              requiredPlan="pro"
+              isAdmin={isAdmin}
               glowColor="from-emerald-500 to-green-700"
               borderColor="border-emerald-200 hover:border-emerald-400"
               logoSrc="/logo-fleetcore-r.png"
@@ -258,14 +230,18 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "📅", text: "Asistencia y organización" },
                 { icon: "📊", text: "Reportes y contabilidad" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
 
             <AppCard
               onClick={() => handleSelect('reportes', canAccessReportes)}
               canAccess={canAccessReportes}
               blockReason={blockReason('reportes', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('reportes')))}
-              requiredPlan="pro"
+              isAdmin={isAdmin}
               glowColor="from-red-600 to-orange-700"
               borderColor="border-red-200 hover:border-red-400"
               logoSrc="/wf-logo-movil.svg"
@@ -282,14 +258,18 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "📅", text: "Histórico por período" },
                 { icon: "⚙️", text: "Panel de administración" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
 
             <AppCard
               onClick={() => handleSelect('finanzas', canAccessFinanzas)}
               canAccess={canAccessFinanzas}
               blockReason={blockReason('finanzas', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('finanzas')))}
-              requiredPlan="enterprise"
+              isAdmin={isAdmin}
               glowColor="from-purple-600 to-violet-700"
               borderColor="border-purple-200 hover:border-purple-400"
               logoSrc="/logo-fleetcore-f.png"
@@ -306,14 +286,18 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "🏦", text: "Créditos y obligaciones" },
                 { icon: "📈", text: "Reportes y análisis financiero" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
 
             <AppCard
               onClick={() => handleSelect('contabilidad', canAccessContabilidad)}
               canAccess={canAccessContabilidad}
               blockReason={blockReason('contabilidad', isSuperAdmin || isAdminContrato || (userRole === 'administrativo' && hasModulo('contabilidad')))}
-              requiredPlan="enterprise"
+              isAdmin={isAdmin}
               glowColor="from-indigo-600 to-blue-700"
               borderColor="border-indigo-200 hover:border-indigo-400"
               logoSrc="/logo-fleetcore-f.png"
@@ -330,14 +314,18 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "🧾", text: "F29, F22 y PPM" },
                 { icon: "⚖️", text: "Impuesto diferido NIC 12" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
 
             <AppCard
               onClick={() => handleSelect('documentos', canAccessDocumentos)}
               canAccess={canAccessDocumentos}
               blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || isRevisorRole || (userRole === 'administrativo' && hasModulo('fleetcore')))}
-              requiredPlan="starter"
+              isAdmin={isAdmin}
               glowColor="from-cyan-500 to-teal-700"
               borderColor="border-cyan-200 hover:border-cyan-400"
               logoSrc="/logo-fleetcore-i.svg"
@@ -354,7 +342,11 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 { icon: "✍️", text: "Firma digital por roles" },
                 { icon: "🤖", text: "Redacción asistida por IA" },
               ]}
-              onUpgrade={() => { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }}
+              onUpgrade={() => {
+                if (isSuperAdmin) { navigate('/admin'); }
+                else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                else { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); }
+              }}
             />
           </div>
 
@@ -371,6 +363,7 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
                 canAccess={canAccessWorkFleetM}
                 blockReason={blockReason('workfleet', isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo')}
+                isAdmin={isAdmin}
                 requiredPlan="starter"
                 glowColor="from-cyan-500/30 to-blue-500/30"
                 borderColor="border-cyan-400/40"
@@ -385,12 +378,16 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
                 ]}
                 buttonClass="from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
                 buttonLabel="Abrir WorkFleet-M"
-                onUpgrade={() => { if (isAdminContrato) { localStorage.setItem('selectedApp', 'pricing'); onSelectApp('pricing'); } }}
+                onUpgrade={() => {
+                  if (isSuperAdmin) { navigate('/admin'); }
+                  else if (isAdminContrato) { navigate('/admin?tab=mi_plan'); }
+                }}
               />
               <AppCard
                 onClick={() => { window.location.href = '/trabajador'; }}
                 canAccess={true}
                 blockReason={null}
+                isAdmin={isAdmin}
                 requiredPlan="starter"
                 glowColor="from-emerald-500/30 to-teal-500/30"
                 borderColor="border-emerald-400/40"
@@ -421,10 +418,8 @@ export default function AppSelector({ user, onLogout, onSelectApp }) {
 
 // ── AppCard con lógica de bloqueo por plan ─────────────────────
 
-function AppCard({ onClick, canAccess, blockReason, requiredPlan, glowColor, borderColor,
+function AppCard({ onClick, canAccess, blockReason, isAdmin, glowColor, borderColor,
   logoSrc, logoAlt, buttonClass, buttonLabel, badgeClass, badgeLabel, features, onUpgrade }) {
-
-  const planNames = { starter: 'Starter', pro: 'Pro', enterprise: 'Enterprise' };
 
   return (
     <div onClick={canAccess ? onClick : undefined} className={`group relative ${canAccess ? 'cursor-pointer' : 'cursor-not-allowed'} animate-fadeInUp`}>
@@ -443,14 +438,20 @@ function AppCard({ onClick, canAccess, blockReason, requiredPlan, glowColor, bor
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                     </svg>
                   </div>
-                  <div className="text-sm font-black text-slate-800 mb-1">Requiere plan {planNames[requiredPlan]}</div>
-                  <div className="text-xs text-slate-500 mb-3">Actualiza tu plan para desbloquear este módulo</div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onUpgrade(); }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-md"
-                  >
-                    Ver planes →
-                  </button>
+                  <div className="text-sm font-black text-slate-800 mb-1">Módulo no contratado</div>
+                  <div className="text-xs text-slate-500 mb-3">
+                    {isAdmin
+                      ? "Activa este módulo desde tu panel de administración para comenzar"
+                      : "Contacta al administrador de tu empresa para activar este módulo"}
+                  </div>
+                  {isAdmin && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onUpgrade(); }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-md"
+                    >
+                      Contratar módulo →
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
@@ -460,7 +461,7 @@ function AppCard({ onClick, canAccess, blockReason, requiredPlan, glowColor, bor
                     </svg>
                   </div>
                   <div className="text-sm font-bold text-slate-700">Acceso Restringido</div>
-                  <div className="text-xs text-slate-500 mt-1">Contacta al administrador</div>
+                  <div className="text-xs text-slate-500 mt-1">Tu rol no tiene acceso a esta aplicación</div>
                 </>
               )}
             </div>

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db, firebaseConfig } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
 import { initializeApp, deleteApp } from 'firebase/app';
 import * as Shared from './shared';
 import * as Calc from './calculo';
@@ -454,18 +455,19 @@ function DashboardSection() {
 }
 
 function TrabajadoresSection() {
+  const navigate = useNavigate();
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
-  const [data,    setData]    = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal,   setModal]   = useState(false);
-  const [editData,setEditData]= useState(null);
-  const [confirm, setConfirm] = useState(null);
-  const [ficha,   setFicha]   = useState(null);
-  const [historial,    setHistorial]    = useState(null);
-  const [hContratos,   setHContratos]   = useState([]);
-  const [hAnexos,      setHAnexos]      = useState([]);
+  const [data,      setData]      = useState([]);
+  const [contratos, setContratos] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [modal,     setModal]     = useState(false);
+  const [editData,  setEditData]  = useState(null);
+  const [confirm,   setConfirm]   = useState(null);
+  const [historial,      setHistorial]      = useState(null);
+  const [hContratos,     setHContratos]     = useState([]);
+  const [hAnexos,        setHAnexos]        = useState([]);
   const [hLiquidaciones, setHLiquidaciones] = useState([]);
-  const [hFiniquitos,  setHFiniquitos]  = useState([]);
+  const [hFiniquitos,    setHFiniquitos]    = useState([]);
   const [busqueda,      setBusqueda]      = useState('');
   const [filtroArea,    setFiltroArea]    = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
@@ -495,16 +497,39 @@ function TrabajadoresSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db,'empresas',empresaId,'trabajadores'), orderBy('apellidoPaterno')));
-      setData(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+      const [tSnap, cSnap] = await Promise.all([
+        getDocs(query(collection(db,'empresas',empresaId,'trabajadores'), orderBy('apellidoPaterno'))),
+        getDocs(collection(db,'empresas',empresaId,'contratos')),
+      ]);
+      setData(tSnap.docs.map(d => ({ id:d.id, ...d.data() })));
+      setContratos(cSnap.docs.map(d => ({ id:d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
   }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Compute expiry alerts for a worker row
+  function getAlertas(row) {
+    const alerts = [];
+    const hoy = new Date();
+    const contrato = contratos.find(c => c.trabajadorId === row.id && c.estado === 'vigente');
+    if (!contrato) {
+      const alguno = contratos.some(c => c.trabajadorId === row.id);
+      alerts.push({ nivel: alguno ? 'amber' : 'red', texto: alguno ? 'Sin contrato vigente' : 'Sin contrato registrado' });
+    } else if (contrato.fechaFin) {
+      const dias = Math.ceil((new Date(contrato.fechaFin) - hoy) / 86400000);
+      if      (dias < 0)   alerts.push({ nivel: 'red',   texto: `Contrato vencido hace ${Math.abs(dias)} día${Math.abs(dias)!==1?'s':''}` });
+      else if (dias <= 15) alerts.push({ nivel: 'red',   texto: `Contrato vence en ${dias} día${dias!==1?'s':''}` });
+      else if (dias <= 30) alerts.push({ nivel: 'amber', texto: `Contrato vence en ${dias} días` });
+      else if (dias <= 60) alerts.push({ nivel: 'yellow',texto: `Contrato vence en ${dias} días` });
+    }
+    if (!row.portalUid) alerts.push({ nivel: 'gray', texto: 'Sin cuenta de portal' });
+    return alerts;
+  }
+
   const openNew  = ()    => { setEditData(null); setModal(true); };
-  const openEdit = (row) => { setEditData(row);  setModal(true); setFicha(null); };
+  const openEdit = (row) => { setEditData(row);  setModal(true); };
 
   const handleDelete = async () => {
     try { await deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id)); load(); }
@@ -625,37 +650,80 @@ function TrabajadoresSection() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[750px]">
+            <table className="w-full min-w-[900px]">
               <thead>
                 <tr style={{background:"#1e1b4b"}}>
                   {['Trabajador','RUT','Área','Empresa','Cargo','F. Ingreso','Estado','Acciones'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
+                    <th key={h} className="px-4 py-3 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {paginados.map(row => {
-                  const nombre = `${row.nombre} ${row.apellidoPaterno}`.trim();
-                  const ini    = `${row.nombre?.[0]||''}${row.apellidoPaterno?.[0]||''}`.toUpperCase();
+                  const nombre  = `${row.nombre} ${row.apellidoPaterno}`.trim();
+                  const ini     = `${row.nombre?.[0]||''}${row.apellidoPaterno?.[0]||''}`.toUpperCase();
+                  const alertas = getAlertas(row);
+                  const tieneAlerta = alertas.some(a => a.nivel === 'red' || a.nivel === 'amber');
                   return (
-                    <tr key={row.id} className="transition-colors" style={{}} onMouseEnter={e=>e.currentTarget.style.background="#faf9ff"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                      <td className="px-4 py-3">
-                        <button onClick={()=>setFicha(row)} className="flex items-center gap-3 text-left hover:opacity-80 transition-opacity">
-                          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0" style={{background:"linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow:"0 2px 6px rgba(124,58,237,0.25)"}}>{ini}</div>
-                          <span className="font-bold text-slate-800 text-sm hover:text-purple-700 transition-colors">{nombre}</span>
-                        </button>
+                    <tr key={row.id} className="group transition-colors" onMouseEnter={e=>e.currentTarget.style.background="#faf9ff"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="relative flex items-center gap-3">
+                          {/* Avatar con indicador de alerta */}
+                          <div className="relative flex-shrink-0">
+                            <button
+                              onClick={() => navigate(`/rrhh/trabajadores/${row.id}`)}
+                              className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs"
+                              style={{background:"linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow:"0 2px 6px rgba(124,58,237,0.25)"}}>
+                              {ini}
+                            </button>
+                            {tieneAlerta && (
+                              <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white" />
+                            )}
+                          </div>
+                          <button
+                            onClick={() => navigate(`/rrhh/trabajadores/${row.id}`)}
+                            className="font-bold text-slate-800 text-sm hover:text-purple-700 transition-colors text-left">
+                            {nombre}
+                          </button>
+                          {/* Tooltip de alertas */}
+                          {alertas.length > 0 && (
+                            <div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-xl shadow-xl border border-slate-100 bg-white opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 pointer-events-none"
+                              style={{boxShadow:"0 8px 24px rgba(0,0,0,0.12)"}}>
+                              <div className="px-3 py-2 border-b border-slate-100">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{nombre}</p>
+                              </div>
+                              <div className="divide-y divide-slate-50">
+                                {alertas.map((a, i) => {
+                                  const colors = {
+                                    red:    'text-red-600 bg-red-50',
+                                    amber:  'text-amber-700 bg-amber-50',
+                                    yellow: 'text-yellow-700 bg-yellow-50',
+                                    gray:   'text-slate-500 bg-slate-50',
+                                  };
+                                  const dots = { red:'bg-red-500', amber:'bg-amber-400', yellow:'bg-yellow-400', gray:'bg-slate-300' };
+                                  return (
+                                    <div key={i} className={`flex items-start gap-2 px-3 py-2 ${colors[a.nivel]}`}>
+                                      <div className={`w-2 h-2 rounded-full mt-0.5 flex-shrink-0 ${dots[a.nivel]}`} />
+                                      <p className="text-xs font-medium leading-tight break-words">{a.texto}</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm font-mono text-slate-500">{row.rut||'—'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{row.area||'—'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{row.empresa||'—'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-500 max-w-[140px] truncate">{row.cargo||'—'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-500">{row.fechaIngreso||'—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-sm font-mono text-slate-500 whitespace-nowrap">{row.rut||'—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{row.area||'—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap max-w-[140px] truncate">{row.empresa||'—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap max-w-[130px] truncate">{row.cargo||'—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">{row.fechaIngreso||'—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${estadoBadge[row.estado||'activo']}`}>
                           {row.estado||'activo'}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <button onClick={()=>openHistorial(row)} className="p-1.5 bg-violet-50 hover:bg-violet-100 text-violet-600 rounded-lg transition-colors" title="Ver historial completo">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -695,7 +763,6 @@ function TrabajadoresSection() {
 
       <TrabajadorModal isOpen={modal} onClose={()=>setModal(false)} editData={editData} onSaved={load} />
       <ConfirmDialog isOpen={!!confirm} onClose={()=>setConfirm(null)} onConfirm={handleDelete} nombre={confirm?`${confirm.nombre} ${confirm.apellidoPaterno}`:''} />
-      <FichaTrabajador trabajador={ficha} onEdit={()=>openEdit(ficha)} onClose={()=>setFicha(null)} />
       <HistorialModal isOpen={!!historial} onClose={()=>setHistorial(null)}
         trabajador={historial} contratos={hContratos} anexos={hAnexos}
         liquidaciones={hLiquidaciones} finiquitos={hFiniquitos} />
@@ -1707,6 +1774,7 @@ function PortalTrabajadoresPanel({ trabajadores }) {
       // inicia sesión automáticamente con la cuenta recién creada).
       const secondaryApp = initializeApp(firebaseConfig, `worker-account-${Date.now()}-${i}`);
       const secondaryAuth = getAuth(secondaryApp);
+      await setPersistence(secondaryAuth, inMemoryPersistence);
 
       try {
         // Crear cuenta en Firebase Auth (app secundaria)

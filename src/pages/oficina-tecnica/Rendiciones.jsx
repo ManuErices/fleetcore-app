@@ -85,7 +85,7 @@ export default function Rendiciones() {
     try {
       // Cargar TODAS las rendiciones del proyecto
       const q = query(
-        collection(db, 'rendiciones'),
+        collection(db, 'empresas', empresaId, 'rendiciones'),
         where("projectId", "==", selectedProject)
       );
       const snap = await getDocs(q);
@@ -363,9 +363,10 @@ export default function Rendiciones() {
       // Solo agregar las nuevas rendiciones
       const batch = writeBatch(db);
       rendicionesImportadas.forEach(rendicion => {
-        const docRef = doc(collection(db, 'rendiciones'));
+        const docRef = doc(collection(db, 'empresas', empresaId, 'rendiciones'));
         batch.set(docRef, {
           ...rendicion,
+          empresaId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -395,7 +396,7 @@ export default function Rendiciones() {
       const batch = writeBatch(db);
       rendiciones.forEach(r => {
         if (r.id) {
-          batch.delete(doc(db, 'rendiciones', r.id));
+          batch.delete(doc(db, 'empresas', empresaId, 'rendiciones', r.id));
         }
       });
       await batch.commit();
