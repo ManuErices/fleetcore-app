@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, setDoc, doc, query, orderBy, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 
@@ -158,46 +158,10 @@ export function ContabilidadProvider({ children }) {
     setLoadingA(false);
   }, [empresaId, periodoActivo]);
 
-  // Cargar períodos disponibles:
-  // - Intenta leer la colección "periods" (si existe)
-  // - Siempre genera los últimos 24 meses como fallback (no requiere permisos extra)
   const cargarPeriodos = useCallback(async () => {
     if (!empresaId) return;
     try {
-      // 1. Obtener períodos desde la colección optimizada
-      let snapPeriods = await getDocs(
-        collection(db, "empresas", empresaId, "active_periods")
-      );
-
-      // Si está vacía, hacemos una migración inicial/fallback única para poblarla
-      if (snapPeriods.empty) {
-        const snapAll = await getDocs(
-          collection(db, "empresas", empresaId, "journal_entries")
-        );
-        const periodosConAsientos = new Set();
-        snapAll.docs.forEach(d => {
-          const p = d.data().periodo;
-          if (p) periodosConAsientos.add(p);
-        });
-
-        if (periodosConAsientos.size > 0) {
-          const promesas = Array.from(periodosConAsientos).map(p =>
-            setDoc(doc(db, "empresas", empresaId, "active_periods", p), {
-              creadoEn: serverTimestamp(),
-              tieneAsientos: true
-            })
-          );
-          await Promise.all(promesas);
-          // Volver a consultar
-          snapPeriods = await getDocs(
-            collection(db, "empresas", empresaId, "active_periods")
-          );
-        }
-      }
-
-      const periodosConAsientos = new Set(snapPeriods.docs.map(d => d.id));
-
-      // 2. Generar los últimos 24 meses como navegación libre
+      // Siempre generar los últimos 24 meses — esto nunca falla
       const hoy = new Date();
       const generados = [];
       for (let i = 0; i < 24; i++) {
@@ -206,20 +170,46 @@ export function ContabilidadProvider({ children }) {
         generados.push({ id, mes: d.getMonth(), anio: d.getFullYear(), cerrado: false });
       }
 
-      // Intentar enriquecer con datos de la colección "periods" (puede no existir o no tener permisos)
+      // Intentar sincronizar active_periods (requiere regla en Firestore)
+      try {
+        let snapPeriods = await getDocs(
+          collection(db, "empresas", empresaId, "active_periods")
+        );
+        // Si está vacía, migrar desde journal_entries (una sola vez)
+        if (snapPeriods.empty) {
+          const snapAll = await getDocs(
+            collection(db, "empresas", empresaId, "journal_entries")
+          );
+          const encontrados = new Set();
+          snapAll.docs.forEach(d => { const p = d.data().periodo; if (p) encontrados.add(p); });
+          if (encontrados.size > 0) {
+            await Promise.all(Array.from(encontrados).map(p =>
+              setDoc(doc(db, "empresas", empresaId, "active_periods", p), {
+                creadoEn: serverTimestamp(), tieneAsientos: true
+              })
+            ));
+            snapPeriods = await getDocs(collection(db, "empresas", empresaId, "active_periods"));
+          }
+        }
+        // Marcar períodos que tienen asientos
+        snapPeriods.docs.forEach(d => {
+          const idx = generados.findIndex(p => p.id === d.id);
+          if (idx >= 0) generados[idx].tieneAsientos = true;
+        });
+      } catch (_) { /* sin permisos para active_periods — mostramos igual los 24 meses */ }
+
+      // Intentar enriquecer con datos de la colección "periods" (cerrados, etc.)
       try {
         const snap = await getDocs(collection(db, "empresas", empresaId, "periods"));
         snap.docs.forEach(d => {
-          const periodo = d.data();
           const idx = generados.findIndex(p => p.id === d.id);
-          if (idx >= 0) {
-            generados[idx] = { ...generados[idx], ...periodo, id: d.id };
-          } else {
+          if (idx >= 0) generados[idx] = { ...generados[idx], ...d.data(), id: d.id };
+          else {
             const [anio, mes] = d.id.split("-");
-            generados.push({ id: d.id, mes: parseInt(mes) - 1, anio: parseInt(anio), cerrado: false, ...periodo });
+            generados.push({ id: d.id, mes: parseInt(mes) - 1, anio: parseInt(anio), cerrado: false, ...d.data() });
           }
         });
-      } catch (_) { /* sin permisos para "periods" — ok, usamos los generados */ }
+      } catch (_) { /* sin permisos para "periods" — ok */ }
 
       generados.sort((a, b) => b.id.localeCompare(a.id));
       setPeriodos(generados);

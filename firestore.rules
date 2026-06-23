@@ -246,6 +246,7 @@ service cloud.firestore {
       // ── CONTABILIDAD Y COMBUSTIBLE ASOCIADOS ────────────
       match /chart_of_accounts/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /journal_entries/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /active_periods/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /reglas_gasto/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /periods/{docId}               { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /flujo_mensual/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }

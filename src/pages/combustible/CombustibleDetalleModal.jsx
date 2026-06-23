@@ -264,6 +264,51 @@ export default function CombustibleDetalleModal({
 
               {/* Documentos */}
               {(() => {
+                const docsEstacion = reporte.documentosEstacion || reporte.datosEntrada?.documentosEstacion;
+                if (docsEstacion && docsEstacion.length > 0) {
+                  return (
+                    <div className="col-span-full space-y-3 mt-2">
+                      <div className="text-xs font-black text-slate-500 uppercase tracking-widest px-1">Documentos de Compra (Estación de Servicio)</div>
+                      <div className="bg-white border-2 border-slate-100 rounded-2xl overflow-hidden shadow-sm max-w-xl">
+                        <table className="min-w-full divide-y divide-slate-100 text-xs text-left">
+                          <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                              <th className="px-4 py-3">N° Doc</th>
+                              <th className="px-4 py-3 text-right">Cantidad (Lts)</th>
+                              <th className="px-4 py-3 text-right">Monto ($)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-700 font-bold">
+                            {docsEstacion.map((d, i) => (
+                              <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="px-4 py-3 text-slate-900">{d.numero}</td>
+                                <td className="px-4 py-3 text-right text-slate-600">{Number(d.cantidad || 0).toLocaleString('es-CL')} Lts</td>
+                                <td className="px-4 py-3 text-right text-green-700">${Number(d.total || 0).toLocaleString('es-CL')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          {reporte.totalMonto && (
+                            <tfoot className="bg-slate-50/50 border-t border-slate-100 font-black text-slate-800">
+                              <tr>
+                                <td className="px-4 py-3 uppercase tracking-wider">Total</td>
+                                <td className="px-4 py-3 text-right text-slate-900">
+                                  {Number(cantidadDisplay || 0).toLocaleString('es-CL')} Lts
+                                </td>
+                                <td className="px-4 py-3 text-right text-green-800">${Number(reporte.totalMonto).toLocaleString('es-CL')}</td>
+                              </tr>
+                            </tfoot>
+                          )}
+                        </table>
+                      </div>
+                      {reporte.precioPorLitro > 0 && (
+                        <div className="text-xs font-bold text-slate-500 mt-2 flex gap-2 items-center">
+                          <span>Precio por Litro calculado:</span>
+                          <span className="font-black text-orange-600 bg-orange-50 px-3 py-1 rounded-lg border border-orange-100">${Number(reporte.precioPorLitro).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / Lts</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
                 const docs = reporte.datosEntrada?.numerosDocumento || reporte.numerosDocumento;
                 const doc = reporte.datosEntrada?.numeroDocumento || reporte.numeroDocumento;
                 if (docs?.length > 0) return (

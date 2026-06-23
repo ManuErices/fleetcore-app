@@ -125,7 +125,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     maquinaProveedorId: '',
     operadorProveedorId: '',
     observaciones: '',
-    extraEmails: []
+    extraEmails: [],
+    documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
   });
 
   const [datosEntrega, setDatosEntrega] = useState({
@@ -255,7 +256,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     setDatosEntrada({
       origen: '', tipoOrigen: '', destinoCarga: '', numerosDocumento: [''], numeroDocumento: '',
       fechaDocumento: TODAY(), cantidad: '', horometroOdometro: '', machineId: '', operadorId: '',
-      receptorNombre: '', maquinaProveedorId: '', operadorProveedorId: '', observaciones: '', extraEmails: []
+      receptorNombre: '', maquinaProveedorId: '', operadorProveedorId: '', observaciones: '', extraEmails: [],
+      documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
     });
     setDatosEntrega({
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
@@ -572,7 +574,6 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       };
 
       if (tipoReporte === 'entrada') {
-        const docsValidos2 = datosEntrada.numerosDocumento.filter(d => d.trim());
         const machineIdFinal = (datosEntrada.tipoOrigen === 'estacion' && datosEntrada.destinoCarga === 'camion')
           ? datosControl.equipoSurtidorId
           : datosEntrada.machineId;
@@ -588,14 +589,47 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           nombreProveedor = 'MPF INGENIERÍA';
         }
 
+        let extraFields = {};
+        if (datosEntrada.tipoOrigen === 'estacion') {
+          const docsEstacion = (datosEntrada.documentosEstacion || []).filter(r => r.numero && r.numero.trim());
+          const totalLitros = docsEstacion.reduce((acc, r) => acc + (parseFloat(r.cantidad) || 0), 0);
+          const totalMonto = docsEstacion.reduce((acc, r) => acc + (parseFloat(r.total) || 0), 0);
+          
+          const firstValid = docsEstacion.find(r => parseFloat(r.cantidad) > 0 && parseFloat(r.total) > 0);
+          const precioPorLitro = firstValid ? (parseFloat(firstValid.total) / parseFloat(firstValid.cantidad)) : 0;
+          
+          extraFields = {
+            documentosEstacion: docsEstacion.map(r => ({
+              numero: r.numero.trim(),
+              cantidad: parseFloat(r.cantidad) || 0,
+              total: parseFloat(r.total) || 0
+            })),
+            totalMonto,
+            precioPorLitro,
+            numerosDocumento: docsEstacion.map(r => r.numero.trim()),
+            numeroDocumento: docsEstacion[0]?.numero.trim() || '',
+            cantidad: totalLitros
+          };
+
+          dataToSave.totalMonto = totalMonto;
+          dataToSave.precioPorLitro = precioPorLitro;
+          dataToSave.documentosEstacion = extraFields.documentosEstacion;
+        } else {
+          const docsValidos2 = datosEntrada.numerosDocumento.filter(d => d && d.trim());
+          extraFields = {
+            numerosDocumento: docsValidos2,
+            numeroDocumento: docsValidos2[0] || '',
+            cantidad: parseFloat(datosEntrada.cantidad.toString().replace(/\./g, '').replace(',', '.')) || 0
+          };
+        }
+
         dataToSave.datosEntrada = {
           ...datosEntrada,
+          ...extraFields,
           machineId: machineIdFinal,
-          numerosDocumento: docsValidos2,
-          numeroDocumento: docsValidos2[0] || '',
-          cantidad: parseFloat(datosEntrada.cantidad.toString().replace(/\./g, '').replace(',', '.')),
           horometroOdometro: parseFloat(datosEntrada.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0
         };
+        dataToSave.cantidad = dataToSave.datosEntrada.cantidad;
         dataToSave.empresaProveedora = nombreProveedor;
         dataToSave.firmaRepartidor = firmaRepartidor;
         dataToSave.fechaFirma = new Date().toISOString();
