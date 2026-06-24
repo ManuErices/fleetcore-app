@@ -1,0 +1,352 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────────────
+
+    // Usuario autenticado
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Lee el doc del usuario desde /users/{uid}
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Rol del usuario
+    function userRole() {
+      return isAuth() ? userData().role : null;
+    }
+
+    // EmpresaId del usuario
+    function userEmpresaId() {
+      return isAuth() ? userData().empresaId : null;
+    }
+
+    // Superadmin global — acceso total a todo
+    function isSuperAdmin() {
+      return isAuth() && userRole() == 'superadmin';
+    }
+
+    // Admin de contrato — acceso total dentro de su empresa
+    function isAdminContrato() {
+      return isAuth() && userRole() == 'admin_contrato';
+    }
+
+    // Mandante admin — puede gestionar usuarios mandante de su empresa
+    function isMandanteAdmin() {
+      return isAuth() && userRole() == 'mandante_admin';
+    }
+
+    // Cualquier admin (superadmin o admin_contrato)
+    function isAnyAdmin() {
+      return isSuperAdmin() || isAdminContrato();
+    }
+
+    // Usuario pertenece a esta empresa
+    function belongsToEmpresa(empresaId) {
+      return isAuth() && userEmpresaId() == empresaId;
+    }
+
+    // Usuario tiene acceso de lectura/escritura a la empresa
+    // (cualquier rol excepto trabajador y mandante pueden operar)
+    function canWriteEmpresa(empresaId) {
+      return belongsToEmpresa(empresaId)
+          && userRole() != 'trabajador'
+          && userRole() != 'mandante';
+    }
+
+    // Trabajador autenticado con cuenta @mpf.cl (u otro dominio de empresa)
+    function isTrabajador() {
+      return isAuth() && userRole() == 'trabajador';
+    }
+
+    // Mandante — solo lectura
+    function isMandante() {
+      return isAuth() && userRole() == 'mandante';
+    }
+
+    // ─────────────────────────────────────────────────────
+    // COLECCIONES GLOBALES (solo superadmin)
+    // ─────────────────────────────────────────────────────
+
+    match /settings/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    match /subscription_intents/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // EMPRESAS — solo superadmin puede crear/listar empresas
+    //            admin_contrato puede leer su propia empresa
+    // ─────────────────────────────────────────────────────
+
+    match /empresas/{empresaId} {
+      allow read:  if isAuth();
+      // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún);
+      // O un administrador/usuario autorizado puede crear una sub-empresa
+      allow create: if isSuperAdmin()
+                    || (isAuth() && !exists(/databases/$(database)/documents/users/$(request.auth.uid)))
+                    || (isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('empresaId', null) == null)
+                    || (isAuth() && request.resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
+      allow update, delete: if isSuperAdmin()
+                            || (isAuth() && resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
+
+      // ── USUARIOS DE LA EMPRESA ──────────────────────────
+      match /users/{uid} {
+        allow read:  if isSuperAdmin()
+                     || (isAuth() && userEmpresaId() == empresaId && isAnyAdmin())
+                     || (isAuth() && request.auth.uid == uid);
+        allow write: if isSuperAdmin()
+                     || (isAdminContrato() && userEmpresaId() == empresaId);
+      }
+
+      // ── TRABAJADORES ────────────────────────────────────
+      match /trabajadores/{trabajadorId} {
+        allow read, write: if isSuperAdmin()
+                           || (canWriteEmpresa(empresaId));
+        // Trabajador lee su propio perfil
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.portalUid == request.auth.uid;
+        // Trabajador crea su propio registro al aceptar una invitación
+        allow create: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && request.resource.data.portalUid == request.auth.uid;
+      }
+
+      match /trabajadores_portal/{uid} {
+        allow read:  if isAuth() && request.auth.uid == uid;
+        allow write: if isSuperAdmin()
+                     || (canWriteEmpresa(empresaId));
+        // Trabajador crea su propio vínculo al aceptar una invitación
+        allow create: if isAuth() && request.auth.uid == uid
+                    && belongsToEmpresa(empresaId)
+                    && isTrabajador();
+      }
+
+      // ── CONTRATOS, ANEXOS, FINIQUITOS ───────────────────
+      match /contratos/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.trabajadorId != null
+                    && existsAfter(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid))
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+      }
+
+      match /finiquitos/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+      }
+
+      match /anexos/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+      }
+
+      // ── REMUNERACIONES ───────────────────────────────────
+      match /remuneraciones/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+      }
+
+      // ── ASISTENCIA ───────────────────────────────────────
+      match /asistencia/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.trabajadorId == request.auth.uid;
+        allow create: if isTrabajador()
+                      && belongsToEmpresa(empresaId)
+                      && request.resource.data.trabajadorId == request.auth.uid;
+        allow update: if isTrabajador()
+                      && belongsToEmpresa(empresaId)
+                      && resource.data.trabajadorId == request.auth.uid;
+      }
+
+      // ── REPORTES WORKFLEET (mandante puede leer) ─────────
+      match /reportes_detallados/{docId} {
+        allow read:  if isSuperAdmin()
+                     || canWriteEmpresa(empresaId)
+                     || (isMandante() && belongsToEmpresa(empresaId));
+        allow write: if isSuperAdmin()
+                     || canWriteEmpresa(empresaId);
+      }
+
+      match /reportes_combustible/{docId} {
+        allow read:  if isSuperAdmin()
+                     || canWriteEmpresa(empresaId)
+                     || (isMandante() && belongsToEmpresa(empresaId));
+        allow write: if isSuperAdmin()
+                     || canWriteEmpresa(empresaId);
+      }
+
+      // ── RESTO DE COLECCIONES DE EMPRESA ──────────────────
+      // Acceso completo para admins y roles operativos de la empresa
+      match /projects/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /machines/{docId}              { allow read: if isAuth(); allow write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /dailyLogs/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /fuelLogs/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /employees/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /employeeMonthlyData/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /employeeAssignments/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /purchaseOrders/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /rendiciones/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /subcontratos/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /actividades_disponibles/{docId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /bandas_salariales/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /catalogo_maquinas/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /costos_fijos/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /empresas_combustible/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /equipos_surtidores/{docId}    { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /estaciones_combustible/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_config/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_cuentas/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_pagados/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_notas/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_pagos/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /finanzas_activos/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /finanzas_ingresos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /centros_costo/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /fuelPrices/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /guias_despacho/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /proveedores_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /solicitudes_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+
+      // ── CONTABILIDAD Y COMBUSTIBLE ASOCIADOS ────────────
+      match /chart_of_accounts/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /journal_entries/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /reglas_gasto/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_mensual/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /combustible_calculos/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /combustible_maquinaria/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /users raíz — para login y lectura de empresaId
+    // Necesario porque AppSelector y useEmpresa leen de aquí
+    // ─────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read:   if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId());
+      allow create: if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid)  // Registro inicial — sin rol aún
+                    // Admin de la empresa crea la cuenta de portal de un trabajador
+                    || (isAnyAdmin() && request.resource.data.role == 'trabajador'
+                        && request.resource.data.empresaId == userEmpresaId());
+      allow update: if isSuperAdmin()
+                    || (isAuth() && request.auth.uid == uid)
+                    || (isAnyAdmin() && resource.data.empresaId == userEmpresaId() && request.resource.data.empresaId == userEmpresaId());
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /subscriptions — usePlan hook lee/escucha el plan activo
+    // ─────────────────────────────────────────────────────
+    match /subscriptions/{uid} {
+      allow read:           if isSuperAdmin()
+                            || (isAuth() && request.auth.uid == uid)
+                            || (isAuth() && resource.data.empresaId == userEmpresaId());
+      allow create, update: if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
+      allow delete:         if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Precios combustible — lectura pública, escritura solo auth
+    // ─────────────────────────────────────────────────────
+    match /fuelPrices/{docId} {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() || isAdminContrato();
+    }
+    match /fuelPriceHistory/{docId} {
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() || isAdminContrato();
+    }
+    match /fuelPriceCache/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /invitaciones — sistema de invitaciones de empresa
+    // ─────────────────────────────────────────────────────
+    match /invitaciones/{token} {
+      // Cualquiera puede leer una invitación (para validarla al aceptar)
+      allow read: if true;
+      // superadmin puede crear cualquier invitación
+      // admin_contrato puede crear invitaciones solo para su empresa
+      // mandante_admin puede crear invitaciones de rol mandante para su empresa
+      allow create: if isSuperAdmin()
+                    || (isAdminContrato() && request.resource.data.empresaId == userEmpresaId())
+                    || (isMandanteAdmin() && request.resource.data.empresaId == userEmpresaId()
+                        && request.resource.data.rol == 'mandante');
+      // Cualquier usuario autenticado puede marcar una invitación como usada (al aceptarla)
+      allow update: if isAuth();
+      // Solo admins pueden revocar
+      allow delete: if isAnyAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // DOCUMENTOS Y FIRMAS (Módulo de Documentos)
+    // ─────────────────────────────────────────────────────
+    match /documentos/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /pins/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /usuarios/{usuario} {
+      allow read, write: if isAuth();
+    }
+    match /folios/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /libros/{docId} {
+      allow read: if isAuth();
+      allow write: if isAnyAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // /domains & /mailboxes — Email Portal
+    // ─────────────────────────────────────────────────────
+    match /domains/{domainName} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
+    }
+
+    match /mailboxes/{mailboxId} {
+      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow write: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
+    // DEFAULT — denegar todo lo no especificado
+    // ─────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

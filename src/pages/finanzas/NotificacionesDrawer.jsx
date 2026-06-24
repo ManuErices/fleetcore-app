@@ -14,6 +14,7 @@ const CATEGORIA = {
   proveedor:        { label: "Proveedores",  color: "bg-amber-100 text-amber-700"   },
   activo_sin_datos: { label: "Activos",      color: "bg-slate-100 text-slate-600"   },
   ingreso_faltante: { label: "Ingresos",     color: "bg-emerald-100 text-emerald-700"},
+  deuda_vencida:    { label: "Deuda",        color: "bg-red-100 text-red-700"       },
 };
 
 // ─── Tarjeta de alerta ────────────────────────────────────────────────────────
