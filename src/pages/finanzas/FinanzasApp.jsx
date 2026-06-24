@@ -6,6 +6,7 @@ import FinanzasActivos from "./FinanzasActivos";
 import FinanzasProveedores from "./FinanzasProveedores";
 import FinanzasObras from "./FinanzasObras";
 import FinanzasReportes from "./FinanzasReportes";
+import FinanzasDeuda from "./FinanzasDeuda";
 import { FinanzasProvider, NotificacionesBtn, useFinanzas } from "./FinanzasContext";
 import NotificacionesDrawer from "./NotificacionesDrawer";
 
@@ -50,6 +51,14 @@ const NAV_ITEMS = [
         d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
     ),
   },
+  {
+    id: "deuda",
+    label: "Deuda & Plan de Pagos",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M9 14l6-6m-5.5-.5h.01M14.5 14.5h.01M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z" />
+    ),
+  },
 
   {
     id: "obras",
@@ -82,7 +91,21 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
     a.categoria === "activo_doc" && a.tipo === "danger"
   ).length > 0;
 
+  // Badge para Deuda: documentos/proveedores con deuda vencida
+  const badgeDeuda = alertas.filter(a => a.categoria === "deuda_vencida").length;
+  const badgeDeudaCritico = badgeDeuda > 0;
+
   const currentNav = NAV_ITEMS.find((n) => n.id === activeView);
+
+  function getBadgeFor(itemId) {
+    if (itemId === "activos" && badgeActivos > 0) {
+      return { count: badgeActivos, critico: badgeActivosCritico };
+    }
+    if (itemId === "deuda" && badgeDeuda > 0) {
+      return { count: badgeDeuda, critico: badgeDeudaCritico };
+    }
+    return null;
+  }
 
   function renderView() {
     switch (activeView) {
@@ -91,6 +114,7 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
       case "costos":       return <FinanzasCostos />;
       case "activos":      return <FinanzasActivos />;
       case "proveedores":  return <FinanzasProveedores />;
+      case "deuda":        return <FinanzasDeuda />;
       case "obras":        return <FinanzasObras />;
       case "reportes":     return <FinanzasReportes />;
       default:             return <FinanzasDashboard onNavigate={setActiveView} />;
@@ -111,7 +135,7 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map((item) => {
             const active = activeView === item.id;
-            const showBadge = item.id === "activos" && badgeActivos > 0;
+            const badge = getBadgeFor(item.id);
             return (
               <button
                 key={item.id}
@@ -126,11 +150,11 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
                   {item.icon}
                 </svg>
                 <span className="flex-1 text-left">{item.label}</span>
-                {showBadge && (
+                {badge && (
                   <span className={`min-w-4 h-4 px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
-                    badgeActivosCritico ? "bg-red-500" : "bg-amber-500"
+                    badge.critico ? "bg-red-500" : "bg-amber-500"
                   }`}>
-                    {badgeActivos > 9 ? "9+" : badgeActivos}
+                    {badge.count > 9 ? "9+" : badge.count}
                   </span>
                 )}
               </button>
@@ -191,7 +215,7 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
             <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
               {NAV_ITEMS.map((item) => {
                 const active = activeView === item.id;
-                const showBadge = item.id === "activos" && badgeActivos > 0;
+                const badge = getBadgeFor(item.id);
                 return (
                   <button
                     key={item.id}
@@ -206,11 +230,11 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
                       {item.icon}
                     </svg>
                     <span className="flex-1 text-left">{item.label}</span>
-                    {showBadge && (
+                    {badge && (
                       <span className={`min-w-4 h-4 px-1 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
-                        badgeActivosCritico ? "bg-red-500" : "bg-amber-500"
+                        badge.critico ? "bg-red-500" : "bg-amber-500"
                       }`}>
-                        {badgeActivos > 9 ? "9+" : badgeActivos}
+                        {badge.count > 9 ? "9+" : badge.count}
                       </span>
                     )}
                   </button>
@@ -271,10 +295,11 @@ function FinanzasAppInner({ user, onLogout, onBackToSelector }) {
         onNavegar={(vista) => {
           const mapa = {
             "Dashboard":     "dashboard",
-            "Flujo de Caja": "flujocaja",
+            "Flujo de Caja": "flujo",
             "Costos":        "costos",
             "Activos":       "activos",
             "Proveedores":   "proveedores",
+            "Deuda":         "deuda",
             "Obras":         "obras",
             "Reportes":      "reportes",
           };

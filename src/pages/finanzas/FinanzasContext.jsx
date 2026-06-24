@@ -25,7 +25,7 @@ function mesKey(fecha) {
 
 // ─── Tipos de alerta ──────────────────────────────────────────────────────────
 // tipo: "danger" | "warning" | "info"
-// categoria: "activo_doc" | "costo_fijo" | "proveedor" | "activo_sin_datos" | "ingreso_faltante"
+// categoria: "activo_doc" | "costo_fijo" | "proveedor" | "activo_sin_datos" | "ingreso_faltante" | "deuda_vencida"
 
 export function FinanzasProvider({ children }) {
   const { empresaId } = useEmpresa();
@@ -192,6 +192,33 @@ export function FinanzasProvider({ children }) {
           });
         }
       }
+    } catch (e) {}
+
+    // ── 6. Deuda de proveedores/factoring/financieras vencida ──────────────
+    try {
+      const snapDeuda = await getDocs(collection(db, "empresas", empresaId, "deuda_proveedores"));
+      const porAcreedor = {};
+      snapDeuda.docs.forEach(d => {
+        const doc = d.data();
+        if (doc.estado !== "vencido") return;
+        const key = doc.proveedorNombre || "Acreedor";
+        if (!porAcreedor[key]) porAcreedor[key] = { saldo: 0, maxMora: 0, docs: 0 };
+        porAcreedor[key].saldo += doc.saldoPendiente || 0;
+        porAcreedor[key].docs += 1;
+        if ((doc.diasMora || 0) > porAcreedor[key].maxMora) porAcreedor[key].maxMora = doc.diasMora;
+      });
+      Object.entries(porAcreedor).forEach(([nombre, info]) => {
+        resultado.push({
+          id: `deuda_vencida_${nombre.replace(/\s+/g, "_")}`,
+          tipo: info.maxMora > 90 ? "danger" : "warning",
+          categoria: "deuda_vencida",
+          titulo: `Deuda vencida: ${nombre}`,
+          descripcion: `${info.docs} documento${info.docs !== 1 ? "s" : ""} — $${Math.round(info.saldo).toLocaleString("es-CL")} — ${info.maxMora} días de mora`,
+          dias: info.maxMora,
+          accion: "Deuda",
+          monto: info.saldo,
+        });
+      });
     } catch (e) {}
 
     // Ordenar: danger primero, luego warning, luego info; dentro de cada tipo por días

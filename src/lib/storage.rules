@@ -1,0 +1,57 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─────────────────────────────────────────────────────
+    // HELPERS (mismo criterio que firestore.rules, adaptado
+    // a la sintaxis de Storage Rules — se consulta Firestore
+    // vía firestore.get() para leer el rol del usuario)
+    // ─────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function userData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRole() {
+      return isAuth() ? userData().role : null;
+    }
+
+    function userEmpresaId() {
+      return isAuth() ? userData().empresaId : null;
+    }
+
+    function isSuperAdmin() {
+      return isAuth() && userRole() == 'superadmin';
+    }
+
+    function belongsToEmpresa(empresaId) {
+      return isAuth() && userEmpresaId() == empresaId;
+    }
+
+    // Mismo criterio que canWriteEmpresa() en firestore.rules:
+    // cualquier rol de la empresa excepto trabajador y mandante
+    function canWriteEmpresa(empresaId) {
+      return belongsToEmpresa(empresaId)
+          && userRole() != 'trabajador'
+          && userRole() != 'mandante';
+    }
+
+    // ─────────────────────────────────────────────────────
+    // COMPROBANTES DE DEUDA
+    // Path: empresas/{empresaId}/deuda_comprobantes/{documentoId}/{archivo}
+    // ─────────────────────────────────────────────────────
+    match /empresas/{empresaId}/deuda_comprobantes/{documentoId}/{archivo} {
+      allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId);
+    }
+
+    // Default deny — cualquier otra ruta de Storage no listada explícitamente
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

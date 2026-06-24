@@ -5,6 +5,7 @@ import ContabilidadLibroDiario from "./ContabilidadLibroDiario";
 import ContabilidadEstados from "./ContabilidadEstados";
 import ContabilidadTributario from "./ContabilidadTributario";
 import ContabilidadActivos from "./ContabilidadActivos";
+import ContabilidadFlujoMensual from "./ContabilidadFlujoMensual";
 
 // ─── Navegación interna ───────────────────────────────────────────────────────
 const NAV_ITEMS = [
@@ -53,6 +54,15 @@ const NAV_ITEMS = [
         d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
     ),
   },
+  {
+    id: "flujo",
+    label: "Flujo Mensual",
+    short: "Flujo",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M3 17l6-6 4 4 8-8M21 7v4m0-4h-4" />
+    ),
+  },
 ];
 
 // ─── Badge de alertas contables ───────────────────────────────────────────────
@@ -86,6 +96,7 @@ function ContabilidadAppInner({ user, onBackToSelector, onLogout }) {
       case "estados":    return <ContabilidadEstados />;
       case "tributario": return <ContabilidadTributario />;
       case "activos":    return <ContabilidadActivos />;
+      case "flujo":      return <ContabilidadFlujoMensual />;
       default:           return <ContabilidadPlanCuentas />;
     }
   }
