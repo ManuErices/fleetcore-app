@@ -1,23 +1,26 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useContabilidad, PeriodoSelector, TIPOS_MAP, fmt, MESES, normalizaRut } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
 import * as XLSX from "xlsx";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { db, auth } from "../../lib/firebase";
 
 // Categorías rápidas para reclasificar asientos importados desde el Libro Diario
 const CATEGORIAS_RAPIDAS = [
   { label: "Combustible (Ley 18.502)", icon: "⛽" },
-  { label: "Subcontratos",             icon: "🏗️" },
-  { label: "Materiales y Repuestos",   icon: "🔧" },
-  { label: "Transporte y Pasajes",     icon: "✈️" },
-  { label: "Telecomunicaciones",       icon: "📡" },
-  { label: "Seguridad",                icon: "🛡️" },
-  { label: "Servicios Profesionales",  icon: "⚖️" },
-  { label: "Peajes y Movilización",    icon: "🛣️" },
-  { label: "Arriendos",                icon: "🏢" },
-  { label: "Gastos Financieros",       icon: "🏦" },
-  { label: "Gastos Generales",         icon: "📋" },
-  { label: "Gastos Varios",            icon: "🧾" },
+  { label: "Subcontratos", icon: "🏗️" },
+  { label: "Materiales y Repuestos", icon: "🔧" },
+  { label: "Transporte y Pasajes", icon: "✈️" },
+  { label: "Telecomunicaciones", icon: "📡" },
+  { label: "Seguridad", icon: "🛡️" },
+  { label: "Servicios Profesionales", icon: "⚖️" },
+  { label: "Peajes y Movilización", icon: "🛣️" },
+  { label: "Arriendos", icon: "🏢" },
+  { label: "Gastos Financieros", icon: "🏦" },
+  { label: "Gastos Generales", icon: "📋" },
+  { label: "Gastos Varios", icon: "🧾" },
 ];
 
 // ─── Modal asiento ────────────────────────────────────────────────────────────
@@ -69,7 +72,7 @@ function LineaAsiento({ linea, idx, cuentas, onChange, onRemove, canRemove }) {
 }
 
 function ModalAsiento({ isOpen, onClose, editando, onSave, cuentas, periodoActivo }) {
-  const [form, setForm]   = useState(ASIENTO_EMPTY);
+  const [form, setForm] = useState(ASIENTO_EMPTY);
   const [saving, setSaving] = useState(false);
   React.useEffect(() => {
     setForm(editando
@@ -79,13 +82,13 @@ function ModalAsiento({ isOpen, onClose, editando, onSave, cuentas, periodoActiv
   }, [editando, isOpen]);
   if (!isOpen) return null;
 
-  const totalDebe  = form.lineas.reduce((s, l) => s + (parseFloat(l.debe)  || 0), 0);
+  const totalDebe = form.lineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0);
   const totalHaber = form.lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0);
   const diferencia = Math.abs(totalDebe - totalHaber);
-  const cuadrado   = diferencia < 0.01 && totalDebe > 0;
+  const cuadrado = diferencia < 0.01 && totalDebe > 0;
 
-  const setLinea    = (idx, val) => setForm(f => ({ ...f, lineas: f.lineas.map((l, i) => i === idx ? val : l) }));
-  const addLinea    = () => setForm(f => ({ ...f, lineas: [...f.lineas, { ...LINEA_EMPTY }] }));
+  const setLinea = (idx, val) => setForm(f => ({ ...f, lineas: f.lineas.map((l, i) => i === idx ? val : l) }));
+  const addLinea = () => setForm(f => ({ ...f, lineas: [...f.lineas, { ...LINEA_EMPTY }] }));
   const removeLinea = (idx) => setForm(f => ({ ...f, lineas: f.lineas.filter((_, i) => i !== idx) }));
 
   const handleSubmit = async () => {
@@ -272,7 +275,7 @@ function AsientoDetalle({ asiento, onElegir }) {
               className="flex items-center gap-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
               </svg>
               {showReclasif ? "Cancelar" : "Reclasificar cuenta de gasto"}
             </button>
@@ -301,13 +304,13 @@ function AsientoDetalle({ asiento, onElegir }) {
 
 // ─── Badge tipo asiento ───────────────────────────────────────────────────────
 const TIPO_COLORS = {
-  manual:       "bg-slate-100 text-slate-600",
-  ajuste:       "bg-blue-100 text-blue-700",
-  apertura:     "bg-emerald-100 text-emerald-700",
-  cierre:       "bg-slate-700 text-white",
+  manual: "bg-slate-100 text-slate-600",
+  ajuste: "bg-blue-100 text-blue-700",
+  apertura: "bg-emerald-100 text-emerald-700",
+  cierre: "bg-slate-700 text-white",
   depreciacion: "bg-amber-100 text-amber-700",
-  iva:          "bg-purple-100 text-purple-700",
-  automatico:   "bg-violet-100 text-violet-700",
+  iva: "bg-purple-100 text-purple-700",
+  automatico: "bg-violet-100 text-violet-700",
 };
 
 // Detecta si un asiento es una Nota de Crédito por su glosa
@@ -344,33 +347,33 @@ function categoriaDeLinea(linea) {
 // Si ninguna existe, cae al primer cuenta del tipo correspondiente.
 const CUENTA_POR_CATEGORIA = {
   "Combustible (Ley 18.502)": ["5-01-004"],                 // Combustible y Lubricantes
-  "Subcontratos":             ["5-01-002"],                 // Subcontratos
-  "Materiales y Repuestos":   ["5-01-003"],                 // Materiales y Suministros
-  "Transporte y Pasajes":     ["6-01-006", "5-01-007"],     // Pasajes y Traslados / Fletes
-  "Telecomunicaciones":       ["6-01-005"],                 // Telecomunicaciones
-  "Seguridad":                ["5-01-009", "6-01-011"],     // Seguridad Industrial / Oficina
-  "Servicios Profesionales":  ["6-01-002"],                 // Honorarios Profesionales
-  "Peajes y Movilización":    ["6-01-007"],                 // Peajes y Movilización
-  "Arriendos":                ["5-01-006", "6-01-003"],     // Arriendo Maquinaria y Equipos / Arriendos Oficina
-  "Gastos Financieros":       ["6-02-003", "6-01-017"],     // Comisiones / Gastos Bancarios
-  "Gastos Generales":         ["6-01-019"],                 // Gastos Varios Administración
-  "Gastos Varios":            ["6-01-019"],
+  "Subcontratos": ["5-01-002"],                 // Subcontratos
+  "Materiales y Repuestos": ["5-01-003"],                 // Materiales y Suministros
+  "Transporte y Pasajes": ["6-01-006", "5-01-007"],     // Pasajes y Traslados / Fletes
+  "Telecomunicaciones": ["6-01-005"],                 // Telecomunicaciones
+  "Seguridad": ["5-01-009", "6-01-011"],     // Seguridad Industrial / Oficina
+  "Servicios Profesionales": ["6-01-002"],                 // Honorarios Profesionales
+  "Peajes y Movilización": ["6-01-007"],                 // Peajes y Movilización
+  "Arriendos": ["5-01-006", "6-01-003"],     // Arriendo Maquinaria y Equipos / Arriendos Oficina
+  "Gastos Financieros": ["6-02-003", "6-01-017"],     // Comisiones / Gastos Bancarios
+  "Gastos Generales": ["6-01-019"],                 // Gastos Varios Administración
+  "Gastos Varios": ["6-01-019"],
 };
 
 // Patrones de nombre por categoría (fallback cuando el código no coincide por migración de plan)
 const NOMBRE_POR_CATEGORIA = {
   "Combustible (Ley 18.502)": /combustible|lubricante/i,
-  "Subcontratos":             /subcontrato/i,
-  "Materiales y Repuestos":   /materiales|suministro/i,
-  "Transporte y Pasajes":     /pasaje|traslado|flete|transporte/i,
-  "Telecomunicaciones":       /telecomunicacion/i,
-  "Seguridad":                /seguridad/i,
-  "Servicios Profesionales":  /honorario|profesional/i,
-  "Peajes y Movilización":    /peaje|movilización|movilizacion/i,
-  "Arriendos":                /arriendo/i,
-  "Gastos Financieros":       /comision|bancari|financier/i,
-  "Gastos Generales":         /gastos.*varios|gastos.*general/i,
-  "Gastos Varios":            /gastos.*varios|gastos.*general/i,
+  "Subcontratos": /subcontrato/i,
+  "Materiales y Repuestos": /materiales|suministro/i,
+  "Transporte y Pasajes": /pasaje|traslado|flete|transporte/i,
+  "Telecomunicaciones": /telecomunicacion/i,
+  "Seguridad": /seguridad/i,
+  "Servicios Profesionales": /honorario|profesional/i,
+  "Peajes y Movilización": /peaje|movilización|movilizacion/i,
+  "Arriendos": /arriendo/i,
+  "Gastos Financieros": /comision|bancari|financier/i,
+  "Gastos Generales": /gastos.*varios|gastos.*general/i,
+  "Gastos Varios": /gastos.*varios|gastos.*general/i,
 };
 
 // Resuelve la cuenta destino de una categoría: primero por código preferido, luego por nombre, luego por tipo
@@ -391,8 +394,8 @@ function cuentaDeCategoria(categ, cuentas) {
   // 3. Fallback por tipo de cuenta
   const tipoTarget = TIPO_POR_CATEGORIA[categ.label] || "gasto_adm";
   return activas.find(c => c.tipo === tipoTarget && TIPOS_GASTO.includes(c.tipo))
-      || activas.find(c => c.tipo === "gasto_adm")
-      || null;
+    || activas.find(c => c.tipo === "gasto_adm")
+    || null;
 }
 
 // Extrae proveedor (rut + razón social) de un asiento importado, sin depender de campos _*
@@ -423,8 +426,10 @@ function aplicarCategoria(asiento, categ, cuentas) {
 
   const nuevasLineas = (asiento.lineas || []).map(l =>
     (parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
-      ? { ...l, cuentaId: nuevaCuenta.id, cuentaNombre: nuevaCuenta.nombre,
-          descripcion: `${categ.icon} ${categ.label} — reclasificado` }
+      ? {
+        ...l, cuentaId: nuevaCuenta.id, cuentaNombre: nuevaCuenta.nombre,
+        descripcion: `${categ.icon} ${categ.label} — reclasificado`
+      }
       : l
   );
   return {
@@ -435,14 +440,14 @@ function aplicarCategoria(asiento, categ, cuentas) {
 }
 
 function CuentaGastoChip({ asiento, onElegir }) {
-  const [abierto, setAbierto]     = useState(false);
+  const [abierto, setAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const lineaGasto = useMemo(() => getLineaGasto(asiento), [asiento]);
 
   if (!lineaGasto) return null; // ventas/NC u otros asientos sin línea de gasto
 
   const catActual = categoriaDeLinea(lineaGasto);
-  const icon  = catActual ? catActual.icon : "🏷";
+  const icon = catActual ? catActual.icon : "🏷";
   const label = catActual ? catActual.label : (lineaGasto.cuentaNombre || "Sin categoría");
 
   const elegir = async (cat) => {
@@ -514,26 +519,26 @@ function excelDateToISO(serial) {
 // ─── Modal Importar Honorarios SII ───────────────────────────────────────────
 function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActivo }) {
   const fileRef = useRef(null);
-  const [filas, setFilas]         = useState([]);
-  const [modo, setModo]           = useState("consolidado");
-  const [paso, setPaso]           = useState(1);
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState("");
+  const [filas, setFilas] = useState([]);
+  const [modo, setModo] = useState("consolidado");
+  const [paso, setPaso] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [ctaHonorarios, setCtaHonorarios] = useState("");
-  const [ctaRetencion, setCtaRetencion]   = useState("");
-  const [ctaLiquido, setCtaLiquido]       = useState("");
+  const [ctaRetencion, setCtaRetencion] = useState("");
+  const [ctaLiquido, setCtaLiquido] = useState("");
 
   // Pre-seleccionar cuentas: primero por código fijo, luego por nombre como fallback
   React.useEffect(() => {
     if (!cuentas.length || !isOpen) return;
     const porCodigo = (cod) => cuentas.find(c => c.codigo === cod);
     // Busca por nombre restringiendo el tipo para evitar falsos matches
-    const porNombreGasto  = (terminos) => cuentas.find(c =>
-      ["gasto_adm","costo","otro_resultado"].includes(c.tipo) &&
+    const porNombreGasto = (terminos) => cuentas.find(c =>
+      ["gasto_adm", "costo", "otro_resultado"].includes(c.tipo) &&
       terminos.some(t => c.nombre?.toLowerCase().includes(t.toLowerCase()))
     );
     const porNombrePasivo = (terminos) => cuentas.find(c =>
-      ["pasivo_corriente","pasivo_no_corriente"].includes(c.tipo) &&
+      ["pasivo_corriente", "pasivo_no_corriente"].includes(c.tipo) &&
       terminos.some(t => c.nombre?.toLowerCase().includes(t.toLowerCase()))
     );
     // DEBE: cuenta de gasto de honorarios
@@ -569,8 +574,8 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const wb  = XLSX.read(ev.target.result, { type: "array" });
-        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
         let headerIdx = -1;
         for (let i = 0; i < raw.length; i++) {
@@ -596,8 +601,8 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
             rut: String(row[iRut] || "").trim(),
             nombre: String(row[iNombre] || "").trim(),
             bruto: Math.round(bruto),
-            retenido: Math.round(parseFloat(row[iRet]  || 0)),
-            pagado:   Math.round(parseFloat(row[iPagado] || 0)),
+            retenido: Math.round(parseFloat(row[iRet] || 0)),
+            pagado: Math.round(parseFloat(row[iPagado] || 0)),
           });
         }
         if (!registros.length) { setError("No se encontraron boletas vigentes en el archivo."); return; }
@@ -615,8 +620,8 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
 
   const buildAsientos = () => {
     const ctaHonNombre = cuentas.find(c => c.id === ctaHonorarios)?.nombre || "Honorarios";
-    const ctaRetNombre = cuentas.find(c => c.id === ctaRetencion)?.nombre  || "Retención Honorarios x Pagar";
-    const ctaLiqNombre = cuentas.find(c => c.id === ctaLiquido)?.nombre    || "Honorarios Líquidos x Pagar";
+    const ctaRetNombre = cuentas.find(c => c.id === ctaRetencion)?.nombre || "Retención Honorarios x Pagar";
+    const ctaLiqNombre = cuentas.find(c => c.id === ctaLiquido)?.nombre || "Honorarios Líquidos x Pagar";
     if (modo === "consolidado") {
       const fechaAsiento = filas[filas.length - 1]?.fecha || new Date().toISOString().slice(0, 10);
       const [anio, mes] = fechaAsiento.split("-");
@@ -645,9 +650,9 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
     setSaving(false);
   };
 
-  const cuentasGasto  = cuentas.filter(c => c.activa !== false && ["gasto_adm","costo","otro_resultado"].includes(c.tipo));
-  const cuentasPasivo = cuentas.filter(c => c.activa !== false && ["pasivo_corriente","pasivo_no_corriente"].includes(c.tipo));
-  const cuentasTodas  = cuentas.filter(c => c.activa !== false);
+  const cuentasGasto = cuentas.filter(c => c.activa !== false && ["gasto_adm", "costo", "otro_resultado"].includes(c.tipo));
+  const cuentasPasivo = cuentas.filter(c => c.activa !== false && ["pasivo_corriente", "pasivo_no_corriente"].includes(c.tipo));
+  const cuentasTodas = cuentas.filter(c => c.activa !== false);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -817,16 +822,16 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
 export default function ContabilidadLibroDiario() {
   const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto } = useContabilidad();
   const reglasGasto = _reglasGasto || {};
-  const [showModal, setShowModal]     = useState(false);
-  const [editando, setEditando]       = useState(null);
-  const [expandido, setExpandido]     = useState(null);
-  const [busqueda, setBusqueda]       = useState("");
-  const [filtroTipo, setFiltroTipo]   = useState("todos");
-  const [ordenCampo, setOrdenCampo]   = useState("fecha");   // fecha|glosa|monto|tipo
-  const [ordenDir, setOrdenDir]       = useState("desc");    // asc|desc
-  const [deletingId, setDeletingId]   = useState(null);
-  const [showImport, setShowImport]     = useState(false);
-  const [showExport, setShowExport]     = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [expandido, setExpandido] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("todos");
+  const [ordenCampo, setOrdenCampo] = useState("fecha");   // fecha|glosa|monto|tipo
+  const [ordenDir, setOrdenDir] = useState("desc");    // asc|desc
+  const [deletingId, setDeletingId] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [showHonModal, setShowHonModal] = useState(false);
   const [showImportMenu, setShowImportMenu] = useState(false);
   const importMenuRef = useRef(null);
@@ -843,7 +848,68 @@ export default function ContabilidadLibroDiario() {
     const t = setTimeout(() => document.addEventListener("mousedown", handler), 0);
     return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
   }, [showImportMenu]);
-  const [autoClasif, setAutoClasif]   = useState(null);      // {procesando, total, hechos} | null
+  const [autoClasif, setAutoClasif] = useState(null);      // {procesando, total, hechos} | null
+
+  // Rol del usuario y selección masiva
+  const [userRole, setUserRole] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [asientosSeleccionados, setAsientosSeleccionados] = useState([]);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
+  // Obtener rol del usuario
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            setUserRole(userData.role || 'operador');
+          } else {
+            setUserRole('operador');
+          }
+        } catch (error) {
+          console.error("Error obteniendo rol del usuario:", error);
+          setUserRole('operador');
+        }
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Limpiar selección de asientos cuando cambia el período activo
+  useEffect(() => {
+    setAsientosSeleccionados([]);
+  }, [periodoActivo]);
+
+  const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
+
+  // Eliminar múltiples asientos
+  const handleEliminarSeleccionados = async () => {
+    const count = asientosSeleccionados.length;
+    if (count === 0) return;
+    if (!window.confirm(`¿Está seguro de que desea eliminar los ${count} asientos contables seleccionados del período? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    setIsDeletingBulk(true);
+    try {
+      // Eliminar en paralelo
+      await Promise.all(asientosSeleccionados.map(id => eliminarAsiento(id)));
+      setAsientosSeleccionados([]);
+    } catch (error) {
+      console.error("Error al eliminar asientos seleccionados:", error);
+      alert("Hubo un error al eliminar algunos de los asientos seleccionados.");
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
 
   // Reclasifica un asiento y aprende la regla para ese proveedor (se aplicará a futuros)
   const reclasificarYAprender = async (asiento, cat) => {
@@ -871,12 +937,16 @@ export default function ContabilidadLibroDiario() {
       if (rut && gl) {
         const rutNorm = normalizaRut(rut);
         const existente = reglasGasto[rutNorm];
-        // Si hay una regla y la cuenta cambió, actualizar la regla con la nueva cuenta
-        if (existente && existente.cuentaId !== gl.cuentaId) {
+        // Si no hay una regla existente, o si existe pero la cuenta cambió, guardamos/actualizamos la regla
+        if (!existente || existente.cuentaId !== gl.cuentaId) {
+          const catMatch = CATEGORIAS_RAPIDAS.find(c => c.label === existente?.categoriaLabel)
+            || CATEGORIAS_RAPIDAS.find(c => c.label === gl.cuentaNombre)
+            || { label: gl.cuentaNombre || "Gasto", icon: "🏷" };
           await guardarReglaGasto(rut, razonSocial, {
-            cuentaId: gl.cuentaId, cuentaNombre: gl.cuentaNombre,
-            categoriaLabel: existente.categoriaLabel || "",
-            categoriaIcon: existente.categoriaIcon || "",
+            cuentaId: gl.cuentaId,
+            cuentaNombre: gl.cuentaNombre,
+            categoriaLabel: catMatch.label,
+            categoriaIcon: catMatch.icon || "🏷",
           });
         }
       }
@@ -887,12 +957,16 @@ export default function ContabilidadLibroDiario() {
   const aplicarReglaAAsiento = (asiento, regla) => {
     const nuevasLineas = (asiento.lineas || []).map(l =>
       (parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
-        ? { ...l, cuentaId: regla.cuentaId, cuentaNombre: regla.cuentaNombre,
-            descripcion: `${regla.categoriaIcon || "🏷"} ${regla.categoriaLabel} — auto (aprendido)` }
+        ? {
+          ...l, cuentaId: regla.cuentaId, cuentaNombre: regla.cuentaNombre,
+          descripcion: `${regla.categoriaIcon || "🏷"} ${regla.categoriaLabel} — auto (aprendido)`
+        }
         : l
     );
-    return { ...asiento, lineas: nuevasLineas,
-      totalDebe: nuevasLineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0) };
+    return {
+      ...asiento, lineas: nuevasLineas,
+      totalDebe: nuevasLineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0)
+    };
   };
 
   // Auto-clasifica los asientos del período aplicando las reglas aprendidas por proveedor
@@ -936,8 +1010,8 @@ export default function ContabilidadLibroDiario() {
     let lista = asientos.filter(a => {
       // Filtro por tipo
       if (filtroTipo === "nota_credito") return esNotaCredito(a);
-      if (filtroTipo === "venta")        return esVenta(a);
-      if (filtroTipo === "compra")       return esCompra(a);
+      if (filtroTipo === "venta") return esVenta(a);
+      if (filtroTipo === "compra") return esCompra(a);
       if (filtroTipo !== "todos" && a.tipo !== filtroTipo) return false;
       // Búsqueda
       if (busqueda) {
@@ -951,14 +1025,14 @@ export default function ContabilidadLibroDiario() {
     // Ordenamiento
     lista = [...lista].sort((a, b) => {
       let va, vb;
-      if (ordenCampo === "fecha")  { va = a.fecha  || ""; vb = b.fecha  || ""; }
+      if (ordenCampo === "fecha") { va = a.fecha || ""; vb = b.fecha || ""; }
       else if (ordenCampo === "glosa") { va = a.glosa || ""; vb = b.glosa || ""; }
       else if (ordenCampo === "monto") { va = a.totalDebe || 0; vb = b.totalDebe || 0; }
-      else if (ordenCampo === "tipo")  { va = a.tipo  || ""; vb = b.tipo  || ""; }
-      else if (ordenCampo === "origen"){ va = a.origen|| ""; vb = b.origen|| ""; }
+      else if (ordenCampo === "tipo") { va = a.tipo || ""; vb = b.tipo || ""; }
+      else if (ordenCampo === "origen") { va = a.origen || ""; vb = b.origen || ""; }
       else { va = ""; vb = ""; }
-      if (va < vb) return ordenDir === "asc" ? -1 :  1;
-      if (va > vb) return ordenDir === "asc" ?  1 : -1;
+      if (va < vb) return ordenDir === "asc" ? -1 : 1;
+      if (va > vb) return ordenDir === "asc" ? 1 : -1;
       return 0;
     });
 
@@ -966,7 +1040,7 @@ export default function ContabilidadLibroDiario() {
   }, [asientos, filtroTipo, busqueda, ordenCampo, ordenDir]);
 
   const totales = useMemo(() => ({
-    debe:  asientosFiltrados.reduce((s, a) => s + (a.totalDebe || 0), 0),
+    debe: asientosFiltrados.reduce((s, a) => s + (a.totalDebe || 0), 0),
     count: asientosFiltrados.length,
   }), [asientosFiltrados]);
 
@@ -1073,9 +1147,9 @@ export default function ContabilidadLibroDiario() {
       {/* KPIs rápidos */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Asientos",       value: totales.count,        color: "text-slate-800"   },
-          { label: "Total Debe",     value: fmt(totales.debe),    color: "text-emerald-600" },
-          { label: "Total Haber",    value: fmt(totales.debe),    color: "text-red-500"     },
+          { label: "Asientos", value: totales.count, color: "text-slate-800" },
+          { label: "Total Debe", value: fmt(totales.debe), color: "text-emerald-600" },
+          { label: "Total Haber", value: fmt(totales.debe), color: "text-red-500" },
         ].map(k => (
           <div key={k.label} className="glass-card rounded-xl p-3 sm:p-4">
             <p className="text-xs text-slate-400 font-semibold">{k.label}</p>
@@ -1098,7 +1172,7 @@ export default function ContabilidadLibroDiario() {
             {busqueda && (
               <button onClick={() => setBusqueda("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             )}
           </div>
@@ -1125,11 +1199,11 @@ export default function ContabilidadLibroDiario() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordenar:</span>
           {[
-            { campo: "fecha",  label: "Fecha"     },
-            { campo: "glosa",  label: "Proveedor" },
-            { campo: "monto",  label: "Monto"     },
-            { campo: "tipo",   label: "Tipo"      },
-            { campo: "origen", label: "Origen"    },
+            { campo: "fecha", label: "Fecha" },
+            { campo: "glosa", label: "Proveedor" },
+            { campo: "monto", label: "Monto" },
+            { campo: "tipo", label: "Tipo" },
+            { campo: "origen", label: "Origen" },
           ].map(({ campo, label }) => {
             const activo = ordenCampo === campo;
             return (
@@ -1142,7 +1216,7 @@ export default function ContabilidadLibroDiario() {
                 {activo && (
                   <svg className={`w-3 h-3 transition-transform ${ordenDir === "desc" ? "rotate-180" : ""}`}
                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
                   </svg>
                 )}
               </button>
@@ -1162,6 +1236,59 @@ export default function ContabilidadLibroDiario() {
           )}
         </div>
       </div>
+
+      {/* Barra de acciones masivas */}
+      {isAdmin && !loadingAsientos && asientosFiltrados.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-black text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id))}
+                ref={el => {
+                  if (el) {
+                    const allSelected = asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id));
+                    const someSelected = asientosFiltrados.some(a => asientosSeleccionados.includes(a.id));
+                    el.indeterminate = someSelected && !allSelected;
+                  }
+                }}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    const newSelection = Array.from(new Set([...asientosSeleccionados, ...asientosFiltrados.map(a => a.id)]));
+                    setAsientosSeleccionados(newSelection);
+                  } else {
+                    const filteredIds = new Set(asientosFiltrados.map(a => a.id));
+                    setAsientosSeleccionados(asientosSeleccionados.filter(id => !filteredIds.has(id)));
+                  }
+                }}
+                className="w-4 h-4 text-purple-600 border-2 border-slate-300 rounded focus:ring-purple-500 cursor-pointer"
+              />
+              <span>Seleccionar todo ({asientosFiltrados.length})</span>
+            </label>
+            {asientosSeleccionados.length > 0 && (
+              <span className="text-[10px] text-purple-700 font-bold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-lg">
+                {asientosSeleccionados.length} seleccionado(s)
+              </span>
+            )}
+          </div>
+          {asientosSeleccionados.length > 0 && (
+            <button
+              onClick={handleEliminarSeleccionados}
+              disabled={isDeletingBulk}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold rounded-xl text-xs transition-all disabled:opacity-50"
+            >
+              {isDeletingBulk ? (
+                <div className="w-3.5 h-3.5 border-2 border-red-700 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              )}
+              <span>Eliminar seleccionados ({asientosSeleccionados.length})</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Lista de asientos */}
       {loadingAsientos ? (
@@ -1183,12 +1310,28 @@ export default function ContabilidadLibroDiario() {
                 onClick={() => setExpandido(expandido === a.id ? null : a.id)}
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-purple-50/30 transition-colors"
               >
+                {isAdmin && (
+                  <div onClick={(e) => e.stopPropagation()} className="flex items-center pr-1 flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={asientosSeleccionados.includes(a.id)}
+                      onChange={() => {
+                        if (asientosSeleccionados.includes(a.id)) {
+                          setAsientosSeleccionados(asientosSeleccionados.filter(id => id !== a.id));
+                        } else {
+                          setAsientosSeleccionados([...asientosSeleccionados, a.id]);
+                        }
+                      }}
+                      className="w-4 h-4 text-purple-600 border-2 border-slate-300 rounded focus:ring-purple-500 cursor-pointer"
+                    />
+                  </div>
+                )}
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
                   style={esNotaCredito(a)
                     ? { background: "linear-gradient(135deg, #db2777, #be185d)" }
                     : esVenta(a)
-                    ? { background: "linear-gradient(135deg, #1d4ed8, #2563eb)" }
-                    : { background: "linear-gradient(135deg, #7e22ce, #6d28d9)" }}>
+                      ? { background: "linear-gradient(135deg, #1d4ed8, #2563eb)" }
+                      : { background: "linear-gradient(135deg, #7e22ce, #6d28d9)" }}>
                   <span className="text-white text-xs font-black">
                     {esNotaCredito(a) ? "NC" : esVenta(a) ? "V" : idx + 1}
                   </span>
@@ -1205,9 +1348,9 @@ export default function ContabilidadLibroDiario() {
                         venta
                       </span>
                     ) : (
-                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${TIPO_COLORS[a.tipo] || "bg-slate-100 text-slate-600"}`}>
-                      {a.tipo || "manual"}
-                    </span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${TIPO_COLORS[a.tipo] || "bg-slate-100 text-slate-600"}`}>
+                        {a.tipo || "manual"}
+                      </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -1255,6 +1398,7 @@ export default function ContabilidadLibroDiario() {
         onClose={() => setShowImport(false)}
         cuentas={cuentas}
         reglasGasto={reglasGasto}
+        guardarReglaGasto={guardarReglaGasto}
         guardarAsiento={guardarAsiento}
         periodoActivo={periodoActivo}
         buscarHashesExistentes={buscarHashesExistentes}

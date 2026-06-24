@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
-import { collection, addDoc, getDocs, query, orderBy, updateDoc, doc, where } from "firebase/firestore";
+import { collection, addDoc, getDocs, getDoc, query, orderBy, updateDoc, doc, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, auth, storage } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -65,12 +65,10 @@ export default function PasajesNuevo() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        // Cargar datos del usuario desde collection users
-        const usersRef = collection(db, 'users');
-        const usersSnap = await getDocs(usersRef);
-        const userData = usersSnap.docs.find(d => d.id === user.uid);
-        if (userData) {
-          const data = { id: userData.id, ...userData.data() };
+        // Cargar datos del usuario
+        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        if (userSnap.exists()) {
+          const data = { id: userSnap.id, ...userSnap.data() };
           setCurrentUserData(data);
           setUserRole(data.role || 'operador');
         }

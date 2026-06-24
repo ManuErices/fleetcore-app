@@ -89,7 +89,7 @@ export default function Subcontratos() {
     try {
       // Cargar TODOS los subcontratos del proyecto
       const q = query(
-        collection(db, 'subcontratos'),
+        collection(db, 'empresas', empresaId, 'subcontratos'),
         where("projectId", "==", selectedProject)
       );
       const snap = await getDocs(q);
@@ -348,9 +348,10 @@ export default function Subcontratos() {
       // Solo agregar los nuevos subcontratos
       const batch = writeBatch(db);
       subcontratosImportados.forEach(subcontrato => {
-        const docRef = doc(collection(db, 'subcontratos'));
+        const docRef = doc(collection(db, 'empresas', empresaId, 'subcontratos'));
         batch.set(docRef, {
           ...subcontrato,
+          empresaId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -380,7 +381,7 @@ export default function Subcontratos() {
       const batch = writeBatch(db);
       subcontratos.forEach(s => {
         if (s.id) {
-          batch.delete(doc(db, 'subcontratos', s.id));
+          batch.delete(doc(db, 'empresas', empresaId, 'subcontratos', s.id));
         }
       });
       await batch.commit();
@@ -418,7 +419,7 @@ export default function Subcontratos() {
     
     setSavingMesAsociado(true);
     try {
-      const docRef = doc(db, 'subcontratos', itemId);
+      const docRef = doc(db, 'empresas', empresaId, 'subcontratos', itemId);
       const { updateDoc } = await import('firebase/firestore');
       
       await updateDoc(docRef, {

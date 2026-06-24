@@ -33,36 +33,41 @@ export const ESTADOS = {
   cerrado:    { label: 'Cerrado',    color: '#374151', bg: '#e5e7eb' },
 }
 
-// ── Trae todos los folios y filtra en cliente (sin índices) ───
-async function todosLosFolios() {
+function foliosCol(empresaId) {
+  return collection(db, 'empresas', empresaId, 'folios')
+}
+
+function folioDoc(empresaId, folioId) {
+  return doc(db, 'empresas', empresaId, 'folios', folioId)
+}
+
+async function todosLosFolios(empresaId) {
   try {
-    const snap = await getDocsFromServer(collection(db, 'folios'))
+    const snap = await getDocsFromServer(foliosCol(empresaId))
     return snap.docs.map(d => ({ id: d.id, ...d.data() }))
   } catch(e) {
-    // fallback con getDocs (caché)
-    const snap = await getDocs(collection(db, 'folios'))
+    const snap = await getDocs(foliosCol(empresaId))
     return snap.docs.map(d => ({ id: d.id, ...d.data() }))
   }
 }
 
-// ── Número siguiente para el libro ────────────────────────────
-export async function getSiguienteNumero(libro) {
-  const todos = await todosLosFolios()
+export async function getSiguienteNumero(libro, empresaId) {
+  const todos = await todosLosFolios(empresaId)
   const del_libro = todos.filter(f => f.libro === libro)
   if (del_libro.length === 0) return 1
   const max = Math.max(...del_libro.map(f => f.numero || 0))
   return max + 1
 }
 
-// ── Crear folio ───────────────────────────────────────────────
-export async function crearFolio({ libro, tipo, asunto, contenido, usuario, nombre, rol }) {
-  const numero = await getSiguienteNumero(libro)
+export async function crearFolio({ libro, tipo, asunto, contenido, usuario, nombre, rol, empresaId }) {
+  const numero = await getSiguienteNumero(libro, empresaId)
   const prefix = LIBROS[libro].prefix
   const codigo = `${prefix}-${String(numero).padStart(3, '0')}`
 
-  const ref = await addDoc(collection(db, 'folios'), {
+  const ref = await addDoc(foliosCol(empresaId), {
     libro, tipo, asunto, contenido,
     numero, codigo,
+    empresaId,
     creadoPor:     { usuario, nombre, rol },
     estado:        'borrador',
     firma_emisor:  null,
@@ -73,9 +78,8 @@ export async function crearFolio({ libro, tipo, asunto, contenido, usuario, nomb
   return { id: ref.id, codigo }
 }
 
-// ── Firmar emisión ────────────────────────────────────────────
-export async function firmarEmision(folioId, firmante) {
-  await updateDoc(doc(db, 'folios', folioId), {
+export async function firmarEmision(folioId, firmante, empresaId) {
+  await updateDoc(folioDoc(empresaId, folioId), {
     estado: 'emitido',
     firma_emisor: {
       ...firmante,
@@ -87,9 +91,8 @@ export async function firmarEmision(folioId, firmante) {
   })
 }
 
-// ── Responder folio ───────────────────────────────────────────
-export async function responderFolio(folioId, { contenido, usuario, nombre, rol }) {
-  await updateDoc(doc(db, 'folios', folioId), {
+export async function responderFolio(folioId, { contenido, usuario, nombre, rol }, empresaId) {
+  await updateDoc(folioDoc(empresaId, folioId), {
     estado: 'respondido',
     respuesta: {
       contenido,
@@ -103,11 +106,10 @@ export async function responderFolio(folioId, { contenido, usuario, nombre, rol 
   })
 }
 
-// ── Firmar respuesta / tomar conocimiento ─────────────────────
-export async function firmarRespuesta(folioId, firmante) {
-  const snap     = await getDoc(doc(db, 'folios', folioId))
+export async function firmarRespuesta(folioId, firmante, empresaId) {
+  const snap      = await getDoc(folioDoc(empresaId, folioId))
   const respuesta = snap.data()?.respuesta || {}
-  await updateDoc(doc(db, 'folios', folioId), {
+  await updateDoc(folioDoc(empresaId, folioId), {
     estado: 'cerrado',
     respuesta: {
       ...respuesta,
@@ -122,18 +124,16 @@ export async function firmarRespuesta(folioId, firmante) {
   })
 }
 
-// ── Obtener folios de un libro (filter + sort en cliente) ─────
-export async function obtenerFolios(libro, n = 100) {
-  const todos = await todosLosFolios()
+export async function obtenerFolios(libro, empresaId, n = 100) {
+  const todos = await todosLosFolios(empresaId)
   return todos
     .filter(f => f.libro === libro)
     .sort((a, b) => (b.numero || 0) - (a.numero || 0))
     .slice(0, n)
 }
 
-// ── Obtener un folio por ID ───────────────────────────────────
-export async function getFolio(folioId) {
-  const snap = await getDoc(doc(db, 'folios', folioId))
+export async function getFolio(folioId, empresaId) {
+  const snap = await getDoc(folioDoc(empresaId, folioId))
   if (!snap.exists()) return null
   return { id: snap.id, ...snap.data() }
 }

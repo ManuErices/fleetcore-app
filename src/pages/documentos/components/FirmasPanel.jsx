@@ -185,7 +185,7 @@ export default function FirmasPanel({ docId, onFirmasUpdate }) {
 
   async function loadFirmas() {
     setLoading(true)
-    try { setFirmas(await getFirmas(docId)) } catch(e) { console.error(e) }
+    try { setFirmas(await getFirmas(docId, session?.empresaId)) } catch(e) { console.error(e) }
     setLoading(false)
   }
 

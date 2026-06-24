@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
-  doc, serverTimestamp, query, orderBy, where,
+  doc, serverTimestamp, query, orderBy, where, setDoc
 } from 'firebase/firestore';
 import { db, auth } from '../../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { usePlan } from '../../hooks/usePlan';
+import { MODULES as CONFIG_MODULES, calculateTotal } from '../../lib/plans';
 import EmailsSection from './EmailsSection';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../../lib/firebase';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable
@@ -60,7 +63,7 @@ const NAV_GROUPS = [
   { label: 'Flota',       ids: ['maquinas', 'actividades'] },
   { label: 'Combustible', ids: ['surtidores', 'empresas_combustible', 'estaciones'] },
   { label: 'RRHH',        ids: ['sub_empresas'] },
-  { label: 'Sistema',     ids: ['empresas_registro'] },
+  { label: 'Sistema',     ids: ['mi_empresa', 'mi_plan', 'empresas_registro'] },
 ];
 
 const TAB_DEFS = [
@@ -75,6 +78,8 @@ const TAB_DEFS = [
   { id: 'usuarios',            label: 'Usuarios',             color: 'rose',   modules: [],                           icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
   { id: 'emails',              label: 'Emails Corporativos',  color: 'blue',   modules: [],                           icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
   { id: 'empresas_registro',   label: 'Empresas Registradas', color: 'violet', modules: ['__superadmin__'],           icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' },
+  { id: 'mi_empresa',          label: 'Mi Empresa',           color: 'slate',  modules: [],                           icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
+  { id: 'mi_plan',             label: 'Mi Plan / Módulos',    color: 'indigo', modules: [],                           icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
 ];
 
 const GRADIENTS = {
@@ -2705,24 +2710,798 @@ function UsuariosSection() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// MI EMPRESA SECTION
+// ─────────────────────────────────────────────────────────────
+const INDUSTRIAS_LIST = ['Construcción','Minería','Transporte y Logística','Agricultura','Forestal','Energía','Ingeniería Civil','Otro'];
+
+function MiEmpresaSection() {
+  const { empresaId } = useEmpresa();
+  const [form, setForm]           = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [logoFile, setLogoFile]   = useState(null);
+  const [saving, setSaving]       = useState(false);
+  const [saved, setSaved]         = useState(false);
+  const [error, setError]         = useState('');
+  const fileInputRef              = React.useRef();
+
+  useEffect(() => {
+    if (!empresaId) return;
+    const uid = auth.currentUser?.uid;
+    Promise.all([
+      getDoc(doc(db, 'empresas', empresaId)),
+      uid ? getDoc(doc(db, 'users', uid)) : Promise.resolve(null),
+    ]).then(([empSnap, userSnap]) => {
+      if (!empSnap.exists()) return;
+      const d = empSnap.data();
+      const u = userSnap?.data() || {};
+      setForm({
+        nombre:   d.nombre   || '',
+        rut:      d.rut      || '',
+        direccion: d.direccion || '',
+        telefono: d.telefono || u.telefono || '',
+        industria: d.industria || '',
+        contacto: d.contacto || u.nombre   || '',
+        ciudad:   d.ciudad   || '',
+        logoUrl:  d.logoUrl  || '',
+      });
+      setLogoPreview(d.logoUrl || null);
+    });
+  }, [empresaId]);
+
+  const formatRut = v => {
+    let c = v.replace(/[^0-9kK]/g,'');
+    if (!c.length) return '';
+    const dv = c.slice(-1).toUpperCase();
+    const body = c.slice(0,-1);
+    return body.length ? `${body.replace(/\B(?=(\d{3})+(?!\d))/g,'.')}-${dv}` : dv;
+  };
+
+  const handleChange = e => {
+    const { name, value } = e.target;
+    setForm(f => ({ ...f, [name]: name === 'rut' ? formatRut(value) : value }));
+    setSaved(false); setError('');
+  };
+
+  const handleLogo = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2*1024*1024) { setError('El logo no puede superar 2 MB.'); return; }
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+    setError('');
+  };
+
+  const handleSave = async () => {
+    if (!form.nombre.trim()) { setError('El nombre es obligatorio.'); return; }
+    setSaving(true); setError('');
+    try {
+      let logoUrl = form.logoUrl;
+      if (logoFile) {
+        const sRef = storageRef(storage, `empresas/${empresaId}/logo`);
+        await uploadBytes(sRef, logoFile);
+        logoUrl = await getDownloadURL(sRef);
+      }
+      await updateDoc(doc(db, 'empresas', empresaId), { nombre: form.nombre.trim(), rut: form.rut.trim(), direccion: form.direccion.trim(), telefono: form.telefono.trim(), industria: form.industria, contacto: form.contacto.trim(), ciudad: form.ciudad.trim(), logoUrl });
+      setForm(f => ({ ...f, logoUrl }));
+      setLogoFile(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError('Error al guardar: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!form) return <div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" /></div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Header con logo */}
+      <div className="flex items-center gap-4 pb-5 border-b border-slate-100">
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className="w-16 h-16 rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-400 flex items-center justify-center cursor-pointer transition-all overflow-hidden bg-slate-50 hover:bg-blue-50 group flex-shrink-0"
+        >
+          {logoPreview
+            ? <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-1" />
+            : <svg className="w-6 h-6 text-slate-300 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          }
+        </div>
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogo} />
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">{form.nombre || 'Mi empresa'}</h2>
+          <button onClick={() => fileInputRef.current?.click()} className="text-xs text-blue-600 hover:underline mt-0.5">
+            {logoPreview ? 'Cambiar logo' : 'Subir logo'}
+          </button>
+        </div>
+      </div>
+
+      {/* Identificación */}
+      <div>
+        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Identificación</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <Field label="Razón social / Nombre empresa" required>
+              <input name="nombre" value={form.nombre} onChange={handleChange} placeholder="Ej: Constructora MPF SpA" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="RUT empresa">
+            <input name="rut" value={form.rut} onChange={handleChange} placeholder="Ej: 76.123.456-7" className={inputCls} />
+          </Field>
+          <Field label="Industria">
+            <select name="industria" value={form.industria} onChange={handleChange} className={selectCls}>
+              <option value="">Seleccionar...</option>
+              {INDUSTRIAS_LIST.map(i => <option key={i} value={i}>{i}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      {/* Contacto */}
+      <div>
+        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Contacto</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Nombre de contacto">
+            <input name="contacto" value={form.contacto} onChange={handleChange} placeholder="Ej: Juan Pérez" className={inputCls} />
+          </Field>
+          <Field label="Teléfono">
+            <input name="telefono" value={form.telefono} onChange={handleChange} placeholder="+56 9 1234 5678" className={inputCls} />
+          </Field>
+          <Field label="Ciudad">
+            <input name="ciudad" value={form.ciudad} onChange={handleChange} placeholder="Ej: Santiago" className={inputCls} />
+          </Field>
+          <Field label="Dirección">
+            <input name="direccion" value={form.direccion} onChange={handleChange} placeholder="Ej: Av. Providencia 1234" className={inputCls} />
+          </Field>
+        </div>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          {error}
+        </div>
+      )}
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition-colors"
+      >
+        {saving ? (
+          <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>Guardando...</>
+        ) : saved ? (
+          <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Guardado</>
+        ) : 'Guardar cambios'}
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// SECCIÓN: MI PLAN / MÓDULOS DE CONTRATACIÓN
+// ─────────────────────────────────────────────────────────────
+function MiPlanSection() {
+  const { empresaId } = useEmpresa();
+  const { subscription, loading: subLoading } = usePlan();
+  const [selectedModules, setSelectedModules] = useState(['finanzas']);
+  const [ufRate, setUfRate] = useState(38300);
+  const [saving, setSaving] = useState(false);
+  const [successType, setSuccessType] = useState(null); // null | 'free' | 'webpay'
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Módulos contratados inicialmente en base a planId de base de datos
+  const initialModules = useMemo(() => {
+    if (!subscription?.planId) return [];
+    return subscription.planId.split(',').filter(Boolean);
+  }, [subscription]);
+
+  const initialTotalUf = useMemo(() => {
+    const ids = initialModules.includes('finanzas') ? initialModules : ['finanzas', ...initialModules];
+    return ids.reduce((sum, id) => sum + (CONFIG_MODULES[id]?.priceUf || 0), 0);
+  }, [initialModules]);
+
+  const initialNetClp = Math.round(initialTotalUf * ufRate);
+  const initialIvaClp = Math.round(initialNetClp * 0.19);
+  const initialTotalClp = initialNetClp + initialIvaClp;
+
+  // Sincronizar módulos iniciales desde la suscripción cargada usando planId como única fuente de verdad
+  useEffect(() => {
+    if (subscription) {
+      const currentPlanId = subscription.planId || '';
+      const parsed = currentPlanId.split(',').filter(Boolean);
+      // El módulo de finanzas es obligatorio y gratuito en el cliente
+      const mods = parsed.includes('finanzas') ? parsed : ['finanzas', ...parsed];
+      setSelectedModules(mods);
+    }
+  }, [subscription]);
+
+  // Cargar UF dinámica
+  useEffect(() => {
+    fetch('https://mindicador.cl/api/uf')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.serie?.[0]?.valor) {
+          setUfRate(Math.round(data.serie[0].valor));
+        }
+      })
+      .catch(err => {
+        console.warn('Error al cargar la UF (usando fallback 38.300):', err.message);
+      });
+  }, []);
+
+  const handleToggleModule = (moduleId) => {
+    setErrorMsg('');
+    if (moduleId === 'finanzas') return; // Finanzas es obligatorio
+
+    if (selectedModules.includes(moduleId)) {
+      setSelectedModules(selectedModules.filter(id => id !== moduleId));
+    } else {
+      setSelectedModules([...selectedModules, moduleId]);
+    }
+  };
+
+  const { totalUf } = calculateTotal(selectedModules);
+  const netClp = Math.round(totalUf * ufRate);
+  const ivaClp = Math.round(netClp * 0.19);
+  const totalClp = netClp + ivaClp;
+
+  // Lógica de comparación de cambios
+  const selectedPaidModules = useMemo(() => {
+    return selectedModules.filter(m => CONFIG_MODULES[m]?.priceUf > 0);
+  }, [selectedModules]);
+
+  const initialPaidModules = useMemo(() => {
+    return initialModules.filter(m => CONFIG_MODULES[m]?.priceUf > 0);
+  }, [initialModules]);
+
+  // Módulos con costo que se están agregando de nuevo
+  const addedPaidModules = useMemo(() => {
+    return selectedPaidModules.filter(m => !initialPaidModules.includes(m));
+  }, [selectedPaidModules, initialPaidModules]);
+
+  // Módulos que se están removiendo (estaban contratados pero se desmarcaron)
+  const removedModules = useMemo(() => {
+    return initialPaidModules.filter(m => !selectedModules.includes(m));
+  }, [initialPaidModules, selectedModules]);
+
+  // Módulos que se mantienen activos (estaban contratados y siguen seleccionados, o son Finanzas)
+  const retainedModules = useMemo(() => {
+    return selectedModules.filter(id => initialModules.includes(id) || id === 'finanzas');
+  }, [selectedModules, initialModules]);
+
+  const contractedGroup = useMemo(() => {
+    return Object.values(CONFIG_MODULES).filter(mod => initialModules.includes(mod.id) || mod.id === 'finanzas');
+  }, [initialModules]);
+
+  const availableGroup = useMemo(() => {
+    return Object.values(CONFIG_MODULES).filter(mod => !initialModules.includes(mod.id) && mod.id !== 'finanzas');
+  }, [initialModules]);
+
+  const hasAddedPaid = addedPaidModules.length > 0;
+  const hasRemoved = removedModules.length > 0;
+  const hasChanges = hasAddedPaid || hasRemoved;
+
+  const handleSavePlan = async () => {
+    if (!hasChanges) return;
+    setErrorMsg('');
+    setSaving(true);
+    try {
+      const docRef = doc(db, 'subscriptions', empresaId);
+      const planIdStr = selectedModules.sort().join(',');
+
+      await setDoc(docRef, {
+        userId: auth.currentUser.uid,
+        empresaId: empresaId,
+        planId: planIdStr,
+        modules: selectedModules, // Sincronizamos de forma idéntica modules y planId
+        gateway: hasAddedPaid ? 'mock_webpay' : 'free',
+        status: 'authorized',
+        modifiedBy: 'admin_contrato',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      setSuccessType(hasAddedPaid ? 'webpay' : 'free');
+
+      // Limpiar app seleccionada y recargar a home
+      setTimeout(() => {
+        localStorage.removeItem('selectedApp');
+        window.location.href = '/';
+      }, 3000);
+    } catch (err) {
+      console.error('Error al guardar suscripción:', err);
+      setErrorMsg('No se pudo guardar la suscripción: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (subLoading || !subscription) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="w-8 h-8 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Identificar el origen de la última modificación
+  const modifiedBy = subscription.modifiedBy || '';
+
+  return (
+    <div className="space-y-6">
+      {/* Banner de Auditoría / Estado */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-black text-slate-900">Estado de tu Suscripción</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Controla y activa los módulos de tu espacio de trabajo.</p>
+          </div>
+          <div className="flex-shrink-0">
+            {modifiedBy === 'superadmin' ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Configurado por Soporte Global
+              </span>
+            ) : modifiedBy === 'admin_contrato' ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                Configurado por Administrador
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-50 text-slate-600 border border-slate-200">
+                Suscripción Inicial
+              </span>
+            )}
+          </div>
+        </div>
+
+        {modifiedBy === 'superadmin' && (
+          <div className="mt-4 p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl text-xs text-amber-800 leading-relaxed font-medium">
+            💡 <strong>Nota del Administrador Global:</strong> Tu plan fue ajustado centralizadamente por soporte técnico. Si requieres módulos adicionales o deseas cambiarlos, puedes realizarlo aquí. Guardar los cambios actualizará el origen del plan a la administración del cliente.
+          </div>
+        )}
+      </div>
+
+      {/* Grid Selección y Carrito */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Módulos */}
+        <div className="lg:col-span-8 space-y-6">
+          
+          {/* Módulos Contratados (Vigentes) */}
+          {contractedGroup.length > 0 && (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Módulos de tu Plan Actual (Activos)
+                </h3>
+                <p className="text-[10.5px] text-slate-500 px-1 mt-0.5">
+                  Módulos activos en tu suscripción vigente. Desmarca un módulo para darlo de baja de tu plan.
+                </p>
+              </div>
+              <div className="space-y-3">
+                {contractedGroup.map((mod) => {
+                  const isSelected = selectedModules.includes(mod.id);
+                  const isFinanzas = mod.id === 'finanzas';
+                  
+                  return (
+                    <div
+                      key={mod.id}
+                      onClick={() => handleToggleModule(mod.id)}
+                      className={`border-2 rounded-2xl p-4.5 flex items-start gap-4 transition-all cursor-pointer select-none bg-white relative overflow-hidden ${
+                        isSelected 
+                          ? 'border-emerald-500 shadow-md shadow-emerald-50' 
+                          : 'border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/50 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      {/* Premium card glow accent */}
+                      {isSelected && (
+                        <div className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl -mr-8 -mt-8 bg-emerald-500/10 pointer-events-none" />
+                      )}
+
+                      {/* Custom Checkbox */}
+                      <div className="mt-1 flex-shrink-0">
+                        <div className={`w-5.5 h-5.5 rounded-lg border flex items-center justify-center transition-all ${
+                          isSelected 
+                            ? 'bg-emerald-600 border-emerald-500 text-white' 
+                            : 'border-slate-300 bg-white'
+                        }`}>
+                          {isSelected && (
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between flex-wrap gap-2">
+                          <h4 className="text-slate-900 font-extrabold text-base flex items-center gap-2">
+                            {mod.name}
+                            {isFinanzas && (
+                              <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wider font-black">
+                                Gratis
+                              </span>
+                            )}
+                            
+                            {/* Badges de Comparación Visual */}
+                            {!isFinanzas && isSelected && (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold flex items-center gap-1 select-none">
+                                ✓ Contratado
+                              </span>
+                            )}
+                            {!isFinanzas && !isSelected && (
+                              <span className="text-[10px] bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold flex items-center gap-1 select-none">
+                                ⚠️ Se dará de baja
+                              </span>
+                            )}
+                          </h4>
+                          <span className="text-sm font-black text-slate-500">
+                            {isFinanzas ? '0 UF' : '3 UF / mes'}
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-xs mt-1 leading-relaxed">{mod.description}</p>
+                        
+                        {/* Feature tags */}
+                        <div className="flex flex-wrap gap-1.5 mt-2.5">
+                          {mod.features.slice(0, 3).map((feat, idx) => (
+                            <span key={idx} className="text-[10px] bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md border border-slate-100 font-medium">
+                              ✓ {feat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Módulos Disponibles para Contratar */}
+          {availableGroup.length > 0 && (
+            <div className="space-y-3 pt-4.5 border-t border-slate-200/60">
+              <div>
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                  Módulos Disponibles para Contratar
+                </h3>
+                <p className="text-[10px] text-slate-500 px-1 mt-0.5">
+                  Habilita nuevas herramientas de gestión para optimizar y expandir tu espacio de trabajo.
+                </p>
+              </div>
+              <div className="space-y-3">
+                {availableGroup.map((mod) => {
+                  const isSelected = selectedModules.includes(mod.id);
+                  
+                  return (
+                    <div
+                      key={mod.id}
+                      onClick={() => handleToggleModule(mod.id)}
+                      className={`border-2 rounded-2xl p-4.5 flex items-start gap-4 transition-all cursor-pointer select-none bg-white relative overflow-hidden ${
+                        isSelected 
+                          ? 'border-indigo-600 shadow-md shadow-indigo-100' 
+                          : 'border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/50 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      {/* Premium card glow accent */}
+                      {isSelected && (
+                        <div className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl -mr-8 -mt-8 bg-indigo-500/10 pointer-events-none animate-pulse" />
+                      )}
+
+                      {/* Custom Checkbox */}
+                      <div className="mt-1 flex-shrink-0">
+                        <div className={`w-5.5 h-5.5 rounded-lg border flex items-center justify-center transition-all ${
+                          isSelected 
+                            ? 'bg-indigo-600 border-indigo-500 text-white' 
+                            : 'border-slate-300 bg-white'
+                        }`}>
+                          {isSelected && (
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between flex-wrap gap-2">
+                          <h4 className="text-slate-900 font-extrabold text-base flex items-center gap-2">
+                            {mod.name}
+                            
+                            {/* Badges de Comparación Visual */}
+                            {isSelected && (
+                              <span className="text-[10px] bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full uppercase tracking-wider font-extrabold flex items-center gap-1 select-none animate-pulse">
+                                ⚡ Por contratar
+                              </span>
+                            )}
+                          </h4>
+                          <span className="text-sm font-black text-slate-500">
+                            3 UF / mes
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-xs mt-1 leading-relaxed">{mod.description}</p>
+                        
+                        {/* Feature tags */}
+                        <div className="flex flex-wrap gap-1.5 mt-2.5">
+                          {mod.features.slice(0, 3).map((feat, idx) => (
+                            <span key={idx} className="text-[10px] bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md border border-slate-100 font-medium">
+                              ✓ {feat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Resumen Card / Panel de Suscripción */}
+        <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200/80 p-5 shadow-lg relative overflow-hidden">
+          {!hasChanges ? (
+            // VISTA: SUSCRIPCIÓN ACTIVA (SIN CAMBIOS)
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-1">
+                  Tu Plan Actual
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Suscripción Activa
+                </span>
+              </div>
+
+              {/* Lista de módulos activos vigentes */}
+              <div className="space-y-2 border-t border-b border-slate-100 py-3.5">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Módulos contratados:</p>
+                {retainedModules.map(id => (
+                  <div key={id} className="flex justify-between items-center text-xs">
+                    <span className="text-slate-600 font-medium">{CONFIG_MODULES[id]?.name}</span>
+                    <span className="text-slate-900 font-extrabold text-[11px]">
+                      {CONFIG_MODULES[id]?.priceUf === 0 ? 'Gratis' : '3 UF / mes'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Costo actual */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">Costo Mensual:</span>
+                  <span className="text-xl font-black text-slate-900">
+                    {initialTotalUf} UF
+                  </span>
+                </div>
+
+                {initialTotalUf > 0 ? (
+                  <div className="space-y-1.5 bg-slate-50/60 p-3 rounded-xl border border-slate-100 text-[11px] text-slate-500 font-semibold">
+                    <div className="flex justify-between">
+                      <span>Valor Neto:</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(initialNetClp)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>IVA (19%):</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(initialIvaClp)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-900 font-black border-t border-slate-200 pt-1.5 mt-1.5 text-xs">
+                      <span>Factura Estimada:</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(initialTotalClp)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 p-3 rounded-xl text-center text-xs font-bold">
+                    Tu plan actual es 100% gratuito.
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 text-center text-[10px] text-slate-400 font-bold leading-relaxed">
+                * Para modificar tu plan, selecciona o deselecciona módulos en la lista de la izquierda.
+              </div>
+            </div>
+          ) : (
+            // VISTA: RESUMEN DE CAMBIOS (CON CAMBIOS EN SELECCIÓN)
+            <div className="space-y-5 animate-fadeIn">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-1">
+                  Resumen de Cambios
+                </h3>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Cambios pendientes de confirmar
+                </span>
+              </div>
+
+              {/* Lista detallada de adiciones/bajas */}
+              <div className="space-y-3 border-t border-slate-100 pt-3">
+                {addedPaidModules.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1.5">A habilitar:</p>
+                    <div className="space-y-1.5">
+                      {addedPaidModules.map(id => (
+                        <div key={id} className="flex justify-between items-center text-xs bg-indigo-50/30 px-2 py-1.5 rounded-lg border border-indigo-100/50">
+                          <span className="text-slate-700 font-bold">{CONFIG_MODULES[id]?.name}</span>
+                          <span className="text-indigo-600 font-extrabold text-[11px]">+3 UF</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {removedModules.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mb-1.5">A dar de baja:</p>
+                    <div className="space-y-1.5">
+                      {removedModules.map(id => (
+                        <div key={id} className="flex justify-between items-center text-xs bg-rose-50/30 px-2 py-1.5 rounded-lg border border-rose-100/50">
+                          <span className="text-slate-700 font-bold line-through decoration-rose-300">{CONFIG_MODULES[id]?.name}</span>
+                          <span className="text-rose-600 font-extrabold text-[11px]">-3 UF</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Comparación de costos */}
+              <div className="border-t border-slate-100 pt-3.5 space-y-3.5">
+                <div className="space-y-1 text-xs font-semibold text-slate-500">
+                  <div className="flex justify-between">
+                    <span>Costo Anterior:</span>
+                    <span className="font-bold text-slate-700">{initialTotalUf} UF</span>
+                  </div>
+                  <div className="flex justify-between text-slate-900 font-black text-sm border-t border-slate-100 pt-1.5">
+                    <span>Nuevo Costo Mensual:</span>
+                    <span className="text-base text-indigo-600">{totalUf} UF</span>
+                  </div>
+                </div>
+
+                {/* Desglose CLP para nuevo total */}
+                {totalUf > 0 ? (
+                  <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-100 text-[11px] text-slate-500 font-semibold">
+                    <div className="flex justify-between">
+                      <span>Valor Neto:</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(netClp)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>IVA (19%):</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(ivaClp)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-900 font-black border-t border-slate-200 pt-1.5 mt-1.5 text-xs">
+                      <span>Nueva Factura:</span>
+                      <span>{new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(totalClp)}</span>
+                    </div>
+                    <div className="text-[9px] text-slate-400 mt-2 leading-relaxed">
+                      * Calculado a UF referencial de ${ufRate.toLocaleString('es-CL')}. El valor real se calcula al facturar.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 p-3 rounded-xl text-center text-xs font-bold">
+                    ¡Tu plan será 100% gratuito! Disfruta de Finanzas sin costo.
+                  </div>
+                )}
+              </div>
+
+              {errorMsg && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 font-bold text-center">
+                  ⚠️ {errorMsg}
+                </div>
+              )}
+
+              {/* Botón de acción */}
+              <button
+                onClick={handleSavePlan}
+                disabled={saving}
+                className={`w-full py-3 font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98] ${
+                  saving 
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : hasAddedPaid
+                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/10'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/10'
+                }`}
+              >
+                {saving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
+                    Guardando...
+                  </>
+                ) : hasAddedPaid ? (
+                  'Pagar con Webpay'
+                ) : (
+                  'Confirmar Cambios (Baja de Módulos)'
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pantalla Éxito Animada */}
+      {successType && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white border border-slate-100 rounded-3xl p-6.5 text-center space-y-5 animate-scaleIn shadow-2xl">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto animate-bounce ${
+              successType === 'webpay' ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600'
+            }`}>
+              <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">
+                {successType === 'webpay' ? '¡Pago Simulado Exitoso!' : '¡Cambios Guardados!'}
+              </h3>
+              <p className="text-slate-500 text-xs mt-1 leading-relaxed">
+                {successType === 'webpay' 
+                  ? 'Tus nuevos módulos de pago seleccionados han sido contratados y activados correctamente mediante Webpay.' 
+                  : 'Los cambios y la baja de módulos han sido procesados y guardados de forma exitosa.'}
+              </p>
+            </div>
+            <div className="pt-2 flex flex-col items-center gap-1.5">
+              <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <span className="text-[10px] text-slate-400 font-bold">Redireccionando a tu espacio de trabajo...</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
 export default function AdminPanel({ onClose }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const tabParam = queryParams.get('tab');
+
   const { empresaId, empresa } = useEmpresa();
   const { activeModules, loading: planLoading } = usePlan();
-  const [activeTab, setActiveTab] = useState('operadores');
+  
+  const [currentUserRole, setCurrentUserRole] = useState(null);
+  const [activeTab, setActiveTab] = useState(tabParam || 'operadores');
 
-  const isSuperAdmin = empresa?.plan === 'superadmin';
+  const isSuperAdmin = currentUserRole === 'superadmin';
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    getDoc(doc(db, 'users', auth.currentUser.uid)).then(snap => {
+      if (snap.exists()) {
+        setCurrentUserRole(snap.data().role || 'operador');
+      }
+    });
+  }, []);
 
   const tabsVisibles = useMemo(() => TAB_DEFS.filter(tab => {
+    if (tab.id === 'mi_plan') {
+      return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
+    }
     if (tab.modules.includes('__superadmin__')) return isSuperAdmin;
     if (tab.modules.length === 0) return true;
     if (isSuperAdmin) return true;
     if (planLoading) return false;
     return tab.modules.some(m => activeModules.includes(m));
-  }), [isSuperAdmin, activeModules, planLoading]);
+  }), [isSuperAdmin, activeModules, planLoading, currentUserRole]);
 
+  // Una sola vez: cuando el rol carga y el tab del URL se vuelve visible, aplicarlo
+  useEffect(() => {
+    if (!currentUserRole || !tabParam) return;
+    if (tabsVisibles.find(t => t.id === tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [currentUserRole]);
+
+  // Si el tab activo deja de ser visible (cambio de plan), ir al primero disponible
   useEffect(() => {
     if (tabsVisibles.length > 0 && !tabsVisibles.find(t => t.id === activeTab)) {
       setActiveTab(tabsVisibles[0].id);
@@ -2754,6 +3533,15 @@ export default function AdminPanel({ onClose }) {
               <div className="hidden sm:flex items-center gap-2 ml-2 pl-4 border-l border-slate-700">
                 <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${GRADIENTS[activeTabDef.color]}`} />
                 <span className="text-sm font-semibold text-slate-300">{activeTabDef.label}</span>
+              </div>
+            )}
+            {empresa && (
+              <div className="hidden md:flex items-center gap-2 ml-2 pl-4 border-l border-slate-700">
+                {empresa.logoUrl
+                  ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
+                  : <div className="w-5 h-5 rounded bg-white/20 flex items-center justify-center text-[9px] font-black text-white">{empresa.nombre?.[0]}</div>
+                }
+                <span className="text-xs font-semibold text-slate-300 max-w-[140px] truncate">{empresa.nombre}</span>
               </div>
             )}
           </div>
@@ -2851,6 +3639,8 @@ export default function AdminPanel({ onClose }) {
             {activeTab === 'usuarios'             && <UsuariosSection />}
             {activeTab === 'emails'               && <EmailsSection />}
             {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
+            {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
+            {activeTab === 'mi_plan'              && <MiPlanSection />}
           </div>
         </main>
       </div>

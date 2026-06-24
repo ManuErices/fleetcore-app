@@ -49,30 +49,25 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 
 // ── Firebase ──────────────────────────────────────────────────
 import { auth, googleProvider, db } from "./lib/firebase";
-import { EmpresaProvider } from "./lib/useEmpresa";
+import { EmpresaProvider, useEmpresa } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
+import { getPlanTier } from "./lib/plans.js";
+import UserMenuDropdown from "./components/UserMenuDropdown";
 
 // ============================================================
 // Shell principal (Oficina Técnica / FleetCore)
 // ============================================================
-function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing }) {
-  const [showUserMenu, setShowUserMenu] = useState(false);
+function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoToPricing }) {
   const [showCostsMenu, setShowCostsMenu] = useState(false);
   const [showProductionMenu, setShowProductionMenu] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [userRole, setUserRole] = useState('operador');
+  const { empresaId, empresa } = useEmpresa();
 
-  const { planData, status, isActive } = usePlan();
-
-  useEffect(() => {
-    if (!user) return;
-    getDoc(doc(db, 'users', user.uid))
-      .then(snap => { if (snap.exists()) setUserRole(snap.data().role || 'operador'); })
-      .catch(() => { });
-  }, [user]);
+  const { activeModules } = usePlan();
+  const planTier = getPlanTier(activeModules);
 
   return (
     <div className="min-h-screen bg-slate-50 relative">
@@ -85,71 +80,27 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
             <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
               <img src="/favicon.svg" alt="Fleet Core Logo" className="h-14 w-14 object-contain block sm:hidden" />
               <img src="/logo-header.svg" alt="Fleet Core Logo" className="h-14 w-auto object-contain hidden sm:block" />
+              {empresa && (
+                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
+                  {empresa.logoUrl
+                    ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
+                    : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600">{empresa.nombre?.[0]}</div>
+                  }
+                  <span className="text-xs font-semibold text-slate-700 max-w-[140px] truncate">{empresa.nombre}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
               {user && (
-                <div className="relative">
-                  <button onClick={() => setShowUserMenu(!showUserMenu)} className="flex items-center gap-2 sm:gap-4 px-3 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl bg-white hover:bg-slate-50 border border-slate-200 shadow-sm hover:shadow-md transition-all group">
-                    <div className="relative">
-                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-md">
-                        <span className="text-white text-xs sm:text-sm font-bold">{user.email?.[0]?.toUpperCase() || "U"}</span>
-                      </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-emerald-500 rounded-full border-2 border-white" />
-                    </div>
-                    <div className="hidden lg:block text-left">
-                      <div className="text-sm font-semibold text-slate-900">{user.email?.split('@')[0]}</div>
-                      <div className="text-xs text-slate-500 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
-                        Plan {planData?.name || 'Starter'}
-                        {status === 'trial' && <span className="text-amber-500">(trial)</span>}
-                      </div>
-                    </div>
-                    <svg className={`w-3 h-3 sm:w-4 sm:h-4 text-slate-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-
-                  {showUserMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-                      <div className="absolute right-0 top-full mt-2 sm:mt-3 w-64 sm:w-72 bg-white rounded-xl sm:rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
-                        <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-50 to-white border-b border-slate-100">
-                          <div className="flex items-center gap-3 sm:gap-4">
-                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center shadow-lg">
-                              <span className="text-white text-base sm:text-lg font-bold">{user.email?.[0]?.toUpperCase() || "U"}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm sm:text-base text-slate-900 truncate">{user.email?.split('@')[0]}</div>
-                              <div className="text-xs sm:text-sm text-slate-600 truncate">{user.email}</div>
-                              <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full">
-                                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />Conectado
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="p-2 space-y-1">
-                          <button
-                            onClick={() => { setShowUserMenu(false); onGoToPricing(); }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors"
-                          >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                            </svg>
-                            Mi plan · {planData?.name || 'Starter'}
-                          </button>
-                          <button onClick={onBackToSelector} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-xl transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-                            Cambiar Aplicación
-                          </button>
-                          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-50 rounded-xl transition-colors">
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                            Cerrar Sesión
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                <div className="hidden lg:block">
+                  <UserMenuDropdown
+                    user={user}
+                    userRole={userRole}
+                    onLogout={onLogout}
+                    onBackToSelector={onBackToSelector}
+                    onGoToPricing={onGoToPricing}
+                  />
                 </div>
               )}
               <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors">
@@ -286,7 +237,26 @@ function Shell({ user, onLogout, selectedApp, onBackToSelector, onGoToPricing })
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                   </svg>
-                  Mi plan · {planData?.name || 'Starter'}
+                  Mi plan · {planTier.label}
+                </button>
+                <div className="h-px bg-slate-200 my-2" />
+                <button
+                  onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
+                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                  Cambiar aplicación
+                </button>
+                <button
+                  onClick={() => { setShowMobileMenu(false); onLogout(); }}
+                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                  </svg>
+                  Cerrar sesión
                 </button>
               </nav>
             </div>
@@ -455,6 +425,25 @@ export default function App() {
           setLoading(false);
         }, (err) => {
           console.error("Error listening to user document:", err);
+          // permission-denied: reglas no desplegadas o en caché stale.
+          // Hacer un getDoc puntual para decidir si realmente falta setup.
+          if (err.code === 'permission-denied') {
+            getDoc(doc(db, 'users', currentUser.uid)).then(snap => {
+              if (snap.exists()) {
+                const data = snap.data();
+                setUserRole(data.role || 'operador');
+                setUserModulos(data.modulos || []);
+                setNeedsSetup(!data.empresaId);
+              } else {
+                setNeedsSetup(true);
+              }
+              setLoading(false);
+            }).catch(() => {
+              // Sin acceso real — mantener loading=false sin cambiar needsSetup
+              setLoading(false);
+            });
+            return;
+          }
           setUserRole('operador');
           setUserModulos([]);
           setNeedsSetup(true);
@@ -484,7 +473,7 @@ export default function App() {
     const appName = match[1];
 
     // Ignorar si no es una app/modulo que requiere gating
-    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos'];
+    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'admin'];
     if (!gatedApps.includes(appName)) return;
 
     const isSuperAdmin = userRole === 'superadmin';
@@ -512,6 +501,8 @@ export default function App() {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
     } else if (appName === 'documentos') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+    } else if (appName === 'admin') {
+      allowed = isSuperAdmin || isAdminContrato || userRole === 'administrativo';
     }
 
     if (!allowed && !planLoading) {
@@ -542,8 +533,15 @@ export default function App() {
   };
 
   const handleGoToPricing = () => {
-    localStorage.setItem('selectedApp', 'pricing');
-    navigate('/pricing');
+    localStorage.setItem('selectedApp', 'admin');
+    if (userRole === 'superadmin') {
+      navigate('/admin');
+    } else if (userRole === 'admin_contrato') {
+      navigate('/admin?tab=mi_plan');
+    } else {
+      localStorage.setItem('selectedApp', 'pricing');
+      navigate('/pricing');
+    }
   };
 
   const handleSelectApp = (app) => {
@@ -592,11 +590,14 @@ export default function App() {
           ) : (
             <>
               <Route path="/" element={
-                <AppSelector
-                  user={user}
-                  onLogout={handleLogout}
-                  onSelectApp={handleSelectApp}
-                />
+                <EmpresaProvider user={user}>
+                  <AppSelector
+                    user={user}
+                    userRole={userRole}
+                    onLogout={handleLogout}
+                    onSelectApp={handleSelectApp}
+                  />
+                </EmpresaProvider>
               } />
 
               <Route path="/pricing" element={
@@ -625,6 +626,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <Shell
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     selectedApp="fleetcore"
                     onBackToSelector={handleBackToSelector}
@@ -637,6 +639,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <OperadoresApp
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -647,6 +650,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <OperadoresApp
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -657,6 +661,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <RRHHShell
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -667,6 +672,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <ReportesShell
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -677,6 +683,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <FinanzasApp
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -687,6 +694,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <ContabilidadApp
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />
@@ -697,6 +705,7 @@ export default function App() {
                 <PWAWrapper user={user}>
                   <DocumentosApp
                     user={user}
+                    userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
                   />

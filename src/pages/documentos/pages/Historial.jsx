@@ -248,6 +248,7 @@ function FirmasRow({ doc, onFirmado }) {
 
 // ── Página principal ───────────────────────────────────────────
 export default function Historial() {
+  const session = getSession()
   const [docs,      setDocs]      = useState([])
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState('')
@@ -259,7 +260,7 @@ export default function Historial() {
     setLoading(true); setError('')
     try {
       const data = await Promise.race([
-        obtenerDocumentos(60),
+        obtenerDocumentos(session?.empresaId, 60),
         new Promise((_,r) => setTimeout(() => r(new Error('Timeout')), 10000)),
       ])
       setDocs(data)

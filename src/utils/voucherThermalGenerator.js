@@ -393,9 +393,31 @@ export function generateThermalVoucher({
       </div>
     </div>
     
+    ${reportData.documentosEstacion && reportData.documentosEstacion.length > 0 ? `
+    <div class="line"></div>
+    <div class="section">
+      <div class="bold center" style="margin-bottom: 1.5mm;">DETALLE COMPRA ESTACION</div>
+      ${reportData.documentosEstacion.map(d => `
+      <div class="row small">
+        <span>Doc ${d.numero}:</span>
+        <span>${formatCantidad(d.cantidad)}L / $${formatCantidad(d.total)}</span>
+      </div>`).join('')}
+      ${reportData.totalMonto ? `
+      <div class="row bold" style="margin-top: 1.5mm;">
+        <span>Monto Total:</span>
+        <span>$${formatCantidad(reportData.totalMonto)}</span>
+      </div>` : ''}
+      ${reportData.precioPorLitro ? `
+      <div class="row small">
+        <span>Precio/Lt:</span>
+        <span>$${reportData.precioPorLitro.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+      </div>` : ''}
+    </div>
+    ` : ''}
+    
     <!-- CANTIDAD CON BORDE -->
     <div class="cantidad-box">
-      <span class="label">Cantidad:</span>
+      <span class="label">${reportData.documentosEstacion && reportData.documentosEstacion.length > 0 ? 'Cant. Total:' : 'Cantidad:'}</span>
       <span class="bold">${cantidadFormateada} Lts</span>
     </div>
     
@@ -602,7 +624,14 @@ ${line}
 ${line}
 
 Producto: DIESEL
-Cantidad: ${cantidadFormateada} Lts
+${reportData.documentosEstacion && reportData.documentosEstacion.length > 0 ? `
+DETALLE COMPRA ESTACION
+${reportData.documentosEstacion.map(d => `Doc ${d.numero}: ${formatCantidad(d.cantidad)}L / $${formatCantidad(d.total)}`).join('\n')}
+${reportData.totalMonto ? `Monto Total: $${formatCantidad(reportData.totalMonto)}` : ''}
+${reportData.precioPorLitro ? `Precio/Lt: $${reportData.precioPorLitro.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}` : ''}
+${line}
+` : ''}
+Cantidad${reportData.documentosEstacion && reportData.documentosEstacion.length > 0 ? ' Total' : ''}: ${cantidadFormateada} Lts
 ${line}
 
 

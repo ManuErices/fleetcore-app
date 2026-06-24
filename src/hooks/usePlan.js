@@ -77,19 +77,14 @@ export function usePlan() {
         return;
       }
 
-      // 2. Buscar suscripción asociada a la empresa
-      const q = query(
-        collection(db, 'subscriptions'),
-        where('empresaId', '==', empresaId)
-      );
-
-      unsubSubscription = onSnapshot(q, (querySnap) => {
-        if (!querySnap.empty) {
-          // Tomar la primera suscripción activa encontrada para la empresa
-          setSubscription(querySnap.docs[0].data());
+      // 2. Escuchar la suscripción directamente por empresaId
+      const subRef = doc(db, 'subscriptions', empresaId);
+      unsubSubscription = onSnapshot(subRef, (subSnap) => {
+        if (subSnap.exists()) {
+          setSubscription(subSnap.data());
           setLoading(false);
         } else {
-          // Fallback a subscriptions/{uid}
+          // Fallback a subscriptions/{user.uid}
           const fallbackRef = doc(db, 'subscriptions', user.uid);
           getDoc(fallbackRef).then((fallbackSnap) => {
             if (fallbackSnap.exists()) {
@@ -104,7 +99,7 @@ export function usePlan() {
           });
         }
       }, (err) => {
-        console.error('Error escuchando suscripción de empresa:', err);
+        console.error('Error escuchando suscripción directa de empresa:', err);
         setSubscription({ planId: '', status: 'trial', trialUntil: null });
         setLoading(false);
       });
@@ -135,6 +130,11 @@ export function usePlan() {
     }
     return false;
   })();
+
+  // Finanzas is always free and active if the subscription is active
+  if (isActive && !activeModules.includes('finanzas')) {
+    activeModules.push('finanzas');
+  }
 
   const canAccess = (moduleId) => {
     if (!isActive) return false;

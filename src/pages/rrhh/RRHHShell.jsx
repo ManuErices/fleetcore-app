@@ -1,7 +1,13 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
+import UserMenuDropdown from "../../components/UserMenuDropdown";
 import RRHH from "./index";
 
-export default function RRHHShell({ user, onLogout, onBackToSelector }) {
+export default function RRHHShell({ user, userRole, onLogout, onBackToSelector }) {
+  const { empresa } = useEmpresa();
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
@@ -14,18 +20,24 @@ export default function RRHHShell({ user, onLogout, onBackToSelector }) {
             </div>
             <div>
               <div className="text-sm font-black text-slate-800 leading-tight">Fleet<span className="text-emerald-600">Core</span></div>
-              <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase leading-tight">El Núcleo de RRHH</div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-400 uppercase leading-tight">Recursos Humanos</div>
             </div>
+            {empresa && (
+              <div className="hidden sm:flex items-center gap-1.5 ml-2 pl-3 border-l border-slate-200">
+                {empresa.logoUrl
+                  ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
+                  : <div className="w-5 h-5 rounded bg-slate-200 flex items-center justify-center text-[9px] font-black text-slate-500">{empresa.nombre?.[0]}</div>
+                }
+                <span className="text-xs font-semibold text-slate-600 max-w-[120px] truncate">{empresa.nombre}</span>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden sm:block text-sm text-slate-500 font-medium">{user?.displayName || user?.email?.split('@')[0]}</span>
-            <button onClick={onBackToSelector} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cambiar aplicación">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-            </button>
-            <button onClick={onLogout} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-600" title="Cerrar sesión">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-            </button>
-          </div>
+          <UserMenuDropdown
+            user={user}
+            userRole={userRole}
+            onLogout={onLogout}
+            onBackToSelector={onBackToSelector}
+          />
         </div>
       </header>
       <RRHH />

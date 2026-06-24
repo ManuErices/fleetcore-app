@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import TrabajadorLogin     from './TrabajadorLogin';
 import TrabajadorDashboard from './TrabajadorDashboard';
@@ -68,7 +68,29 @@ export default function TrabajadorApp() {
             });
             setTrabajador({ id: tDoc.id, ...tDoc.data() });
           } else {
-            setTrabajador(null);
+            // 3. Fallback: buscar en trabajadores por email real del usuario
+            // Cubre admin_contrato / administrativo que tienen cuentas propias
+            // y no pasaron por crearCuentas()
+            let linked = false;
+            if (firebaseUser.email) {
+              const emailQ    = query(collection(db, 'empresas', empId, 'trabajadores'), where('email', '==', firebaseUser.email));
+              const emailSnap = await getDocs(emailQ);
+              if (!emailSnap.empty) {
+                const tDoc = emailSnap.docs[0];
+                // Vincular portalUid para que funcione en próximas sesiones
+                await updateDoc(doc(db, 'empresas', empId, 'trabajadores', tDoc.id), { portalUid: firebaseUser.uid }).catch(() => {});
+                await setDoc(idxRef, {
+                  trabajadorDocId: tDoc.id,
+                  rut:   tDoc.data().rut   || '',
+                  email: firebaseUser.email,
+                  autoCreated: true,
+                  createdAt: serverTimestamp(),
+                }).catch(() => {});
+                setTrabajador({ id: tDoc.id, ...tDoc.data() });
+                linked = true;
+              }
+            }
+            if (!linked) setTrabajador(null);
           }
         }
       } catch {

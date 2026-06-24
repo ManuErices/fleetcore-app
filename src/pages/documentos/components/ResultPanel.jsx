@@ -157,6 +157,7 @@ export default function ResultPanel({ texto, loading, tipo, titulo, session, fec
         fecha, sector,
         extraFields: extraFields || {},
         layoutPngB64: layoutPngB64 || '',
+        empresaId: session.empresaId,
       })
       setDocId(id)
       setSaved(true)

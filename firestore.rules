@@ -95,8 +95,14 @@ service cloud.firestore {
                     || (isAuth() && !exists(/databases/$(database)/documents/users/$(request.auth.uid)))
                     || (isAuth() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('empresaId', null) == null)
                     || (isAuth() && request.resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
-      allow update, delete: if isSuperAdmin()
-                            || (isAuth() && resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
+      // admin_contrato puede editar su propia empresa raíz
+      // superadmin puede todo
+      // canWriteEmpresa permite editar sub-empresas propias
+      allow update: if isSuperAdmin()
+                    || (isAdminContrato() && userEmpresaId() == empresaId)
+                    || (isAuth() && resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
+      allow delete: if isSuperAdmin()
+                    || (isAuth() && resource.data.get('parentEmpresaId', null) == userEmpresaId() && canWriteEmpresa(userEmpresaId()));
 
       // ── USUARIOS DE LA EMPRESA ──────────────────────────
       match /users/{uid} {
@@ -231,6 +237,8 @@ service cloud.firestore {
       match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /centros_costo/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelPrices/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /fuelPriceHistory/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /config/{docId}               { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /guias_despacho/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /proveedores_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /solicitudes_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
@@ -238,9 +246,18 @@ service cloud.firestore {
       // ── CONTABILIDAD Y COMBUSTIBLE ASOCIADOS ────────────
       match /chart_of_accounts/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /journal_entries/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /active_periods/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /reglas_gasto/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /periods/{docId}               { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_mensual/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /combustible_calculos/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /combustible_maquinaria/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+
+      // ── MÓDULO DOCUMENTOS (aislado por empresa) ──────────
+      match /documentos/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId)
+                                                                || (isMandante() && belongsToEmpresa(empresaId)); }
+      match /folios/{docId}                { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId)
+                                                                || (isMandante() && belongsToEmpresa(empresaId)); }
     }
 
     // ─────────────────────────────────────────────────────
@@ -248,45 +265,57 @@ service cloud.firestore {
     // Necesario porque AppSelector y useEmpresa leen de aquí
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read:   if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid)
-                    || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId());
+      // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
+      allow read:   if isAuth() && (
+                      request.auth.uid == uid
+                      || isSuperAdmin()
+                      || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId())
+                    );
+
+      // Permisos de creación
+      allow create: if isAuth() && request.auth.uid == uid;
       allow create: if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid)  // Registro inicial — sin rol aún
-                    // Admin de la empresa crea la cuenta de portal de un trabajador
                     || (isAnyAdmin() && request.resource.data.role == 'trabajador'
                         && request.resource.data.empresaId == userEmpresaId());
+
+      // Permisos de actualización
+      allow update: if isAuth() && request.auth.uid == uid;
       allow update: if isSuperAdmin()
-                    || (isAuth() && request.auth.uid == uid)
                     || (isAnyAdmin() && resource.data.empresaId == userEmpresaId() && request.resource.data.empresaId == userEmpresaId());
+
       allow delete: if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
     // /subscriptions — usePlan hook lee/escucha el plan activo
     // ─────────────────────────────────────────────────────
-    match /subscriptions/{uid} {
-      allow read:           if isSuperAdmin()
-                            || (isAuth() && request.auth.uid == uid)
-                            || (isAuth() && resource.data.empresaId == userEmpresaId());
-      allow create, update: if isSuperAdmin() || (isAuth() && request.auth.uid == uid);
+    match /subscriptions/{docId} {
+      // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
+      allow read:           if isAuth() && (
+                              request.auth.uid == docId
+                              || isSuperAdmin()
+                              || (resource.data.empresaId == userEmpresaId())
+                              || docId == userEmpresaId()
+                            );
+
+      allow create, update: if isAuth() && request.auth.uid == docId;
+      allow create, update: if isSuperAdmin()
+                            || (isAdminContrato() && docId == userEmpresaId());
       allow delete:         if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
-    // Precios combustible — lectura pública, escritura solo auth
+    // Precios combustible root — legacy, solo superadmin
+    // Los datos nuevos van en empresas/{empresaId}/fuelPrices y /fuelPriceHistory
     // ─────────────────────────────────────────────────────
     match /fuelPrices/{docId} {
-      allow read: if isAuth();
-      allow write: if isSuperAdmin() || isAdminContrato();
+      allow read, write: if isSuperAdmin();
     }
     match /fuelPriceHistory/{docId} {
-      allow read: if isAuth();
-      allow write: if isSuperAdmin() || isAdminContrato();
+      allow read, write: if isSuperAdmin();
     }
     match /fuelPriceCache/{docId} {
-      allow read: if isAuth();
-      allow write: if isAuth();
+      allow read, write: if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
@@ -309,18 +338,21 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────────────
-    // DOCUMENTOS Y FIRMAS (Módulo de Documentos)
+    // DOCUMENTOS Y FIRMAS — root legacy, superadmin solo
+    // Los datos nuevos van en empresas/{empresaId}/documentos y /folios
     // ─────────────────────────────────────────────────────
     match /documentos/{docId} {
-      allow read, write: if isAuth();
+      allow read, write: if isSuperAdmin();
     }
+    match /folios/{docId} {
+      allow read, write: if isSuperAdmin();
+    }
+    // pins y usuarios: sistema custom de auth del módulo documentos (no Firebase Auth)
+    // Solo necesita ser accedido por cualquier usuario autenticado (no hay empresaId en estos docs)
     match /pins/{usuario} {
       allow read, write: if isAuth();
     }
     match /usuarios/{usuario} {
-      allow read, write: if isAuth();
-    }
-    match /folios/{docId} {
       allow read, write: if isAuth();
     }
     match /libros/{docId} {
