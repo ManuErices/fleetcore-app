@@ -2,6 +2,24 @@ import React, { useState } from "react";
 import { formatMiles } from '../../../utils/formatters';
 import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
 
+const incrementDocNumber = (numStr) => {
+  if (!numStr) return '';
+  const match = numStr.match(/^(.*?)(\d+)$/);
+  if (match) {
+    const prefix = match[1];
+    const num = parseInt(match[2], 10);
+    const length = match[2].length;
+    const nextNum = (num + 1).toString().padStart(length, '0');
+    return prefix + nextNum;
+  }
+  const parsed = parseInt(numStr, 10);
+  if (!isNaN(parsed)) {
+    return (parsed + 1).toString();
+  }
+  return numStr;
+};
+
+
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
     <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -89,19 +107,19 @@ export default function EntradaStep({
                   <label className="block text-sm font-black text-slate-600 uppercase tracking-widest">Documentos de Compra (Estación de Servicio)</label>
                 </div>
                 <span className="text-xs font-black text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                  {(datosEntrada.documentosEstacion || []).length} / 10
+                  {(datosEntrada.documentosEstacion || []).length} / 20
                 </span>
               </div>
               
               <div className="space-y-4">
                 <div className="grid grid-cols-12 gap-3 px-2 text-xs font-black text-slate-500 uppercase tracking-wider">
                   <div className="col-span-4 px-1">N° Doc</div>
-                  <div className="col-span-4 px-1 text-right">Cantidad (Lts)</div>
+                  <div className="col-span-3 px-1 text-right">Cantidad (Lts)</div>
                   <div className="col-span-3 px-1 text-right">Monto Total ($)</div>
-                  <div className="col-span-1"></div>
+                  <div className="col-span-2"></div>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 max-h-[290px] overflow-y-auto pr-1">
                   {(datosEntrada.documentosEstacion || [{ numero: '', cantidad: '', total: '' }]).map((docRow, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-3 items-center animate-in fade-in duration-200">
                       <div className="col-span-4">
@@ -123,7 +141,7 @@ export default function EntradaStep({
                           className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-sm font-bold text-slate-700 shadow-inner"
                         />
                       </div>
-                      <div className="col-span-4">
+                      <div className="col-span-3">
                         <input
                           type="text" required={idx === 0}
                           value={formatMiles(docRow.cantidad)}
@@ -163,7 +181,37 @@ export default function EntradaStep({
                           className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-sm font-bold text-slate-700 shadow-inner text-right"
                         />
                       </div>
-                      <div className="col-span-1 text-center">
+                      <div className="col-span-2 flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rowToDup = (datosEntrada.documentosEstacion || [])[idx];
+                            const nextNum = incrementDocNumber(rowToDup.numero);
+                            const newRow = {
+                              numero: nextNum,
+                              cantidad: rowToDup.cantidad,
+                              total: rowToDup.total
+                            };
+                            const arr = [...(datosEntrada.documentosEstacion || [])];
+                            if (arr.length >= 20) return;
+                            arr.splice(idx + 1, 0, newRow);
+                            const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                            const numDocs = arr.map(row => row.numero);
+                            setDatosEntrada({
+                              ...datosEntrada,
+                              documentosEstacion: arr,
+                              numerosDocumento: numDocs,
+                              cantidad: totalLitros > 0 ? String(totalLitros) : ''
+                            });
+                          }}
+                          title="Duplicar y autoincrementar N° Doc"
+                          className="px-2 py-2 bg-green-50 hover:bg-green-500 hover:text-white text-green-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-green-200 flex items-center justify-center gap-1"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                          </svg>
+                          <span className="hidden sm:inline">Duplicar</span>
+                        </button>
                         {idx > 0 && (
                           <button
                             type="button"
@@ -178,7 +226,7 @@ export default function EntradaStep({
                                 cantidad: totalLitros > 0 ? String(totalLitros) : ''
                               });
                             }}
-                            className="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-xs shadow-sm hover:bg-red-500 hover:text-white transition-all font-black"
+                            className="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-xs shadow-sm hover:bg-red-500 hover:text-white transition-all font-black animate-in fade-in"
                           >×</button>
                         )}
                       </div>
@@ -187,7 +235,7 @@ export default function EntradaStep({
                 </div>
 
                 {/* Add button */}
-                {(datosEntrada.documentosEstacion || []).length < 10 && (
+                {(datosEntrada.documentosEstacion || []).length < 20 && (
                   <button
                     type="button"
                     onClick={() => {
@@ -270,7 +318,7 @@ export default function EntradaStep({
               <div className="flex justify-between items-center px-1">
                 <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Vales / Guías de Despacho</label>
                 <span className="text-xs font-black text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                  {datosEntrada.numerosDocumento.filter(d => d).length} / 10
+                  {datosEntrada.numerosDocumento.filter(d => d).length} / 20
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -296,7 +344,7 @@ export default function EntradaStep({
                     )}
                   </div>
                 ))}
-                {datosEntrada.numerosDocumento.length < 10 && (
+                {datosEntrada.numerosDocumento.length < 20 && (
                   <button
                     type="button"
                     onClick={() => setDatosEntrada({ ...datosEntrada, numerosDocumento: [...datosEntrada.numerosDocumento, ''] })}

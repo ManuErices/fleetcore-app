@@ -150,10 +150,15 @@ export function ContabilidadProvider({ children }) {
     try {
       const snap = await getDocs(query(
         collection(db, "empresas", empresaId, "journal_entries"),
-        where("periodo", "==", periodoActivo),
-        orderBy("fecha", "desc")
+        where("periodo", "==", periodoActivo)
       ));
-      setAsientos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      docs.sort((a, b) => {
+        const fa = a.fecha?.seconds ?? a.fecha ?? 0;
+        const fb = b.fecha?.seconds ?? b.fecha ?? 0;
+        return fb - fa;
+      });
+      setAsientos(docs);
     } catch (e) { console.error(e); }
     setLoadingA(false);
   }, [empresaId, periodoActivo]);

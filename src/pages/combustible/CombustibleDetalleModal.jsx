@@ -269,13 +269,13 @@ export default function CombustibleDetalleModal({
                   return (
                     <div className="col-span-full space-y-3 mt-2">
                       <div className="text-xs font-black text-slate-500 uppercase tracking-widest px-1">Documentos de Compra (Estación de Servicio)</div>
-                      <div className="bg-white border-2 border-slate-100 rounded-2xl overflow-hidden shadow-sm max-w-xl">
-                        <table className="min-w-full divide-y divide-slate-100 text-xs text-left">
-                          <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
+                      <div className="bg-white border-2 border-slate-100 rounded-2xl overflow-y-auto shadow-sm max-w-xl max-h-[310px]">
+                        <table className="min-w-full divide-y divide-slate-100 text-xs text-left border-collapse">
+                          <thead className="bg-slate-50 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(226,232,240,1)] font-bold text-slate-500 uppercase tracking-wider">
                             <tr>
-                              <th className="px-4 py-3">N° Doc</th>
-                              <th className="px-4 py-3 text-right">Cantidad (Lts)</th>
-                              <th className="px-4 py-3 text-right">Monto ($)</th>
+                              <th className="px-4 py-3 bg-slate-50">N° Doc</th>
+                              <th className="px-4 py-3 text-right bg-slate-50">Cantidad (Lts)</th>
+                              <th className="px-4 py-3 text-right bg-slate-50">Monto ($)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-700 font-bold">
@@ -288,13 +288,13 @@ export default function CombustibleDetalleModal({
                             ))}
                           </tbody>
                           {reporte.totalMonto && (
-                            <tfoot className="bg-slate-50/50 border-t border-slate-100 font-black text-slate-800">
+                            <tfoot className="bg-slate-50 sticky bottom-0 z-10 shadow-[0_-1px_0_0_rgba(226,232,240,1)] font-black text-slate-800">
                               <tr>
-                                <td className="px-4 py-3 uppercase tracking-wider">Total</td>
-                                <td className="px-4 py-3 text-right text-slate-900">
+                                <td className="px-4 py-3 uppercase bg-slate-50 tracking-wider">Total</td>
+                                <td className="px-4 py-3 text-right bg-slate-50 text-slate-900">
                                   {Number(cantidadDisplay || 0).toLocaleString('es-CL')} Lts
                                 </td>
-                                <td className="px-4 py-3 text-right text-green-800">${Number(reporte.totalMonto).toLocaleString('es-CL')}</td>
+                                <td className="px-4 py-3 text-right bg-slate-50 text-green-800">${Number(reporte.totalMonto).toLocaleString('es-CL')}</td>
                               </tr>
                             </tfoot>
                           )}
