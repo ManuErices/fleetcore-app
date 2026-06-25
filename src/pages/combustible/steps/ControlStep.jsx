@@ -105,16 +105,16 @@ export default function ControlStep({
       <div className="flex-1 bg-white p-4 sm:p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-6">
 
         <div>
-          <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-3">
+          <h3 className="text-lg font-black text-slate-800 mb-2 flex items-center gap-3">
             <span className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-black">1</span>
             {tipoReporte === 'entrada' ? "¿De dónde viene el combustible?" : "¿Quién entrega el combustible?"}
           </h3>
 
           {/* Obra / Fecha / Folio */}
-          <div className="pt-4 border-t border-slate-100">
-            <div className="grid grid-cols-12 gap-4">
+          <div className="pt-3 border-t border-slate-100">
+            <div className="grid grid-cols-12 gap-3">
               <div className={`col-span-12 ${isReportesView ? 'md:col-span-8' : 'md:col-span-6'}`}>
-                <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Obra / Proyecto</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 px-1 tracking-wider">Obra / Proyecto</label>
                 <div className="flex gap-2">
                   <select
                     value={datosControl.projectId}
@@ -122,45 +122,45 @@ export default function ControlStep({
                       setDatosControl({ ...datosControl, projectId: e.target.value });
                       cargarEstaciones(e.target.value);
                     }}
-                    className="flex-1 w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                    className="flex-1 w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all"
                   >
                     <option value="">Seleccione obra</option>
                     {projects.map(p => (
                       <option key={p.id} value={p.id}>{p.name || p.id}</option>
                     ))}
                   </select>
-                  <button type="button" onClick={() => setShowModalProyecto(true)} className="px-4 bg-orange-500 text-white rounded-xl font-black shadow-lg shadow-orange-100 hover:bg-orange-400 text-lg">+</button>
+                  <button type="button" onClick={() => setShowModalProyecto(true)} className="px-3 bg-orange-500 text-white rounded-xl font-black shadow-lg shadow-orange-100 hover:bg-orange-400 text-lg">+</button>
                 </div>
               </div>
               <div className={`col-span-12 ${isReportesView ? 'sm:col-span-4 md:col-span-4' : 'sm:col-span-6 md:col-span-3'}`}>
-                <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">Fecha</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 px-1 tracking-wider">Fecha</label>
                 <input
                   type="date"
                   value={datosControl.fecha}
                   onChange={(e) => setDatosControl({ ...datosControl, fecha: e.target.value })}
-                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                  className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all"
                 />
               </div>
               {isReportesView && (
                 <div className="col-span-12 sm:col-span-4 md:col-span-6">
-                  <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">N° Folio</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 px-1 tracking-wider">N° Folio</label>
                   <input
                     type="text"
                     placeholder="Ej: 1234"
                     value={datosControl.folio || ''}
                     onChange={(e) => setDatosControl({ ...datosControl, folio: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                    className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all"
                   />
                 </div>
               )}
               <div className={`col-span-12 ${isReportesView ? 'sm:col-span-4 md:col-span-6' : 'sm:col-span-6 md:col-span-3'}`}>
-                <label className="block text-sm font-black text-slate-500 uppercase mb-2 px-1 tracking-wider">N° Código</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-1 px-1 tracking-wider">N° Código</label>
                 <input
                   type="text"
                   placeholder="Ej: 527"
                   value={datosControl.codigo || ''}
                   onChange={(e) => setDatosControl({ ...datosControl, codigo: e.target.value })}
-                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-base transition-all"
+                  className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all"
                 />
               </div>
             </div>
@@ -168,28 +168,28 @@ export default function ControlStep({
 
           {/* Tipo origen (entrada) o toggle empresa (entrega) */}
           {tipoReporte === 'entrada' ? (
-            <div className="mt-8 flex flex-wrap gap-4 justify-center">
+            <div className="mt-4 flex flex-wrap gap-2 justify-center">
               <button
                 onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'interno', destinoCarga: '', origen: '', maquinaProveedorId: '', operadorProveedorId: '' })}
-                className={`px-6 py-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 group min-w-[120px] ${datosEntrada.tipoOrigen === 'interno' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-200 hover:border-green-200'}`}
+                className={`px-5 py-2 rounded-xl border-2 transition-all flex items-center gap-2 ${datosEntrada.tipoOrigen === 'interno' ? 'bg-green-50 border-green-500 shadow-md' : 'bg-white border-slate-200 hover:border-green-200'}`}
               >
                 <span className={datosEntrada.tipoOrigen === 'interno' ? 'text-green-600' : 'text-slate-400'}>
-                  <BuildingIcon />
+                  <BuildingIcon className="w-5 h-5" />
                 </span>
                 <span className={`font-black text-xs uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>Interno</span>
               </button>
               <button
                 onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
-                className={`px-6 py-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 group min-w-[120px] ${datosEntrada.tipoOrigen === 'estacion' ? 'bg-green-50 border-green-500 shadow-lg scale-105' : 'bg-white border-slate-200 hover:border-green-200'}`}
+                className={`px-5 py-2 rounded-xl border-2 transition-all flex items-center gap-2 ${datosEntrada.tipoOrigen === 'estacion' ? 'bg-green-50 border-green-500 shadow-md' : 'bg-white border-slate-200 hover:border-green-200'}`}
               >
                 <span className={datosEntrada.tipoOrigen === 'estacion' ? 'text-green-600' : 'text-slate-400'}>
-                  <FuelIcon />
+                  <FuelIcon className="w-5 h-5" />
                 </span>
                 <span className={`font-black text-xs uppercase tracking-wider ${datosEntrada.tipoOrigen === 'estacion' ? 'text-green-700' : 'text-slate-500'}`}>Estación</span>
               </button>
             </div>
           ) : (
-            <div className="mt-8 flex flex-wrap gap-4 justify-center">
+            <div className="mt-4 flex flex-wrap gap-2 justify-center">
               {/* <button
                 onClick={() => setDatosEntrega({ ...datosEntrega, empresa: 'MPF Ingeniería Civil' })}
                 className={`px-6 py-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 group min-w-[120px] ${esMPF(datosEntrega.empresa) ? 'bg-blue-50 border-blue-500 shadow-lg scale-105' : 'bg-white border-slate-200 hover:border-blue-200'}`}
@@ -232,7 +232,7 @@ export default function ControlStep({
                                 className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
-                            <div className="max-h-36 overflow-y-auto space-y-1">
+                            <div className="max-h-52 overflow-y-auto space-y-1">
                               {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
                                 <button key={emp.id} type="button"
                                   onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
@@ -271,7 +271,7 @@ export default function ControlStep({
                               className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
-                          <div className="max-h-36 overflow-y-auto space-y-1">
+                          <div className="max-h-52 overflow-y-auto space-y-1">
                             {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
@@ -333,7 +333,7 @@ export default function ControlStep({
                               className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-amber-100 rounded-xl focus:border-amber-500 font-medium text-sm" />
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
-                          <div className="max-h-32 overflow-y-auto space-y-1">
+                          <div className="max-h-52 overflow-y-auto space-y-1">
                             {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
@@ -394,7 +394,7 @@ export default function ControlStep({
                               className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
-                          <div className="max-h-36 overflow-y-auto space-y-1">
+                          <div className="max-h-52 overflow-y-auto space-y-1">
                             {(trabajadoresLocales || [])
                               .filter(emp => matchWorker(emp, searchReceptor))
                               .map(emp => (
@@ -470,7 +470,7 @@ export default function ControlStep({
                                 className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
-                            <div className="max-h-36 overflow-y-auto space-y-1">
+                            <div className="max-h-52 overflow-y-auto space-y-1">
                               {proveedorMachines.filter(m => matchMachine(m, searchMaquinaProveedor)).map(m => (
                                 <button key={m.id} type="button"
                                   onClick={() => { setDatosEntrada(prev => ({ ...prev, maquinaProveedorId: m.id })); setSearchMaquinaProveedor(''); }}
@@ -508,7 +508,7 @@ export default function ControlStep({
                                 className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
-                            <div className="max-h-36 overflow-y-auto space-y-1">
+                            <div className="max-h-52 overflow-y-auto space-y-1">
                               {proveedorWorkers.filter(emp => matchWorker(emp, searchOperadorProveedor)).map(emp => (
                                 <button key={emp.id} type="button"
                                   onClick={() => { setDatosEntrada(prev => ({ ...prev, operadorProveedorId: emp.id })); setSearchOperadorProveedor(''); }}
@@ -528,9 +528,9 @@ export default function ControlStep({
             </div>
           ) : (
             /* ENTREGA: identificación del emisor */
-            <div className="space-y-6">
-              <div className="bg-blue-50/20 p-6 rounded-[2rem] border border-blue-100 space-y-5">
-                <div className="flex items-center gap-3 mb-2 px-1">
+            <div className="space-y-4">
+              <div className="bg-blue-50/20 p-4 rounded-[2rem] border border-blue-100 space-y-4">
+                <div className="flex items-center gap-3 mb-1 px-1">
                   <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">1</span>
                   <h4 className="text-sm font-black text-blue-800 uppercase tracking-wider">Identificación del Emisor</h4>
                 </div>
@@ -553,7 +553,7 @@ export default function ControlStep({
                               className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm" />
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
-                          <div className="max-h-36 overflow-y-auto space-y-1">
+                          <div className="max-h-52 overflow-y-auto space-y-1">
                             {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
                               <button key={emp.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
@@ -591,7 +591,7 @@ export default function ControlStep({
                             className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm" />
                           <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                         </div>
-                        <div className="max-h-36 overflow-y-auto space-y-1">
+                        <div className="max-h-52 overflow-y-auto space-y-1">
                           {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                             <button key={m.id} type="button"
                               onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}

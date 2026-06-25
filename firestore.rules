@@ -191,6 +191,22 @@ service cloud.firestore {
                       && resource.data.trabajadorId == request.auth.uid;
       }
 
+      // ── TURNOS Y ASIGNACIONES ────────────────────────────
+      match /turnos/{docId} {
+        allow read: if belongsToEmpresa(empresaId);
+        allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
+      }
+
+      match /asignaciones_turnos/{docId} {
+        allow read: if belongsToEmpresa(empresaId);
+        allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
+      }
+
+      match /vacaciones/{docId} {
+        allow read: if belongsToEmpresa(empresaId);
+        allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
+      }
+
       // ── REPORTES WORKFLEET (mandante puede leer) ─────────
       match /reportes_detallados/{docId} {
         allow read:  if isSuperAdmin()
@@ -235,6 +251,11 @@ service cloud.firestore {
       match /finanzas_activos/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_ingresos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /deuda_proveedores/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /deuda_proveedores/{docId}/pagos/{pagoId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /deuda_acuerdos/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /deuda_financieras/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /deuda_auditoria/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /centros_costo/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelPrices/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelPriceHistory/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }

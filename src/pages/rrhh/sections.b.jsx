@@ -610,7 +610,7 @@ function ImpuestosSection() {
   );
 }
 
-function AsistenciaSection() {
+function OldAsistenciaSection() {
   const { empresaId } = useEmpresa();
   const now   = new Date();
   const hoy   = { anio: now.getFullYear(), mes: now.getMonth(), dia: now.getDate() };
@@ -2978,4 +2978,4 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
 function PreviredAvanzadoSection() { return <ContabilidadSection initialTab="previred" />; }
 function ArchivoPagoSection()      { return <ContabilidadSection initialTab="pago" />; }
 
-export { AnexosSection, ImpuestosSection, AsistenciaSection, Organigrama, BandasSection, CentrosCostoSection, OrganizacionSection, ReportesSection, ContabilidadSection, PreviredAvanzadoSection, ArchivoPagoSection };
+export { AnexosSection, ImpuestosSection, Organigrama, BandasSection, CentrosCostoSection, OrganizacionSection, ReportesSection, ContabilidadSection, PreviredAvanzadoSection, ArchivoPagoSection };

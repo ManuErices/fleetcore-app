@@ -800,9 +800,9 @@ export default function ReporteWorkFleet() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-4 sm:p-6 lg:p-8">
+    <>
       {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
+      <div className="w-full mb-8">
         <div className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 rounded-2xl shadow-2xl p-8 relative overflow-hidden">
           <div className="absolute inset-0 bg-grid opacity-10"></div>
           <div className="relative z-10">
@@ -833,7 +833,7 @@ export default function ReporteWorkFleet() {
       </div>
 
       {/* Filtros */}
-      <div className="max-w-7xl mx-auto mb-6">
+      <div className="w-full mb-6">
         <div className="bg-white rounded-xl shadow-md p-6 border-2 border-indigo-100">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             {/* Fecha Inicio */}
@@ -921,7 +921,7 @@ export default function ReporteWorkFleet() {
 
 
       {/* Botones de Acción */}
-      <div className="max-w-7xl mx-auto mb-6">
+      <div className="w-full mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border-2 border-indigo-100">
           <div className="flex flex-wrap gap-3">
             <button
@@ -986,7 +986,7 @@ export default function ReporteWorkFleet() {
       </div>
 
       {/* Tabla de reportes - Estilo profesional con colores indigo/purple */}
-      <div className="max-w-7xl mx-auto">
+      <div className="w-full">
         <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-indigo-100">
           {/* Mensaje informativo para mandantes */}
           {userRole === 'mandante' && (
@@ -1230,7 +1230,7 @@ export default function ReporteWorkFleet() {
         const totalDesglose = horasEfectivas + horasNoEfectivas + horasMantenciones + horasProgramadas;
 
         return (
-          <div className="max-w-7xl mx-auto mb-6 mt-6">
+          <div className="w-full mb-6 mt-6">
             <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2" style={{background: 'linear-gradient(135deg, #2A3F5F 0%, #0F1C2E 100%)'}}>
                 <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1565,7 +1565,7 @@ export default function ReporteWorkFleet() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

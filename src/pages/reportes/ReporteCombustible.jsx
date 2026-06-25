@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable';
 import CombustibleDetalleModal from "../combustible/CombustibleDetalleModal";
 import CombustibleModal from "../combustible/CombustibleModal";
 import CombustibleAnalytics from "../combustible/CombustibleAnalytics";
+import CombustibleImporter from "../combustible/CombustibleImporter";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
 
@@ -18,7 +19,7 @@ function SurtidoresStatsPanel({ stats, selectedSurtidorId, onSelectSurtidor, fec
   const selectedStat = stats.find(s => s.id === selectedSurtidorId);
 
   return (
-    <div className="max-w-7xl mx-auto mb-6">
+    <div className="w-full mb-6">
       <div className="bg-white rounded-2xl shadow-md border-2 border-orange-100 p-5">
         <div className="flex items-center justify-between mb-4 border-b border-orange-100 pb-2">
           <div className="flex items-center gap-2">
@@ -171,15 +172,18 @@ export default function ReporteCombustible() {
   const [empleados, setEmpleados] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCombustibleModal, setShowCombustibleModal] = useState(false);
+  const [showImporter, setShowImporter] = useState(false);
   const [userRole, setUserRole] = useState('operador');
   const [currentUser, setCurrentUser] = useState(null);
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
   const [paginaActual, setPaginaActual] = useState(1);
-  const ITEMS_POR_PAGINA = 10;
+  const ITEMS_POR_PAGINA = 50;
   const [reporteDetalle, setReporteDetalle] = useState(null);
   const [empresas, setEmpresas] = useState([]);
   const [estaciones, setEstaciones] = useState([]);
   const [equiposSurtidores, setEquiposSurtidores] = useState([]);
+  const [activeSubTab, setActiveSubTab] = useState('registro'); // 'registro', 'surtidores', 'analisis'
+  const [showFiltrosPanel, setShowFiltrosPanel] = useState(false);
 
   // Configuración de columnas de la tabla
   const todasLasColumnas = [
@@ -187,7 +191,9 @@ export default function ReporteCombustible() {
     { id: 'fecha', label: 'Fecha' },
     { id: 'codigo', label: 'N° Reporte' },
     { id: 'folio', label: 'Folio' },
+    { id: 'proyecto', label: 'Proyecto' },
     { id: 'empresa', label: 'Empresa' },
+    { id: 'surtidor', label: 'Surtidor' },
     { id: 'maquina', label: 'Máquina' },
     { id: 'repartidor', label: 'Repartidor' },
     { id: 'receptor', label: 'Receptor' },
@@ -202,14 +208,13 @@ export default function ReporteCombustible() {
   const [columnasVisibles, setColumnasVisibles] = useState([
     'tipo',
     'fecha',
-    'codigo',
     'folio',
+    'proyecto',
     'empresa',
-    'maquina',
+    'surtidor',
+    'receptor',
     'creadoPor',
     'litros',
-    'firmado',
-    'voucher',
     'acciones'
   ]);
   const [showColSelector, setShowColSelector] = useState(false);
@@ -218,6 +223,7 @@ export default function ReporteCombustible() {
 
   // Filtros
   const [filtros, setFiltros] = useState({
+    mes: '',
     fechaInicio: '',
     fechaFin: '',
     tipo: '',
@@ -227,6 +233,58 @@ export default function ReporteCombustible() {
     receptor: '',
     folio: ''
   });
+
+  // Limpiar filtros activos si su columna correspondiente es ocultada
+  useEffect(() => {
+    setFiltros(prev => {
+      let changed = false;
+      const next = { ...prev };
+      if (!columnasVisibles.includes('fecha')) {
+        if (next.fechaInicio || next.fechaFin) {
+          next.fechaInicio = '';
+          next.fechaFin = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('proyecto')) {
+        if (next.proyecto) {
+          next.proyecto = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('surtidor')) {
+        if (next.surtidor) {
+          next.surtidor = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('maquina')) {
+        if (next.maquina) {
+          next.maquina = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('receptor')) {
+        if (next.receptor) {
+          next.receptor = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('folio')) {
+        if (next.folio) {
+          next.folio = '';
+          changed = true;
+        }
+      }
+      if (!columnasVisibles.includes('tipo')) {
+        if (next.tipo) {
+          next.tipo = '';
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [columnasVisibles]);
 
   // Listas únicas
   const [surtidores, setSurtidores] = useState([]);
@@ -387,6 +445,10 @@ export default function ReporteCombustible() {
   const reportesFiltrados = useMemo(() => {
     let resultado = [...reportes];
 
+    if (filtros.mes) {
+      resultado = resultado.filter(r => (r.fecha || '').startsWith(filtros.mes));
+    }
+
     if (filtros.fechaInicio) {
       resultado = resultado.filter(r => r.fecha >= filtros.fechaInicio);
     }
@@ -498,6 +560,13 @@ export default function ReporteCombustible() {
         }
       }
 
+      let surtidorTruck = null;
+      if (r.tipo === 'entrada' && r.datosEntrada?.destinoCarga === 'camion') {
+        surtidorTruck = equiposSurtidores.find(m => m.id === r.datosEntrada.machineId);
+      } else if (r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId) {
+        surtidorTruck = equiposSurtidores.find(m => m.id === r.datosControl.equipoSurtidorId);
+      }
+
       const horometroOdometro = r.datosEntrega?.horometroOdometro
         || r.datosEntrada?.horometroOdometro
         || r.horometroOdometro
@@ -510,6 +579,8 @@ export default function ReporteCombustible() {
         machinePatente: machine?.patente || '',
         machineName: machine?.nombre || machine?.name
           || (machine?.type && machine?.marca ? `${machine.type} - ${machine.marca}` : machine?.modelo || ''),
+        surtidorPatente: surtidorTruck?.patente || '',
+        surtidorName: surtidorTruck?.nombre || surtidorTruck?.name || '',
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
         operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.operadorNombre || '',
@@ -521,6 +592,20 @@ export default function ReporteCombustible() {
       };
     });
   }, [filtros, reportes, projects, machines, empleados, empresas, estaciones, equiposSurtidores]);
+
+  const activeFiltersCount = useMemo(() => {
+    return Object.values(filtros).filter(Boolean).length;
+  }, [filtros]);
+
+  const mesesDisponibles = useMemo(() => {
+    const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const set = new Set();
+    reportes.forEach(r => { if (r.fecha?.length >= 7) set.add(r.fecha.substring(0, 7)); });
+    return [...set].sort().reverse().map(val => {
+      const [y, m] = val.split('-');
+      return { val, label: `${MESES[parseInt(m, 10) - 1]} ${y}` };
+    });
+  }, [reportes]);
 
   const surtidoresStats = useMemo(() => {
     return equiposSurtidores.map(s => {
@@ -553,8 +638,8 @@ export default function ReporteCombustible() {
       // Mermas/Desviación en el período
       // Diferencia = Lo que entró al camión - Lo que salió del camión
       const diferenciaPeriodo = totalIngresadoPeriodo - totalEntregadoPeriodo;
-      const desviacionPct = totalIngresadoPeriodo > 0 
-        ? (diferenciaPeriodo / totalIngresadoPeriodo) * 100 
+      const desviacionPct = totalIngresadoPeriodo > 0
+        ? (diferenciaPeriodo / totalIngresadoPeriodo) * 100
         : 0;
 
       return {
@@ -772,7 +857,9 @@ export default function ReporteCombustible() {
       if (columnasVisibles.includes('fecha')) row['Fecha'] = r.fecha;
       if (columnasVisibles.includes('codigo')) row['N° Reporte'] = r.numeroReporte;
       if (columnasVisibles.includes('folio')) row['Folio'] = r.folio || '';
+      if (columnasVisibles.includes('proyecto')) row['Proyecto'] = r.projectName || '';
       if (columnasVisibles.includes('empresa')) row['Empresa'] = r.empresaNombre || '';
+      if (columnasVisibles.includes('surtidor')) row['Surtidor'] = r.surtidorPatente ? `${r.surtidorPatente} - ${r.surtidorName}` : '';
       if (columnasVisibles.includes('maquina')) row['Máquina'] = r.machinePatente ? `${r.machinePatente} - ${r.machineName}` : '';
       if (columnasVisibles.includes('repartidor')) row['Repartidor'] = r.repartidorNombre || '';
       if (columnasVisibles.includes('receptor')) row['Receptor'] = r.operadorNombre || '';
@@ -1040,7 +1127,9 @@ export default function ReporteCombustible() {
       fecha: 'Fecha',
       codigo: 'N° Reporte',
       folio: 'Folio',
+      proyecto: 'Proyecto',
       empresa: 'Empresa',
+      surtidor: 'Surtidor',
       maquina: 'Máquina',
       repartidor: 'Repartidor',
       receptor: 'Receptor',
@@ -1061,7 +1150,9 @@ export default function ReporteCombustible() {
         if (k === 'fecha') return r.fecha ? new Date(r.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '-';
         if (k === 'codigo') return r.codigo || '-';
         if (k === 'folio') return r.folio || '-';
+        if (k === 'proyecto') return r.projectName || '-';
         if (k === 'empresa') return r.empresaNombre || '-';
+        if (k === 'surtidor') return r.surtidorPatente ? `${r.surtidorPatente} - ${r.surtidorName}` : '-';
         if (k === 'maquina') return r.machinePatente ? `${r.machinePatente} - ${r.machineName}` : '-';
         if (k === 'repartidor') return r.repartidorNombre || '-';
         if (k === 'receptor') return r.operadorNombre || '-';
@@ -1098,204 +1189,71 @@ export default function ReporteCombustible() {
   return (
     <>
       <ToastContainer toasts={toasts} onRemove={removeToast} />
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-amber-50 p-4 sm:p-6 lg:p-8">
-        {/* Header */}
-        <div className="max-w-7xl mx-auto mb-8">
-          <div className="bg-gradient-to-r from-orange-600 via-orange-700 to-amber-700 rounded-2xl shadow-2xl p-8 relative overflow-hidden">
-            <div className="absolute inset-0 bg-grid opacity-10"></div>
-            <div className="relative z-10">
-              <div className="flex items-center justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <svg className="w-9 h-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h1 className="text-3xl font-black text-white tracking-tight">Reportes de Combustible</h1>
-                    <p className="text-orange-100 text-sm mt-1">Control y gestión de salidas de combustible</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowCombustibleModal(true)}
-                  className="px-6 py-3 bg-white hover:bg-orange-50 text-orange-700 font-bold rounded-xl transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z" />
-                  </svg>
-                  Crear Reporte
-                </button>
-              </div>
-            </div>
-          </div>
+      {/* Header minimalista inline */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+            ⛽ Reportes de Combustible
+          </h1>
+          <p className="text-slate-500 text-sm mt-0.5">Control y gestión de ingresos y despachos de combustible</p>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImporter(true)}
+            className="px-4 py-2.5 bg-white border-2 border-slate-200 hover:border-orange-400 text-slate-600 hover:text-orange-600 font-bold rounded-xl transition-all flex items-center gap-2 text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Importar Excel
+          </button>
+          <button
+            onClick={() => setShowCombustibleModal(true)}
+            className="px-5 py-2.5 bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-500 hover:to-orange-600 text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            Crear Reporte
+          </button>
+        </div>
+      </div>
 
-        {/* Filtros + Acciones */}
-        <div className="max-w-7xl mx-auto mb-6 space-y-3">
+      {/* Sub-tabs de Navegación */}
+      <div className="flex border-b border-orange-200 gap-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+        <button
+          onClick={() => setActiveSubTab("registro")}
+          className={`flex items-center gap-2 px-6 py-2.5 font-black text-xs sm:text-sm transition-all border-b-4 -mb-[2px] ${activeSubTab === "registro"
+            ? "border-orange-600 text-orange-600 font-extrabold"
+            : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+            }`}
+        >
+          📋 Historial de Registros
+        </button>
+        <button
+          onClick={() => setActiveSubTab("surtidores")}
+          className={`flex items-center gap-2 px-6 py-2.5 font-black text-xs sm:text-sm transition-all border-b-4 -mb-[2px] ${activeSubTab === "surtidores"
+            ? "border-orange-600 text-orange-600 font-extrabold"
+            : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+            }`}
+        >
+          🚛 Stock y Mermas de Surtidores
+        </button>
+        <button
+          onClick={() => setActiveSubTab("analisis")}
+          className={`flex items-center gap-2 px-6 py-2.5 font-black text-xs sm:text-sm transition-all border-b-4 -mb-[2px] ${activeSubTab === "analisis"
+            ? "border-orange-600 text-orange-600 font-extrabold"
+            : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+            }`}
+        >
+          📊 Análisis Gráfico
+        </button>
+      </div>
 
-          {/* Fila de filtros */}
-          <div className="bg-white rounded-2xl shadow-sm border border-orange-100 px-4 py-3">
-            <div className="flex flex-wrap lg:flex-nowrap items-end gap-3">
-
-              {/* Fechas — más compactas */}
-              <div className="flex gap-2 flex-shrink-0">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Desde</label>
-                  <input
-                    type="date"
-                    value={filtros.fechaInicio}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFiltros(prev => {
-                        const next = { ...prev, fechaInicio: val };
-                        if (val && prev.fechaFin && val > prev.fechaFin) {
-                          next.fechaFin = val;
-                        }
-                        return next;
-                      });
-                      setPaginaActual(1);
-                    }}
-                    className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Hasta</label>
-                  <input
-                    type="date"
-                    value={filtros.fechaFin}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFiltros(prev => {
-                        const next = { ...prev, fechaFin: val };
-                        if (val && prev.fechaInicio && val < prev.fechaInicio) {
-                          next.fechaInicio = val;
-                        }
-                        return next;
-                      });
-                      setPaginaActual(1);
-                    }}
-                    className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                  />
-                </div>
-              </div>
-
-              {/* Proyecto */}
-              <div className="flex-1 min-w-[140px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proyecto</label>
-                <select
-                  value={filtros.proyecto}
-                  onChange={(e) => { setFiltros({ ...filtros, proyecto: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                >
-                  <option value="">Todos</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name || p.id}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Surtidor */}
-              <div className="flex-1 min-w-[130px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Surtidor</label>
-                <select
-                  value={filtros.surtidor}
-                  onChange={(e) => { setFiltros({ ...filtros, surtidor: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                >
-                  <option value="">Todos</option>
-                  {equiposSurtidores.map(s => {
-                    const label = [
-                      s.patente || s.code,
-                      s.nombre || s.name,
-                      s.modelo,
-                      s.marca
-                    ].filter(Boolean).join(' - ');
-                    return (
-                      <option key={s.id} value={s.id}>{label}</option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Máquina */}
-              <div className="flex-1 min-w-[130px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Máquina</label>
-                <input
-                  type="text"
-                  placeholder="Patente, modelo, marca..."
-                  value={filtros.maquina}
-                  onChange={(e) => { setFiltros({ ...filtros, maquina: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                />
-              </div>
-
-              {/* Receptor */}
-              <div className="flex-1 min-w-[130px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Receptor</label>
-                <input
-                  type="text"
-                  placeholder="Nombre o apellido..."
-                  value={filtros.receptor}
-                  onChange={(e) => { setFiltros({ ...filtros, receptor: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                />
-              </div>
-
-              {/* Folio */}
-              <div className="flex-1 min-w-[100px]">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Folio</label>
-                <input
-                  type="text"
-                  placeholder="Buscar folio..."
-                  value={filtros.folio}
-                  onChange={(e) => { setFiltros({ ...filtros, folio: e.target.value }); setPaginaActual(1); }}
-                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                />
-              </div>
-
-              {/* Toggle Entrada / Salida */}
-              <div className="flex-shrink-0">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tipo</label>
-                <div className="flex items-center gap-1.5 bg-slate-100 rounded-lg p-0.5">
-                  {[{ val: '', label: 'Todos' }, { val: 'entrada', label: 'Entrada' }, { val: 'entrega', label: 'Salida' }].map(opt => (
-                    <button key={opt.val}
-                      onClick={() => { setFiltros({ ...filtros, tipo: opt.val }); setPaginaActual(1); }}
-                      className={`px-3 py-1.5 rounded-md text-xs font-black transition-all ${filtros.tipo === opt.val
-                        ? opt.val === 'entrada' ? 'bg-blue-600 text-white shadow'
-                          : opt.val === 'entrega' ? 'bg-orange-500 text-white shadow'
-                            : 'bg-white text-slate-700 shadow'
-                        : 'text-slate-500 hover:text-slate-700'
-                        }`}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Limpiar + contador */}
-              <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Resultados</span>
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-black">
-                    {reportesFiltrados.length}
-                  </span>
-                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.surtidor || filtros.receptor || filtros.tipo || filtros.folio) && (
-                    <button
-                      onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '', folio: '' }); setPaginaActual(1); }}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs font-bold transition-all"
-                      title="Limpiar filtros"
-                    >
-                      ✕ Limpiar
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Fila de acciones de exportación */}
+      {/* Fila de acciones de exportación y Filtros Toggle */}
+      {activeSubTab === "registro" && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-6 mb-4 animate-fadeIn">
+          {/* Exportadores y Columnas */}
           <div className="flex flex-wrap items-center gap-2">
             {reportesSeleccionados.length > 0 && (
               <button
@@ -1344,7 +1302,7 @@ export default function ReporteCombustible() {
             <div className="relative">
               <button
                 onClick={() => setShowColSelector(!showColSelector)}
-                className="px-3 py-2 rounded-xl bg-white border border-orange-200 hover:bg-orange-50 text-slate-700 font-semibold text-xs transition-all shadow flex items-center gap-1.5"
+                className="px-3 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition-all shadow flex items-center gap-1.5"
               >
                 <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
@@ -1356,9 +1314,9 @@ export default function ReporteCombustible() {
                 <>
                   {/* Backdrop para cerrar */}
                   <div className="fixed inset-0 z-40" onClick={() => setShowColSelector(false)}></div>
-                  
+
                   {/* Popover */}
-                  <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border-2 border-orange-100 z-50 p-4 max-h-[450px] flex flex-col">
+                  <div className="absolute left-0 mt-2 w-72 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border-2 border-orange-100 z-50 p-4 max-h-[450px] flex flex-col">
                     {/* Buscador */}
                     <div className="relative mb-3">
                       <input
@@ -1413,25 +1371,292 @@ export default function ReporteCombustible() {
               )}
             </div>
           </div>
-        </div>
 
-        {/* Panel de Surtidores */}
+          {/* Botón Toggle de Filtros */}
+          <button
+            onClick={() => setShowFiltrosPanel(!showFiltrosPanel)}
+            className={`px-4 py-2 rounded-xl border text-xs font-bold transition-all flex items-center gap-2 ${showFiltrosPanel
+              ? "bg-orange-100 border-orange-300 text-orange-800"
+              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+            </svg>
+            Filtros {activeFiltersCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 bg-orange-600 text-white text-[9px] rounded-full font-black">
+                {activeFiltersCount}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Panel de Filtros Colapsable */}
+      {activeSubTab === "registro" && showFiltrosPanel && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4 my-4 animate-slideDown">
+          {/* Grid de Filtros */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            {/* Mes */}
+            <div className="col-span-1 animate-fadeIn">
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Mes</label>
+              <select
+                value={filtros.mes}
+                onChange={(e) => { setFiltros(prev => ({ ...prev, mes: e.target.value, fechaInicio: '', fechaFin: '' })); setPaginaActual(1); }}
+                className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+              >
+                <option value="">Todos los meses</option>
+                {mesesDisponibles.map(m => (
+                  <option key={m.val} value={m.val}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Fecha Desde */}
+            {columnasVisibles.includes('fecha') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Desde</label>
+                <input
+                  type="date"
+                  value={filtros.fechaInicio}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFiltros(prev => {
+                      const next = { ...prev, fechaInicio: val };
+                      if (val && prev.fechaFin && val > prev.fechaFin) {
+                        next.fechaFin = val;
+                      }
+                      return next;
+                    });
+                    setPaginaActual(1);
+                  }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Fecha Hasta */}
+            {columnasVisibles.includes('fecha') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Hasta</label>
+                <input
+                  type="date"
+                  value={filtros.fechaFin}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFiltros(prev => {
+                      const next = { ...prev, fechaFin: val };
+                      if (val && prev.fechaInicio && val < prev.fechaInicio) {
+                        next.fechaInicio = val;
+                      }
+                      return next;
+                    });
+                    setPaginaActual(1);
+                  }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Proyecto */}
+            {columnasVisibles.includes('proyecto') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Proyecto</label>
+                <select
+                  value={filtros.proyecto}
+                  onChange={(e) => { setFiltros({ ...filtros, proyecto: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                >
+                  <option value="">Todos</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name || p.id}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Surtidor */}
+            {columnasVisibles.includes('surtidor') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Surtidor</label>
+                <select
+                  value={filtros.surtidor}
+                  onChange={(e) => { setFiltros({ ...filtros, surtidor: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                >
+                  <option value="">Todos</option>
+                  {equiposSurtidores.map(s => {
+                    const label = [
+                      s.patente || s.code,
+                      s.nombre || s.name,
+                      s.modelo,
+                      s.marca
+                    ].filter(Boolean).join(' - ');
+                    return (
+                      <option key={s.id} value={s.id}>{label}</option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+
+            {/* Máquina */}
+            {columnasVisibles.includes('maquina') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Máquina</label>
+                <input
+                  type="text"
+                  placeholder="Patente, modelo, marca..."
+                  value={filtros.maquina}
+                  onChange={(e) => { setFiltros({ ...filtros, maquina: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Receptor */}
+            {columnasVisibles.includes('receptor') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Receptor</label>
+                <input
+                  type="text"
+                  placeholder="Nombre o apellido..."
+                  value={filtros.receptor}
+                  onChange={(e) => { setFiltros({ ...filtros, receptor: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Folio */}
+            {columnasVisibles.includes('folio') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Folio</label>
+                <input
+                  type="text"
+                  placeholder="Buscar folio..."
+                  value={filtros.folio}
+                  onChange={(e) => { setFiltros({ ...filtros, folio: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-3 py-2 border border-orange-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 bg-orange-50/20 transition-all"
+                />
+              </div>
+            )}
+
+            {/* Tipo */}
+            {columnasVisibles.includes('tipo') && (
+              <div className="col-span-1 animate-fadeIn">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Tipo</label>
+                <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-0.5 border border-slate-200">
+                  {[{ val: '', label: 'Todos' }, { val: 'entrada', label: 'Entrada' }, { val: 'entrega', label: 'Salida' }].map(opt => (
+                    <button key={opt.val}
+                      onClick={() => { setFiltros({ ...filtros, tipo: opt.val }); setPaginaActual(1); }}
+                      className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${filtros.tipo === opt.val
+                        ? opt.val === 'entrada' ? 'bg-blue-600 text-white shadow'
+                          : opt.val === 'entrega' ? 'bg-orange-500 text-white shadow'
+                            : 'bg-white text-slate-700 shadow'
+                        : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fila de Badges Activos / Resumen (Siempre visible si hay filtros activos o resultados) */}
+      {activeSubTab === "registro" && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white border border-slate-200/85 shadow-sm text-xs mb-6">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">Filtros Activos:</span>
+            {activeFiltersCount === 0 ? (
+              <span className="text-slate-400 italic text-xs">Ninguno</span>
+            ) : (
+              Object.entries(filtros).map(([key, val]) => {
+                if (!val) return null;
+                let label = '';
+                if (key === 'mes') label = `Mes: ${mesesDisponibles.find(m => m.val === val)?.label || val}`;
+                else if (key === 'fechaInicio') label = `Desde: ${val}`;
+                else if (key === 'fechaFin') label = `Hasta: ${val}`;
+                else if (key === 'proyecto') label = `Proyecto: ${projects.find(p => p.id === val)?.name || val}`;
+                else if (key === 'surtidor') label = `Surtidor: ${equiposSurtidores.find(s => s.id === val)?.patente || val}`;
+                else if (key === 'maquina') label = `Máquina: ${val}`;
+                else if (key === 'receptor') label = `Receptor: ${val}`;
+                else if (key === 'folio') label = `Folio: ${val}`;
+                else if (key === 'tipo') label = `Tipo: ${val === 'entrada' ? 'Entrada' : 'Salida'}`;
+                return (
+                  <span key={key} className="px-2.5 py-1 bg-orange-50 text-orange-700 rounded-xl text-[10px] font-bold border border-orange-100 flex items-center gap-1.5 shadow-sm animate-fadeIn">
+                    {label}
+                    <button onClick={() => setFiltros(prev => ({ ...prev, [key]: '' }))} className="hover:text-red-600 font-black">✕</button>
+                  </span>
+                );
+              })
+            )}
+          </div>
+          <div className="flex items-center gap-4 ml-auto">
+            <span className="text-xs font-semibold text-slate-500">
+              Resultados: <span className="px-2.5 py-1 bg-orange-100 text-orange-700 rounded-lg font-black text-sm">{reportesFiltrados.length}</span>
+            </span>
+            {activeFiltersCount > 0 && (
+              <button
+                onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '', folio: '' }); setPaginaActual(1); }}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+              >
+                ✕ Limpiar Filtros
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Panel de Surtidores */}
+      {activeSubTab === "surtidores" && (
         <SurtidoresStatsPanel
           stats={surtidoresStats}
           selectedSurtidorId={filtros.surtidor}
-          onSelectSurtidor={(id) => setFiltros(prev => ({ ...prev, surtidor: id }))}
+          onSelectSurtidor={(id) => {
+            setFiltros(prev => ({ ...prev, surtidor: id }));
+            if (id) {
+              setActiveSubTab("registro");
+            }
+          }}
           fechaInicio={filtros.fechaInicio}
           fechaFin={filtros.fechaFin}
         />
+      )}
 
-        {/* Tabla */}
-        <div className="max-w-7xl mx-auto">
+      {/* Scroll mensual */}
+      {activeSubTab === "registro" && mesesDisponibles.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          <button
+            onClick={() => { setFiltros(prev => ({ ...prev, mes: '' })); setPaginaActual(1); }}
+            className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-black transition-all border ${!filtros.mes ? 'bg-orange-600 text-white border-orange-600 shadow' : 'bg-white text-slate-500 border-slate-200 hover:border-orange-300 hover:text-orange-600'}`}
+          >
+            Todos
+          </button>
+          {mesesDisponibles.map(m => (
+            <button
+              key={m.val}
+              onClick={() => { setFiltros(prev => ({ ...prev, mes: m.val, fechaInicio: '', fechaFin: '' })); setPaginaActual(1); }}
+              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-black transition-all border ${filtros.mes === m.val ? 'bg-orange-600 text-white border-orange-600 shadow' : 'bg-white text-slate-500 border-slate-200 hover:border-orange-300 hover:text-orange-600'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Tabla */}
+      {activeSubTab === "registro" && (
+        <div className="w-full animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-orange-100">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gradient-to-r from-orange-600 via-orange-700 to-amber-700 text-white">
                   <tr>
-                    <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider w-12">
+                    <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider w-12 whitespace-nowrap">
                       <input
                         type="checkbox"
                         checked={todosSeleccionados}
@@ -1440,46 +1665,52 @@ export default function ReporteCombustible() {
                       />
                     </th>
                     {columnasVisibles.includes('tipo') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Tipo</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Tipo</th>
                     )}
                     {columnasVisibles.includes('fecha') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Fecha</th>
                     )}
                     {columnasVisibles.includes('codigo') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">N° Reporte</th>
                     )}
                     {columnasVisibles.includes('folio') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Folio</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Folio</th>
+                    )}
+                    {columnasVisibles.includes('proyecto') && (
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Proyecto</th>
                     )}
                     {columnasVisibles.includes('empresa') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Empresa</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Empresa</th>
+                    )}
+                    {columnasVisibles.includes('surtidor') && (
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Surtidor</th>
                     )}
                     {columnasVisibles.includes('maquina') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Máquina</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Máquina</th>
                     )}
                     {columnasVisibles.includes('repartidor') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Repartidor</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Repartidor</th>
                     )}
                     {columnasVisibles.includes('receptor') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Receptor</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Receptor</th>
                     )}
                     {columnasVisibles.includes('creadoPor') && (
-                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Creado por</th>
+                      <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Creado por</th>
                     )}
                     {columnasVisibles.includes('horometro') && (
-                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Horómetro</th>
+                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider whitespace-nowrap">Horómetro</th>
                     )}
                     {columnasVisibles.includes('litros') && (
-                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Litros</th>
+                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider whitespace-nowrap">Litros</th>
                     )}
                     {columnasVisibles.includes('firmado') && (
-                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Firmado</th>
+                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider whitespace-nowrap">Firmado</th>
                     )}
                     {columnasVisibles.includes('voucher') && (
-                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Ver</th>
+                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider whitespace-nowrap">Ver</th>
                     )}
                     {columnasVisibles.includes('acciones') && (
-                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
+                      <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider whitespace-nowrap">Acciones</th>
                     )}
                   </tr>
                 </thead>
@@ -1514,7 +1745,7 @@ export default function ReporteCombustible() {
                           />
                         </td>
                         {columnasVisibles.includes('tipo') && (
-                          <td className="px-3 py-3 text-sm text-center">
+                          <td className="px-3 py-3 text-sm text-center whitespace-nowrap">
                             <div className="flex flex-col items-center gap-1">
                               <span className={`px-2 py-1 rounded-full text-xs font-bold ${reporte.tipo === 'entrada'
                                 ? 'bg-green-100 text-green-700'
@@ -1534,14 +1765,14 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('fecha') && (
-                          <td className="px-3 py-3 text-sm font-semibold text-slate-900">
+                          <td className="px-3 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
                             {reporte.fecha ? new Date(reporte.fecha + 'T00:00:00').toLocaleDateString('es-CL') : '-'}
                           </td>
                         )}
                         {columnasVisibles.includes('codigo') && (
                           <td
                             onClick={() => setReporteDetalle(reporte)}
-                            className="px-3 py-3 text-sm font-bold text-orange-600 hover:text-orange-800 hover:bg-orange-50 cursor-pointer transition-all"
+                            className="px-3 py-3 text-sm font-bold text-orange-600 hover:text-orange-800 hover:bg-orange-50 cursor-pointer transition-all whitespace-nowrap"
                             title="Click para ver detalle"
                           >
                             <div className="flex items-center gap-2">
@@ -1553,8 +1784,13 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('folio') && (
-                          <td className="px-3 py-3 text-sm font-semibold text-slate-700">
+                          <td className="px-3 py-3 text-sm font-semibold text-slate-700 whitespace-nowrap">
                             {reporte.folio || '-'}
+                          </td>
+                        )}
+                        {columnasVisibles.includes('proyecto') && (
+                          <td className="px-3 py-3 text-sm text-slate-700">
+                            {reporte.projectName || '-'}
                           </td>
                         )}
                         {columnasVisibles.includes('empresa') && (
@@ -1562,38 +1798,53 @@ export default function ReporteCombustible() {
                             {reporte.empresaNombre || '-'}
                           </td>
                         )}
+                        {columnasVisibles.includes('surtidor') && (
+                          <td className="px-3 py-3 text-sm whitespace-nowrap">
+                            {reporte.surtidorPatente ? (
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-800">{reporte.surtidorPatente}</span>
+                                <span className="text-[11px] text-slate-500 font-normal leading-tight">{reporte.surtidorName}</span>
+                              </div>
+                            ) : '-'}
+                          </td>
+                        )}
                         {columnasVisibles.includes('maquina') && (
-                          <td className="px-3 py-3 text-sm text-slate-700">
-                            {reporte.machinePatente ? `${reporte.machinePatente} - ${reporte.machineName}` : (reporte.tipo === 'entrada' ? 'N/A' : '-')}
+                          <td className="px-3 py-3 text-sm whitespace-nowrap">
+                            {reporte.machinePatente ? (
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-800">{reporte.machinePatente}</span>
+                                <span className="text-[11px] text-slate-500 font-normal leading-tight">{reporte.machineName}</span>
+                              </div>
+                            ) : (reporte.tipo === 'entrada' ? <span className="text-slate-400 font-medium">N/A</span> : '-')}
                           </td>
                         )}
                         {columnasVisibles.includes('repartidor') && (
-                          <td className="px-3 py-3 text-sm text-slate-700">
+                          <td className="px-3 py-3 text-sm text-slate-700 whitespace-nowrap">
                             {reporte.repartidorNombre || '-'}
                           </td>
                         )}
                         {columnasVisibles.includes('receptor') && (
-                          <td className="px-3 py-3 text-sm text-slate-700">
+                          <td className="px-3 py-3 text-sm text-slate-700 whitespace-nowrap">
                             {reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}
                           </td>
                         )}
                         {columnasVisibles.includes('creadoPor') && (
-                          <td className="px-3 py-3 text-sm text-slate-500 font-medium">
+                          <td className="px-3 py-3 text-sm text-slate-500 font-medium whitespace-nowrap">
                             {reporte.creadoPor || '-'}
                           </td>
                         )}
                         {columnasVisibles.includes('horometro') && (
-                          <td className="px-3 py-3 text-sm text-center text-slate-700">
+                          <td className="px-3 py-3 text-sm text-center text-slate-700 whitespace-nowrap">
                             {reporte.horometroOdometro ? Number(reporte.horometroOdometro).toLocaleString('es-CL') : '-'}
                           </td>
                         )}
                         {columnasVisibles.includes('litros') && (
-                          <td className="px-3 py-3 text-sm text-center font-bold text-orange-600">
+                          <td className="px-3 py-3 text-sm text-center font-bold text-orange-600 whitespace-nowrap">
                             {Number(reporte.cantidad || 0).toLocaleString('es-CL')} L
                           </td>
                         )}
                         {columnasVisibles.includes('firmado') && (
-                          <td className="px-3 py-3 text-center">
+                          <td className="px-3 py-3 text-center whitespace-nowrap">
                             {(reporte.firmaRepartidor || reporte.firmaReceptor) ? (
                               <div className="flex items-center justify-center">
                                 <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
@@ -1614,7 +1865,7 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('voucher') && (
-                          <td className="px-3 py-3 text-center">
+                          <td className="px-3 py-3 text-center whitespace-nowrap">
                             {reporte.tipo === 'entrega' ? (
                               <button
                                 onClick={() => handleReimprimirVoucher(reporte)}
@@ -1631,7 +1882,7 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('acciones') && (
-                          <td className="px-3 py-3 text-center">
+                          <td className="px-3 py-3 text-center whitespace-nowrap">
                             <button
                               onClick={() => handleEliminar(reporte.id)}
                               className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-red-100 hover:text-red-700 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto"
@@ -1652,213 +1903,234 @@ export default function ReporteCombustible() {
             </div>
 
             {/* Paginador */}
-            {reportesFiltrados.length > ITEMS_POR_PAGINA && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-orange-100 bg-white rounded-b-xl">
-                <span className="text-xs text-slate-500">
-                  Mostrando {Math.min((paginaActual - 1) * ITEMS_POR_PAGINA + 1, reportesFiltrados.length)}–{Math.min(paginaActual * ITEMS_POR_PAGINA, reportesFiltrados.length)} de {reportesFiltrados.length} reportes
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
-                    disabled={paginaActual === 1}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all"
-                  >← Anterior</button>
-                  {Array.from({ length: Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA) || Math.abs(p - paginaActual) <= 1)
-                    .reduce((acc, p, i, arr) => {
-                      if (i > 0 && arr[i - 1] !== p - 1) acc.push('...');
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((p, i) => p === '...'
-                      ? <span key={i} className="px-2 text-slate-400 text-xs">…</span>
-                      : <button key={p} onClick={() => setPaginaActual(p)}
-                        className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-orange-600 text-white shadow' : 'bg-orange-50 hover:bg-orange-100 text-orange-700'}`}
-                      >{p}</button>
+            {reportesFiltrados.length > ITEMS_POR_PAGINA && (() => {
+              const totalPages = Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA);
+              const pageNums = [];
+              for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || Math.abs(i - paginaActual) <= 2) pageNums.push(i);
+              }
+              const withGaps = [];
+              pageNums.forEach((p, i) => {
+                if (i > 0 && p - pageNums[i - 1] > 1) withGaps.push('…');
+                withGaps.push(p);
+              });
+              return (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-orange-100 bg-white rounded-b-xl">
+                  <span className="text-xs text-slate-500">
+                    {(paginaActual - 1) * ITEMS_POR_PAGINA + 1}–{Math.min(paginaActual * ITEMS_POR_PAGINA, reportesFiltrados.length)} de {reportesFiltrados.length} reportes
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} disabled={paginaActual === 1}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all">
+                      ← Anterior
+                    </button>
+                    {withGaps.map((p, i) =>
+                      p === '…'
+                        ? <span key={`gap-${i}`} className="px-1 text-slate-400 text-xs">…</span>
+                        : <button key={p} onClick={() => setPaginaActual(p)}
+                            className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${paginaActual === p ? 'bg-orange-600 text-white shadow' : 'bg-orange-50 hover:bg-orange-100 text-orange-700'}`}>
+                            {p}
+                          </button>
                     )}
-                  <button
-                    onClick={() => setPaginaActual(p => Math.min(Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA), p + 1))}
-                    disabled={paginaActual === Math.ceil(reportesFiltrados.length / ITEMS_POR_PAGINA)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all"
-                  >Siguiente →</button>
+                    <button onClick={() => setPaginaActual(p => Math.min(totalPages, p + 1))} disabled={paginaActual === totalPages}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-50 hover:bg-orange-100 text-orange-700 disabled:opacity-40 transition-all">
+                      Siguiente →
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
+      )}
 
-        {/* Modal de Combustible */}
-        <CombustibleModal
-          isOpen={showCombustibleModal}
-          onClose={() => {
-            setShowCombustibleModal(false);
+      {/* Importador Excel */}
+      {showImporter && (
+        <CombustibleImporter
+          empresaId={empresaId}
+          onClose={() => setShowImporter(false)}
+          onSuccess={(count) => {
+            setShowImporter(false);
             handleRecargarReportes();
           }}
-          empresaId={empresaId}
-          isReportesView={true}
         />
+      )}
 
-        {/* Modal de Detalle del Reporte de Combustible */}
+      {/* Modal de Combustible */}
+      <CombustibleModal
+        isOpen={showCombustibleModal}
+        onClose={() => {
+          setShowCombustibleModal(false);
+          handleRecargarReportes();
+        }}
+        empresaId={empresaId}
+        isReportesView={true}
+      />
 
-        {/* Panel de Análisis en Tiempo Real */}
-        {reportesFiltrados.length > 0 && <CombustibleAnalytics reportesFiltrados={reportesFiltrados} />}
+      {/* Modal de Detalle del Reporte de Combustible */}
 
-        {reporteDetalle && (
-          <CombustibleDetalleModal
-            reporte={{
-              ...reporteDetalle,
-              ...reporteDetalle.datosEntrega,
-              cantidadLitros: reporteDetalle.datosEntrega?.cantidadLitros
-                || reporteDetalle.datosEntrada?.cantidad
-                || reporteDetalle.cantidadLitros,
-              empresa: reporteDetalle.datosEntrega?.empresaNombre
-                || (empresas.find(e => e.id === reporteDetalle.datosEntrega?.empresa)?.nombre)
-                || reporteDetalle.datosEntrega?.empresa
-                || reporteDetalle.empresa
-                || (reporteDetalle.datosEntrada?.tipoOrigen === 'estacion'
-                  ? (() => {
-                    const est = estaciones.find(e => e.id === reporteDetalle.datosEntrada?.origen);
-                    if (est) return (est.marca ? est.marca + ' - ' : '') + est.nombre + (est.ciudad ? ' (' + est.ciudad + ')' : '');
-                    return empresas.find(e => e.id === reporteDetalle.datosEntrada?.origen)?.nombre || 'Estación de Servicio';
-                  })()
-                  : reporteDetalle.datosEntrada?.tipoOrigen === 'estanque'
-                    ? (empresas.find(e => e.id === reporteDetalle.datosEntrada?.origen)?.nombre || 'Estanque')
-                    : null)
-                || '-',
-              observaciones: reporteDetalle.datosEntrega?.observaciones
-                || reporteDetalle.datosEntrada?.observaciones
-                || reporteDetalle.observaciones,
-              numerosDocumento: reporteDetalle.datosEntrada?.numerosDocumento,
-              numeroDocumento: reporteDetalle.datosEntrada?.numeroDocumento || reporteDetalle.datosEntrada?.numerosDocumento?.[0],
-              horometroOdometro: reporteDetalle.datosEntrega?.horometroOdometro
-                || reporteDetalle.datosEntrada?.horometroOdometro
-                || reporteDetalle.horometroOdometro
-            }}
-            onClose={() => setReporteDetalle(null)}
-            projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
-            machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.datosEntrada?.machineId || reporteDetalle.machineId))}
-            surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
-            operadorInfo={
-              empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))
-              || (reporteDetalle.datosEntrada?.receptorNombre ? { nombre: reporteDetalle.datosEntrada.receptorNombre, rut: '' } : null)
+      {/* Panel de Análisis en Tiempo Real */}
+      {activeSubTab === 'analisis' && reportesFiltrados.length > 0 && (
+        <div className="animate-fadeIn">
+          <CombustibleAnalytics reportesFiltrados={reportesFiltrados} />
+        </div>
+      )}
+
+      {reporteDetalle && (
+        <CombustibleDetalleModal
+          reporte={{
+            ...reporteDetalle,
+            ...reporteDetalle.datosEntrega,
+            cantidadLitros: reporteDetalle.datosEntrega?.cantidadLitros
+              || reporteDetalle.datosEntrada?.cantidad
+              || reporteDetalle.cantidadLitros,
+            empresa: reporteDetalle.datosEntrega?.empresaNombre
+              || (empresas.find(e => e.id === reporteDetalle.datosEntrega?.empresa)?.nombre)
+              || reporteDetalle.datosEntrega?.empresa
+              || reporteDetalle.empresa
+              || (reporteDetalle.datosEntrada?.tipoOrigen === 'estacion'
+                ? (() => {
+                  const est = estaciones.find(e => e.id === reporteDetalle.datosEntrada?.origen);
+                  if (est) return (est.marca ? est.marca + ' - ' : '') + est.nombre + (est.ciudad ? ' (' + est.ciudad + ')' : '');
+                  return empresas.find(e => e.id === reporteDetalle.datosEntrada?.origen)?.nombre || 'Estación de Servicio';
+                })()
+                : reporteDetalle.datosEntrada?.tipoOrigen === 'estanque'
+                  ? (empresas.find(e => e.id === reporteDetalle.datosEntrada?.origen)?.nombre || 'Estanque')
+                  : null)
+              || '-',
+            observaciones: reporteDetalle.datosEntrega?.observaciones
+              || reporteDetalle.datosEntrada?.observaciones
+              || reporteDetalle.observaciones,
+            numerosDocumento: reporteDetalle.datosEntrada?.numerosDocumento,
+            numeroDocumento: reporteDetalle.datosEntrada?.numeroDocumento || reporteDetalle.datosEntrada?.numerosDocumento?.[0],
+            horometroOdometro: reporteDetalle.datosEntrega?.horometroOdometro
+              || reporteDetalle.datosEntrada?.horometroOdometro
+              || reporteDetalle.horometroOdometro
+          }}
+          onClose={() => setReporteDetalle(null)}
+          projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
+          machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.datosEntrada?.machineId || reporteDetalle.machineId))}
+          surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
+          operadorInfo={
+            empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))
+            || (reporteDetalle.datosEntrada?.receptorNombre ? { nombre: reporteDetalle.datosEntrada.receptorNombre, rut: '' } : null)
+          }
+          userRole={userRole}
+          onSave={async (editedData) => {
+            try {
+              // Validar código si fue editado
+              if (editedData.codigo && editedData.codigo.trim() !== reporteDetalle.codigo) {
+                const { collection, query, where, getDocs } = await import('firebase/firestore');
+                const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+                const q = query(reportesRef, where('codigo', '==', editedData.codigo.trim()));
+                const snap = await getDocs(q);
+                const exists = snap.docs.some(d => d.id !== reporteDetalle.id && !d.data().deleted);
+                if (exists) {
+                  toast({ type: 'error', message: 'El código ingresado ya existe en otro reporte.' });
+                  return;
+                }
+              }
+
+              // Guardar los cambios en Firebase
+              const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
+              await updateDoc(reporteRef, editedData);
+              console.log('Reporte actualizado:', editedData);
+
+              // Recargar reportes
+              const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+              const q = query(reportesRef, orderBy('fecha', 'desc'));
+              const reportesSnap = await getDocs(q);
+              const reportesData = reportesSnap.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setReportes(reportesData);
+
+              // Actualizar el reporte en detalle
+              setReporteDetalle({
+                ...reporteDetalle,
+                ...editedData
+              });
+
+              toast({ type: 'success', message: 'Cambios guardados exitosamente' });
+            } catch (error) {
+              console.error("Error guardando cambios:", error);
+              toast({ type: 'error', message: 'Error al guardar los cambios. Intenta nuevamente.' });
             }
-            userRole={userRole}
-            onSave={async (editedData) => {
-              try {
-                // Validar código si fue editado
-                if (editedData.codigo && editedData.codigo.trim() !== reporteDetalle.codigo) {
-                  const { collection, query, where, getDocs } = await import('firebase/firestore');
-                  const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-                  const q = query(reportesRef, where('codigo', '==', editedData.codigo.trim()));
-                  const snap = await getDocs(q);
-                  const exists = snap.docs.some(d => d.id !== reporteDetalle.id && !d.data().deleted);
-                  if (exists) {
-                    toast({ type: 'error', message: 'El código ingresado ya existe en otro reporte.' });
-                    return;
-                  }
-                }
-
-                // Guardar los cambios en Firebase
-                const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
-                await updateDoc(reporteRef, editedData);
-                console.log('Reporte actualizado:', editedData);
-
-                // Recargar reportes
-                const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-                const q = query(reportesRef, orderBy('fecha', 'desc'));
-                const reportesSnap = await getDocs(q);
-                const reportesData = reportesSnap.docs.map(doc => ({
-                  id: doc.id,
-                  ...doc.data()
-                }));
-                setReportes(reportesData);
-
-                // Actualizar el reporte en detalle
-                setReporteDetalle({
-                  ...reporteDetalle,
-                  ...editedData
-                });
-
-                toast({ type: 'success', message: 'Cambios guardados exitosamente' });
-              } catch (error) {
-                console.error("Error guardando cambios:", error);
-                toast({ type: 'error', message: 'Error al guardar los cambios. Intenta nuevamente.' });
+          }}
+          onSign={async (signatureData, pin) => {
+            try {
+              // Validar el PIN del administrador contra Firebase
+              if (!currentUser) {
+                toast({ type: 'error', message: 'No hay usuario autenticado' });
+                return;
               }
-            }}
-            onSign={async (signatureData, pin) => {
-              try {
-                // Validar el PIN del administrador contra Firebase
-                if (!currentUser) {
-                  toast({ type: 'error', message: 'No hay usuario autenticado' });
-                  return;
-                }
 
-                // Obtener el documento del usuario actual
-                const userRef = doc(db, 'users', currentUser.uid);
-                const userDoc = await getDoc(userRef);
+              // Obtener el documento del usuario actual
+              const userRef = doc(db, 'users', currentUser.uid);
+              const userDoc = await getDoc(userRef);
 
-                if (!userDoc.exists()) {
-                  toast({ type: 'error', message: 'No se encontró información del usuario' });
-                  return;
-                }
-
-                const userData = userDoc.data();
-                const storedPin = userData.pin;
-
-                // Validar el PIN
-                if (!storedPin) {
-                  toast({ type: 'error', message: 'El usuario no tiene un PIN configurado. Contacte al administrador.' });
-                  return;
-                }
-
-                if (storedPin !== pin) {
-                  toast({ type: 'error', message: 'PIN incorrecto. Verifica e intenta nuevamente.' });
-                  return;
-                }
-
-                // PIN correcto, proceder con la firma
-                const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
-                await updateDoc(reporteRef, {
-                  firmado: true,
-                  firmaAdmin: {
-                    nombre: signatureData.adminName,
-                    timestamp: signatureData.timestamp,
-                    userId: currentUser.uid
-                  }
-                });
-
-                console.log('Reporte firmado exitosamente');
-
-                // Recargar reportes
-                const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-                const q = query(reportesRef, orderBy('fecha', 'desc'));
-                const reportesSnap = await getDocs(q);
-                const reportesData = reportesSnap.docs.map(doc => ({
-                  id: doc.id,
-                  ...doc.data()
-                }));
-                setReportes(reportesData);
-
-                // Actualizar el reporte en detalle
-                setReporteDetalle({
-                  ...reporteDetalle,
-                  firmado: true,
-                  firmaAdmin: {
-                    nombre: signatureData.adminName,
-                    timestamp: signatureData.timestamp,
-                    userId: currentUser.uid
-                  }
-                });
-
-                toast({ type: 'success', message: 'Reporte firmado y validado exitosamente' });
-              } catch (error) {
-                console.error("Error firmando reporte:", error);
-                toast({ type: 'error', message: 'Error al firmar el reporte. Intenta nuevamente.' });
+              if (!userDoc.exists()) {
+                toast({ type: 'error', message: 'No se encontró información del usuario' });
+                return;
               }
-            }}
-          />
-        )}
-      </div>
+
+              const userData = userDoc.data();
+              const storedPin = userData.pin;
+
+              // Validar el PIN
+              if (!storedPin) {
+                toast({ type: 'error', message: 'El usuario no tiene un PIN configurado. Contacte al administrador.' });
+                return;
+              }
+
+              if (storedPin !== pin) {
+                toast({ type: 'error', message: 'PIN incorrecto. Verifica e intenta nuevamente.' });
+                return;
+              }
+
+              // PIN correcto, proceder con la firma
+              const reporteRef = doc(db, 'empresas', empresaId, 'reportes_combustible', reporteDetalle.id);
+              await updateDoc(reporteRef, {
+                firmado: true,
+                firmaAdmin: {
+                  nombre: signatureData.adminName,
+                  timestamp: signatureData.timestamp,
+                  userId: currentUser.uid
+                }
+              });
+
+              console.log('Reporte firmado exitosamente');
+
+              // Recargar reportes
+              const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
+              const q = query(reportesRef, orderBy('fecha', 'desc'));
+              const reportesSnap = await getDocs(q);
+              const reportesData = reportesSnap.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setReportes(reportesData);
+
+              // Actualizar el reporte en detalle
+              setReporteDetalle({
+                ...reporteDetalle,
+                firmado: true,
+                firmaAdmin: {
+                  nombre: signatureData.adminName,
+                  timestamp: signatureData.timestamp,
+                  userId: currentUser.uid
+                }
+              });
+
+              toast({ type: 'success', message: 'Reporte firmado y validado exitosamente' });
+            } catch (error) {
+              console.error("Error firmando reporte:", error);
+              toast({ type: 'error', message: 'Error al firmar el reporte. Intenta nuevamente.' });
+            }
+          }}
+        />
+      )}
     </>
   );
 }
