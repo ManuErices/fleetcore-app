@@ -1,9 +1,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, addDoc, serverTimestamp, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+const calcularDiasHabiles = (desde, hasta) => {
+  if (!desde || !hasta) return 0;
+  const start = new Date(desde + 'T00:00:00');
+  const end = new Date(hasta + 'T00:00:00');
+  if (end < start) return 0;
+  
+  let count = 0;
+  let cur = new Date(start);
+  while (cur <= end) {
+    const day = cur.getDay(); // 0 = Domingo, 6 = Sábado
+    if (day !== 0 && day !== 6) {
+      count++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+};
 
 function fmt2(n) { return String(n).padStart(2,'0'); }
 function fmtHora(ts) {
@@ -15,6 +33,12 @@ function fmtFecha(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return `${fmt2(d.getDate())}/${fmt2(d.getMonth()+1)}/${d.getFullYear()}`;
+}
+function fmtFechaString(str) {
+  if (!str) return '';
+  const parts = str.split('-');
+  if (parts.length !== 3) return str;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 function diffHoras(ts1, ts2) {
   if (!ts1 || !ts2) return null;
@@ -52,8 +76,95 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
   const [passLoading, setPassLoading] = useState(false);
   const [passMsg,     setPassMsg]     = useState(null); // { tipo: 'ok'|'err', msg }
 
-  const nombre = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno}`
+  const [trabajadorInfo, setTrabajadorInfo] = useState(trabajador);
+
+  // Escucha en tiempo real el perfil del trabajador
+  useEffect(() => {
+    if (!empresaId || !trabajador?.id) return;
+    const ref = doc(db, 'empresas', empresaId, 'trabajadores', trabajador.id);
+    const unsub = onSnapshot(ref, snap => {
+      if (snap.exists()) {
+        setTrabajadorInfo({ id: snap.id, ...snap.data() });
+      }
+    }, err => {
+      console.error("Error al escuchar trabajador:", err);
+    });
+    return unsub;
+  }, [empresaId, trabajador?.id]);
+
+  // Estados de vacaciones
+  const [vacDesde, setVacDesde] = useState('');
+  const [vacHasta, setVacHasta] = useState('');
+  const [vacObs, setVacObs] = useState('');
+  const [vacEnviando, setVacEnviando] = useState(false);
+  const [vacFeedback, setVacFeedback] = useState(null);
+  const [solicitudesVacaciones, setSolicitudesVacaciones] = useState([]);
+
+  // Escucha en tiempo real las solicitudes de vacaciones del trabajador
+  useEffect(() => {
+    if (!empresaId || !trabajadorInfo?.id || tab !== 'vacaciones') return;
+    const q = query(
+      collection(db, 'empresas', empresaId, 'vacaciones'),
+      where('trabajadorId', '==', trabajadorInfo.id),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, snap => {
+      setSolicitudesVacaciones(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, err => {
+      console.error("Error al escuchar solicitudes de vacaciones:", err);
+    });
+    return unsub;
+  }, [empresaId, trabajadorInfo?.id, tab]);
+
+  async function solicitarVacacion(e) {
+    e.preventDefault();
+    if (vacEnviando || !empresaId || !trabajadorInfo?.id) return;
+    setVacFeedback(null);
+
+    const diasSolicitados = calcularDiasHabiles(vacDesde, vacHasta);
+    const diasDisponibles = trabajadorInfo.diasVacacionesDisponibles ?? 15.0;
+
+    if (!vacDesde || !vacHasta) {
+      setVacFeedback({ tipo: 'err', msg: 'Debe especificar ambas fechas.' });
+      return;
+    }
+    if (diasSolicitados <= 0) {
+      setVacFeedback({ tipo: 'err', msg: 'Rango de fechas inválido o no contempla días hábiles.' });
+      return;
+    }
+    if (diasSolicitados > diasDisponibles) {
+      setVacFeedback({ tipo: 'err', msg: 'No tienes suficientes días disponibles.' });
+      return;
+    }
+
+    setVacEnviando(true);
+    try {
+      await addDoc(collection(db, 'empresas', empresaId, 'vacaciones'), {
+        trabajadorId: trabajadorInfo.id,
+        trabajadorNombre: `${trabajadorInfo.nombre} ${trabajadorInfo.apellidoPaterno || ''} ${trabajadorInfo.apellidoMaterno || ''}`.trim(),
+        diasSolicitados,
+        diasDisponibles,
+        desde: vacDesde,
+        hasta: vacHasta,
+        observaciones: vacObs,
+        estado: 'pendiente',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      setVacFeedback({ tipo: 'ok', msg: '✓ Solicitud de vacaciones creada exitosamente.' });
+      setVacDesde('');
+      setVacHasta('');
+      setVacObs('');
+    } catch (err) {
+      console.error("Error al enviar solicitud:", err);
+      setVacFeedback({ tipo: 'err', msg: 'Error al enviar la solicitud: ' + err.message });
+    } finally {
+      setVacEnviando(false);
+    }
+  }
+
+  const nombre = trabajadorInfo
+    ? `${trabajadorInfo.nombre} ${trabajadorInfo.apellidoPaterno}`
     : user.email.split('@')[0];
 
   // Reloj en tiempo real
@@ -84,7 +195,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
   // trabajadorId en remuneraciones = id del documento Firestore, NO el uid de Auth
   useEffect(() => {
     if (tab !== 'docs') return;
-    const firestoreId = trabajador?.id;
+    const firestoreId = trabajadorInfo?.id;
     if (!firestoreId || !empresaId) { setLoadingLiqs(false); return; }
     setLoadingLiqs(true);
     const q = query(
@@ -96,7 +207,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
     getDocs(q).then(snap => {
       setLiquidaciones(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => {}).finally(() => setLoadingLiqs(false));
-  }, [tab, trabajador?.id, empresaId]);
+  }, [tab, trabajadorInfo?.id, empresaId]);
 
   // Obtener GPS en background (no bloqueante)
   function obtenerGPS() {
@@ -653,7 +764,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
           -webkit-backdrop-filter: blur(16px);
           border-top: 1px solid var(--border);
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(5, 1fr);
           padding-bottom: var(--safe-bot);
           z-index: 20;
         }
@@ -916,7 +1027,7 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                         <div>
                           <div className="liq-periodo">{MESES[(l.mes||1)-1]} {l.anio}</div>
                           <div style={{fontSize:11,color:'var(--text-3)',marginTop:2,fontFamily:'var(--mono)'}}>
-                            {l.empresa || trabajador?.empresa || ''}
+                            {l.empresa || trabajadorInfo?.empresa || ''}
                           </div>
                         </div>
                         <div style={{textAlign:'right'}}>
@@ -924,6 +1035,289 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── TAB VACACIONES ── */}
+          {tab === 'vacaciones' && (
+            <>
+              <div className="mes-header">
+                <span className="mes-title">Mis Vacaciones</span>
+              </div>
+
+              {/* Saldo de vacaciones y resúmenes */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  padding: '14px 16px'
+                }}>
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    letterSpacing: '1px',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-3)',
+                    marginBottom: '5px'
+                  }}>Días Disponibles</div>
+                  <div style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                    color: 'var(--accent)'
+                  }}>{(trabajadorInfo?.diasVacacionesDisponibles ?? 15.0).toFixed(1)}</div>
+                </div>
+                <div style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  padding: '14px 16px'
+                }}>
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    letterSpacing: '1px',
+                    textTransform: 'uppercase',
+                    color: 'var(--text-3)',
+                    marginBottom: '5px'
+                  }}>Por Autorizar</div>
+                  <div style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                    color: 'var(--text)'
+                  }}>{solicitudesVacaciones.filter(s => s.estado === 'pendiente').reduce((sum, s) => sum + s.diasSolicitados, 0)}</div>
+                </div>
+              </div>
+
+              {/* Formulario de solicitud */}
+              <div style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                padding: '18px',
+                marginBottom: '24px'
+              }}>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  letterSpacing: '1px',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-2)',
+                  marginBottom: '16px'
+                }}>Solicitar Vacaciones</div>
+
+                <form onSubmit={solicitarVacacion} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        letterSpacing: '1px',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-3)',
+                        marginBottom: '6px'
+                      }}>Desde</label>
+                      <input 
+                        type="date" 
+                        className="pass-input" 
+                        style={{ padding: '10px 12px', fontSize: '13px' }}
+                        value={vacDesde}
+                        onChange={e => { setVacDesde(e.target.value); setVacFeedback(null); }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        letterSpacing: '1px',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-3)',
+                        marginBottom: '6px'
+                      }}>Hasta</label>
+                      <input 
+                        type="date" 
+                        className="pass-input" 
+                        style={{ padding: '10px 12px', fontSize: '13px' }}
+                        value={vacHasta}
+                        onChange={e => { setVacHasta(e.target.value); setVacFeedback(null); }}
+                      />
+                    </div>
+                  </div>
+
+                  {vacDesde && vacHasta && (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: 'rgba(245, 158, 11, 0.04)',
+                      border: '1px solid rgba(245, 158, 11, 0.15)',
+                      borderRadius: '10px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '12px'
+                    }}>
+                      <div>
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', tracking: '0.5px' }}>Días Hábiles</span>
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--accent)' }}>{calcularDiasHabiles(vacDesde, vacHasta)} días</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', tracking: '0.5px' }}>Saldo Proyectado</span>
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: 700,
+                          color: ((trabajadorInfo?.diasVacacionesDisponibles ?? 15.0) - calcularDiasHabiles(vacDesde, vacHasta)) < 0 ? 'var(--red)' : 'var(--text)'
+                        }}>
+                          {((trabajadorInfo?.diasVacacionesDisponibles ?? 15.0) - calcularDiasHabiles(vacDesde, vacHasta)).toFixed(1)} días
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      letterSpacing: '1px',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-3)',
+                      marginBottom: '6px'
+                    }}>Observaciones</label>
+                    <textarea 
+                      className="pass-input" 
+                      style={{ padding: '10px 12px', fontSize: '13px', resize: 'none', height: '64px', fontFamily: 'var(--sans)' }}
+                      placeholder="Ej: Vacaciones de invierno."
+                      value={vacObs}
+                      onChange={e => setVacObs(e.target.value)}
+                    />
+                  </div>
+
+                  {vacFeedback && (
+                    <div className={`feedback ${vacFeedback.tipo}`} style={{ marginBottom: 0 }}>
+                      {vacFeedback.tipo === 'ok'
+                        ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      }
+                      {vacFeedback.msg}
+                    </div>
+                  )}
+
+                  <button className="btn-pass" type="submit" disabled={vacEnviando} style={{ marginTop: '4px' }}>
+                    {vacEnviando
+                      ? 'Enviando...'
+                      : <>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                          Enviar Solicitud
+                        </>
+                    }
+                  </button>
+                </form>
+              </div>
+
+              {/* Historial de solicitudes */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  letterSpacing: '1.5px',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-3)',
+                  marginBottom: '10px'
+                }}>Historial de solicitudes</div>
+
+                {solicitudesVacaciones.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '30px 20px',
+                    color: 'var(--text-3)',
+                    fontSize: '13px',
+                    fontFamily: 'var(--mono)',
+                    border: '1px dashed var(--border)',
+                    borderRadius: '12px'
+                  }}>No tienes solicitudes anteriores</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {solicitudesVacaciones.map(v => {
+                      let badgeStyle = {
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        textTransform: 'uppercase',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-3)',
+                        background: 'rgba(255,255,255,0.02)'
+                      };
+                      if (v.estado === 'pendiente') {
+                        badgeStyle = {
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          color: '#fcd34d',
+                          border: '1px solid rgba(245, 158, 11, 0.3)',
+                          background: 'rgba(245, 158, 11, 0.08)'
+                        };
+                      } else if (v.estado === 'aprobado') {
+                        badgeStyle = {
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          color: '#86efac',
+                          border: '1px solid rgba(34, 197, 94, 0.3)',
+                          background: 'rgba(34, 197, 94, 0.08)'
+                        };
+                      } else if (v.estado === 'rechazado') {
+                        badgeStyle = {
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          color: '#fca5a5',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          background: 'rgba(239, 68, 68, 0.08)'
+                        };
+                      }
+
+                      return (
+                        <div key={v.id} style={{
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '12px',
+                          padding: '14px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)' }}>
+                              Del {fmtFechaString(v.desde)} al {fmtFechaString(v.hasta)}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>
+                              {v.diasSolicitados} {v.diasSolicitados === 1 ? 'día hábil' : 'días hábiles'}
+                              {v.observaciones && ` • "${v.observaciones}"`}
+                            </div>
+                          </div>
+                          <span style={badgeStyle}>{v.estado}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -947,15 +1341,15 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">RUT</span>
-                  <span className="ci-val">{trabajador?.rut || user.email.replace(/@(trabajador\.app|mpf\.cl)$/, '')}</span>
+                  <span className="ci-val">{trabajadorInfo?.rut || user.email.replace(/@(trabajador\.app|mpf\.cl)$/, '')}</span>
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">Empresa</span>
-                  <span className="ci-val">{trabajador?.empresa || '—'}</span>
+                  <span className="ci-val">{trabajadorInfo?.empresa || '—'}</span>
                 </div>
                 <div className="ci-row">
                   <span className="ci-key">Cargo</span>
-                  <span className="ci-val">{trabajador?.cargo || '—'}</span>
+                  <span className="ci-val">{trabajadorInfo?.cargo || '—'}</span>
                 </div>
               </div>
 
@@ -1046,6 +1440,10 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
           <button className={`tab-btn ${tab==='docs'?'active':''}`} onClick={() => setTab('docs')}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={tab==='docs'?2.5:2}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
             <span className="tab-lbl">Documentos</span>
+          </button>
+          <button className={`tab-btn ${tab==='vacaciones'?'active':''}`} onClick={() => setTab('vacaciones')}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={tab==='vacaciones'?2.5:2}><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
+            <span className="tab-lbl">Vacaciones</span>
           </button>
           <button className={`tab-btn ${tab==='cuenta'?'active':''}`} onClick={() => setTab('cuenta')}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={tab==='cuenta'?2.5:2}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>

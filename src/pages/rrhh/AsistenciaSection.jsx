@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useEmpresa } from '../../lib/useEmpresa';
 import {
   collection,
@@ -76,6 +77,7 @@ export default function AsistenciaSection() {
   const [vacaciones, setVacaciones] = useState([]);
   const [showVacacionModal, setShowVacacionModal] = useState(false);
   const [loadingBase, setLoadingBase] = useState(true);
+  const [currentUserRole, setCurrentUserRole] = useState(null);
 
   // Time & Clock state for Marcador
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -111,6 +113,27 @@ export default function AsistenciaSection() {
   const fmt2 = n => String(n).padStart(2, '0');
   const now = new Date();
   const diaKeyHoy = fmt2(now.getDate());
+
+  // 0. Fetch current user role
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const userSnap = await getDoc(doc(db, 'users', user.uid));
+          if (userSnap.exists()) {
+            setCurrentUserRole(userSnap.data().role || 'trabajador');
+          }
+        } catch (e) {
+          console.error('Error fetching user role:', e);
+        }
+      } else {
+        setCurrentUserRole(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const isUserAdmin = currentUserRole === 'superadmin' || currentUserRole === 'admin_contrato';
 
   // 1. Live clock update
   useEffect(() => {
@@ -166,13 +189,14 @@ export default function AsistenciaSection() {
   useEffect(() => {
     if (!empresaId || loadingBase || activeTab !== 'jornadas' || jornadasVista !== 'hoy') return;
     const mesStr = fmt2(now.getMonth() + 1);
-    const activosConPortal = trabajadores.filter(t => (!t.estado || t.estado === 'activo') && t.portalUid);
+    const activos = trabajadores.filter(t => !t.estado || t.estado === 'activo');
 
     setMarcacionesHoy({});
-    if (activosConPortal.length === 0) return;
+    if (activos.length === 0) return;
 
-    const unsubs = activosConPortal.map(t => {
-      const docId = `${t.portalUid}_${now.getFullYear()}_${mesStr}`;
+    const unsubs = activos.map(t => {
+      const keyId = t.portalUid || t.id;
+      const docId = `${keyId}_${now.getFullYear()}_${mesStr}`;
       const ref = doc(db, 'empresas', empresaId, 'asistencia', docId);
       return onSnapshot(ref, snap => {
         setMarcacionesHoy(prev => {
@@ -180,7 +204,7 @@ export default function AsistenciaSection() {
           const data = snap.data();
           return {
             ...prev,
-            [t.portalUid]: {
+            [keyId]: {
               docId: snap.id,
               entrada: data.registros?.[diaKeyHoy]?.entrada || null,
               salida: data.registros?.[diaKeyHoy]?.salida || null,
@@ -540,8 +564,23 @@ export default function AsistenciaSection() {
     try {
       const ref = doc(db, 'empresas', empresaId, 'asistencia', docId);
       const snap = await getDoc(ref);
-      if (!snap.exists()) return;
-      const data = snap.data();
+      
+      let data = {};
+      if (snap.exists()) {
+        data = snap.data();
+      } else {
+        const parts = docId.split('_');
+        const tId = parts[0];
+        const yearPart = parts[1];
+        const mesStr = parts[2];
+        data = {
+          trabajadorId: tId,
+          trabajadorNombre: editMarcacionModal.nombre,
+          anio: parseInt(yearPart) || new Date().getFullYear(),
+          mes: mesStr,
+          registros: {}
+        };
+      }
 
       const toTs = (horaStr) => {
         if (!horaStr) return null;
@@ -574,7 +613,7 @@ export default function AsistenciaSection() {
         valorDespues: { entrada: entryDate, salida: exitDate, estadoJornada: val.estadoJornada },
         justificacion: val.justificacion,
         modificadoPor: auth.currentUser?.email || 'Admin',
-        timestamp: serverTimestamp()
+        timestamp: new Date()
       };
 
       const updatedReg = {
@@ -589,7 +628,8 @@ export default function AsistenciaSection() {
         }
       };
 
-      await updateDoc(ref, {
+      await setDoc(ref, {
+        ...data,
         registros: updatedReg,
         modificaciones: [...(data.modificaciones || []), modLog]
       });
@@ -597,6 +637,20 @@ export default function AsistenciaSection() {
       setEditMarcacionModal(null);
     } catch (e) {
       alert('Error al modificar marcación: ' + e.message);
+    }
+  };
+
+  const handleDeleteJornadaDoc = async (rowId) => {
+    if (!confirm('¿Está seguro de eliminar de forma permanente todo el historial de este mes para el trabajador? Esta acción es irreversible.')) return;
+    try {
+      await deleteDoc(doc(db, 'empresas', empresaId, 'asistencia', rowId));
+      alert('Registro de asistencia del mes eliminado con éxito.');
+      // Refetch historical logs
+      getDocs(query(collection(db, 'empresas', empresaId, 'asistencia'), orderBy('anio', 'desc')))
+        .then(snap => setHistorialAsistencia(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+        .catch(err => console.error(err));
+    } catch (e) {
+      alert('Error al eliminar registro: ' + e.message);
     }
   };
 
@@ -622,8 +676,8 @@ export default function AsistenciaSection() {
 
   // Filter Jornadas (real time)
   const realTimeJornadasFiltradas = trabajadores.map(t => {
-    const uid = t.portalUid;
-    const marc = uid ? (marcacionesHoy[uid] || {}) : {};
+    const keyId = t.portalUid || t.id;
+    const marc = marcacionesHoy[keyId] || {};
     return {
       ...t,
       _marc: marc
@@ -1005,7 +1059,7 @@ export default function AsistenciaSection() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {realTimeJornadasFiltradas.map(t => {
-                        const uid = t.portalUid;
+                        const uid = t.portalUid || t.id;
                         const marc = t._marc || {};
                         const ini = `${t.nombre?.[0] || ''}${t.apellidoPaterno?.[0] || ''}`.toUpperCase();
                         const activeShift = getActiveShift(t.id);
@@ -1058,12 +1112,12 @@ export default function AsistenciaSection() {
                               {marc.horasTrabajadas ? `${marc.horasTrabajadas} hrs` : <span className="text-slate-300">—</span>}
                             </td>
                             <td className="px-4 py-3">
-                              {marc.docId && (
+                              {(isUserAdmin || marc.docId) && (
                                 <button
                                   onClick={() => setEditMarcacionModal({
                                     nombre: `${t.nombre} ${t.apellidoPaterno}`,
                                     diaKey: diaKeyHoy,
-                                    docId: marc.docId,
+                                    docId: marc.docId || `${uid}_${now.getFullYear()}_${fmt2(now.getMonth() + 1)}`,
                                     trabajadorUid: uid,
                                     entrada: marc.entrada ? fmtHora(marc.entrada) : '',
                                     salida: marc.salida ? fmtHora(marc.salida) : '',
@@ -1196,6 +1250,15 @@ export default function AsistenciaSection() {
                                 >
                                   Ver Ficha
                                 </button>
+                                {isUserAdmin && (
+                                  <button
+                                    onClick={() => handleDeleteJornadaDoc(row.id)}
+                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors"
+                                    title="Eliminar registro completo de este mes"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1467,6 +1530,64 @@ export default function AsistenciaSection() {
           onClose={() => setEditMarcacionModal(null)}
           item={editMarcacionModal}
           onSave={handleSaveEditMarcacion}
+          isAdmin={isUserAdmin}
+          onTriggerEdit={(diaKey, r) => {
+            setEditMarcacionModal({
+              nombre: editMarcacionModal.nombre,
+              diaKey: diaKey,
+              docId: editMarcacionModal.docId,
+              trabajadorUid: editMarcacionModal.trabajadorUid,
+              entrada: r.entrada ? fmtHora(r.entrada) : '',
+              salida: r.salida ? fmtHora(r.salida) : '',
+              estadoJornada: r.estadoJornada || 'presente',
+              modificaciones: editMarcacionModal.modificaciones || []
+            });
+          }}
+          onTriggerDeleteDay={async (diaKey) => {
+            if (!confirm(`¿Está seguro de eliminar la marcación del día ${diaKey}?`)) return;
+            try {
+              const ref = doc(db, 'empresas', empresaId, 'asistencia', editMarcacionModal.docId);
+              const snap = await getDoc(ref);
+              if (!snap.exists()) return;
+              const data = snap.data();
+
+              const currentReg = data.registros?.[diaKey] || {};
+              const updatedReg = {
+                ...data.registros,
+                [diaKey]: {
+                  ...currentReg,
+                  entrada: null,
+                  salida: null,
+                  estadoJornada: 'libre',
+                  horasTrabajadas: 0,
+                  horasExtra: 0
+                }
+              };
+
+              const modLog = {
+                campo: `registros.${diaKey}`,
+                valorAntes: { entrada: currentReg.entrada || null, salida: currentReg.salida || null, estadoJornada: currentReg.estadoJornada || null },
+                valorDespues: { entrada: null, salida: null, estadoJornada: 'libre' },
+                justificacion: 'Eliminación manual por Administrador',
+                modificadoPor: auth.currentUser?.email || 'Admin',
+                timestamp: new Date()
+              };
+
+              await updateDoc(ref, {
+                registros: updatedReg,
+                modificaciones: [...(data.modificaciones || []), modLog]
+              });
+
+              setEditMarcacionModal({
+                ...editMarcacionModal,
+                registros: updatedReg,
+                modificaciones: [...(data.modificaciones || []), modLog]
+              });
+              alert('Marcación del día eliminada con éxito.');
+            } catch (e) {
+              alert('Error al eliminar marcación: ' + e.message);
+            }
+          }}
         />
       )}
 
@@ -1689,7 +1810,7 @@ function AssignShiftModal({ isOpen, onClose, worker, turnos, currentAssignment, 
   );
 }
 
-function EditMarcacionModal({ isOpen, onClose, item, onSave }) {
+function EditMarcacionModal({ isOpen, onClose, item, onSave, isAdmin, onTriggerEdit, onTriggerDeleteDay }) {
   const [entrada, setEntrada] = useState(item.entrada || '');
   const [salida, setSalida] = useState(item.salida || '');
   const [estadoJornada, setEstadoJornada] = useState(item.estadoJornada || 'presente');
@@ -1724,6 +1845,26 @@ function EditMarcacionModal({ isOpen, onClose, item, onSave }) {
                     <span className="text-slate-600">Salida: {r.salida ? new Date(r.salida.toDate ? r.salida.toDate() : r.salida).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
                     {r.horasTrabajadas > 0 && (
                       <span className="font-bold text-emerald-600">({r.horasTrabajadas} hrs)</span>
+                    )}
+                    {isAdmin && (
+                      <div className="flex gap-1 ml-2">
+                        <button
+                          onClick={() => onTriggerEdit(diaKey, r)}
+                          className="p-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded transition-colors"
+                          title="Editar este día"
+                        >
+                          ✏️
+                        </button>
+                        {(r.entrada || r.salida || r.estadoJornada !== 'libre') && (
+                          <button
+                            onClick={() => onTriggerDeleteDay(diaKey)}
+                            className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded transition-colors"
+                            title="Eliminar marca del día"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

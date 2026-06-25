@@ -204,7 +204,8 @@ service cloud.firestore {
 
       match /vacaciones/{docId} {
         allow read: if belongsToEmpresa(empresaId);
-        allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
+        allow create: if belongsToEmpresa(empresaId) && (isSuperAdmin() || canWriteEmpresa(empresaId) || isTrabajador());
+        allow update, delete: if isSuperAdmin() || canWriteEmpresa(empresaId);
       }
 
       // ── REPORTES WORKFLEET (mandante puede leer) ─────────
