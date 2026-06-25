@@ -51,14 +51,53 @@ function getBaseUrl() {
   return window.location.origin;
 }
 
-export default function InviteUserPanel({ empresaId, onClose, soloRevisores = false }) {
+export default function InviteUserPanel({ empresaId, onClose, soloRevisores = false, currentUserRole = "" }) {
   const { canAccess } = usePlan();
   const [invitaciones, setInvitaciones] = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [creating,     setCreating]     = useState(false);
   const [copied,       setCopied]       = useState(null);
   const [showForm,     setShowForm]     = useState(false);
+  const [loggedInUserRole, setLoggedInUserRole] = useState(currentUserRole || "");
+
+  useEffect(() => {
+    if (currentUserRole) {
+      setLoggedInUserRole(currentUserRole);
+      return;
+    }
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) return;
+      try {
+        const uDoc = await getDoc(doc(db, "users", u.uid));
+        if (uDoc.exists()) {
+          setLoggedInUserRole(uDoc.data().role || "");
+        }
+      } catch (err) {
+        console.error("Error fetching logged in user role:", err);
+      }
+    });
+    return unsub;
+  }, [currentUserRole]);
+
   const rolesDisponibles = soloRevisores ? ROLES_REVISOR : ROLES;
+
+  const getFilteredRoles = () => {
+    let list = rolesDisponibles;
+    if (loggedInUserRole === 'admin_contrato') {
+      list = list.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
+      list = list.map(r => {
+        if (r.value === 'administrativo') {
+          return { ...r, label: "Editor", desc: "Acceso de edición a los módulos asignados" };
+        }
+        if (r.value === 'mandante') {
+          return { ...r, label: "Solo Visualización", desc: "Acceso de solo lectura al Reporte WorkFleet" };
+        }
+        return r;
+      });
+    }
+    return list;
+  };
+
   const [form, setForm] = useState({
     emailDestino: "",
     rol:          soloRevisores ? "revisor" : "administrativo",
@@ -218,7 +257,7 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
                   Rol que tendrá *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {rolesDisponibles.map(r => (
+                  {getFilteredRoles().map(r => (
                     <button key={r.value}
                       onClick={() => setForm(f => ({ ...f, rol: r.value, modulos: [] }))}
                       className={`p-3 rounded-xl text-left border-2 transition-all ${form.rol === r.value ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>

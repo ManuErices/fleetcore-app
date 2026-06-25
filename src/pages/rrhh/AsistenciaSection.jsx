@@ -21,6 +21,9 @@ import {
 import * as Shared from './shared';
 import * as Calc from './calculo';
 import { TrabajadoresSection } from './sections.a';
+import * as Modals from './modals';
+
+const { AusenciaModal } = Modals;
 
 const {
   inp,
@@ -76,6 +79,9 @@ export default function AsistenciaSection() {
   const [asignaciones, setAsignaciones] = useState([]);
   const [vacaciones, setVacaciones] = useState([]);
   const [showVacacionModal, setShowVacacionModal] = useState(false);
+  const [ausencias, setAusencias] = useState([]);
+  const [showAusenciaModal, setShowAusenciaModal] = useState(false);
+  const [editingAusencia, setEditingAusencia] = useState(null);
   const [loadingBase, setLoadingBase] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState(null);
 
@@ -296,6 +302,19 @@ export default function AsistenciaSection() {
     return () => unsub();
   }, [empresaId]);
 
+  // Real-time Ausencias loading
+  useEffect(() => {
+    if (!empresaId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'empresas', empresaId, 'ausencias'), orderBy('fechaDesde', 'desc')),
+      snap => {
+        setAusencias(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      err => console.error('Error loading ausencias:', err)
+    );
+    return () => unsub();
+  }, [empresaId]);
+
   const handleSaveVacacion = async (data) => {
     if (!empresaId) return;
     try {
@@ -359,6 +378,18 @@ export default function AsistenciaSection() {
     } catch (e) {
       console.error('Error al rechazar vacaciones:', e);
       alert('Error al rechazar la solicitud: ' + e.message);
+    }
+  };
+
+  const handleDeleteAusencia = async (ausencia) => {
+    if (!empresaId) return;
+    if (!confirm('¿Seguro que deseas eliminar este registro de ausencia?')) return;
+    try {
+      await deleteDoc(doc(db, 'empresas', empresaId, 'ausencias', ausencia.id));
+      alert('Registro de ausencia eliminado con éxito.');
+    } catch (e) {
+      console.error('Error al eliminar ausencia:', e);
+      alert('Error: ' + e.message);
     }
   };
 
@@ -779,6 +810,15 @@ export default function AsistenciaSection() {
               icon: (active) => (
                 <svg className={`w-4 h-4 mr-2 ${active ? 'text-purple-600' : 'text-slate-400 group-hover:text-slate-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+              )
+            },
+            {
+              id: 'ausencias',
+              label: 'Ausencias / Licencias',
+              icon: (active) => (
+                <svg className={`w-4 h-4 mr-2 ${active ? 'text-purple-600' : 'text-slate-400 group-hover:text-slate-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               )
             }
@@ -1483,6 +1523,16 @@ export default function AsistenciaSection() {
         />
       )}
 
+      {activeTab === 'ausencias' && (
+        <AusenciasTabContent
+          ausencias={ausencias}
+          trabajadores={trabajadores}
+          onAdd={() => { setEditingAusencia(null); setShowAusenciaModal(true); }}
+          onEdit={(a) => { setEditingAusencia(a); setShowAusenciaModal(true); }}
+          onDelete={handleDeleteAusencia}
+        />
+      )}
+
       {/* ========================================================
           MODALS & OVERLAYS
           ======================================================== */}
@@ -1600,6 +1650,19 @@ export default function AsistenciaSection() {
           onSave={handleSaveVacacion}
         />
       )}
+
+      {/* Modal Ausencias */}
+      {showAusenciaModal && (
+        <AusenciaModal
+          isOpen={showAusenciaModal}
+          onClose={() => {
+            setShowAusenciaModal(false);
+            setEditingAusencia(null);
+          }}
+          editData={editingAusencia}
+          trabajadores={trabajadores}
+        />
+      )}
     </div>
   );
 }
@@ -1607,6 +1670,21 @@ export default function AsistenciaSection() {
 // ==========================================
 // SUB-COMPONENTS
 // ==========================================
+
+const HORAS_INTERVALO = (() => {
+  const options = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const ampm = h >= 12 ? 'p.m.' : 'a.m.';
+      const hour12 = h % 12 === 0 ? 12 : h % 12;
+      const label = `${String(hour12).padStart(2, '0')}:${mm} ${ampm}`;
+      options.push({ value: `${hh}:${mm}`, label });
+    }
+  }
+  return options;
+})();
 
 function ShiftModal({ isOpen, onClose, onSave, editData }) {
   const [nombre, setNombre] = useState('');
@@ -1639,6 +1717,48 @@ function ShiftModal({ isOpen, onClose, onSave, editData }) {
         [field]: val
       }
     }));
+  };
+
+  const duplicarHorario = (fromDayKey) => {
+    const sourceConfig = dias[fromDayKey];
+    if (!sourceConfig) return;
+
+    setDias(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(dayKey => {
+        if (next[dayKey].activo) {
+          next[dayKey] = {
+            ...next[dayKey],
+            entrada: sourceConfig.entrada,
+            salida: sourceConfig.salida,
+            colacionMins: sourceConfig.colacionMins
+          };
+        }
+      });
+      return next;
+    });
+  };
+
+  const getOptionsForVal = (val) => {
+    if (!val) return HORAS_INTERVALO;
+    const exists = HORAS_INTERVALO.some(opt => opt.value === val);
+    if (exists) return HORAS_INTERVALO;
+
+    const parts = val.split(':');
+    if (parts.length === 2) {
+      const h = parseInt(parts[0]);
+      const m = parseInt(parts[1]);
+      if (!isNaN(h) && !isNaN(m)) {
+        const hh = String(h).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        const ampm = h >= 12 ? 'p.m.' : 'a.m.';
+        const hour12 = h % 12 === 0 ? 12 : h % 12;
+        const label = `${String(hour12).padStart(2, '0')}:${mm} ${ampm}`;
+        const newOpt = { value: `${hh}:${mm}`, label };
+        return [...HORAS_INTERVALO, newOpt].sort((a, b) => a.value.localeCompare(b.value));
+      }
+    }
+    return HORAS_INTERVALO;
   };
 
   const handleSave = () => {
@@ -1678,11 +1798,15 @@ function ShiftModal({ isOpen, onClose, onSave, editData }) {
             <span className="w-16 text-center">Activo</span>
             <span className="flex-1 text-center">Horario Entrada/Salida</span>
             <span className="w-24 text-center">Colación (Mins)</span>
+            <span className="w-24 text-center">Acciones</span>
           </div>
 
           <div className="divide-y divide-slate-100 bg-white">
             {DIAS_SEMANA.map(day => {
-              const config = dias[day.key] || { activo: false, entrada: '', salida: '', colacionMins: 0 };
+              const config = dias[day.key] || { activo: false, entrada: '09:00', salida: '18:00', colacionMins: 60 };
+              const optionsEntrada = getOptionsForVal(config.entrada);
+              const optionsSalida = getOptionsForVal(config.salida);
+
               return (
                 <div key={day.key} className="px-4 py-3 flex items-center justify-between gap-4">
                   <span className="w-24 font-bold text-slate-700 text-xs">{day.label}</span>
@@ -1697,21 +1821,27 @@ function ShiftModal({ isOpen, onClose, onSave, editData }) {
                   </div>
 
                   <div className="flex-1 flex items-center justify-center gap-2">
-                    <input
-                      type="time"
+                    <select
                       disabled={!config.activo}
-                      value={config.entrada || ''}
+                      value={config.entrada || '09:00'}
                       onChange={e => setDayVal(day.key, 'entrada', e.target.value)}
-                      className="px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:border-purple-400 disabled:bg-slate-50"
-                    />
+                      className="px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:border-purple-400 disabled:bg-slate-50 bg-white cursor-pointer"
+                    >
+                      {optionsEntrada.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
                     <span className="text-slate-400 text-xs">a</span>
-                    <input
-                      type="time"
+                    <select
                       disabled={!config.activo}
-                      value={config.salida || ''}
+                      value={config.salida || '18:00'}
                       onChange={e => setDayVal(day.key, 'salida', e.target.value)}
-                      className="px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:border-purple-400 disabled:bg-slate-50"
-                    />
+                      className="px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:border-purple-400 disabled:bg-slate-50 bg-white cursor-pointer"
+                    >
+                      {optionsSalida.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="w-24">
@@ -1723,6 +1853,21 @@ function ShiftModal({ isOpen, onClose, onSave, editData }) {
                       onChange={e => setDayVal(day.key, 'colacionMins', parseInt(e.target.value) || 0)}
                       className="w-full px-2 py-1.5 text-xs border rounded-lg text-center focus:outline-none focus:border-purple-400 disabled:bg-slate-50"
                     />
+                  </div>
+
+                  <div className="w-24 flex justify-center">
+                    {config.activo ? (
+                      <button
+                        type="button"
+                        onClick={() => duplicarHorario(day.key)}
+                        className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded text-[10px] font-bold transition-all flex items-center gap-1 border border-purple-200 shadow-sm active:scale-95"
+                        title="Copiar horario y colación de este día a los demás días seleccionados"
+                      >
+                        📋 Copiar a seleccionados
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-slate-300 italic">Inactivo</span>
+                    )}
                   </div>
                 </div>
               );
@@ -2315,5 +2460,279 @@ function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, onSave }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+function AusenciasTabContent({ ausencias, trabajadores, onAdd, onEdit, onDelete }) {
+  const [filtroTipo, setFiltroTipo] = useState('todos');
+  const [busqueda, setBusqueda] = useState('');
+
+  const now = new Date();
+  const currentYearStr = String(now.getFullYear());
+  const currentMonthStr = String(now.getMonth() + 1).padStart(2, '0');
+  const currentMonthPrefix = `${currentYearStr}-${currentMonthStr}`;
+
+  const isAusenciaActiva = (a) => {
+    if (!a.fechaDesde) return false;
+    const start = new Date(a.fechaDesde + 'T00:00:00');
+    const end = new Date(start);
+    end.setDate(end.getDate() + (Number(a.dias) || 1));
+    const normalizedToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return normalizedToday >= start && normalizedToday < end;
+  };
+
+  const totalAusenciasMes = ausencias.filter(a => a.fechaDesde && a.fechaDesde.startsWith(currentMonthPrefix)).length;
+
+  const licenciasMedicasActivas = ausencias.filter(a => 
+    (a.tipo === 'licencia medica' || a.tipo === 'licencia maternal') && isAusenciaActiva(a)
+  ).length;
+
+  const permisosSinGoceActivos = ausencias.filter(a => 
+    a.tipo === 'sin goce' && isAusenciaActiva(a)
+  ).length;
+
+  const enrichedAusencias = ausencias.map(a => {
+    const worker = trabajadores.find(t => t.id === a.trabajadorId);
+    return {
+      ...a,
+      _worker: worker,
+      trabajadorNombre: worker ? `${worker.nombre} ${worker.apellidoPaterno}` : 'Trabajador no encontrado'
+    };
+  });
+
+  const filteredAusencias = enrichedAusencias.filter(a => {
+    const nameMatch = !busqueda || a.trabajadorNombre.toLowerCase().includes(busqueda.toLowerCase()) || (a._worker?.rut && a._worker.rut.toLowerCase().includes(busqueda.toLowerCase()));
+    const tipoMatch = filtroTipo === 'todos' || a.tipo === filtroTipo;
+    return nameMatch && tipoMatch;
+  });
+
+  const TIPOS_AUSENCIA = [
+    { value: 'permiso con goce', label: 'permiso con goce' },
+    { value: 'sin goce', label: 'sin goce' },
+    { value: 'licencia medica', label: 'licencia medica' },
+    { value: 'licencia maternal', label: 'licencia maternal' },
+    { value: 'falta injustificada', label: 'falta injustificada' },
+    { value: 'accidente', label: 'accidente' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* ── KPI CARDS ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card 1 */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 p-5 text-white shadow-md shadow-purple-100/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-purple-100/80">Total Ausencias (Este Mes)</p>
+              <h4 className="text-3xl font-black mt-2 tracking-tight">{totalAusenciasMes}</h4>
+            </div>
+            <div className="p-2 bg-white/10 rounded-xl">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+          </div>
+          <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 w-24 h-24 bg-white/5 rounded-full blur-xl pointer-events-none" />
+        </div>
+
+        {/* Card 2 */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 p-5 text-white shadow-md shadow-amber-100/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-amber-100/80">Licencias Médicas Activas</p>
+              <h4 className="text-3xl font-black mt-2 tracking-tight">{licenciasMedicasActivas}</h4>
+            </div>
+            <div className="p-2 bg-white/10 rounded-xl">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            </div>
+          </div>
+          <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 w-24 h-24 bg-white/5 rounded-full blur-xl pointer-events-none" />
+        </div>
+
+        {/* Card 3 */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 p-5 text-white shadow-md shadow-rose-100/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-rose-100/80">Permisos Sin Goce Activos</p>
+              <h4 className="text-3xl font-black mt-2 tracking-tight">{permisosSinGoceActivos}</h4>
+            </div>
+            <div className="p-2 bg-white/10 rounded-xl">
+              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+          <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 w-24 h-24 bg-white/5 rounded-full blur-xl pointer-events-none" />
+        </div>
+      </div>
+
+      {/* ── FILTERS AND ACTION BAR ── */}
+      <div className="bg-slate-50/50 border border-slate-200/60 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          {/* Search */}
+          <div className="relative w-full sm:w-64">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+            </svg>
+            <input
+              className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-purple-400 bg-white"
+              placeholder="Buscar por trabajador o RUT..."
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+            />
+          </div>
+
+          {/* Type Select */}
+          <div className="w-full sm:w-48">
+            <select
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-purple-400 bg-white"
+              value={filtroTipo}
+              onChange={e => setFiltroTipo(e.target.value)}
+            >
+              <option value="todos">Todos los Tipos</option>
+              {TIPOS_AUSENCIA.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <div>
+          <button
+            onClick={onAdd}
+            className="w-full sm:w-auto px-5 py-2.5 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-md shadow-purple-100 hover:shadow-lg transition-all"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)' }}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Registrar Ausencia
+          </button>
+        </div>
+      </div>
+
+      {/* ── AUSENCIAS TABLE ── */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px]">
+            <thead>
+              <tr style={{ background: '#1e1b4b' }}>
+                {['Trabajador', 'Tipo', 'Fecha Desde', 'Duración', 'Motivo / Licencia', 'Médico', 'Observaciones', 'Acciones'].map(h => (
+                  <th key={h} className="px-4 py-3.5 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredAusencias.map(a => {
+                const ini = a.trabajadorNombre ? `${a.trabajadorNombre[0]}`.toUpperCase() : 'T';
+                const isLic = a.tipo === 'licencia medica' || a.tipo === 'licencia maternal';
+                return (
+                  <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
+                    {/* Trabajador */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs">
+                          {ini}
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-800 text-sm block">{a.trabajadorNombre}</span>
+                          {a._worker?.rut && (
+                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+                              {a._worker.rut}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Tipo */}
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        a.tipo === 'sin goce' ? 'bg-red-100 text-red-700' :
+                        a.tipo === 'permiso con goce' ? 'bg-emerald-100 text-emerald-700' :
+                        a.tipo?.startsWith('licencia') ? 'bg-amber-100 text-amber-700' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {a.tipo}
+                      </span>
+                    </td>
+
+                    {/* Fecha Desde */}
+                    <td className="px-4 py-3 font-semibold text-slate-700 text-xs">
+                      {a.fechaDesde ? new Date(a.fechaDesde + 'T00:00:00').toLocaleDateString('es-CL') : '—'}
+                    </td>
+
+                    {/* Duración */}
+                    <td className="px-4 py-3 text-slate-600 text-xs">
+                      {a.medioDia ? (
+                        <span className="font-bold text-slate-700">Medio día</span>
+                      ) : (
+                        <span className="font-bold text-slate-700">{a.dias} {a.dias === 1 ? 'día' : 'días'}</span>
+                      )}
+                      {a.horaDesde && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {a.horaDesde} ({a.horas}h {a.minutos}m)
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Motivo / Licencia */}
+                    <td className="px-4 py-3 text-xs">
+                      <div className="font-bold text-slate-700">{a.motivo || '—'}</div>
+                      {isLic && a.nroLicencia && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Lic: {a.nroLicencia} {a.esContinuacion && ' (Continuación)'}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Médico */}
+                    <td className="px-4 py-3 text-xs text-slate-600 font-semibold">
+                      {isLic ? a.nombreMedico || '—' : '—'}
+                    </td>
+
+                    {/* Observaciones */}
+                    <td className="px-4 py-3 text-xs text-slate-500 max-w-[200px] truncate" title={a.observaciones}>
+                      {a.observaciones || '—'}
+                    </td>
+
+                    {/* Acciones */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => onEdit(a)}
+                          className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors"
+                          title="Editar"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => onDelete(a)}
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors"
+                          title="Eliminar"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {filteredAusencias.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="text-center py-8 text-xs font-semibold text-slate-400 bg-slate-50/30">
+                    No se encontraron registros de ausencias.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }

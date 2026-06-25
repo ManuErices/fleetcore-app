@@ -2539,6 +2539,23 @@ function UsuariosSection() {
     }));
   };
 
+  const getFilteredRolesForAdminPanel = () => {
+    let list = ROLES;
+    if (userRole === 'admin_contrato') {
+      list = list.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
+      list = list.map(r => {
+        if (r.value === 'administrativo') {
+          return { ...r, label: "Editor" };
+        }
+        if (r.value === 'mandante') {
+          return { ...r, label: "Solo Visualización" };
+        }
+        return r;
+      });
+    }
+    return list;
+  };
+
   const openEdit = (row) => {
     setForm({
       role:     row.role     || 'operador',
@@ -2603,6 +2620,7 @@ function UsuariosSection() {
         <InviteUserPanel
           empresaId={empresaId}
           onClose={() => setShowInvite(false)}
+          currentUserRole={userRole}
         />
       )}
 
@@ -2667,7 +2685,7 @@ function UsuariosSection() {
           </Field>
           <Field label="Rol" required>
             <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, modulos: [], cargo: '' })}>
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {getFilteredRolesForAdminPanel().map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </Field>
           {/* Descripción del rol */}

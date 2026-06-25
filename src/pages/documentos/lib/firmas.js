@@ -32,6 +32,18 @@ export async function crearPin(usuario, pin) {
 }
 
 export async function verificarPin(usuario, pin) {
+  try {
+    const userSnap = await getDoc(doc(db, 'usuarios', usuario))
+    if (userSnap.exists()) {
+      const uData = userSnap.data()
+      if (uData.estado === 'finiquitado' || uData.estado === 'inactivo') {
+        return false
+      }
+    }
+  } catch (e) {
+    console.error('Error checking user status in verificarPin:', e.message)
+  }
+
   const snap = await getDoc(doc(db, 'pins', usuario))
   if (!snap.exists()) return false
   const hash = await hashPin(pin)

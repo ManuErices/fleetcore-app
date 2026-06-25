@@ -19,12 +19,12 @@ service cloud.firestore {
 
     // Rol del usuario
     function userRole() {
-      return isAuth() ? userData().role : null;
+      return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? userData().role : null;
     }
 
     // EmpresaId del usuario
     function userEmpresaId() {
-      return isAuth() ? userData().empresaId : null;
+      return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? userData().empresaId : null;
     }
 
     // Superadmin global — acceso total a todo
@@ -62,7 +62,10 @@ service cloud.firestore {
 
     // Trabajador autenticado con cuenta @mpf.cl (u otro dominio de empresa)
     function isTrabajador() {
-      return isAuth() && userRole() == 'trabajador';
+      return isAuth()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && userRole() == 'trabajador'
+          && userData().get('estado', 'activo') == 'activo';
     }
 
     // Mandante — solo lectura
@@ -110,7 +113,8 @@ service cloud.firestore {
                      || (isAuth() && userEmpresaId() == empresaId && isAnyAdmin())
                      || (isAuth() && request.auth.uid == uid);
         allow write: if isSuperAdmin()
-                     || (isAdminContrato() && userEmpresaId() == empresaId);
+                     || (isAdminContrato() && userEmpresaId() == empresaId)
+                     || (isAuth() && request.auth.uid == uid);
       }
 
       // ── TRABAJADORES ────────────────────────────────────
@@ -120,7 +124,7 @@ service cloud.firestore {
         // Trabajador lee su propio perfil
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.portalUid == request.auth.uid;
+                    && (resource == null || resource.data.portalUid == request.auth.uid);
         // Trabajador crea su propio registro al aceptar una invitación
         allow create: if isTrabajador()
                     && belongsToEmpresa(empresaId)
@@ -143,9 +147,9 @@ service cloud.firestore {
                            || canWriteEmpresa(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.trabajadorId != null
+                    && (resource == null || (resource.data.trabajadorId != null
                     && existsAfter(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid))
-                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId));
       }
 
       match /finiquitos/{docId} {
@@ -153,8 +157,8 @@ service cloud.firestore {
                            || canWriteEmpresa(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.trabajadorId != null
-                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+                    && (resource == null || (resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId));
       }
 
       match /anexos/{docId} {
@@ -162,8 +166,8 @@ service cloud.firestore {
                            || canWriteEmpresa(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.trabajadorId != null
-                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+                    && (resource == null || (resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId));
       }
 
       // ── REMUNERACIONES ───────────────────────────────────
@@ -172,8 +176,8 @@ service cloud.firestore {
                            || canWriteEmpresa(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.trabajadorId != null
-                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId;
+                    && (resource == null || (resource.data.trabajadorId != null
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId));
       }
 
       // ── ASISTENCIA ───────────────────────────────────────
@@ -182,7 +186,7 @@ service cloud.firestore {
                            || canWriteEmpresa(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
-                    && resource.data.trabajadorId == request.auth.uid;
+                    && (resource == null || resource.data.trabajadorId == request.auth.uid);
         allow create: if isTrabajador()
                       && belongsToEmpresa(empresaId)
                       && request.resource.data.trabajadorId == request.auth.uid;
@@ -206,6 +210,11 @@ service cloud.firestore {
         allow read: if belongsToEmpresa(empresaId);
         allow create: if belongsToEmpresa(empresaId) && (isSuperAdmin() || canWriteEmpresa(empresaId) || isTrabajador());
         allow update, delete: if isSuperAdmin() || canWriteEmpresa(empresaId);
+      }
+
+      match /ausencias/{docId} {
+        allow read: if belongsToEmpresa(empresaId);
+        allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
       }
 
       // ── REPORTES WORKFLEET (mandante puede leer) ─────────
@@ -288,10 +297,10 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
       // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
-      allow read:   if isAuth() && (
-                      request.auth.uid == uid
-                      || isSuperAdmin()
-                      || (isMandanteAdmin() && resource.data.empresaId == userEmpresaId())
+      allow read: if isAuth() && request.auth.uid == uid;
+      allow read: if isAuth() && (
+                      isSuperAdmin()
+                      || (resource != null && isMandanteAdmin() && resource.data.get('empresaId', null) == userEmpresaId())
                     );
 
       // Permisos de creación
@@ -316,7 +325,7 @@ service cloud.firestore {
       allow read:           if isAuth() && (
                               request.auth.uid == docId
                               || isSuperAdmin()
-                              || (resource.data.empresaId == userEmpresaId())
+                              || (resource != null && resource.data.empresaId == userEmpresaId())
                               || docId == userEmpresaId()
                             );
 
@@ -372,10 +381,19 @@ service cloud.firestore {
     // pins y usuarios: sistema custom de auth del módulo documentos (no Firebase Auth)
     // Solo necesita ser accedido por cualquier usuario autenticado (no hay empresaId en estos docs)
     match /pins/{usuario} {
-      allow read, write: if isAuth();
+      allow read, write: if isAuth() && (
+        !exists(/databases/$(database)/documents/usuarios/$(usuario))
+        || get(/databases/$(database)/documents/usuarios/$(usuario)).data.get('estado', 'activo') == 'activo'
+        || isSuperAdmin()
+      );
     }
     match /usuarios/{usuario} {
-      allow read, write: if isAuth();
+      allow read: if isAuth();
+      allow write: if isAuth() && (
+        !exists(/databases/$(database)/documents/usuarios/$(usuario))
+        || resource.data.get('estado', 'activo') == 'activo'
+        || isSuperAdmin()
+      );
     }
     match /libros/{docId} {
       allow read: if isAuth();
@@ -386,12 +404,12 @@ service cloud.firestore {
     // /domains & /mailboxes — Email Portal
     // ─────────────────────────────────────────────────────
     match /domains/{domainName} {
-      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow read: if isAuth() && (isSuperAdmin() || (resource != null && resource.data.empresaId == userEmpresaId()));
       allow write: if isSuperAdmin();
     }
 
     match /mailboxes/{mailboxId} {
-      allow read: if isAuth() && (isSuperAdmin() || resource.data.empresaId == userEmpresaId());
+      allow read: if isAuth() && (isSuperAdmin() || (resource != null && resource.data.empresaId == userEmpresaId()));
       allow write: if isSuperAdmin();
     }
 

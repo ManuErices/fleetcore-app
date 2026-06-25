@@ -37,6 +37,9 @@ export async function login(usuario, pin) {
     if (!snap.exists()) return { ok: false, error: 'Usuario no encontrado. Si es tu primera vez, crea tu perfil.' }
 
     const user = snap.data()
+    if (user.estado === 'finiquitado' || user.estado === 'inactivo') {
+      return { ok: false, error: 'Acceso denegado: tu relación laboral ha finalizado o tu cuenta está inactiva.' }
+    }
     const hash = await hashPin(pin)
     if (hash !== user.pinHash) return { ok: false, error: 'PIN incorrecto' }
 

@@ -248,6 +248,25 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
+        
+        // Propagate state to linked user accounts
+        const stateToSync = form.estado || 'activo';
+        if (form.portalUid) {
+          try {
+            await updateDoc(doc(db, 'users', form.portalUid), { estado: stateToSync, updatedAt: serverTimestamp() });
+            await updateDoc(doc(db, 'empresas', empresaId, 'users', form.portalUid), { estado: stateToSync, updatedAt: serverTimestamp() });
+          } catch (e) {
+            console.warn('Could not sync user status in users subcollection:', e.message);
+          }
+        }
+        if (form.email) {
+          const u = form.email.split('@')[0].toLowerCase().trim();
+          try {
+            await updateDoc(doc(db, 'usuarios', u), { estado: stateToSync, updatedAt: serverTimestamp() });
+          } catch (e) {
+            console.warn('Could not sync user status in documents usuarios collection:', e.message);
+          }
+        }
       } else {
         await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...payload, createdAt: serverTimestamp() });
       }
@@ -1168,6 +1187,32 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
       } else {
         await addDoc(collection(db, 'empresas', empresaId, 'finiquitos'), { ...payload, createdAt: serverTimestamp() });
       }
+
+      // Automatically update worker state to finiquitado
+      await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', form.trabajadorId), {
+        estado: 'finiquitado',
+        updatedAt: serverTimestamp()
+      });
+
+      // Propagate state to linked user accounts
+      if (trabajadorSel?.portalUid) {
+        try {
+          await updateDoc(doc(db, 'users', trabajadorSel.portalUid), { estado: 'finiquitado', updatedAt: serverTimestamp() });
+          await updateDoc(doc(db, 'empresas', empresaId, 'users', trabajadorSel.portalUid), { estado: 'finiquitado', updatedAt: serverTimestamp() });
+        } catch (e) {
+          console.warn('Could not sync user status in users subcollection:', e.message);
+        }
+      }
+      const emailStr = trabajadorSel?.email || trabajadorSel?.portalEmail || '';
+      if (emailStr) {
+        const u = emailStr.split('@')[0].toLowerCase().trim();
+        try {
+          await updateDoc(doc(db, 'usuarios', u), { estado: 'finiquitado', updatedAt: serverTimestamp() });
+        } catch (e) {
+          console.warn('Could not sync user status in documents usuarios collection:', e.message);
+        }
+      }
+
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
@@ -2356,10 +2401,270 @@ function AsistenciaModal({ isOpen, onClose, editData, trabajadores, contratos, o
   );
 }
 
+// ─── AusenciaModal ───────────────────────────────────────────────────────────
+
+function AusenciaModal({ isOpen, onClose, editData, trabajadores, preselectedTrabajadorId, onSaved }) {
+  const { empresaId } = useEmpresa();
+  const empty = {
+    trabajadorId: preselectedTrabajadorId || '',
+    tipo: '',
+    fechaDesde: new Date().toISOString().split('T')[0],
+    dias: '1',
+    medioDia: false,
+    esContinuacion: false,
+    motivo: '',
+    nroLicencia: '',
+    nombreMedico: '',
+    horaDesde: '',
+    horas: '0',
+    minutos: '0',
+    observaciones: '',
+  };
+
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm(editData ? { ...empty, ...editData } : { ...empty, trabajadorId: preselectedTrabajadorId || '' });
+  }, [editData, isOpen, preselectedTrabajadorId]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.trabajadorId || !form.tipo || !form.fechaDesde) {
+      alert('Trabajador, tipo de ausencia y fecha desde son obligatorios.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        dias: Number(form.dias) || 0,
+        horas: Number(form.horas) || 0,
+        minutos: Number(form.minutos) || 0,
+        updatedAt: serverTimestamp(),
+      };
+      if (editData?.id) {
+        await updateDoc(doc(db, 'empresas', empresaId, 'ausencias', editData.id), payload);
+      } else {
+        await addDoc(collection(db, 'empresas', empresaId, 'ausencias'), {
+          ...payload,
+          createdAt: serverTimestamp(),
+        });
+      }
+      onSaved?.();
+      onClose();
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setSaving(false);
+  };
+
+  const showMedicalFields = form.tipo === 'licencia medica' || form.tipo === 'licencia maternal';
+
+  const TIPOS_AUSENCIA = [
+    { value: 'permiso con goce', label: 'permiso con goce' },
+    { value: 'sin goce', label: 'sin goce' },
+    { value: 'licencia medica', label: 'licencia medica' },
+    { value: 'licencia maternal', label: 'licencia maternal' },
+    { value: 'falta injustificada', label: 'falta injustificada' },
+    { value: 'accidente', label: 'accidente' },
+  ];
+
+  const MOTIVOS_AUSENCIA = [
+    'Enfermedad común',
+    'Accidente del trabajo',
+    'Accidente de trayecto',
+    'Enfermedad profesional',
+    'Pre y post natal',
+    'Otro',
+  ];
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose}
+      title={editData ? 'Editar Ausencia' : 'Registrar Ausencia'}
+      subtitle="Control de Ausencias y Licencias Médicas"
+      maxWidth="max-w-2xl">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Trabajador" required>
+            <select
+              className={inp}
+              value={form.trabajadorId}
+              onChange={e => set('trabajadorId', e.target.value)}
+              disabled={!!preselectedTrabajadorId}
+            >
+              <option value="">Seleccionar trabajador…</option>
+              {(trabajadores || []).sort((a, b) => a.apellidoPaterno?.localeCompare(b.apellidoPaterno)).map(t => (
+                <option key={t.id} value={t.id}>{t.apellidoPaterno} {t.nombre} — {t.rut}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Tipo de Ausencia" required>
+            <select
+              className={inp}
+              value={form.tipo}
+              onChange={e => set('tipo', e.target.value)}
+            >
+              <option value="">Seleccionar tipo…</option>
+              {TIPOS_AUSENCIA.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Fecha Desde" required>
+            <input
+              type="date"
+              className={inp}
+              value={form.fechaDesde}
+              onChange={e => set('fechaDesde', e.target.value)}
+            />
+            <p className="text-[10px] text-slate-400 mt-1">fecha inclusive</p>
+          </Field>
+
+          <Field label="Número de Días">
+            <input
+              type="number"
+              min="0"
+              className={inp}
+              value={form.dias}
+              onChange={e => set('dias', e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="medioDia"
+              checked={form.medioDia}
+              onChange={e => set('medioDia', e.target.checked)}
+              className="rounded text-violet-600 focus:ring-violet-500 h-4 w-4 border-slate-300"
+            />
+            <label htmlFor="medioDia" className="text-xs font-bold text-slate-700">¿Sólo medio día?</label>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="esContinuacion"
+              checked={form.esContinuacion}
+              onChange={e => set('esContinuacion', e.target.checked)}
+              className="rounded text-violet-600 focus:ring-violet-500 h-4 w-4 border-slate-300"
+            />
+            <div>
+              <label htmlFor="esContinuacion" className="text-xs font-bold text-slate-700">¿Es Continuación?</label>
+              <p className="text-[9px] text-slate-400">Sólo para licencias médicas. Si es continuación de una licencia anterior</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Motivo">
+            <select
+              className={inp}
+              value={form.motivo}
+              onChange={e => set('motivo', e.target.value)}
+            >
+              <option value="">Seleccionar motivo…</option>
+              {MOTIVOS_AUSENCIA.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </Field>
+
+          {showMedicalFields && (
+            <Field label="Número de licencia">
+              <input
+                type="text"
+                className={inp}
+                placeholder="Ej: 1-12345678"
+                value={form.nroLicencia}
+                onChange={e => set('nroLicencia', e.target.value)}
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Sólo para licencias médicas</p>
+            </Field>
+          )}
+        </div>
+
+        {showMedicalFields && (
+          <div className="grid grid-cols-1 gap-4">
+            <Field label="Nombre del Médico">
+              <input
+                type="text"
+                className={inp}
+                placeholder="Dr(a). Nombre Apellido"
+                value={form.nombreMedico}
+                onChange={e => set('nombreMedico', e.target.value)}
+              />
+              <p className="text-[10px] text-slate-400 mt-1">Sólo para licencias médicas</p>
+            </Field>
+          </div>
+        )}
+
+        <Divider label="Horas de Ausencia (Si aplica)" />
+        <div className="grid grid-cols-3 gap-4">
+          <Field label="Hora Desde">
+            <input
+              type="time"
+              className={inp}
+              value={form.horaDesde}
+              onChange={e => set('horaDesde', e.target.value)}
+            />
+          </Field>
+          <Field label="Número de Horas">
+            <input
+              type="number"
+              min="0"
+              className={inp}
+              value={form.horas}
+              onChange={e => set('horas', e.target.value)}
+            />
+          </Field>
+          <Field label="Número de Minutos">
+            <input
+              type="number"
+              min="0"
+              max="59"
+              className={inp}
+              value={form.minutos}
+              onChange={e => set('minutos', e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Field label="Observaciones">
+          <textarea
+            className={inp + ' resize-none'}
+            rows={3}
+            placeholder="Observaciones adicionales..."
+            value={form.observaciones}
+            onChange={e => set('observaciones', e.target.value)}
+          />
+          {showMedicalFields && (
+            <p className="text-[10px] text-slate-400 mt-1">Observaciones para licencias médicas</p>
+          )}
+        </Field>
+
+        <div className="flex justify-end gap-3 pt-2">
+          <CancelBtn onClose={onClose} />
+          <SaveBtn saving={saving} onClick={handleSave} label={editData ? 'Actualizar ausencia' : 'Guardar ausencia'} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 export {
   TrabajadorModal, FichaTrabajador,
   ContratoModal, LiquidacionModal, FiniquitoModal,
   AnexoModal, HistorialModal, AsistenciaModal,
+  AusenciaModal,
 };

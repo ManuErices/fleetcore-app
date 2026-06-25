@@ -103,6 +103,7 @@ export default function InviteAccept({ token, onAccepted }) {
         email,
         nombre:    form.nombre || "",
         rut:       form.rut || "",
+        estado:    "activo",
         updatedAt: serverTimestamp(),
       };
       if (form.pin) {
@@ -163,6 +164,7 @@ export default function InviteAccept({ token, onAccepted }) {
           empresa: empresaNombre,
           rol: docRole,
           pinHash,
+          estado: "activo",
           creadoEn: serverTimestamp(),
         });
       }
