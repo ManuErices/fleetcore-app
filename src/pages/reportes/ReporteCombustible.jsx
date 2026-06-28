@@ -208,7 +208,6 @@ export default function ReporteCombustible() {
   const [columnasVisibles, setColumnasVisibles] = useState([
     'tipo',
     'fecha',
-    'folio',
     'proyecto',
     'empresa',
     'surtidor',
@@ -1652,8 +1651,8 @@ export default function ReporteCombustible() {
       {activeSubTab === "registro" && (
         <div className="w-full animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden border-2 border-orange-100">
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto w-full">
+              <table className="w-full text-left border-collapse" style={{ minWidth: '1200px', tableLayout: 'auto' }}>
                 <thead className="bg-gradient-to-r from-orange-600 via-orange-700 to-amber-700 text-white">
                   <tr>
                     <th className="px-3 py-4 text-center text-xs font-bold uppercase tracking-wider w-12 whitespace-nowrap">
@@ -1735,8 +1734,13 @@ export default function ReporteCombustible() {
                     </tr>
                   ) : (
                     reportesFiltrados.slice((paginaActual - 1) * ITEMS_POR_PAGINA, paginaActual * ITEMS_POR_PAGINA).map((reporte, index) => (
-                      <tr key={reporte.id} className={`hover:bg-orange-50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-orange-50/30'}`}>
-                        <td className="px-3 py-3 text-center">
+                      <tr
+                        key={reporte.id}
+                        onClick={() => setReporteDetalle(reporte)}
+                        className={`hover:bg-orange-50 transition-colors cursor-pointer ${index % 2 === 0 ? 'bg-white' : 'bg-orange-50/30'}`}
+                        title="Click para ver detalle"
+                      >
+                        <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={reportesSeleccionados.includes(reporte.id)}
@@ -1770,13 +1774,9 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('codigo') && (
-                          <td
-                            onClick={() => setReporteDetalle(reporte)}
-                            className="px-3 py-3 text-sm font-bold text-orange-600 hover:text-orange-800 hover:bg-orange-50 cursor-pointer transition-all whitespace-nowrap"
-                            title="Click para ver detalle"
-                          >
+                          <td className="px-3 py-3 text-sm font-bold text-slate-700 whitespace-nowrap">
                             <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
                               {reporte.codigo || '-'}
@@ -1865,7 +1865,7 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('voucher') && (
-                          <td className="px-3 py-3 text-center whitespace-nowrap">
+                          <td className="px-3 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             {reporte.tipo === 'entrega' ? (
                               <button
                                 onClick={() => handleReimprimirVoucher(reporte)}
@@ -1882,7 +1882,7 @@ export default function ReporteCombustible() {
                           </td>
                         )}
                         {columnasVisibles.includes('acciones') && (
-                          <td className="px-3 py-3 text-center whitespace-nowrap">
+                          <td className="px-3 py-3 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button
                               onClick={() => handleEliminar(reporte.id)}
                               className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-red-100 hover:text-red-700 transition-colors text-xs font-semibold flex items-center gap-1 mx-auto"

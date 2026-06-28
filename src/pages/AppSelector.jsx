@@ -67,6 +67,7 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
   const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
   const hasModulo = (m) => isSuperAdmin || userModulos.includes(m);
   const isAdmin = isSuperAdmin || isAdminContrato;
+  const isOperadorRole = userRole === 'operador';
 
   // Permisos combinados: rol + módulo + plan
   // ✅ FIX: superadmin nunca bloqueado por plan — bypassa canAccess()
@@ -115,18 +116,17 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
             userRole={userRole}
             onLogout={onLogout}
             onAdminPanel={() => navigate('/admin')}
+            onAdminEmpresaPanel={() => navigate('/admin/empresa')}
             onInviteUsers={() => setShowInvite(true)}
-            onGoToPricing={() => {
+            onGoToPricing={!isSuperAdmin ? () => {
               localStorage.setItem('selectedApp', 'admin');
-              if (isSuperAdmin) {
-                navigate('/admin');
-              } else if (isAdminContrato) {
+              if (isAdminContrato) {
                 navigate('/admin?tab=mi_plan');
               } else {
                 localStorage.setItem('selectedApp', 'pricing');
                 onSelectApp('pricing');
               }
-            }}
+            } : undefined}
             theme="dark"
           />
         </div>
@@ -181,7 +181,7 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
             </div>
           )}
 
-          <div className={isRevisorRole ? 'hidden' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'}>
+          <div className={(isRevisorRole || isOperadorRole) ? 'hidden' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8'}>
             <AppCard
               onClick={() => handleSelect('fleetcore', canAccessFleetCore)}
               canAccess={canAccessFleetCore}
@@ -353,11 +353,13 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
 
           {/* ── Aplicaciones Móviles ── */}
           <div className={`mt-10 mb-4 ${isRevisorRole ? 'hidden' : ''}`}>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="h-px flex-1 bg-white/20" />
-              <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>
-              <div className="h-px flex-1 bg-white/20" />
-            </div>
+            {!isOperadorRole && (
+              <div className="flex items-center gap-3 mb-6">
+                <div className="h-px flex-1 bg-white/20" />
+                <span className="text-white/60 text-xs font-bold uppercase tracking-widest px-2">Aplicaciones Móviles</span>
+                <div className="h-px flex-1 bg-white/20" />
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
               <AppCard
                 onClick={() => handleSelect('workfleet-m', canAccessWorkFleetM)}

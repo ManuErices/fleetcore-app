@@ -80,7 +80,7 @@ const NAV_ITEMS = [
   },
 ];
 
-function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
+function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   const [activeView, setActiveView] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { alertas } = useFinanzas();
@@ -184,6 +184,8 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
             userRole={userRole}
             onLogout={onLogout}
             onBackToSelector={onBackToSelector}
+            onAdminPanel={onAdminPanel}
+            onAdminEmpresaPanel={onAdminEmpresaPanel}
             placement="top-left"
           />
         </div>
@@ -275,6 +277,8 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
                 userRole={userRole}
                 onLogout={onLogout}
                 onBackToSelector={onBackToSelector}
+                onAdminPanel={onAdminPanel}
+                onAdminEmpresaPanel={onAdminEmpresaPanel}
               />
             </div>
           </div>

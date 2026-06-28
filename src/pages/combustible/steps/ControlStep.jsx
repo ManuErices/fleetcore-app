@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
+import { PillButton } from "../../../components/ui/PillButton";
+import { useKeyboardAvoidingView } from "../../../hooks/useKeyboardAvoidingView";
 
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
@@ -77,18 +79,61 @@ export default function ControlStep({
   const [searchMaquinaProveedor, setSearchMaquinaProveedor] = useState('');
   const [searchOperadorProveedor, setSearchOperadorProveedor] = useState('');
   const [searchReceptor, setSearchReceptor] = useState('');
+  const [validationErrors, setValidationErrors] = useState([]);
 
-  const canAdvance = (() => {
-    if (!datosControl.projectId) return true;
+  useKeyboardAvoidingView();
+
+  const FIELD_LABELS = {
+    projectId: 'Obra / Proyecto',
+    tipoOrigen: 'Tipo de origen (Interno / Estación)',
+    repartidorId: 'Repartidor',
+    equipoSurtidorId: 'Equipo Surtidor',
+    origen: 'Estación / Empresa de origen',
+    destinoCarga: 'Destino de carga (Camión / Estanque)',
+    maquinaProveedorId: 'Maquinaria del Proveedor',
+    operadorProveedorId: 'Operador del Proveedor',
+  };
+
+  const getMissingFields = useCallback(() => {
+    const missing = [];
+    if (!datosControl.projectId) missing.push('projectId');
     if (tipoReporte === 'entrada') {
-      if (!datosEntrada.tipoOrigen) return true;
-      if (datosEntrada.tipoOrigen === 'interno') return !datosControl.repartidorId || !datosControl.equipoSurtidorId;
-      if (datosEntrada.tipoOrigen === 'estacion') return !datosEntrada.origen || !datosControl.equipoSurtidorId || !datosEntrada.destinoCarga;
-      if (datosEntrada.tipoOrigen === 'externo') return !datosEntrada.origen || !datosEntrada.maquinaProveedorId || !datosEntrada.operadorProveedorId;
-      return true;
+      if (!datosEntrada.tipoOrigen) { missing.push('tipoOrigen'); return missing; }
+      if (datosEntrada.tipoOrigen === 'interno') {
+        if (!datosControl.repartidorId) missing.push('repartidorId');
+        if (!datosControl.equipoSurtidorId) missing.push('equipoSurtidorId');
+      } else if (datosEntrada.tipoOrigen === 'estacion') {
+        if (!datosEntrada.origen) missing.push('origen');
+        if (!datosControl.equipoSurtidorId) missing.push('equipoSurtidorId');
+        if (!datosEntrada.destinoCarga) missing.push('destinoCarga');
+      } else if (datosEntrada.tipoOrigen === 'externo') {
+        if (!datosEntrada.origen) missing.push('origen');
+        if (!datosEntrada.maquinaProveedorId) missing.push('maquinaProveedorId');
+        if (!datosEntrada.operadorProveedorId) missing.push('operadorProveedorId');
+      }
+    } else {
+      if (!datosControl.repartidorId) missing.push('repartidorId');
+      if (!datosControl.equipoSurtidorId) missing.push('equipoSurtidorId');
     }
-    return !datosControl.repartidorId || !datosControl.equipoSurtidorId;
-  })();
+    return missing;
+  }, [datosControl, datosEntrada, tipoReporte]);
+
+  const errSet = new Set(validationErrors);
+  const hasErr = (key) => errSet.has(key);
+
+  // Auto-select única estación disponible al cambiar a tipoOrigen 'estacion'
+  useEffect(() => {
+    if (datosEntrada.tipoOrigen === 'estacion' && estacionesLocal.length === 1 && !datosEntrada.origen) {
+      setDatosEntrada(prev => ({ ...prev, origen: estacionesLocal[0].id }));
+    }
+  }, [datosEntrada.tipoOrigen, datosEntrada.origen, estacionesLocal]);
+
+  const handleNext = () => {
+    const missing = getMissingFields();
+    if (missing.length > 0) { setValidationErrors(missing); return; }
+    setValidationErrors([]);
+    setPaso(3);
+  };
 
   const repartidorSel = surtidoresPersonas.find(e => e.id === datosControl.repartidorId);
   const equipoSel = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId);
@@ -101,8 +146,8 @@ export default function ControlStep({
   );
 
   return (
-    <div className="flex flex-col min-h-[65dvh] space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
-      <div className="flex-1 bg-white p-4 sm:p-6 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-6">
+    <div className="flex flex-col space-y-3 pb-32 animate-in fade-in slide-in-from-right-4 duration-500">
+      <div className="flex-1 bg-white p-3 sm:p-5 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-4">
 
         <div>
           <h3 className="text-lg font-black text-slate-800 mb-2 flex items-center gap-3">
@@ -114,7 +159,7 @@ export default function ControlStep({
           <div className="pt-3 border-t border-slate-100">
             <div className="grid grid-cols-12 gap-3">
               <div className={`col-span-12 ${isReportesView ? 'md:col-span-8' : 'md:col-span-6'}`}>
-                <label className="block text-xs font-black text-slate-500 uppercase mb-1 px-1 tracking-wider">Obra / Proyecto</label>
+                <label className={`block text-xs font-black uppercase mb-1 px-1 tracking-wider ${hasErr('projectId') ? 'text-red-600' : 'text-slate-500'}`}>Obra / Proyecto{hasErr('projectId') && <span className="ml-1 font-normal normal-case">— requerido</span>}</label>
                 <div className="flex gap-2">
                   <select
                     value={datosControl.projectId}
@@ -122,7 +167,7 @@ export default function ControlStep({
                       setDatosControl({ ...datosControl, projectId: e.target.value });
                       cargarEstaciones(e.target.value);
                     }}
-                    className="flex-1 w-full px-3 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all"
+                    className={`flex-1 w-full px-3 py-2 bg-slate-50 border-2 rounded-xl focus:border-orange-500 font-bold text-slate-700 text-sm transition-all ${hasErr('projectId') ? 'border-red-400 bg-red-50/30' : 'border-slate-100'}`}
                   >
                     <option value="">Seleccione obra</option>
                     {projects.map(p => (
@@ -168,7 +213,7 @@ export default function ControlStep({
 
           {/* Tipo origen (entrada) o toggle empresa (entrega) */}
           {tipoReporte === 'entrada' ? (
-            <div className="mt-4 flex flex-wrap gap-2 justify-center">
+            <div className={`mt-4 flex flex-wrap gap-2 justify-center ${hasErr('tipoOrigen') ? 'rounded-2xl ring-2 ring-red-300 p-2' : ''}`}>
               <button
                 onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'interno', destinoCarga: '', origen: '', maquinaProveedorId: '', operadorProveedorId: '' })}
                 className={`px-5 py-2 rounded-xl border-2 transition-all flex items-center gap-2 ${datosEntrada.tipoOrigen === 'interno' ? 'bg-green-50 border-green-500 shadow-md' : 'bg-white border-slate-200 hover:border-green-200'}`}
@@ -215,7 +260,9 @@ export default function ControlStep({
 
                     {/* Repartidor - searchable */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Repartidor</label>
+                      <label className={`block text-sm font-black uppercase tracking-wider px-1 ${hasErr('repartidorId') ? 'text-red-600' : 'text-slate-500'}`}>
+                        Repartidor{hasErr('repartidorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                      </label>
                       {isAdmin ? (
                         datosControl.repartidorId ? (
                           <div className="p-3 bg-gradient-to-br from-green-600 to-emerald-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
@@ -229,7 +276,7 @@ export default function ControlStep({
                           <>
                             <div className="relative">
                               <input type="text" placeholder="Buscar repartidor..." value={searchRepartidor} onChange={e => setSearchRepartidor(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
+                                className={`w-full pl-10 pr-4 py-3 bg-white border-2 rounded-xl focus:border-green-500 font-medium text-sm ${hasErr('repartidorId') ? 'border-red-300' : 'border-slate-200'}`} />
                               <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                             </div>
                             <div className="max-h-52 overflow-y-auto space-y-1">
@@ -254,7 +301,9 @@ export default function ControlStep({
 
                     {/* Equipo Surtidor - searchable */}
                     <div className="space-y-2">
-                      <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Equipo Surtidor</label>
+                      <label className={`block text-sm font-black uppercase tracking-wider px-1 ${hasErr('equipoSurtidorId') ? 'text-red-600' : 'text-slate-500'}`}>
+                        Equipo Surtidor{hasErr('equipoSurtidorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                      </label>
                       {datosControl.equipoSurtidorId ? (
                         <div className="p-3 bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
                           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><TruckIcon /></div>
@@ -268,7 +317,7 @@ export default function ControlStep({
                         <>
                           <div className="relative">
                             <input type="text" placeholder="Buscar equipo..." value={searchEquipo} onChange={e => setSearchEquipo(e.target.value)}
-                              className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-green-500 font-medium text-sm" />
+                              className={`w-full pl-10 pr-4 py-3 bg-white border-2 rounded-xl focus:border-green-500 font-medium text-sm ${hasErr('equipoSurtidorId') ? 'border-red-300' : 'border-slate-200'}`} />
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-52 overflow-y-auto space-y-1">
@@ -532,13 +581,12 @@ export default function ControlStep({
               <div className="bg-blue-50/20 p-4 rounded-[2rem] border border-blue-100 space-y-4">
                 <div className="flex items-center gap-3 mb-1 px-1">
                   <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black">1</span>
-                  <h4 className="text-sm font-black text-blue-800 uppercase tracking-wider">Identificación del Emisor</h4>
+                  <h4 className={`text-sm font-black uppercase tracking-wider ${hasErr('repartidorId') ? 'text-red-600' : 'text-blue-800'}`}>Identificación del Repartidor{hasErr('repartidorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}</h4>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
 
                   {/* Repartidor - searchable */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Repartidor</label>
                     {isAdmin ? (
                       datosControl.repartidorId ? (
                         <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
@@ -575,7 +623,9 @@ export default function ControlStep({
 
                   {/* Equipo Surtidor - searchable */}
                   <div className="space-y-2">
-                    <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Equipo Surtidor (Fuente)</label>
+                    <label className={`block text-sm font-black uppercase tracking-wider px-1 ${hasErr('equipoSurtidorId') ? 'text-red-600' : 'text-slate-500'}`}>
+                      Equipo que entrega{hasErr('equipoSurtidorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                    </label>
                     {datosControl.equipoSurtidorId ? (
                       <div className="p-3 bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
                         <div className="flex-1 min-w-0">
@@ -616,21 +666,42 @@ export default function ControlStep({
           )}
         </div>
 
-        {/* Navegación */}
-        <div className="flex gap-3 pt-4 border-t border-slate-100 mt-2">
-          <button
+        {/* Validación */}
+        {validationErrors.length > 0 && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-3">
+            <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="font-black text-red-700 text-xs uppercase tracking-wider">Faltan campos requeridos</p>
+              <ul className="mt-1 space-y-0.5">
+                {validationErrors.map(key => (
+                  <li key={key} className="text-sm text-red-600 font-bold flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+                    {FIELD_LABELS[key] || key}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button onClick={() => setValidationErrors([])} className="text-red-400 hover:text-red-600 font-black text-lg leading-none">×</button>
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-3 border-t border-slate-100">
+          <PillButton
+            variant="outline"
             onClick={() => setPaso(1)}
-            className="flex-1 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black rounded-2xl transition-all uppercase tracking-tight text-sm"
+            className="flex-1"
           >
             ← Atrás
-          </button>
-          <button
-            onClick={() => setPaso(3)}
-            disabled={canAdvance}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-black rounded-2xl transition-all uppercase tracking-tight text-sm shadow-lg shadow-orange-100 disabled:grayscale disabled:opacity-50"
+          </PillButton>
+          <PillButton
+            variant="primary"
+            onClick={handleNext}
+            className="flex-1 bg-orange-600 hover:bg-orange-500 text-white shadow-orange-100 hover:shadow-lg"
           >
             Siguiente →
-          </button>
+          </PillButton>
         </div>
       </div>
     </div>

@@ -5,14 +5,17 @@ import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
 } from 'firebase/firestore';
-import { db, auth } from '../../lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth, firebaseConfig } from '../../lib/firebase';
+import { onAuthStateChanged, createUserWithEmailAndPassword, getAuth, setPersistence, inMemoryPersistence, signOut as firebaseSignOut } from 'firebase/auth';
+import { initializeApp } from 'firebase/app';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { usePlan } from '../../hooks/usePlan';
 import { MODULES as CONFIG_MODULES, calculateTotal } from '../../lib/plans';
 import EmailsSection from './EmailsSection';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../lib/firebase';
+
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable
@@ -43,6 +46,7 @@ const MODULOS = [
 const CARGOS_OPERADOR = [
   { value: 'operador_maquinaria', label: 'Operador de Maquinaria — solo Reporte Maquinaria' },
   { value: 'surtidor',            label: 'Surtidor — Reporte Maquinaria + Combustible' },
+  { value: 'solo_combustible',    label: 'Surtidor — solo Combustible' },
 ];
 const TIPOS_MAQUINA = [
   'CAMIONETA',
@@ -59,7 +63,7 @@ const TIPOS_MAQUINA = [
 ];
 
 const NAV_GROUPS = [
-  { label: 'General',     ids: ['operadores', 'proyectos', 'usuarios', 'emails'] },
+  { label: 'General',     ids: ['operadores', 'proyectos', 'usuarios', 'emails', 'capacitaciones'] },
   { label: 'Flota',       ids: ['maquinas', 'actividades'] },
   { label: 'Combustible', ids: ['surtidores', 'empresas_combustible', 'estaciones'] },
   { label: 'RRHH',        ids: ['sub_empresas'] },
@@ -77,6 +81,7 @@ const TAB_DEFS = [
   { id: 'estaciones',          label: 'Est. Combustible',     color: 'cyan',   modules: ['workfleet'],                icon: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z' },
   { id: 'usuarios',            label: 'Usuarios',             color: 'rose',   modules: [],                           icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z' },
   { id: 'emails',              label: 'Emails Corporativos',  color: 'blue',   modules: [],                           icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+  { id: 'capacitaciones',      label: 'Capacitaciones',       color: 'amber',  modules: [],                           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { id: 'empresas_registro',   label: 'Empresas Registradas', color: 'violet', modules: ['__superadmin__'],           icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9' },
   { id: 'mi_empresa',          label: 'Mi Empresa',           color: 'slate',  modules: [],                           icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
   { id: 'mi_plan',             label: 'Mi Plan / Módulos',    color: 'indigo', modules: [],                           icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
@@ -554,13 +559,14 @@ function OperadoresSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', telefono: '', area: '', fechaIngreso: '', estado: 'activo', afp: '', prevision: '', nacionalidad: '' });
+  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', password: '', telefono: '', area: '', fechaIngreso: '', estado: 'activo', afp: '', prevision: '', nacionalidad: '' });
   const [cargoCustom, setCargoCustom] = useState('');
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [busquedaOp, setBusquedaOp] = useState('');
   const [filtroEmpresaOp, setFiltroEmpresaOp] = useState('');
   const [catCargoModal, setCatCargoModal] = useState(false);
+  const [qrOp, setQrOp] = useState(null);
 
   // Catálogo dinámico de cargos
   const { items: cargosDB, load: reloadCargos } = useCatalogo('cargo_operador');
@@ -577,7 +583,7 @@ function OperadoresSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false }); setCargoCustom(''); setEditId(null); setModal(true); };
+  const openNew = () => { setForm({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', password: '' }); setCargoCustom(''); setEditId(null); setModal(true); };
   const openEdit = (row) => {
     const cargo = row.cargo || '';
     const isCustom = cargo && !CARGOS_LIST.includes(cargo);
@@ -586,7 +592,11 @@ function OperadoresSection() {
       apellidoPaterno: row.apellidoPaterno || row.nombre?.split(' ').slice(-2,-1)[0] || '',
       apellidoMaterno: row.apellidoMaterno || row.nombre?.split(' ').slice(-1)[0] || '',
       rut: row.rut || '', cargo: isCustom ? 'otro' : cargo,
-      empresa: row.empresa || '', esSurtidor: row.esSurtidor || false
+      empresa: row.empresa || '', esSurtidor: row.esSurtidor || false,
+      email: row.email || '', password: row.password || '',
+      telefono: row.telefono || '', area: row.area || '',
+      fechaIngreso: row.fechaIngreso || '', estado: row.estado || 'activo',
+      afp: row.afp || '', prevision: row.prevision || '', nacionalidad: row.nacionalidad || '',
     });
     setCargoCustom(isCustom ? cargo : '');
     setEditId(row.id); setModal(true);
@@ -606,8 +616,9 @@ function OperadoresSection() {
     try {
       const cargoFinal = form.cargo === 'otro' ? cargoCustom.trim() : form.cargo.trim();
       const nombreCompleto = [form.nombres, form.apellidoPaterno, form.apellidoMaterno].filter(Boolean).map(s=>s.trim()).join(' ');
+      const emailTrim = form.email.trim();
+      const passTrim = form.password.trim();
       const p = {
-        // Campos WorkFleet
         nombres: form.nombres.trim(),
         apellidoPaterno: form.apellidoPaterno.trim(),
         apellidoMaterno: form.apellidoMaterno.trim(),
@@ -617,19 +628,60 @@ function OperadoresSection() {
         empresa: form.empresa.trim(),
         esSurtidor: form.esSurtidor,
         tipo: form.esSurtidor ? 'GASTO_GENERAL' : 'OPERADOR',
-        // Campos RRHH (opcionales — se completan desde RRHH)
-        email:          form.email        || '',
-        telefono:       form.telefono     || '',
-        area:           form.area         || '',
-        fechaIngreso:   form.fechaIngreso  || '',
-        estado:         form.estado        || 'activo',
-        afp:            form.afp           || '',
-        prevision:      form.prevision     || '',
-        nacionalidad:   form.nacionalidad  || '',
+        email:       emailTrim,
+        telefono:    form.telefono    || '',
+        area:        form.area        || '',
+        fechaIngreso:form.fechaIngreso|| '',
+        estado:      form.estado      || 'activo',
+        afp:         form.afp         || '',
+        prevision:   form.prevision   || '',
+        nacionalidad:form.nacionalidad|| '',
         updatedAt: serverTimestamp(),
       };
-      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
+      if (passTrim) p.password = passTrim;
+
+      if (editId) {
+        await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editId), p);
+      } else {
+        // Crear en trabajadores
+        const newDoc = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
+        // Si tiene email+password, crear cuenta de acceso via auth secundaria
+        if (emailTrim && passTrim) {
+          try {
+            const secondaryApp = initializeApp(firebaseConfig, `op-account-${Date.now()}`);
+            const secondaryAuth = getAuth(secondaryApp);
+            await setPersistence(secondaryAuth, inMemoryPersistence);
+            const cred = await createUserWithEmailAndPassword(secondaryAuth, emailTrim, passTrim);
+            const uid = cred.user.uid;
+            await firebaseSignOut(secondaryAuth);
+            await setDoc(doc(db, 'users', uid), {
+              empresaId,
+              role: 'operador',
+              email: emailTrim,
+              nombre: nombreCompleto,
+              rut: rutNorm,
+              cargo: cargoFinal,
+              password: passTrim,
+              createdAt: serverTimestamp(),
+            });
+            await setDoc(doc(db, 'empresas', empresaId, 'users', uid), {
+              empresaId,
+              role: 'operador',
+              email: emailTrim,
+              nombre: nombreCompleto,
+              rut: rutNorm,
+              cargo: cargoFinal,
+              password: passTrim,
+              createdAt: serverTimestamp(),
+            });
+          } catch (authErr) {
+            const msg = authErr.code === 'auth/email-already-in-use'
+              ? 'El email ya tiene una cuenta registrada. El operador fue guardado sin cuenta de acceso.'
+              : `Operador creado, pero error al crear cuenta de acceso: ${authErr.message}`;
+            alert(msg);
+          }
+        }
+      }
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
@@ -639,6 +691,26 @@ function OperadoresSection() {
     try { await deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
+
+  const openQROp = (row) => {
+    const email = row.email || '';
+    const password = row.password || '';
+    if (!email || !password) {
+      alert('Este operador no tiene credenciales de acceso guardadas.\n\nEdita el operador, ingresa email y contraseña, y guarda.');
+      return;
+    }
+    setQrOp({ title: row.nombre || email, qrText: JSON.stringify({ email, password }) });
+  };
+
+  const QRBtnOp = (row) => (
+    row.email ? (
+      <button onClick={() => openQROp(row)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver QR acceso">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+        </svg>
+      </button>
+    ) : null
+  );
 
   return (
     <>
@@ -665,7 +737,7 @@ function OperadoresSection() {
           const matchQ = !q || r.nombre?.toLowerCase().includes(q) || r.rut?.includes(busquedaOp) || r.cargo?.toLowerCase().includes(q);
           const matchE = !filtroEmpresaOp || (r.empresa || '').toUpperCase() === filtroEmpresaOp.toUpperCase();
           return matchQ && matchE;
-        })} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay operadores registrados"
+        })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtnOp} emptyText="No hay operadores registrados"
           columns={[
             { key: 'nombres', label: 'Nombres', render: r => <span>{r.nombres || r.nombre?.split(' ').slice(0,-2).join(' ') || r.nombre || '—'}</span> },
             { key: 'apellidos', label: 'Apellidos', render: r => {
@@ -759,6 +831,20 @@ function OperadoresSection() {
               <div className="text-xs text-amber-700 mt-0.5">Este operador puede ser asignado como repartidor de combustible</div>
             </div>
           </label>
+
+          <div className="border-t border-slate-200 pt-4">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Acceso al sistema (WorkFleet-M)</p>
+            <div className="space-y-3">
+              <Field label="Email de acceso">
+                <input className={inputCls} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="correo@ejemplo.com" />
+              </Field>
+              <Field label={editId ? 'Contraseña (dejar vacío para no cambiar)' : 'Contraseña de acceso'}>
+                <input className={inputCls} type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Mínimo 6 caracteres" />
+                {!editId && <p className="text-[11px] text-slate-400 mt-1">Al guardar con email+contraseña se creará la cuenta de acceso automáticamente.</p>}
+              </Field>
+            </div>
+          </div>
+
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="blue" />
         </div>
       </Modal>
@@ -773,6 +859,7 @@ function OperadoresSection() {
       />
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Operador" message={`¿Eliminar a "${confirm?.nombre}"?`} />
+      <QRCard isOpen={!!qrOp} onClose={() => setQrOp(null)} title={qrOp?.title} qrText={qrOp?.qrText} />
     </>
   );
 }
@@ -2498,6 +2585,7 @@ function UsuariosSection() {
   });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -2569,11 +2657,17 @@ function UsuariosSection() {
     setModal(true);
   };
 
-  const openQR = (row) => {
+  const openQR = async (row) => {
     const email = row.email || row.id;
-    const password = row.password || '';
+    let password = row.password || '';
     if (!password) {
-      alert('Este usuario no tiene contraseña guardada. Agrégala editando el usuario primero.');
+      try {
+        const rootSnap = await getDoc(doc(db, 'users', row.id));
+        if (rootSnap.exists()) password = rootSnap.data().password || '';
+      } catch {}
+    }
+    if (!password) {
+      alert('Este usuario no tiene contraseña guardada para QR.\n\nEdita el usuario, ingresa su contraseña en el campo "Contraseña para QR" y guarda. Luego podrás generar el QR.');
       return;
     }
     setQr({ title: row.nombre || email, qrText: JSON.stringify({ email, password }) });
@@ -2601,6 +2695,17 @@ function UsuariosSection() {
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
+  };
+
+  const del = async () => {
+    if (!confirm) return;
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, 'empresas', empresaId, 'users', confirm.id)),
+        deleteDoc(doc(db, 'users', confirm.id)),
+      ]);
+      setConfirm(null); load();
+    } catch (e) { alert('Error al eliminar: ' + e.message); }
   };
 
   const QRBtn = (row) => (
@@ -2646,7 +2751,7 @@ function UsuariosSection() {
           <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           <p className="text-xs text-blue-600">El <strong>QR</strong> contiene email y contraseña en formato JSON para login directo. Solo disponible para cuentas creadas con email/password (no Google).</p>
         </div>
-        <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={null} extraAction={QRBtn} emptyText="No hay usuarios registrados"
+        <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay usuarios registrados"
           columns={[
             { key: 'email',  label: 'Email',  render: r => <span className="font-mono text-xs text-slate-600">{r.email || r.id}</span> },
             { key: 'nombre', label: 'Nombre' },
@@ -2671,6 +2776,29 @@ function UsuariosSection() {
                 )}
               </div>
             )},
+            { key: 'capacitacion', label: 'Capacitación', render: r => {
+              const requiresTraining = (r.role === 'administrativo' && r.modulos?.includes('reportes')) ||
+                                       (r.role === 'operador' && ['surtidor', 'solo_combustible'].includes(r.cargo));
+              if (!requiresTraining) {
+                return <span className="text-[10px] text-slate-400 font-medium">No requerida</span>;
+              }
+              if (r.capacitacionAprobada) {
+                const dateStr = r.capacitacionFecha ? new Date(r.capacitacionFecha.seconds * 1000).toLocaleDateString('es-CL') : '';
+                return (
+                  <div className="flex flex-col">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-600">
+                      ✓ Aprobada ({r.capacitacionScore}%)
+                    </span>
+                    {dateStr && <span className="text-[9px] text-slate-400 font-medium">{dateStr}</span>}
+                  </div>
+                );
+              }
+              return (
+                <span className="inline-flex items-center gap-1 text-[11px] font-black text-rose-600">
+                  ✗ Pendiente
+                </span>
+              );
+            }},
           ]}
         />
       </SectionCard>
@@ -2723,6 +2851,332 @@ function UsuariosSection() {
         </div>
       </Modal>
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} qrText={qr?.qrText} />
+      <ConfirmDialog
+        isOpen={!!confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={del}
+        title="Eliminar Usuario"
+        message={`¿Eliminar a "${confirm?.nombre || confirm?.email || confirm?.id}"? Esta acción no se puede deshacer.`}
+      />
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// CAPACITACIONES SECTION
+// ─────────────────────────────────────────────────────────────
+function getEmbedUrl(url) {
+  if (!url) return "";
+  if (url.includes("youtube.com/embed/")) return url;
+  if (url.includes("youtube.com/watch?v=")) {
+    return url.replace("watch?v=", "embed/");
+  }
+  if (url.includes("youtu.be/")) {
+    const parts = url.split("/");
+    const id = parts[parts.length - 1];
+    return `https://www.youtube.com/embed/${id}`;
+  }
+  return url;
+}
+
+function CapacitacionesSection() {
+  const { empresaId } = useEmpresa();
+  const [activeModule, setActiveModule] = useState('reportes'); // default module: combustible
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingVideo, setEditingVideo] = useState(null);
+
+  const [form, setForm] = useState({
+    titulo: "",
+    descripcion: "",
+    url: "",
+    subcategoria: "entrada"
+  });
+
+  const loadVideos = useCallback(async () => {
+    if (!empresaId) return;
+    setLoading(true);
+    try {
+      const docRef = doc(db, 'empresas', empresaId, 'config', 'capacitaciones');
+      const snap = await getDoc(docRef);
+      if (snap.exists() && snap.data().videos) {
+        setVideos(snap.data().videos);
+      } else {
+        setVideos([]);
+      }
+    } catch (e) {
+      console.error("Error loading training videos:", e);
+      setVideos([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [empresaId]);
+
+  useEffect(() => {
+    loadVideos();
+  }, [loadVideos]);
+
+  const saveVideosList = async (newVideosList) => {
+    if (!empresaId) return;
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'empresas', empresaId, 'config', 'capacitaciones'), {
+        videos: newVideosList
+      });
+      setVideos(newVideosList);
+      setModalOpen(false);
+      setEditingVideo(null);
+      setForm({ titulo: "", descripcion: "", url: "" });
+    } catch (e) {
+      alert("Error al guardar videos: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddOrEditVideo = async () => {
+    if (!form.titulo || !form.url) {
+      alert("Por favor completa los campos obligatorios (Título y URL del video).");
+      return;
+    }
+
+    let updatedList = [];
+    if (editingVideo) {
+      // Edit
+      updatedList = videos.map(v => v.id === editingVideo.id ? { ...v, ...form } : v);
+    } else {
+      // Add new
+      const newVideo = {
+        id: Date.now().toString(),
+        modulo: activeModule,
+        titulo: form.titulo,
+        descripcion: form.descripcion,
+        url: form.url,
+        subcategoria: form.subcategoria || "entrada",
+        createdAt: new Date().toISOString()
+      };
+      updatedList = [...videos, newVideo];
+    }
+    await saveVideosList(updatedList);
+  };
+
+  const handleDeleteVideo = async (id) => {
+    if (window.confirm("¿Estás seguro de que deseas eliminar este video tutorial?")) {
+      const updatedList = videos.filter(v => v.id !== id);
+      await saveVideosList(updatedList);
+    }
+  };
+
+  const openAddModal = () => {
+    setEditingVideo(null);
+    setForm({ titulo: "", descripcion: "", url: "", subcategoria: "entrada" });
+    setModalOpen(true);
+  };
+
+  const openEditModal = (video) => {
+    setEditingVideo(video);
+    setForm({
+      titulo: video.titulo,
+      descripcion: video.descripcion,
+      url: video.url,
+      subcategoria: video.subcategoria || "entrada"
+    });
+    setModalOpen(true);
+  };
+
+  // Filtrar los videos del módulo activo
+  const filteredVideos = useMemo(() => {
+    return videos.filter(v => v.modulo === activeModule);
+  }, [videos, activeModule]);
+
+  const modulesList = [
+    { value: 'fleetcore', label: 'Oficina Técnica', desc: 'Guías de payroll, consolidado y subcontratos.' },
+    { value: 'reportes', label: 'Combustible', desc: 'Guías de recepción de combustible (Entrada) y despacho (Salida).' },
+    { value: 'rrhh', label: 'Recursos Humanos', desc: 'Manuales de asistencia, vacaciones y control de personal.' },
+    { value: 'finanzas', label: 'Finanzas', desc: 'Entrenamiento sobre flujos de caja y órdenes de compra.' },
+    { value: 'contabilidad', label: 'Contabilidad', desc: 'Guías de plan de cuentas y asientos contables.' },
+    { value: 'documentos', label: 'Documentos', desc: 'Instrucciones del libro de obras y firma de contratos.' },
+  ];
+
+  return (
+    <>
+      <SectionCard
+        title="Capacitaciones Obligatorias"
+        subtitle="Configuración de videos instructivos y guías multimedia del sistema para nuevos usuarios"
+        color="amber"
+        icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>}
+      >
+        
+        {/* Menú de módulos por pestañas sub-nav */}
+        <div className="border-b border-slate-200 mb-6">
+          <div className="flex flex-wrap -mb-px gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            {modulesList.map(mod => (
+              <button
+                key={mod.value}
+                onClick={() => setActiveModule(mod.value)}
+                className={`px-4 py-2.5 rounded-t-xl text-xs font-black transition-all border-b-2 whitespace-nowrap ${
+                  activeModule === mod.value
+                    ? 'border-orange-600 text-orange-700 bg-orange-50/50'
+                    : 'border-transparent text-slate-500 hover:text-orange-600 hover:border-orange-200'
+                }`}
+              >
+                {mod.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Módulo activo cabecera */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50 border border-slate-200 p-5 rounded-2xl mb-6">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-black text-sm text-slate-800 uppercase tracking-wider">
+              Módulo: {modulesList.find(m => m.value === activeModule)?.label}
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 leading-normal">
+              {modulesList.find(m => m.value === activeModule)?.desc}
+            </p>
+          </div>
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex-shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Agregar Video
+          </button>
+        </div>
+
+        {/* Listado de videos */}
+        {loading ? (
+          <div className="text-center text-xs text-slate-400 py-12">Cargando videos tutoriales...</div>
+        ) : filteredVideos.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center gap-3">
+            <span className="text-3xl">📺</span>
+            <p className="font-semibold text-slate-700 text-sm">No hay videos en este módulo</p>
+            <p className="text-xs text-slate-400 max-w-sm">
+              Carga videos instructivos para que los nuevos operarios puedan aprender los flujos correspondientes y aprobar el examen final.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {filteredVideos.map(vid => (
+              <div key={vid.id} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm flex flex-col justify-between">
+                
+                {/* Reproductor de Video */}
+                <div className="aspect-video bg-black w-full overflow-hidden relative group">
+                  <iframe
+                    className="w-full h-full"
+                    src={getEmbedUrl(vid.url)}
+                    title={vid.titulo}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+
+                {/* Detalle y Botones */}
+                <div className="p-5 space-y-3 flex-1 flex flex-col justify-between bg-gradient-to-b from-white to-slate-50/50">
+                  <div>
+                    {vid.subcategoria && (
+                      <span className={`inline-block text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md mb-2 ${
+                        vid.subcategoria === 'entrada' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {vid.subcategoria === 'entrada' ? 'Recepción (Entrada)' : 'Despacho (Salida)'}
+                      </span>
+                    )}
+                    <h4 className="font-black text-sm text-slate-800 truncate">{vid.titulo}</h4>
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{vid.descripcion || "Sin descripción proporcionada."}</p>
+                  </div>
+                  
+                  <div className="flex gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      onClick={() => openEditModal(vid)}
+                      className="flex-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => handleDeleteVideo(vid.id)}
+                      className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center"
+                      title="Eliminar"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            ))}
+          </div>
+        )}
+
+      </SectionCard>
+
+      {/* Modal para agregar/editar video */}
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingVideo ? "Editar Video Tutorial" : "Agregar Video Tutorial"} color="amber">
+        <div className="space-y-4">
+          <Field label="Título del Video" required>
+            <input
+              type="text"
+              className={inputCls}
+              placeholder="Ej: Tutorial de Despacho de Combustible"
+              value={form.titulo}
+              onChange={e => setForm({ ...form, titulo: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Descripción">
+            <textarea
+              className={`${inputCls} min-h-[80px] py-2`}
+              placeholder="Describe qué se enseña en este video..."
+              value={form.descripcion}
+              onChange={e => setForm({ ...form, descripcion: e.target.value })}
+            />
+          </Field>
+
+          <Field label="URL del Video (YouTube o MP4)" required>
+            <input
+              type="text"
+              className={inputCls}
+              placeholder="Ej: https://www.youtube.com/watch?v=..."
+              value={form.url}
+              onChange={e => setForm({ ...form, url: e.target.value })}
+            />
+            <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+              Soporta enlaces estándar de YouTube, enlaces abreviados (youtu.be) o URLs directas a archivos de video en la nube.
+            </p>
+          </Field>
+
+          {activeModule === 'reportes' && (
+            <Field label="Capítulo / Proceso" required>
+              <select
+                className={inputCls}
+                value={form.subcategoria}
+                onChange={e => setForm({ ...form, subcategoria: e.target.value })}
+              >
+                <option value="entrada">Capítulo 1: Recepción (Entrada)</option>
+                <option value="salida">Capítulo 2: Despacho (Salida)</option>
+              </select>
+            </Field>
+          )}
+
+          <FormButtons
+            onCancel={() => setModalOpen(false)}
+            onSave={handleAddOrEditVideo}
+            saving={saving}
+            isEdit={!!editingVideo}
+            color="amber"
+          />
+        </div>
+      </Modal>
     </>
   );
 }
@@ -3477,7 +3931,7 @@ function MiPlanSection() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
-export default function AdminPanel({ onClose }) {
+export default function AdminPanel({ onClose, hideSystem = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
@@ -3501,6 +3955,9 @@ export default function AdminPanel({ onClose }) {
   }, []);
 
   const tabsVisibles = useMemo(() => TAB_DEFS.filter(tab => {
+    if (hideSystem && ['mi_empresa', 'mi_plan', 'empresas_registro'].includes(tab.id)) {
+      return false;
+    }
     if (tab.id === 'mi_plan') {
       return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
     }
@@ -3509,7 +3966,7 @@ export default function AdminPanel({ onClose }) {
     if (isSuperAdmin) return true;
     if (planLoading) return false;
     return tab.modules.some(m => activeModules.includes(m));
-  }), [isSuperAdmin, activeModules, planLoading, currentUserRole]);
+  }), [isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem]);
 
   // Una sola vez: cuando el rol carga y el tab del URL se vuelve visible, aplicarlo
   useEffect(() => {
@@ -3656,6 +4113,7 @@ export default function AdminPanel({ onClose }) {
             {activeTab === 'estaciones'           && <EstacionesSection />}
             {activeTab === 'usuarios'             && <UsuariosSection />}
             {activeTab === 'emails'               && <EmailsSection />}
+            {activeTab === 'capacitaciones'       && <CapacitacionesSection />}
             {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
             {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
             {activeTab === 'mi_plan'              && <MiPlanSection />}

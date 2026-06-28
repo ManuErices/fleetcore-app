@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import { formatRut } from "../utils/formatters";
 import { db } from "../lib/firebase";
 import {
   collection, getDocs, doc, updateDoc, setDoc, addDoc, deleteDoc,
@@ -742,6 +743,11 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     }));
   };
 
+  const handleRutChange = (e) => {
+    const raw = e.target.value.replace(/[^0-9kK]/g, "").toUpperCase();
+    setForm(f => ({ ...f, rut: formatRut(raw) }));
+  };
+
   const openEdit = (usr) => {
     setEditId(usr.id);
     setForm({
@@ -945,7 +951,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
             <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Juan Pérez" />
           </Field>
           <Field label="RUT">
-            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 12.345.678-9" />
+            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={handleRutChange} placeholder="Ej: 12.345.678-9" />
           </Field>
           <Field label="Email" required>
             <input

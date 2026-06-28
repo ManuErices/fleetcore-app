@@ -6,6 +6,7 @@ import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import { getNextGuiaNumber } from '../../../utils/voucherThermalGenerator';
 import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
+import { useEmpresa } from '../../../lib/useEmpresa';
 
 const TODAY = () => new Date().toISOString().split('T')[0];
 
@@ -39,6 +40,7 @@ const getNextCodigoNumber = async (empresaId) => {
 };
 
 export function useCombustibleForm(empresaId, onClose, isReportesView) {
+  const { empresa: empresaPrincipal } = useEmpresa();
   const { toast, toasts, removeToast } = useToast();
   const isSubmittingRef = useRef(false);
 
@@ -185,6 +187,14 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
   }, [empleados]);
 
+  // Auto-asignar repartidor si el usuario logueado aparece en la lista de surtidores
+  useEffect(() => {
+    if (currentUserData?.id && surtidoresPersonas.length > 0 && !datosControl.repartidorId) {
+      const self = surtidoresPersonas.find(p => p.id === currentUserData.id);
+      if (self) setDatosControl(prev => ({ ...prev, repartidorId: self.id }));
+    }
+  }, [currentUserData?.id, surtidoresPersonas.length]);
+
   // Auto-seleccionar proyecto cuando solo hay uno disponible
   useEffect(() => {
     if (projects?.length === 1 && !datosControl.projectId) {
@@ -216,15 +226,13 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     if (empresaIdONombre === 'MPF') return true;
     const nombre = resolverNombreEmpresa(empresaIdONombre);
     const n = normEmp(nombre);
-    const nombresInternos = (subEmpresasLocal || []).map(se => normEmp(se.nombre || ''));
-    
-    if (nombresInternos.length === 0) {
-      const EMPRESAS_SISTEMA = ['MPF Ingeniería Civil', 'MPF', 'LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor'];
-      return EMPRESAS_SISTEMA.some(na => {
-        const t = normEmp(na);
-        return n.includes(t) || t.includes(n);
-      });
+    // Filtrar la empresa principal del usuario (evitar combustible "propio")
+    if (empresaPrincipal?.nombre) {
+      const t = normEmp(empresaPrincipal.nombre);
+      if (t && n && (n.includes(t) || t.includes(n))) return true;
     }
+    const nombresInternos = (subEmpresasLocal || []).map(se => normEmp(se.nombre || ''));
+    if (nombresInternos.length === 0) return false;
     return nombresInternos.some(t => n.includes(t) || t.includes(n));
   };
   const esMPF = esEmpresaInterna;
@@ -706,28 +714,12 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
           || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
 
-        setLastReportData({
-          reportData: {
-            ...dataToSave, numeroReporte,
-            fecha: datosControl.fecha,
-            cantidadLitros: parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.')),
-            horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')),
-            firmaReceptor, firmaRepartidor
-          },
-          reporteId: nuevoReporteId,
-          projectName: projectInfo?.nombre || projectInfo?.name || 'N/A',
-          machineInfo: finalMachineInfo,
-          operadorInfo: finalOperadorInfo,
-          empresaInfo,
-          repartidorInfo: {
-            nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
-            rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
-          },
-          equipoSurtidorInfo: equipoSurtidorInfo
-            ? { nombre: equipoSurtidorInfo.nombre || '', patente: equipoSurtidorInfo.patente || '', tipo: equipoSurtidorInfo.tipo || '' }
-            : null
-        });
-        setShowVoucherModal(true);
+        toast({ type: 'success', message: `Reporte de Entrega registrado: ${numeroReporte}`, duration: 5000 });
+        if (isReportesView) {
+          onClose();
+        } else {
+          resetForm();
+        }
       } else {
         toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
         if (isReportesView) {

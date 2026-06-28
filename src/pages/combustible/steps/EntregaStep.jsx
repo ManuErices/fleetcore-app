@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { formatMiles } from '../../../utils/formatters';
 import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
+import { PillButton } from "../../../components/ui/PillButton";
+import { useKeyboardAvoidingView } from "../../../hooks/useKeyboardAvoidingView";
 
 const SearchIcon = () => (
   <svg className="w-4 h-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
@@ -49,6 +51,9 @@ export default function EntregaStep({
 }) {
   const [emailInput, setEmailInput] = useState('');
   const [searchMaquina, setSearchMaquina] = useState('');
+  const [validationErrors, setValidationErrors] = useState([]);
+
+  useKeyboardAvoidingView();
 
   const machineLabel = (m) => {
     if (!m) return 'S/P';
@@ -56,11 +61,33 @@ export default function EntregaStep({
     return m.patente || m.codigo || m.code || m.modelo || 'S/P';
   };
 
-  const canSubmit = !loading
-    && !!datosEntrega.cantidadLitros
-    && (isReportesView || !!firmaReceptor)
-    && !!datosEntrega.machineId
-    && !!datosEntrega.operadorId;
+  const FIELD_LABELS = {
+    cantidadLitros: 'Litros entregados',
+    machineId: 'Maquinaria que recibe',
+    operadorId: 'Persona que recibe',
+    firmaReceptor: 'Foto de identificación del receptor',
+    horometroOdometro: 'Horómetro / KM de la maquinaria',
+  };
+
+  const getMissingFields = useCallback(() => {
+    const missing = [];
+    if (!datosEntrega.cantidadLitros || parseFloat(datosEntrega.cantidadLitros) === 0) missing.push('cantidadLitros');
+    if (!datosEntrega.machineId) missing.push('machineId');
+    if (!datosEntrega.operadorId) missing.push('operadorId');
+    if (!datosEntrega.horometroOdometro) missing.push('horometroOdometro');
+    if (!isReportesView && !firmaReceptor) missing.push('firmaReceptor');
+    return missing;
+  }, [datosEntrega, firmaReceptor, isReportesView]);
+
+  const errSet = new Set(validationErrors);
+  const hasErr = (key) => errSet.has(key);
+
+  const handleSubmitWithValidation = () => {
+    const missing = getMissingFields();
+    if (missing.length > 0) { setValidationErrors(missing); return; }
+    setValidationErrors([]);
+    handleSubmit();
+  };
 
   React.useEffect(() => {
     const handlePaste = (e) => {
@@ -103,9 +130,11 @@ export default function EntregaStep({
   const filteredMachines = (machinesLocal || [])
     .filter(m => esMPF(datosEntrega.empresa) ? esMPF(m.empresa) : empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrega.empresa)));
 
+  const mpfNombre = empresasLocal.find(e => esMPF(e.id))?.nombre || 'Empresa Propia';
+
   return (
-    <div className="flex flex-col min-h-[75dvh] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex-1 bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
+    <div className="flex flex-col space-y-3 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex-1 bg-white p-4 sm:p-5 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-5">
 
         {/* Destino de la entrega */}
         <div className="pt-4 border-t border-slate-100 space-y-6">
@@ -114,56 +143,46 @@ export default function EntregaStep({
             <h4 className="text-base font-black text-slate-800 uppercase tracking-wider">Destino de la Entrega</h4>
           </div>
 
-          {/* Toggle Interno/Externo */}
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2">
-            <button
-              onClick={() => setDatosEntrega({ ...datosEntrega, empresa: 'MPF', machineId: '', operadorId: '' })}
-              className={`flex-1 py-3 rounded-xl font-black text-sm uppercase tracking-wide transition-all ${esMPF(datosEntrega.empresa) ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-200'}`}
-            >
-              Interno (MPF)
-            </button>
-            <button
-              onClick={() => setDatosEntrega({ ...datosEntrega, empresa: '', machineId: '', operadorId: '' })}
-              className={`flex-1 py-3 rounded-xl font-black text-sm uppercase tracking-wide transition-all ${!esMPF(datosEntrega.empresa) ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-200'}`}
-            >
-              Externo
-            </button>
-          </div>
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Empresa y Maquinaria */}
             <div className="space-y-5">
-              {!esMPF(datosEntrega.empresa) && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between px-1">
-                    <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Empresa Receptora</label>
-                    {isAdmin && (
-                      <button onClick={() => setShowModalEmpresa(true)} className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-xl shadow-lg hover:bg-blue-500 transition-all flex-shrink-0">+</button>
-                    )}
-                  </div>
-                  <select
-                    value={datosEntrega.empresa}
-                    onChange={(e) => setDatosEntrega({ ...datosEntrega, empresa: e.target.value, machineId: '', operadorId: '' })}
-                    className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-bold text-sm text-slate-700 shadow-inner"
-                  >
-                    <option value="">Seleccione empresa</option>
-                    {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.nombre}</option>
-                    ))}
-                  </select>
+              {/* Empresa Receptora — única lista con empresa propia + externas */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Empresa Receptora</label>
+                  {isAdmin && (
+                    <button onClick={() => setShowModalEmpresa(true)} className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-lg shadow-lg hover:bg-blue-500 transition-all flex-shrink-0">+</button>
+                  )}
                 </div>
-              )}
+                <select
+                  value={datosEntrega.empresa}
+                  onChange={(e) => setDatosEntrega({ ...datosEntrega, empresa: e.target.value, machineId: '', operadorId: '' })}
+                  className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-bold text-sm text-slate-700 shadow-inner"
+                >
+                  <option value="">Seleccione empresa</option>
+                  <option value="MPF">{mpfNombre}</option>
+                  {empresasLocal.filter(e => !esMPF(e.id)).map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.nombre}</option>
+                  ))}
+                </select>
+              </div>
 
               {/* Maquinaria (searchable) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
-                  <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Maquinaria que recibe</label>
+                  <label className={`block text-sm font-black uppercase tracking-widest ${hasErr('machineId') ? 'text-red-600' : 'text-slate-500'}`}>
+                    Maquinaria que recibe{hasErr('machineId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                  </label>
                   <button
                     onClick={() => { setNuevaMaquinaData({ ...nuevaMaquinaData, empresaId: datosEntrega.empresa || 'MPF' }); setShowModalMaquina(true); }}
                     className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-xl shadow-lg hover:bg-blue-500 transition-all flex-shrink-0"
                   >+</button>
                 </div>
-                {datosEntrega.machineId ? (() => {
+                {!datosEntrega.empresa ? (
+                  <div className="py-3 px-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 font-bold text-center">
+                    Selecciona primero la empresa receptora
+                  </div>
+                ) : datosEntrega.machineId ? (() => {
                   const sel = filteredMachines.find(m => m.id === datosEntrega.machineId);
                   return (
                     <div className="p-4 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl flex items-center gap-3 shadow-lg animate-in zoom-in duration-200">
@@ -178,7 +197,7 @@ export default function EntregaStep({
                   <>
                     <div className="relative">
                       <input type="text" placeholder="Buscar tipo o patente..." value={searchMaquina} onChange={e => setSearchMaquina(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm" />
+                        className={`w-full pl-10 pr-4 py-3 bg-white border-2 rounded-xl focus:border-blue-500 font-medium text-sm ${hasErr('machineId') ? 'border-red-300' : 'border-slate-200'}`} />
                       <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                     </div>
                     <div className="max-h-44 overflow-y-auto space-y-1">
@@ -205,7 +224,9 @@ export default function EntregaStep({
             <div className="space-y-4">
               <div className="bg-slate-50/50 p-6 rounded-[2.5rem] border-2 border-slate-100 space-y-4">
                 <div className="flex items-center justify-between px-1">
-                  <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Persona que recibe</label>
+                  <label className={`block text-sm font-black uppercase tracking-widest ${hasErr('operadorId') ? 'text-red-600' : 'text-slate-500'}`}>
+                    Persona que recibe{hasErr('operadorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                  </label>
                   <button
                     onClick={() => { setNuevoEmpleadoData({ ...nuevoEmpleadoData, empresaId: datosEntrega.empresa || 'MPF' }); setShowModalEmpleado(true); }}
                     className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-xl shadow-lg hover:bg-blue-500 transition-all flex-shrink-0"
@@ -218,12 +239,16 @@ export default function EntregaStep({
                     placeholder="Buscar nombre o RUT..."
                     value={searchOperador}
                     onChange={(e) => setSearchOperador(e.target.value)}
-                    className="w-full pl-10 pr-5 py-3 bg-white border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-medium text-sm uppercase tracking-wide"
+                    className={`w-full pl-10 pr-5 py-3 bg-white border-2 rounded-2xl focus:border-blue-500 font-medium text-sm uppercase tracking-wide ${hasErr('operadorId') ? 'border-red-300' : 'border-slate-200'}`}
                   />
                   <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                 </div>
 
-                {datosEntrega.operadorId ? (() => {
+                {!datosEntrega.empresa ? (
+                  <div className="py-3 px-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 font-bold text-center">
+                    Selecciona primero la empresa receptora
+                  </div>
+                ) : datosEntrega.operadorId ? (() => {
                   const sel = trabajadoresLocales.find(e => e.id === datosEntrega.operadorId);
                   return (
                     <div className="p-4 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-3xl flex items-center gap-4 shadow-xl shadow-blue-200 animate-in zoom-in duration-300">
@@ -285,7 +310,7 @@ export default function EntregaStep({
               />
             </div>
           </div>
-          <div className="space-y-2 opacity-50 pointer-events-none">
+          <div className="hidden sm:block space-y-2 opacity-50 pointer-events-none">
             <label className="block text-sm font-black text-slate-500 uppercase tracking-widest px-1">WhatsApp</label>
             <input type="tel" disabled placeholder="+56 9 XXXX XXXX"
               className="w-full px-4 py-3 bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl text-sm text-slate-400" />
@@ -294,86 +319,113 @@ export default function EntregaStep({
         </div>
 
         {/* Cantidades */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-blue-50/40 p-6 rounded-[2.5rem] border-2 border-blue-100 flex flex-col justify-center text-center">
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Litros Entregados</label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className={`p-3 rounded-2xl border-2 flex flex-col justify-center text-center ${hasErr('cantidadLitros') ? 'bg-red-50/40 border-red-300' : 'bg-blue-50/40 border-blue-100'}`}>
+            <label className={`block text-xs font-black uppercase tracking-widest mb-2 ${hasErr('cantidadLitros') ? 'text-red-600' : 'text-slate-500'}`}>
+              Litros Entregados{hasErr('cantidadLitros') && <span className="ml-1 font-normal normal-case">— requerido</span>}
+            </label>
             <input
-              type="text" required
+              type="text" required inputMode="decimal"
               value={formatMiles(datosEntrega.cantidadLitros)}
               onChange={(e) => {
                 const raw = e.target.value.replace(/\./g, '').replace(',', '.');
                 if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrega({ ...datosEntrega, cantidadLitros: raw });
               }}
-              className="w-full px-4 py-5 bg-white border-2 border-blue-200 rounded-2xl focus:border-blue-500 font-black text-3xl text-blue-700 text-center shadow-inner transition-all"
+              className={`w-full px-3 py-3 bg-white border-2 rounded-xl focus:border-blue-500 font-black text-2xl text-center shadow-inner transition-all ${hasErr('cantidadLitros') ? 'border-red-300 text-red-700' : 'border-blue-200 text-blue-700'}`}
               placeholder="0"
             />
           </div>
-          <div className="bg-slate-50 p-6 rounded-[2.5rem] border-2 border-slate-100 flex flex-col justify-center text-center">
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Horómetro / KM</label>
+          <div className={`p-3 rounded-2xl border-2 flex flex-col justify-center text-center ${hasErr('horometroOdometro') ? 'bg-red-50/40 border-red-300' : 'bg-slate-50 border-slate-100'}`}>
+            <label className={`block text-xs font-black uppercase tracking-widest mb-2 ${hasErr('horometroOdometro') ? 'text-red-600' : 'text-slate-500'}`}>
+              Horómetro / KM{hasErr('horometroOdometro') && <span className="ml-1 font-normal normal-case">— requerido</span>}
+            </label>
             <input
-              type="text"
+              type="text" required inputMode="decimal"
               value={formatMiles(datosEntrega.horometroOdometro)}
               onChange={(e) => {
                 const raw = e.target.value.replace(/\./g, '').replace(',', '.');
                 if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrega({ ...datosEntrega, horometroOdometro: raw });
               }}
-              className="w-full px-4 py-5 bg-white border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-black text-3xl text-slate-700 text-center shadow-inner transition-all"
+              className={`w-full px-3 py-3 bg-white border-2 rounded-xl focus:border-blue-500 font-black text-2xl text-center shadow-inner transition-all ${hasErr('horometroOdometro') ? 'border-red-300 text-red-700' : 'border-slate-200 text-slate-700'}`}
               placeholder="0"
             />
           </div>
         </div>
 
         {/* Foto de identificación */}
-        <div className="flex flex-col items-center justify-center py-12 px-10 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200 text-center hover:bg-slate-100/50 transition-colors">
+        <div className={`flex flex-col items-center justify-center py-4 px-4 rounded-2xl border-2 border-dashed text-center hover:bg-slate-100/50 transition-colors ${hasErr('firmaReceptor') ? 'bg-red-50/30 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
           {firmaReceptor ? (
             <div className="relative group/photo inline-block">
-              <img src={firmaReceptor} alt="Identificación" className="w-72 h-48 object-cover rounded-2xl border-4 border-white shadow-xl" />
+              <img src={firmaReceptor} alt="Identificación" className="w-56 h-36 object-cover rounded-2xl border-4 border-white shadow-xl" />
               <button
                 type="button"
                 onClick={() => { setFirmaReceptor(null); setShowModalCamaraReceptor(true); }}
                 className="absolute inset-0 bg-black/60 opacity-0 group-hover/photo:opacity-100 transition-opacity rounded-2xl flex flex-col items-center justify-center gap-2 backdrop-blur-sm"
               >
                 <RefreshIcon />
-                <span className="text-xs font-black text-white uppercase tracking-widest">Cambiar Fotografía</span>
+                <span className="text-xs font-black text-white uppercase tracking-widest">Cambiar</span>
               </button>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-4">
-              <button
-                type="button"
-                onClick={() => setShowModalCamaraReceptor(true)}
-                className="flex flex-col items-center gap-4 group transition-all active:scale-95"
-              >
-                <div className="w-24 h-24 bg-blue-600 group-hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-100 transition-all">
-                  <CameraIcon />
-                </div>
-                <span className="text-sm font-black text-slate-500 uppercase tracking-widest group-hover:text-blue-600 transition-colors">
-                  Foto de identificación del receptor {isReportesView && <span className="text-xs text-slate-400 font-bold lowercase tracking-normal"> (opcional)</span>}
-                </span>
-              </button>
-              <p className="text-xs font-semibold text-slate-400 max-w-md">
-                Haz click para abrir la cámara o pega una imagen desde tu portapapeles usando <kbd className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-600 text-[10px] font-mono">Ctrl + V</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-200 rounded text-slate-600 text-[10px] font-mono">Cmd + V</kbd>
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowModalCamaraReceptor(true)}
+              className="flex items-center gap-3 group transition-all active:scale-95 w-full"
+            >
+              <div className="w-14 h-14 bg-blue-600 group-hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg shadow-blue-100 transition-all flex-shrink-0">
+                <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <span className={`text-sm font-black uppercase tracking-wide group-hover:text-blue-600 transition-colors text-left ${hasErr('firmaReceptor') ? 'text-red-600' : 'text-slate-500'}`}>
+                Foto ID del receptor{isReportesView ? <span className="text-xs font-normal lowercase tracking-normal ml-1">(opcional)</span> : hasErr('firmaReceptor') ? <span className="ml-1 font-normal normal-case text-xs">— requerido</span> : <span className="text-red-500 ml-1">*</span>}
+              </span>
+            </button>
           )}
         </div>
       </div>
 
       {/* Sticky footer */}
-      <div className="sticky bottom-0 p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 flex gap-4 mt-4">
-        <button
-          onClick={() => setPaso(2)}
-          className="flex-1 px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-sm tracking-wide"
-        >
-          ← Regresar
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className="flex-[2] px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-2xl transition-all uppercase text-sm tracking-wide shadow-xl shadow-blue-100 disabled:grayscale disabled:opacity-50 active:scale-95"
-        >
-          {loading ? 'Guardando...' : '✓ Finalizar Entrega'}
-        </button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-md border-t border-slate-100">
+        {validationErrors.length > 0 && (
+          <div className="mx-4 mt-3 bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-2">
+            <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="font-black text-red-700 text-xs uppercase tracking-wider">Faltan campos requeridos</p>
+              <ul className="mt-1 space-y-0.5">
+                {validationErrors.map(key => (
+                  <li key={key} className="text-sm text-red-600 font-bold flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+                    {FIELD_LABELS[key] || key}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button onClick={() => setValidationErrors([])} className="text-red-400 hover:text-red-600 font-black text-lg leading-none">×</button>
+          </div>
+        )}
+        <div className="p-4 flex gap-4">
+          <PillButton
+            variant="outline"
+            onClick={() => setPaso(2)}
+            className="flex-1"
+          >
+            ← Regresar
+          </PillButton>
+          <PillButton
+            variant="primary"
+            onClick={handleSubmitWithValidation}
+            disabled={loading}
+            isLoading={loading}
+            loadingText="Guardando..."
+            className="flex-[2]"
+          >
+            ✓ Finalizar Entrega
+          </PillButton>
+        </div>
       </div>
     </div>
   );

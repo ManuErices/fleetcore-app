@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
@@ -10,7 +10,7 @@ import * as Modals from './modals';
 
 const { MESES, TIPOS_ANEXO } = Shared;
 const { calcularAntiguedad, calcularLiquidacion, alertaVencimiento, labelPeriodo, exportarAsistenciaCSV } = Calc;
-const { generarPDFContrato } = PDFs;
+const { generarPDFContrato, generarPDFLiquidacion, generarPDFAnexo } = PDFs;
 const { TrabajadorModal, AusenciaModal } = Modals;
 
 // ── UI primitives ─────────────────────────────────────────────────────────────
@@ -115,7 +115,10 @@ export default function TrabajadorPerfil() {
   const [liquidaciones, setLiqs]      = useState([]);
   const [anexos, setAnexos]           = useState([]);
   const [ausencias, setAusencias]     = useState([]);
+  const [asistencia, setAsistencia]   = useState([]);
   const [loading, setLoading]         = useState(true);
+  const [pdfPreview, setPdfPreview]   = useState(null); // { url, filename }
+  const iframeRef                     = useRef(null);
   const [editModal, setEditModal]     = useState(false);
   const [showAusenciaModal, setShowAusenciaModal] = useState(false);
   const [editingAusencia, setEditingAusencia]     = useState(null);
@@ -290,7 +293,7 @@ export default function TrabajadorPerfil() {
                   Editar ficha
                 </LeftBtn>
                 {contratoVigente && (
-                  <LeftBtn onClick={() => generarPDFContrato(contratoVigente, trabajador)}>
+                  <LeftBtn onClick={() => setPdfPreview({ url: generarPDFContrato(contratoVigente, trabajador, { preview: true }), filename: 'Contrato de Trabajo' })}>
                     {Ico.doc}
                     Contrato
                   </LeftBtn>
@@ -490,7 +493,7 @@ export default function TrabajadorPerfil() {
                               {c.estado || 'vigente'}
                             </span>
                             <button
-                              onClick={() => generarPDFContrato(c, trabajador)}
+                              onClick={() => setPdfPreview({ url: generarPDFContrato(c, trabajador, { preview: true }), filename: 'Contrato de Trabajo' })}
                               className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors"
                             >
                               {Ico.dl} PDF
@@ -832,6 +835,14 @@ export default function TrabajadorPerfil() {
                               }`}>
                                 {l.estado || 'pendiente'}
                               </span>
+                              {c && (
+                                <button
+                                  onClick={() => setPdfPreview({ url: generarPDFLiquidacion(l, trabajador, c, { preview: true }), filename: `Liquidación ${labelPeriodo(l)}` })}
+                                  className="flex items-center gap-1 px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-colors"
+                                >
+                                  {Ico.dl} Ver
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -852,11 +863,23 @@ export default function TrabajadorPerfil() {
                               <p className="text-sm font-semibold text-slate-700">{tipoLabel}</p>
                               <p className="text-xs text-slate-400 mt-0.5">{a.fechaAnexo || '—'}</p>
                             </div>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              a.estado === 'anulado' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'
-                            }`}>
-                              {a.estado === 'anulado' ? 'Anulado' : 'Vigente'}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                a.estado === 'anulado' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'
+                              }`}>
+                                {a.estado === 'anulado' ? 'Anulado' : 'Vigente'}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const c = contratos.find(c => c.id === a.contratoId) || contratoVigente;
+                                  const nro = anexos.filter(x => x.contratoId === a.contratoId).length - i;
+                                  setPdfPreview({ url: generarPDFAnexo(a, c, trabajador, nro, { preview: true }), filename: `Anexo ${tipoLabel}` });
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-colors"
+                              >
+                                {Ico.dl} Ver
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -882,6 +905,42 @@ export default function TrabajadorPerfil() {
             load();
           }}
         />
+      )}
+
+      {/* PDF viewer modal */}
+      {pdfPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col" style={{ height: '90vh' }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 flex-shrink-0">
+              <span className="font-semibold text-slate-800 text-sm truncate">{pdfPreview.filename}</span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => iframeRef.current?.contentWindow?.print()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Guardar PDF
+                </button>
+                <button
+                  onClick={() => { URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-400 hover:text-slate-800"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <iframe
+              ref={iframeRef}
+              src={pdfPreview.url}
+              className="flex-1 w-full rounded-b-2xl"
+              title={pdfPreview.filename}
+            />
+          </div>
+        </div>
       )}
 
       {/* Ausencia modal */}

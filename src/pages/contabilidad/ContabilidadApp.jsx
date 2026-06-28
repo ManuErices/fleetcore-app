@@ -85,7 +85,7 @@ function AlertasBadge() {
 }
 
 // ─── Inner app ────────────────────────────────────────────────────────────────
-function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout }) {
+function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout, onAdminPanel, onAdminEmpresaPanel }) {
   const [activeView, setActiveView] = useState("plan");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { empresa } = useEmpresa();
@@ -144,6 +144,8 @@ function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout }) {
             userRole={userRole}
             onLogout={onLogout}
             onBackToSelector={onBackToSelector}
+            onAdminPanel={onAdminPanel}
+            onAdminEmpresaPanel={onAdminEmpresaPanel}
             placement="top-left"
           />
         </div>
@@ -212,6 +214,8 @@ function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout }) {
                 userRole={userRole}
                 onLogout={onLogout}
                 onBackToSelector={onBackToSelector}
+                onAdminPanel={onAdminPanel}
+                onAdminEmpresaPanel={onAdminEmpresaPanel}
               />
             </div>
           </div>

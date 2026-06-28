@@ -5,7 +5,7 @@ import ReporteCombustible from "./ReporteCombustible";
 import ReporteWorkFleet from "./ReporteWorkFleet";
 import AdminPanel from "./AdminPanel";
 
-export default function ReportesShell({ user, userRole, onLogout, onBackToSelector }) {
+export default function ReportesShell({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   const [activeView, setActiveView] = useState("combustible");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { empresa } = useEmpresa();
@@ -175,6 +175,8 @@ export default function ReportesShell({ user, userRole, onLogout, onBackToSelect
                 userRole={userRole}
                 onLogout={onLogout}
                 onBackToSelector={onBackToSelector}
+                onAdminPanel={onAdminPanel}
+                onAdminEmpresaPanel={onAdminEmpresaPanel}
               />
             )}
           </div>
@@ -184,7 +186,7 @@ export default function ReportesShell({ user, userRole, onLogout, onBackToSelect
         <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 w-full max-w-[1500px] mx-auto animate-fadeIn">
           {activeView === "combustible" && <ReporteCombustible />}
           {activeView === "maquinaria" && <ReporteWorkFleet />}
-          {activeView === "admin" && isAdmin && <AdminPanel />}
+          {activeView === "admin" && isAdmin && <AdminPanel hideSystem={true} />}
         </main>
       </div>
     </div>
