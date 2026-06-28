@@ -499,7 +499,7 @@ export default function Capacitacion({ user, onComplete }) {
   const entradaVideos = videos.filter(v => !v.subcategoria || v.subcategoria === "entrada");
   const salidaVideos = videos.filter(v => v.subcategoria === "salida");
 
-  const isDev = window.location.hostname === 'localhost' || user.email?.includes('concentra') || user.email?.includes('saer') || user.email?.includes('felipe');
+  const isDev = import.meta.env.DEV;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between py-6 px-4 sm:px-6 relative overflow-hidden">
@@ -889,7 +889,7 @@ export default function Capacitacion({ user, onComplete }) {
 
               <div className="space-y-4">
                 {/* SIMULACION 1: RECEPCION */}
-                <div className={`p-6 rounded-3xl border-2 flex items-center justify-between gap-4 transition-all ${simEntradaCompleted
+                <div className={`p-5 sm:p-6 rounded-3xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${simEntradaCompleted
                   ? 'bg-emerald-50/50 border-emerald-200'
                   : 'bg-slate-50 border-slate-100 hover:border-slate-200'
                   }`}>
@@ -898,34 +898,36 @@ export default function Capacitacion({ user, onComplete }) {
                       }`}>
                       {simEntradaCompleted ? '✓' : '⬇️'}
                     </div>
-                    <div>
-                      <h4 className="font-black text-slate-900 text-base flex items-center gap-2">
+                    <div className="space-y-1">
+                      <h4 className="font-black text-slate-900 text-base sm:text-lg flex flex-wrap items-center gap-2">
                         1. Simular Recepción (Entrada)
                         {simEntradaCompleted && (
-                          <span className="text-xs font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          <span className="text-[10px] sm:text-xs font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider">
                             Completado
                           </span>
                         )}
                       </h4>
-                      <p className="text-xs sm:text-sm text-slate-500 mt-1 leading-relaxed font-semibold">
+                      <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
                         Registra el ingreso de combustible desde una estación o camión aljibe emisor.
                       </p>
                     </div>
                   </div>
-                  <PillButton
-                    onClick={() => {
-                      setSimFlow("entrada");
-                      setSimStep(2);
-                      setStep(7);
-                    }}
-                    variant={simEntradaCompleted ? "outline" : "primary"}
-                    className="flex-shrink-0"
-                    title={simEntradaCompleted ? "Rehacer" : "Iniciar"}
-                  />
+                  <div className="w-full sm:w-auto flex justify-end">
+                    <PillButton
+                      onClick={() => {
+                        setSimFlow("entrada");
+                        setSimStep(2);
+                        setStep(7);
+                      }}
+                      variant={simEntradaCompleted ? "outline" : "primary"}
+                      className="w-full sm:w-auto"
+                      title={simEntradaCompleted ? "Rehacer" : "Iniciar"}
+                    />
+                  </div>
                 </div>
 
                 {/* SIMULACION 2: DESPACHO */}
-                <div className={`p-6 rounded-3xl border-2 flex items-center justify-between gap-4 transition-all ${simSalidaCompleted
+                <div className={`p-5 sm:p-6 rounded-3xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${simSalidaCompleted
                   ? 'bg-emerald-50/50 border-emerald-200'
                   : 'bg-slate-50 border-slate-100 hover:border-slate-200'
                   }`}>
@@ -934,30 +936,32 @@ export default function Capacitacion({ user, onComplete }) {
                       }`}>
                       {simSalidaCompleted ? '✓' : '➡️'}
                     </div>
-                    <div>
-                      <h4 className="font-black text-slate-900 text-base flex items-center gap-2">
+                    <div className="space-y-1">
+                      <h4 className="font-black text-slate-900 text-base sm:text-lg flex flex-wrap items-center gap-2">
                         2. Simular Despacho (Salida)
                         {simSalidaCompleted && (
-                          <span className="text-xs font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          <span className="text-[10px] sm:text-xs font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wider">
                             Completado
                           </span>
                         )}
                       </h4>
-                      <p className="text-xs sm:text-sm text-slate-500 mt-1 leading-relaxed font-semibold">
+                      <p className="text-xs sm:text-sm text-slate-500 leading-relaxed font-semibold">
                         Registra la entrega de combustible a una máquina con firma del operario receptor.
                       </p>
                     </div>
                   </div>
-                  <PillButton
-                    onClick={() => {
-                      setSimFlow("entrega");
-                      setSimStep(2);
-                      setStep(7);
-                    }}
-                    variant={simSalidaCompleted ? "outline" : "primary"}
-                    className="flex-shrink-0"
-                    title={simSalidaCompleted ? "Rehacer" : "Iniciar"}
-                  />
+                  <div className="w-full sm:w-auto flex justify-end">
+                    <PillButton
+                      onClick={() => {
+                        setSimFlow("entrega");
+                        setSimStep(2);
+                        setStep(7);
+                      }}
+                      variant={simSalidaCompleted ? "outline" : "primary"}
+                      className="w-full sm:w-auto"
+                      title={simSalidaCompleted ? "Rehacer" : "Iniciar"}
+                    />
+                  </div>
                 </div>
               </div>
 
