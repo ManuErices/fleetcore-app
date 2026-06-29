@@ -78,7 +78,9 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
   const canAccessFinanzas = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
   const canAccessContabilidad = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
   const canAccessDocumentos = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || (isRevisorRole && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
-  const canAccessWorkFleetM = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'operador' || userRole === 'administrativo') && canAccess('workfleet'));
+  // Operadores siempre tienen acceso a WorkFleet-M si están asignados a una empresa
+  // (el chequeo de plan aplica solo a nivel empresa/admin, no a usuarios individuales)
+  const canAccessWorkFleetM = isSuperAdmin || userRole === 'operador' || (isAdminContrato && canAccess('workfleet')) || (userRole === 'administrativo' && canAccess('workfleet'));
 
   // Razón de bloqueo para mostrar el mensaje correcto
   const blockReason = (moduleId, roleOk) => {

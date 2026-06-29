@@ -4,7 +4,7 @@
 // ============================================================
 
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, collection, query, where, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDoc, getDocs, limit } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -77,14 +77,25 @@ export function usePlan() {
         return;
       }
 
-      // 2. Escuchar la suscripción directamente por empresaId
+      // 2. Escuchar la suscripción directamente por empresaId (doc ID)
       const subRef = doc(db, 'subscriptions', empresaId);
-      unsubSubscription = onSnapshot(subRef, (subSnap) => {
+      unsubSubscription = onSnapshot(subRef, async (subSnap) => {
         if (subSnap.exists()) {
           setSubscription(subSnap.data());
           setLoading(false);
         } else {
-          // Fallback a subscriptions/{user.uid}
+          // Fallback 1: query por campo empresaId (cuando el doc fue creado con UID del admin)
+          try {
+            const q = query(collection(db, 'subscriptions'), where('empresaId', '==', empresaId), limit(1));
+            const qSnap = await getDocs(q);
+            if (!qSnap.empty) {
+              setSubscription(qSnap.docs[0].data());
+              setLoading(false);
+              return;
+            }
+          } catch { /* ignorar errores de permisos */ }
+
+          // Fallback 2: subscriptions/{user.uid}
           const fallbackRef = doc(db, 'subscriptions', user.uid);
           getDoc(fallbackRef).then((fallbackSnap) => {
             if (fallbackSnap.exists()) {

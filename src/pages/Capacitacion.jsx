@@ -17,6 +17,7 @@ import MaquinaModal from "./combustible/modals/MaquinaModal";
 import EmpleadoModal from "./combustible/modals/EmpleadoModal";
 import ProyectoModal from "./combustible/modals/ProyectoModal";
 import EstacionModal from "./combustible/modals/EstacionModal";
+import CameraCapture from "../components/CameraCapture";
 
 const QUIZ_QUESTIONS = [
   {
@@ -143,43 +144,66 @@ export default function Capacitacion({ user, onComplete }) {
   const [simFlow, setSimFlow] = useState(""); // "entrada" | "entrega"
   const [simStep, setSimStep] = useState(2); // Start directly at step 2 (Selection & Control)
 
+  const TODAY = () => new Date().toISOString().split('T')[0];
+
   const [simDatosControl, setSimDatosControl] = useState({
     projectId: '',
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: TODAY(),
     repartidorId: '',
     equipoSurtidorId: '',
-    tipoOrigen: 'interno',
-    origen: '',
-    destinoCarga: 'camion'
+    folio: '',
+    codigo: ''
   });
 
   const [simDatosEntrada, setSimDatosEntrada] = useState({
-    tipoOrigen: 'interno',
     origen: '',
+    tipoOrigen: '',
     destinoCarga: 'camion',
-    litrosRecibidos: '',
-    tipoDocumento: 'guia',
-    nroDocumento: '12345',
-    documentosEstacion: [{ numero: '', cantidad: '', total: '' }],
+    numerosDocumento: [''],
+    numeroDocumento: '',
+    fechaDocumento: TODAY(),
+    cantidad: '',
+    horometroOdometro: '',
+    machineId: '',
+    operadorId: '',
+    receptorNombre: '',
+    maquinaProveedorId: '',
+    operadorProveedorId: '',
     observaciones: '',
+    extraEmails: [],
+    documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
   });
 
   const [simDatosEntrega, setSimDatosEntrega] = useState({
-    receptorId: '',
-    maquinaId: '',
-    litrosEntregados: '',
-    horometroActual: '',
+    empresa: '',
+    fecha: TODAY(),
+    operadorId: '',
+    machineId: '',
+    horometroOdometro: '',
+    cantidadLitros: '',
     observaciones: '',
-    isExternalReceptor: false,
-    externalReceptorName: '',
-    externalReceptorRut: '',
+    extraEmails: []
   });
 
   const [simFirmaReceptor, setSimFirmaReceptor] = useState("");
   const [simSearchOperador, setSimSearchOperador] = useState("");
 
+  const esMPF = (id) => {
+    if (!id) return false;
+    const cleanId = String(id).trim().toLowerCase();
+    if (cleanId === 'mpf' || cleanId === 'emp-2' || cleanId === String(empresaId).toLowerCase()) return true;
+    if (cleanId.includes('mpf') || cleanId.includes('ingenieria civil') || cleanId.includes('ingeniería civil')) return true;
+    const emp = empresasLocal.find(e => e.id === id);
+    if (emp) {
+      const nameLower = emp.nombre.toLowerCase();
+      return nameLower.includes('mpf') || nameLower.includes('ingenieria civil') || nameLower.includes('ingeniería civil');
+    }
+    return false;
+  };
+
   // Modales del simulador
   const [showModalEquipoSurtidor, setShowModalEquipoSurtidor] = useState(false);
+  const [showModalCamaraReceptor, setShowModalCamaraReceptor] = useState(false);
   const [showModalEmpresa, setShowModalEmpresa] = useState(false);
   const [showModalMaquina, setShowModalMaquina] = useState(false);
   const [showModalEmpleado, setShowModalEmpleado] = useState(false);
@@ -606,7 +630,7 @@ export default function Capacitacion({ user, onComplete }) {
               </div>
 
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 text-sm sm:text-base text-blue-900 leading-relaxed font-bold">
-                💡 <strong>Consejo Práctico:</strong> Si hay un solo Servicentro en el sistema, se selecciona solo. Registra el número de <strong>Folio</strong> físico para cuadrar con administración.
+                💡 <strong>Consejo Práctico:</strong> Puede que algunos campos estén pre-seleccionados por el sistema.
               </div>
 
               {/* Videos */}
@@ -676,7 +700,7 @@ export default function Capacitacion({ user, onComplete }) {
                   <div>
                     <h4 className="font-black text-slate-900 text-base">2. Máquina y Operador</h4>
                     <p className="text-sm sm:text-base text-slate-600 mt-1 leading-relaxed font-semibold">
-                      Busca la máquina por patente. Si el receptor o la máquina no figuran en la lista, <strong>¡no te preocupes! Presiona el botón (+) para agregarlos en 5 segundos</strong> sin salir de la pantalla.
+                      Busca la máquina por patente. Si el receptor o la máquina no figuran en la lista, <strong>Presiona el botón (+) para agregarlos en solo unos segundos</strong> sin salir de la pantalla.
                     </p>
                   </div>
                 </div>
@@ -686,7 +710,7 @@ export default function Capacitacion({ user, onComplete }) {
                   <div>
                     <h4 className="font-black text-slate-900 text-base">3. Litros, Horómetro y Firma</h4>
                     <p className="text-sm sm:text-base text-slate-600 mt-1 leading-relaxed font-semibold">
-                      Escribe los litros entregados, el horómetro de la máquina y <strong>haz que el receptor firme con el dedo en la pantalla</strong>.
+                      Escribe los litros entregados, el horómetro de la máquina y <strong> toma una foto del registro en papel o tuya</strong>.
                     </p>
                   </div>
                 </div>
@@ -1054,7 +1078,7 @@ export default function Capacitacion({ user, onComplete }) {
                       isAdmin={false}
                       isReportesView={false}
                       cargarEstaciones={() => { }}
-                      esMPF={(id) => id === 'emp-2'}
+                      esMPF={esMPF}
                       empresasMatch={(e1, e2) => String(e1).toLowerCase() === String(e2).toLowerCase()}
                       resolverNombreEmpresa={(id) => {
                         const emp = empresasLocal.find(e => e.id === id);
@@ -1091,7 +1115,7 @@ export default function Capacitacion({ user, onComplete }) {
                       machinesLocal={machinesLocal}
                       machines={machinesLocal}
                       trabajadoresLocales={trabajadoresLocales}
-                      esMPF={(id) => id === 'emp-2'}
+                      esMPF={esMPF}
                       setShowModalMaquina={setShowModalMaquina}
                       setNuevaMaquinaData={setNuevaMaquinaData}
                       setShowModalEmpleado={setShowModalEmpleado}
@@ -1110,7 +1134,7 @@ export default function Capacitacion({ user, onComplete }) {
                       machinesLocal={machinesLocal}
                       trabajadoresLocales={trabajadoresLocales}
                       empresasLocal={empresasLocal}
-                      esMPF={(id) => id === 'emp-2'}
+                      esMPF={esMPF}
                       empresasMatch={(e1, e2) => String(e1).toLowerCase() === String(e2).toLowerCase()}
                       resolverNombreEmpresa={(id) => {
                         const emp = empresasLocal.find(e => e.id === id);
@@ -1119,7 +1143,7 @@ export default function Capacitacion({ user, onComplete }) {
                       firmaReceptor={simFirmaReceptor}
                       setFirmaReceptor={setSimFirmaReceptor}
                       setShowModalCamaraReceptor={() => {
-                        setSimFirmaReceptor("data:image/png;base64,mocksignature");
+                        setShowModalCamaraReceptor(true);
                       }}
                       setShowModalMaquina={setShowModalMaquina}
                       setNuevaMaquinaData={setNuevaMaquinaData}
@@ -1152,14 +1176,14 @@ export default function Capacitacion({ user, onComplete }) {
                           <div>• Surtidor / Emisor: {simFlow === 'entrada' ? (simDatosEntrada.tipoOrigen === 'estacion' ? 'Estación de Servicio' : 'Interno') : (equiposSurtidores.find(e => e.id === simDatosControl.equipoSurtidorId)?.nombre)}</div>
                           {simFlow === 'entrada' ? (
                             <>
-                              <div>• Litros Recibidos: {simDatosEntrada.litrosRecibidos || '0'} Litros</div>
-                              <div>• Documento de Compra: {simDatosEntrada.tipoDocumento.toUpperCase()} N° {simDatosEntrada.nroDocumento}</div>
+                              <div>• Litros Recibidos: {simDatosEntrada.cantidad || '0'} Litros</div>
+                              <div>• Documento de Compra: {simDatosEntrada.numeroDocumento || 'N/A'}</div>
                             </>
                           ) : (
                             <>
-                              <div>• Maquinaria: {machinesLocal.find(m => m.id === simDatosEntrega.machineId)?.nombre} ({machinesLocal.find(m => m.id === simDatosEntrega.machineId)?.patente})</div>
-                              <div>• Recibe: {simDatosEntrega.isExternalReceptor ? simDatosEntrega.externalReceptorName : (trabajadoresLocales.find(t => t.id === simDatosEntrega.receptorId)?.nombre)}</div>
-                              <div>• Litros Despachados: {simDatosEntrega.litrosEntregados || '0'} Litros</div>
+                              <div>• Maquinaria: {machinesLocal.find(m => m.id === simDatosEntrega.machineId)?.nombre || 'N/A'} ({machinesLocal.find(m => m.id === simDatosEntrega.machineId)?.patente || 'N/A'})</div>
+                              <div>• Recibe: {trabajadoresLocales.find(t => t.id === simDatosEntrega.operadorId)?.nombre || 'Trabajador Externo'}</div>
+                              <div>• Litros Despachados: {simDatosEntrega.cantidadLitros || '0'} Litros</div>
                             </>
                           )}
                         </div>
@@ -1177,32 +1201,39 @@ export default function Capacitacion({ user, onComplete }) {
                           // Reset simulated form states
                           setSimDatosControl({
                             projectId: projects[0]?.id || "",
-                            fecha: new Date().toISOString().split('T')[0],
+                            fecha: TODAY(),
                             repartidorId: surtidoresPersonas[0]?.id || "",
                             equipoSurtidorId: equiposSurtidores[0]?.id || "",
-                            tipoOrigen: 'interno',
-                            origen: '',
-                            destinoCarga: 'camion'
+                            folio: '',
+                            codigo: ''
                           });
                           setSimDatosEntrada({
-                            tipoOrigen: 'interno',
                             origen: '',
+                            tipoOrigen: '',
                             destinoCarga: 'camion',
-                            litrosRecibidos: '',
-                            tipoDocumento: 'guia',
-                            nroDocumento: '12345',
-                            documentosEstacion: [{ numero: '', cantidad: '', total: '' }],
+                            numerosDocumento: [''],
+                            numeroDocumento: '',
+                            fechaDocumento: TODAY(),
+                            cantidad: '',
+                            horometroOdometro: '',
+                            machineId: '',
+                            operadorId: '',
+                            receptorNombre: '',
+                            maquinaProveedorId: '',
+                            operadorProveedorId: '',
                             observaciones: '',
+                            extraEmails: [],
+                            documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
                           });
                           setSimDatosEntrega({
-                            receptorId: '',
-                            maquinaId: '',
-                            litrosEntregados: '',
-                            horometroActual: '',
+                            empresa: '',
+                            fecha: TODAY(),
+                            operadorId: '',
+                            machineId: '',
+                            horometroOdometro: '',
+                            cantidadLitros: '',
                             observaciones: '',
-                            isExternalReceptor: false,
-                            externalReceptorName: '',
-                            externalReceptorRut: '',
+                            extraEmails: []
                           });
                           setSimFirmaReceptor("");
                         }}
@@ -1242,7 +1273,7 @@ export default function Capacitacion({ user, onComplete }) {
                   data={nuevaMaquinaData}
                   setData={setNuevaMaquinaData}
                   empresasLocal={empresasLocal}
-                  esMPF={(id) => id === 'emp-2'}
+                  esMPF={esMPF}
                   onConfirm={handleCrearMaquina}
                   onClose={() => setShowModalMaquina(false)}
                   loading={false}
@@ -1254,7 +1285,7 @@ export default function Capacitacion({ user, onComplete }) {
                   data={nuevoEmpleadoData}
                   setData={setNuevoEmpleadoData}
                   empresasLocal={empresasLocal}
-                  esMPF={(id) => id === 'emp-2'}
+                  esMPF={esMPF}
                   onConfirm={handleCrearEmpleado}
                   onClose={() => setShowModalEmpleado(false)}
                   loading={false}
@@ -1278,6 +1309,18 @@ export default function Capacitacion({ user, onComplete }) {
                   onConfirm={handleCrearEstacion}
                   onClose={() => setShowModalEstacion(false)}
                   loading={false}
+                />
+              )}
+
+              {showModalCamaraReceptor && (
+                <CameraCapture
+                  color="blue"
+                  title="Identificación Receptor"
+                  onCapture={(photo) => {
+                    setSimFirmaReceptor(photo);
+                    setShowModalCamaraReceptor(false);
+                  }}
+                  onClose={() => setShowModalCamaraReceptor(false)}
                 />
               )}
             </div>

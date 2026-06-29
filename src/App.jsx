@@ -520,7 +520,7 @@ export default function App() {
     if (appName === 'fleetcore') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
     } else if (appName === 'workfleet' || appName === 'workfleet-m') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'administrativo' && hasModulo('workfleet')) && canAccess('workfleet')) || (userRole === 'operador' && canAccess('workfleet'));
+      allowed = isSuperAdmin || userRole === 'operador' || (isAdminContrato && canAccess('workfleet')) || (userRole === 'administrativo' && hasModulo('workfleet') && canAccess('workfleet'));
     } else if (appName === 'rrhh') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
     } else if (appName === 'reportes') {
