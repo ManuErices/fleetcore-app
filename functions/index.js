@@ -1247,3 +1247,38 @@ exports.emailDeleteDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KE
   });
 });
 
+exports.deleteAuthUser = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { targetUid, callerUid, empresaId } = req.body;
+      if (!targetUid || !callerUid || !empresaId) {
+        return res.status(400).json({ error: 'Faltan campos requeridos: targetUid, callerUid, empresaId' });
+      }
+
+      // Verificar permisos del caller
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) return res.status(403).json({ error: 'Usuario no autorizado' });
+      const callerData = callerDoc.data();
+      const isSuper = callerData.role === 'superadmin';
+      const isAdmin = callerData.role === 'admin_contrato' && callerData.empresaId === empresaId;
+      if (!isSuper && !isAdmin) return res.status(403).json({ error: 'Sin permisos para eliminar usuarios' });
+
+      // No permitir auto-eliminación
+      if (targetUid === callerUid) return res.status(400).json({ error: 'No puedes eliminarte a ti mismo' });
+
+      await admin.auth().deleteUser(targetUid);
+
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      // Si el usuario ya no existe en Auth, igual consideramos éxito
+      if (err.code === 'auth/user-not-found') {
+        return res.status(200).json({ success: true, note: 'Usuario ya no existía en Auth' });
+      }
+      console.error('deleteAuthUser error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+

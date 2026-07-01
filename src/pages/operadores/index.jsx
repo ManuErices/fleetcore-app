@@ -35,7 +35,7 @@ function SubHeader({ titulo, onBack, accent }) {
 export default function OperadoresApp({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   const [vista, setVista] = useState('loading');
   const [esSurtidor, setEsSurtidor] = useState(false);
-  const [esSoloCombustible, setEsSoloCombustible] = useState(false);
+  const [accesoMaquinaria, setAccesoMaquinaria] = useState(true);
   const [esSuperAdmin, setEsSuperAdmin] = useState(false);
   const nombre = user?.displayName || user?.email?.split('@')[0] || 'Operador';
   const inicial = nombre.charAt(0).toUpperCase();
@@ -51,11 +51,11 @@ export default function OperadoresApp({ user, userRole, onLogout, onBackToSelect
           // Buscar esSurtidor en el doc de usuario O en trabajadores
           if (data.role === 'superadmin') {
             setEsSuperAdmin(true);
-          } else if (data.esSurtidor === true || data.cargo === 'surtidor') {
-            setEsSurtidor(true);
-          } else if (data.cargo === 'solo_combustible') {
-            setEsSoloCombustible(true);
           }
+          if (data.esSurtidor === true || data.cargo === 'surtidor' || data.cargo === 'solo_combustible') {
+            setEsSurtidor(true);
+          }
+          setAccesoMaquinaria(data.accesoMaquinaria !== false);
           setVista('home');
         } else {
           setVista('home');
@@ -168,8 +168,8 @@ export default function OperadoresApp({ user, userRole, onLogout, onBackToSelect
       {/* Tarjetas */}
       <div className="relative z-10 flex-1 px-5 flex flex-col gap-3 pb-12">
 
-        {/* Maquinaria — oculto para surtidores de solo combustible */}
-        {!esSoloCombustible && <button onClick={() => setVista('maquinaria')}
+        {/* Maquinaria */}
+        {accesoMaquinaria && <button onClick={() => setVista('maquinaria')}
           className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-95 relative"
           style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(139,92,246,0.08) 100%)', border: '1.5px solid rgba(99,102,241,0.3)' }}>
           <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
@@ -197,7 +197,7 @@ export default function OperadoresApp({ user, userRole, onLogout, onBackToSelect
         </button>}
 
         {/* Combustible — surtidores y superadmin */}
-        {(esSurtidor || esSoloCombustible || esSuperAdmin) && <button onClick={() => setVista('combustible')}
+        {(esSurtidor || esSuperAdmin) && <button onClick={() => setVista('combustible')}
           className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-95 relative"
           style={{ background: 'linear-gradient(135deg, rgba(251,146,60,0.15) 0%, rgba(245,158,11,0.08) 100%)', border: '1.5px solid rgba(251,146,60,0.3)' }}>
           <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"

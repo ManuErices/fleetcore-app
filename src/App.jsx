@@ -399,6 +399,7 @@ export default function App() {
   const [userRole, setUserRole] = useState('operador');
   const [userModulos, setUserModulos] = useState([]);
   const [userCargo, setUserCargo] = useState('');
+  const [userEsSurtidor, setUserEsSurtidor] = useState(false);
   const [capacitacionAprobada, setCapacitacionAprobada] = useState(false);
 
   const { canAccess, loading: planLoading, subscription } = usePlan();
@@ -430,9 +431,14 @@ export default function App() {
         unsubUserDoc = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
           if (snap.exists()) {
             const data = snap.data();
+            if (data.deleted) {
+              signOut(auth);
+              return;
+            }
             setUserRole(data.role || 'operador');
             setUserModulos(data.modulos || []);
             setUserCargo(data.cargo || '');
+            setUserEsSurtidor(data.esSurtidor || false);
             setCapacitacionAprobada(data.capacitacionAprobada || false);
             if (data.empresaId) {
               setNeedsSetup(false);
@@ -443,6 +449,7 @@ export default function App() {
             setUserRole('operador');
             setUserModulos([]);
             setUserCargo('');
+            setUserEsSurtidor(false);
             setCapacitacionAprobada(false);
             setNeedsSetup(true);
           }
@@ -458,6 +465,7 @@ export default function App() {
                 setUserRole(data.role || 'operador');
                 setUserModulos(data.modulos || []);
                 setUserCargo(data.cargo || '');
+                setUserEsSurtidor(data.esSurtidor || false);
                 setCapacitacionAprobada(data.capacitacionAprobada || false);
                 setNeedsSetup(!data.empresaId);
               } else {
@@ -473,6 +481,7 @@ export default function App() {
           setUserRole('operador');
           setUserModulos([]);
           setUserCargo('');
+          setUserEsSurtidor(false);
           setCapacitacionAprobada(false);
           setNeedsSetup(true);
           setLoading(false);
@@ -611,7 +620,7 @@ export default function App() {
   const isAdminExempt = ['superadmin', 'admin_contrato', 'admin'].includes(userRole);
   const isFuelUser = !isAdminExempt && (
                      (userRole === 'administrativo' && userModulos.includes('reportes')) ||
-                     (userRole === 'operador' && ['surtidor', 'solo_combustible'].includes(userCargo))
+                     (userRole === 'operador' && (userEsSurtidor || ['surtidor', 'solo_combustible'].includes(userCargo)))
                    );
   const needsTraining = user && !needsSetup && isFuelUser && !capacitacionAprobada;
   if (needsTraining) {

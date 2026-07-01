@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
-import { auth, googleProvider } from "../lib/firebase";
+import { signInWithPopup, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { auth, googleProvider, db } from "../lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import jsQR from "jsqr";
 import { calculateTotal } from "../lib/plans";
@@ -124,6 +125,35 @@ export default function LoginPage() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, emailVal, passVal);
       const user = userCredential.user;
+
+      // Verificar tombstone y obtener rol para redirect directo
+      try {
+        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          if (userData.deleted) {
+            await signOut(auth);
+            setError("Email o contraseña incorrectos");
+            return;
+          }
+          if (userData.role === 'operador') {
+            navigate('/workfleet-m');
+            return;
+          }
+          if (userData.role === 'trabajador') {
+            navigate('/trabajador');
+            return;
+          }
+        }
+      } catch (permErr) {
+        if (permErr.code === 'permission-denied') {
+          // App.jsx ya hizo signOut por la race condition (onSnapshot detectó deleted:true primero)
+          setError("Email o contraseña incorrectos");
+          return;
+        }
+        // Otro error (red, etc.) — dejar pasar, App.jsx maneja el estado
+      }
+
       await processPostLoginCheckout(user);
     } catch (err) {
       console.error("Auth error:", err);

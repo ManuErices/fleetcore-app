@@ -43,9 +43,13 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
         // ✅ FIX: cargar empresaId para pasarlo a InviteUserPanel
         if (data.empresaId) setEmpresaId(data.empresaId);
 
-        // Redirección automática solo para trabajador (usa otra ruta)
+        // Redirección automática para roles que tienen app propia
         if (role === 'trabajador') {
           window.location.href = '/trabajador';
+          return;
+        }
+        if (role === 'operador') {
+          window.location.href = '/workfleet-m';
           return;
         }
       } catch {

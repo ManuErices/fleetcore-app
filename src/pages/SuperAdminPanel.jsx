@@ -11,12 +11,14 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { formatRut } from "../utils/formatters";
-import { db } from "../lib/firebase";
+import { db, auth } from "../lib/firebase";
 import {
   collection, getDocs, doc, updateDoc, setDoc, addDoc, deleteDoc,
   serverTimestamp, query, orderBy, where,
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
+
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "firebase/auth";
 
@@ -887,14 +889,19 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     }
     setSaving(usr.id);
     try {
-      // 1. Delete from root
-      await deleteDoc(doc(db, "users", usr.id));
-
-      // 2. Delete from company if empresaId is present
-      if (usr.empresaId) {
-        await deleteDoc(doc(db, "empresas", usr.empresaId, "users", usr.id));
-      }
-      
+      await Promise.all([
+        // Tombstone en vez de deleteDoc: fuerza sign out en el cliente eliminado
+        // y evita que EmpresaSetup lo re-cree via trabajadores
+        setDoc(doc(db, "users", usr.id), { deleted: true, deletedAt: serverTimestamp() }),
+        usr.empresaId
+          ? deleteDoc(doc(db, "empresas", usr.empresaId, "users", usr.id))
+          : Promise.resolve(),
+        fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUid: usr.id, callerUid: auth.currentUser?.uid, empresaId: usr.empresaId || '' }),
+        }).catch(() => {}),
+      ]);
       onRefresh();
     } catch (e) {
       alert("Error al eliminar usuario: " + e.message);
@@ -1210,7 +1217,7 @@ export default function SuperAdminPanel({ onClose }) {
         getDocs(collection(db, "subscriptions")),
       ]);
       setEmpresas(empSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setUsuarios(usrSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setUsuarios(usrSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => !u.deleted));
       setSubscriptions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);

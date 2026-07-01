@@ -559,7 +559,7 @@ function OperadoresSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', password: '', telefono: '', area: '', fechaIngreso: '', estado: 'activo', afp: '', prevision: '', nacionalidad: '' });
+  const [form, setForm] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, accesoMaquinaria: true, email: '', password: '', telefono: '', area: '', fechaIngreso: '', estado: 'activo', afp: '', prevision: '', nacionalidad: '' });
   const [cargoCustom, setCargoCustom] = useState('');
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -573,17 +573,18 @@ function OperadoresSection() {
   const CARGOS_TODOS = [...new Set([...CARGOS_LIST, ...cargosDB.map(c=>c.nombre)])].sort();
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, email: '', password: '' }); setCargoCustom(''); setEditId(null); setModal(true); };
+  const openNew = () => { setForm({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', rut: '', cargo: '', empresa: '', esSurtidor: false, accesoMaquinaria: true, email: '', password: '' }); setCargoCustom(''); setEditId(null); setModal(true); };
   const openEdit = (row) => {
     const cargo = row.cargo || '';
     const isCustom = cargo && !CARGOS_LIST.includes(cargo);
@@ -593,6 +594,7 @@ function OperadoresSection() {
       apellidoMaterno: row.apellidoMaterno || row.nombre?.split(' ').slice(-1)[0] || '',
       rut: row.rut || '', cargo: isCustom ? 'otro' : cargo,
       empresa: row.empresa || '', esSurtidor: row.esSurtidor || false,
+      accesoMaquinaria: row.accesoMaquinaria !== false,
       email: row.email || '', password: row.password || '',
       telefono: row.telefono || '', area: row.area || '',
       fechaIngreso: row.fechaIngreso || '', estado: row.estado || 'activo',
@@ -627,6 +629,7 @@ function OperadoresSection() {
         cargo: cargoFinal,
         empresa: form.empresa.trim(),
         esSurtidor: form.esSurtidor,
+        accesoMaquinaria: form.accesoMaquinaria !== false,
         tipo: form.esSurtidor ? 'GASTO_GENERAL' : 'OPERADOR',
         email:       emailTrim,
         telefono:    form.telefono    || '',
@@ -640,11 +643,12 @@ function OperadoresSection() {
       };
       if (passTrim) p.password = passTrim;
 
+      let trabajadoresDocId = editId;
       if (editId) {
         await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editId), p);
       } else {
-        // Crear en trabajadores
         const newDoc = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
+        trabajadoresDocId = newDoc.id;
       }
 
       // Si tiene email+password, intentar crear o sincronizar cuenta de acceso
@@ -663,6 +667,8 @@ function OperadoresSection() {
             nombre: nombreCompleto,
             rut: rutNorm,
             cargo: cargoFinal,
+            esSurtidor: form.esSurtidor || false,
+            accesoMaquinaria: form.accesoMaquinaria !== false,
             password: passTrim,
             createdAt: serverTimestamp(),
           });
@@ -673,14 +679,24 @@ function OperadoresSection() {
             nombre: nombreCompleto,
             rut: rutNorm,
             cargo: cargoFinal,
+            esSurtidor: form.esSurtidor || false,
+            accesoMaquinaria: form.accesoMaquinaria !== false,
             password: passTrim,
             createdAt: serverTimestamp(),
           });
+          // Escribir portalUid en el doc de trabajadores para que del() pueda tombstonear correctamente
+          if (trabajadoresDocId) {
+            await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', trabajadoresDocId), { portalUid: uid });
+          }
         } catch (authErr) {
           if (authErr.code === 'auth/email-already-in-use') {
             // Si la cuenta de acceso ya existe, buscamos el perfil de usuario para enlazarlo con la empresa
             try {
-              const usersQ = query(collection(db, 'users'), where('email', '==', emailTrim));
+              const usersQ = query(
+                collection(db, 'users'),
+                where('email', '==', emailTrim),
+                where('empresaId', '==', empresaId)
+              );
               const usersSnap = await getDocs(usersQ);
               if (!usersSnap.empty) {
                 const userDoc = usersSnap.docs[0];
@@ -690,6 +706,8 @@ function OperadoresSection() {
                   nombre: nombreCompleto,
                   rut: rutNorm,
                   cargo: cargoFinal,
+                  esSurtidor: form.esSurtidor || false,
+                  accesoMaquinaria: form.accesoMaquinaria !== false,
                   password: passTrim
                 });
                 await setDoc(doc(db, 'empresas', empresaId, 'users', userDoc.id), {
@@ -699,9 +717,14 @@ function OperadoresSection() {
                   nombre: nombreCompleto,
                   rut: rutNorm,
                   cargo: cargoFinal,
+                  esSurtidor: form.esSurtidor || false,
+                  accesoMaquinaria: form.accesoMaquinaria !== false,
                   password: passTrim,
                   createdAt: serverTimestamp()
                 }, { merge: true });
+                if (trabajadoresDocId) {
+                  await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', trabajadoresDocId), { portalUid: userDoc.id });
+                }
               }
             } catch (syncErr) {
               console.error("Error syncing existing user profile:", syncErr);
@@ -712,13 +735,61 @@ function OperadoresSection() {
           }
         }
       }
+
+      // Caso C: editando sin cambiar contraseña — sync esSurtidor y cargo al user doc
+      if (emailTrim && !passTrim && editId) {
+        try {
+          const usersQ = query(
+            collection(db, 'users'),
+            where('email', '==', emailTrim),
+            where('empresaId', '==', empresaId)
+          );
+          const usersSnap = await getDocs(usersQ);
+          if (!usersSnap.empty) {
+            const linkedUser = usersSnap.docs[0];
+            await updateDoc(doc(db, 'users', linkedUser.id), {
+              esSurtidor: form.esSurtidor || false,
+              accesoMaquinaria: form.accesoMaquinaria !== false,
+              cargo: cargoFinal,
+            });
+          }
+        } catch (syncErr) {
+          console.error("Error syncing esSurtidor:", syncErr);
+        }
+      }
+
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try {
+      // Resolver uid: portalUid directo o buscar por email
+      let uid = confirm.portalUid;
+      if (!uid && confirm.email) {
+        try {
+          const q = query(collection(db, 'users'), where('email', '==', confirm.email), where('empresaId', '==', empresaId));
+          const snap = await getDocs(q);
+          if (!snap.empty) uid = snap.docs[0].id;
+        } catch (_) {}
+      }
+
+      const ops = [deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id))];
+      if (uid) {
+        ops.push(
+          setDoc(doc(db, 'users', uid), { deleted: true, deletedAt: serverTimestamp() }),
+          deleteDoc(doc(db, 'empresas', empresaId, 'users', uid)),
+        );
+        fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUid: uid, callerUid: auth.currentUser?.uid, empresaId }),
+        }).catch(() => {});
+      }
+      await Promise.all(ops);
+      load();
+    } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -854,13 +925,25 @@ function OperadoresSection() {
               )}
             </select>
           </Field>
-          <label className="flex items-center gap-3 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl cursor-pointer hover:bg-amber-100 transition-all select-none">
-            <input type="checkbox" checked={form.esSurtidor} onChange={e => setForm({ ...form, esSurtidor: e.target.checked })} className="w-4 h-4 rounded accent-amber-500" />
-            <div>
-              <div className="font-bold text-amber-900 text-sm">Surtidor de Combustible</div>
-              <div className="text-xs text-amber-700 mt-0.5">Este operador puede ser asignado como repartidor de combustible</div>
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Módulos disponibles</p>
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 p-3 bg-indigo-50 border-2 border-indigo-200 rounded-xl cursor-pointer hover:bg-indigo-100 transition-all select-none">
+                <input type="checkbox" checked={form.accesoMaquinaria !== false} onChange={e => setForm({ ...form, accesoMaquinaria: e.target.checked })} className="w-4 h-4 rounded accent-indigo-500" />
+                <div>
+                  <div className="font-bold text-indigo-900 text-sm">Reporte Maquinaria</div>
+                  <div className="text-xs text-indigo-600 mt-0.5">Registro diario de equipos y horómetro</div>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 p-3 bg-amber-50 border-2 border-amber-200 rounded-xl cursor-pointer hover:bg-amber-100 transition-all select-none">
+                <input type="checkbox" checked={form.esSurtidor || false} onChange={e => setForm({ ...form, esSurtidor: e.target.checked })} className="w-4 h-4 rounded accent-amber-500" />
+                <div>
+                  <div className="font-bold text-amber-900 text-sm">Reporte Combustible</div>
+                  <div className="text-xs text-amber-700 mt-0.5">Registro de carga en surtidor</div>
+                </div>
+              </label>
             </div>
-          </label>
+          </div>
 
           <div className="border-t border-slate-200 pt-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Acceso al sistema (WorkFleet-M)</p>
@@ -1170,13 +1253,14 @@ function MaquinasSection() {
   const [catModal, setCatModal] = useState(null); // 'tipo' | 'marca' | 'propietario'
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'machines'), orderBy('name')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1424,13 +1508,14 @@ function ActividadesSection() {
   const tiposMaquinaOpciones = tiposDB.map(t => t.nombre).sort();
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'actividades_disponibles'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1577,13 +1662,14 @@ function SurtidoresSection() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores'));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1754,13 +1840,14 @@ function EmpresasSection() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'empresas_combustible'), orderBy('nombre')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1889,13 +1976,14 @@ function ProyectosSection() {
   const mandantesOpciones = mandantesDB.map(m => m.nombre).sort();
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name')));
       setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch { setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2074,6 +2162,7 @@ function EstacionesSection() {
   const [form, setForm] = useState({ nombre: '', marca: '', region: '', ciudad: '', direccion: '', telefono: '', rut: '' });
 
   const load = useCallback(async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
       const [estSnap, projSnap] = await Promise.all([
@@ -2084,7 +2173,7 @@ function EstacionesSection() {
       setProjects(projSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); setData([]); }
     setLoading(false);
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2610,7 +2699,7 @@ function UsuariosSection() {
   const [modal, setModal] = useState(false);
   const [qr, setQr] = useState(null);
   const [form, setForm] = useState({
-    role: 'operador', nombre: '', rut: '', password: '',
+    role: 'administrativo', nombre: '', rut: '', password: '',
     modulos: [], cargo: '',
   });
   const [editId, setEditId] = useState(null);
@@ -2622,7 +2711,7 @@ function UsuariosSection() {
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, 'empresas', empresaId, 'users'));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.role !== 'operador'));
     } catch (e) {
       console.error("Error loading users:", e);
       setData([]);
@@ -2658,7 +2747,7 @@ function UsuariosSection() {
   };
 
   const getFilteredRolesForAdminPanel = () => {
-    let list = ROLES;
+    let list = ROLES.filter(r => r.value !== 'operador');
     if (userRole === 'admin_contrato') {
       list = list.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
       list = list.map(r => {
@@ -2676,7 +2765,7 @@ function UsuariosSection() {
 
   const openEdit = (row) => {
     setForm({
-      role:     row.role     || 'operador',
+      role:     row.role     || 'administrativo',
       nombre:   row.nombre   || '',
       rut:      row.rut      || '',
       password: row.password || '',
@@ -2732,7 +2821,14 @@ function UsuariosSection() {
     try {
       await Promise.all([
         deleteDoc(doc(db, 'empresas', empresaId, 'users', confirm.id)),
-        deleteDoc(doc(db, 'users', confirm.id)),
+        // Tombstone en vez de deleteDoc: fuerza sign out inmediato en el cliente del usuario eliminado
+        // y evita que EmpresaSetup lo re-cree automáticamente al detectar su email en trabajadores
+        setDoc(doc(db, 'users', confirm.id), { deleted: true, deletedAt: serverTimestamp() }),
+        fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUid: confirm.id, callerUid: auth.currentUser?.uid, empresaId }),
+        }).catch(() => {}),
       ]);
       setConfirm(null); load();
     } catch (e) { alert('Error al eliminar: ' + e.message); }

@@ -300,7 +300,7 @@ service cloud.firestore {
       allow read: if isAuth() && request.auth.uid == uid;
       allow read: if isAuth() && (
                       isSuperAdmin()
-                      || (resource != null && isMandanteAdmin() && resource.data.get('empresaId', null) == userEmpresaId())
+                      || (resource != null && (isAnyAdmin() || isMandanteAdmin()) && resource.data.get('empresaId', null) == userEmpresaId())
                     );
 
       // Permisos de creación

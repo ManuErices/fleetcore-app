@@ -13,8 +13,9 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { db } from "../lib/firebase";
+import { db, auth } from "../lib/firebase";
 import { collection, addDoc, doc, setDoc, getDoc, query, where, getDocs, serverTimestamp, collectionGroup } from "firebase/firestore";
+import { signOut } from "firebase/auth";
 import PhoneInput from "../components/ui/PhoneInput";
 
 export default function EmpresaSetup({ user, onComplete, onLogout }) {
@@ -33,6 +34,14 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
     const checkExistingEmpresa = async () => {
       if (!user?.email) return;
       try {
+        // Verificar si el usuario fue eliminado por un admin (tombstone)
+        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        if (!active) return;
+        if (userSnap.exists() && userSnap.data().deleted) {
+          await signOut(auth);
+          return;
+        }
+
         // 1. Auto-vincular si es un operario registrado por email en la ficha de trabajadores
         const qTrabajador = query(
           collectionGroup(db, "trabajadores"),
@@ -54,6 +63,9 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
             role:      "operador",
             email:     user.email,
             nombre:    trabajadorData.nombre || user.displayName || '',
+            cargo:     trabajadorData.cargo || '',
+            esSurtidor: trabajadorData.esSurtidor || false,
+            accesoMaquinaria: trabajadorData.accesoMaquinaria !== false,
             updatedAt: serverTimestamp(),
           }, { merge: true });
 
@@ -63,6 +75,9 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
             role:      "operador",
             email:     user.email,
             nombre:    trabajadorData.nombre || user.displayName || '',
+            cargo:     trabajadorData.cargo || '',
+            esSurtidor: trabajadorData.esSurtidor || false,
+            accesoMaquinaria: trabajadorData.accesoMaquinaria !== false,
             createdAt: serverTimestamp(),
           }, { merge: true });
 
