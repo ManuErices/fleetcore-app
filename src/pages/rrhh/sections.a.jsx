@@ -13,7 +13,7 @@ const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
-  mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV } = Shared;
+  mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV, PdfPreviewModal } = Shared;
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
@@ -473,6 +473,7 @@ function TrabajadoresSection() {
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('activo');
   const [pagina, setPagina] = useState(1);
+  const [pdfPreview, setPdfPreview] = useState(null);
   const POR_PAGINA = 10;
 
   // Cargar datos relacionados cuando se abre el historial
@@ -728,9 +729,19 @@ function TrabajadoresSection() {
                           <button onClick={() => openHistorial(row)} className="p-1.5 bg-violet-50 hover:bg-violet-100 text-violet-600 rounded-lg transition-colors" title="Ver historial completo">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                           </button>
-                          <button onClick={() => generarPDFContrato(row, row._trabajador)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar contrato PDF">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                          </button>
+                          {(() => {
+                            const c = contratos.find(x => x.trabajadorId === row.id && x.estado === 'vigente');
+                            return (
+                              <button
+                                disabled={!c}
+                                onClick={() => c && setPdfPreview({ url: generarPDFContrato(c, row, { preview: true }), filename: `Contrato — ${nombre}` })}
+                                className={`p-1.5 rounded-lg transition-colors ${c ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600' : 'bg-slate-50 text-slate-300 cursor-not-allowed'}`}
+                                title={c ? 'Previsualizar contrato PDF' : 'Sin contrato vigente'}
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                              </button>
+                            );
+                          })()}
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                           </button>
@@ -766,6 +777,7 @@ function TrabajadoresSection() {
       <HistorialModal isOpen={!!historial} onClose={() => setHistorial(null)}
         trabajador={historial} contratos={hContratos} anexos={hAnexos}
         liquidaciones={hLiquidaciones} finiquitos={hFiniquitos} />
+      <PdfPreviewModal isOpen={!!pdfPreview} onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }} url={pdfPreview?.url} filename={pdfPreview?.filename} />
     </>
   );
 }
@@ -782,6 +794,7 @@ function ContratosSection() {
   const [filtroTipo, setFiltroTipo] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('vigente');
   const [pagina, setPagina] = useState(1);
+  const [pdfPreview, setPdfPreview] = useState(null);
   const POR_PAGINA = 10;
 
   const load = useCallback(async () => {
@@ -998,7 +1011,7 @@ function ContratosSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => generarPDFContrato(row, row._trabajador)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar contrato PDF">
+                          <button onClick={() => setPdfPreview({ url: generarPDFContrato(row, row._trabajador, { preview: true }), filename: `Contrato — ${nombre}` })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Previsualizar contrato PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </button>
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
@@ -1048,6 +1061,7 @@ function ContratosSection() {
           </div>
         </div>
       )}
+      <PdfPreviewModal isOpen={!!pdfPreview} onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }} url={pdfPreview?.url} filename={pdfPreview?.filename} />
     </>
   );
 }

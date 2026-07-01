@@ -11,7 +11,7 @@ const {
   inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, IMM_2024,
   TASAS, TASAS_AFP, TIPOS_ANEXO, ESTADOS_DIA, UTM_DEFAULT, COLORES_AREA,
-  REGIONES_COMUNAS, REGIONES,
+  REGIONES_COMUNAS, REGIONES, PdfPreviewModal,
 } = Shared;
 
 const {
@@ -1820,6 +1820,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [tab, setTab] = useState('contratos');
+  const [pdfPreview, setPdfPreview] = useState(null);
   // Documentos adjuntos
   const [documentos,     setDocumentos]     = useState([]);
   const [loadingDocs,    setLoadingDocs]    = useState(false);
@@ -1927,7 +1928,8 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
   ];
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose}
+    <>
+      <Modal isOpen={isOpen} onClose={onClose}
       title={`Historial — ${trabajador.nombre} ${trabajador.apellidoPaterno}`}
       subtitle={`RUT ${trabajador.rut} · ${anios}a ${meses}m de antigüedad`}
       maxWidth="max-w-3xl">
@@ -1978,7 +1980,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-700">{fmt(c.sueldoBase)}</span>
-                      <button onClick={() => generarPDFContrato(c, trabajador)}
+                      <button onClick={() => setPdfPreview({ url: generarPDFContrato(c, trabajador, { preview: true }), filename: 'Contrato de Trabajo' })}
                         className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF contrato">
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                       </button>
@@ -2014,7 +2016,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
                           </a>
                         ) : (
-                          <button onClick={() => generarPDFAnexo(a, contratoA, trabajador, misAnexos.length - i)}
+                          <button onClick={() => setPdfPreview({ url: generarPDFAnexo(a, contratoA, trabajador, misAnexos.length - i, { preview: true }), filename: `Anexo — ${tipoLabel}` })}
                             className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF anexo">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                           </button>
@@ -2047,7 +2049,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                           {l.estado || 'pendiente'}
                         </span>
                         <span className="text-sm font-black text-emerald-600">{calc ? fmt(calc.liquido) : '—'}</span>
-                        {c && <button onClick={() => generarPDFLiquidacion(l, c, trabajador)}
+                        {c && <button onClick={() => setPdfPreview({ url: generarPDFLiquidacion(l, trabajador, c, { preview: true }), filename: `Liquidación — ${labelPeriodo(l)}` })}
                           className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF liquidación">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                         </button>}
@@ -2080,7 +2082,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                       <span className="text-xs font-bold text-slate-600">{causalLabel}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-black text-emerald-600">{calcF ? fmt(calcF.totalFiniquito) : '—'}</span>
-                        <button onClick={() => generarPDFFiniquito(f, trabajador, contratoF)}
+                        <button onClick={() => setPdfPreview({ url: generarPDFFiniquito(f, trabajador, contratoF, { preview: true }), filename: `Finiquito — ${trabajador.nombre} ${trabajador.apellidoPaterno}` })}
                           className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF finiquito">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                         </button>
@@ -2166,7 +2168,9 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
 
         </div>
       </div>
-    </Modal>
+      </Modal>
+      <PdfPreviewModal isOpen={!!pdfPreview} onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }} url={pdfPreview?.url} filename={pdfPreview?.filename} />
+    </>
   );
 }
 

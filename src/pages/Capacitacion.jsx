@@ -112,16 +112,17 @@ const QUIZ_QUESTIONS = [
 
 function getEmbedUrl(url) {
   if (!url) return "";
-  if (url.includes("youtube.com/embed/")) return url;
-  if (url.includes("youtube.com/watch?v=")) {
-    return url.replace("watch?v=", "embed/");
+  const trimmed = url.trim();
+  if (trimmed.includes("youtube.com/embed/")) {
+    return trimmed;
   }
-  if (url.includes("youtu.be/")) {
-    const parts = url.split("/");
-    const id = parts[parts.length - 1];
-    return `https://www.youtube.com/embed/${id}`;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([^#\&\?]*).*/;
+  const match = trimmed.match(regExp);
+  if (match && match[2].length === 11) {
+    const videoId = match[2];
+    return `https://www.youtube.com/embed/${videoId}`;
   }
-  return url;
+  return "";
 }
 
 export default function Capacitacion({ user, onComplete }) {
@@ -647,14 +648,22 @@ export default function Capacitacion({ user, onComplete }) {
                         <h4 className="font-extrabold text-slate-900 text-sm">{vid.titulo}</h4>
                         {vid.descripcion && <p className="text-xs text-slate-500 font-medium">{vid.descripcion}</p>}
                         <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-200 mt-2">
-                          <iframe
-                            className="w-full h-full"
-                            src={getEmbedUrl(vid.url)}
-                            title={vid.titulo}
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
+                          {getEmbedUrl(vid.url) ? (
+                            <iframe
+                              className="w-full h-full"
+                              src={getEmbedUrl(vid.url)}
+                              title={vid.titulo}
+                              frameBorder="0"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-400 p-4 text-center">
+                              <span className="text-2xl mb-1">⚠️</span>
+                              <p className="text-xs font-black text-slate-300">Enlace de video no válido</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">El administrador debe configurar un enlace válido de YouTube (ej: https://youtu.be/...)</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -730,14 +739,22 @@ export default function Capacitacion({ user, onComplete }) {
                         <h4 className="font-extrabold text-slate-900 text-sm">{vid.titulo}</h4>
                         {vid.descripcion && <p className="text-xs text-slate-500 font-medium">{vid.descripcion}</p>}
                         <div className="aspect-video w-full rounded-xl overflow-hidden bg-black border border-slate-200 mt-2">
-                          <iframe
-                            className="w-full h-full"
-                            src={getEmbedUrl(vid.url)}
-                            title={vid.titulo}
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
+                          {getEmbedUrl(vid.url) ? (
+                            <iframe
+                              className="w-full h-full"
+                              src={getEmbedUrl(vid.url)}
+                              title={vid.titulo}
+                              frameBorder="0"
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-400 p-4 text-center">
+                              <span className="text-2xl mb-1">⚠️</span>
+                              <p className="text-xs font-black text-slate-300">Enlace de video no válido</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">El administrador debe configurar un enlace válido de YouTube (ej: https://youtu.be/...)</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}

@@ -645,39 +645,69 @@ function OperadoresSection() {
       } else {
         // Crear en trabajadores
         const newDoc = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
-        // Si tiene email+password, crear cuenta de acceso via auth secundaria
-        if (emailTrim && passTrim) {
-          try {
-            const secondaryApp = initializeApp(firebaseConfig, `op-account-${Date.now()}`);
-            const secondaryAuth = getAuth(secondaryApp);
-            await setPersistence(secondaryAuth, inMemoryPersistence);
-            const cred = await createUserWithEmailAndPassword(secondaryAuth, emailTrim, passTrim);
-            const uid = cred.user.uid;
-            await firebaseSignOut(secondaryAuth);
-            await setDoc(doc(db, 'users', uid), {
-              empresaId,
-              role: 'operador',
-              email: emailTrim,
-              nombre: nombreCompleto,
-              rut: rutNorm,
-              cargo: cargoFinal,
-              password: passTrim,
-              createdAt: serverTimestamp(),
-            });
-            await setDoc(doc(db, 'empresas', empresaId, 'users', uid), {
-              empresaId,
-              role: 'operador',
-              email: emailTrim,
-              nombre: nombreCompleto,
-              rut: rutNorm,
-              cargo: cargoFinal,
-              password: passTrim,
-              createdAt: serverTimestamp(),
-            });
-          } catch (authErr) {
-            const msg = authErr.code === 'auth/email-already-in-use'
-              ? 'El email ya tiene una cuenta registrada. El operador fue guardado sin cuenta de acceso.'
-              : `Operador creado, pero error al crear cuenta de acceso: ${authErr.message}`;
+      }
+
+      // Si tiene email+password, intentar crear o sincronizar cuenta de acceso
+      if (emailTrim && passTrim) {
+        try {
+          const secondaryApp = initializeApp(firebaseConfig, `op-account-${Date.now()}`);
+          const secondaryAuth = getAuth(secondaryApp);
+          await setPersistence(secondaryAuth, inMemoryPersistence);
+          const cred = await createUserWithEmailAndPassword(secondaryAuth, emailTrim, passTrim);
+          const uid = cred.user.uid;
+          await firebaseSignOut(secondaryAuth);
+          await setDoc(doc(db, 'users', uid), {
+            empresaId,
+            role: 'operador',
+            email: emailTrim,
+            nombre: nombreCompleto,
+            rut: rutNorm,
+            cargo: cargoFinal,
+            password: passTrim,
+            createdAt: serverTimestamp(),
+          });
+          await setDoc(doc(db, 'empresas', empresaId, 'users', uid), {
+            empresaId,
+            role: 'operador',
+            email: emailTrim,
+            nombre: nombreCompleto,
+            rut: rutNorm,
+            cargo: cargoFinal,
+            password: passTrim,
+            createdAt: serverTimestamp(),
+          });
+        } catch (authErr) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            // Si la cuenta de acceso ya existe, buscamos el perfil de usuario para enlazarlo con la empresa
+            try {
+              const usersQ = query(collection(db, 'users'), where('email', '==', emailTrim));
+              const usersSnap = await getDocs(usersQ);
+              if (!usersSnap.empty) {
+                const userDoc = usersSnap.docs[0];
+                await updateDoc(doc(db, 'users', userDoc.id), {
+                  empresaId,
+                  role: 'operador',
+                  nombre: nombreCompleto,
+                  rut: rutNorm,
+                  cargo: cargoFinal,
+                  password: passTrim
+                });
+                await setDoc(doc(db, 'empresas', empresaId, 'users', userDoc.id), {
+                  empresaId,
+                  role: 'operador',
+                  email: emailTrim,
+                  nombre: nombreCompleto,
+                  rut: rutNorm,
+                  cargo: cargoFinal,
+                  password: passTrim,
+                  createdAt: serverTimestamp()
+                }, { merge: true });
+              }
+            } catch (syncErr) {
+              console.error("Error syncing existing user profile:", syncErr);
+            }
+          } else {
+            const msg = `Operador guardado, pero ocurrió un error al crear la cuenta de acceso: ${authErr.message}`;
             alert(msg);
           }
         }
@@ -2867,16 +2897,14 @@ function UsuariosSection() {
 // ─────────────────────────────────────────────────────────────
 function getEmbedUrl(url) {
   if (!url) return "";
-  if (url.includes("youtube.com/embed/")) return url;
-  if (url.includes("youtube.com/watch?v=")) {
-    return url.replace("watch?v=", "embed/");
+  const trimmed = url.trim();
+  const regExp = /^.*(youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=|shorts\/)([^#&?]*).*/;
+  const match = trimmed.match(regExp);
+  if (match && match[2].length === 11) {
+    return `https://www.youtube.com/embed/${match[2]}`;
   }
-  if (url.includes("youtu.be/")) {
-    const parts = url.split("/");
-    const id = parts[parts.length - 1];
-    return `https://www.youtube.com/embed/${id}`;
-  }
-  return url;
+  if (trimmed.includes("youtube.com/embed/")) return trimmed;
+  return "";
 }
 
 function CapacitacionesSection() {
@@ -3067,14 +3095,22 @@ function CapacitacionesSection() {
                 
                 {/* Reproductor de Video */}
                 <div className="aspect-video bg-black w-full overflow-hidden relative group">
-                  <iframe
-                    className="w-full h-full"
-                    src={getEmbedUrl(vid.url)}
-                    title={vid.titulo}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+                  {getEmbedUrl(vid.url) ? (
+                    <iframe
+                      className="w-full h-full"
+                      src={getEmbedUrl(vid.url)}
+                      title={vid.titulo}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-400 p-4 text-center">
+                      <span className="text-2xl mb-2">⚠️</span>
+                      <p className="text-xs font-black text-slate-300">URL de video no válida</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Edita este video y agrega un enlace válido de YouTube.</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Detalle y Botones */}

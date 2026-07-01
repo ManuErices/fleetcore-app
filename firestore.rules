@@ -306,13 +306,13 @@ service cloud.firestore {
       // Permisos de creación
       allow create: if isAuth() && request.auth.uid == uid;
       allow create: if isSuperAdmin()
-                    || (isAnyAdmin() && request.resource.data.role == 'trabajador'
+                    || (isAnyAdmin() && (request.resource.data.role == 'trabajador' || request.resource.data.role == 'operador')
                         && request.resource.data.empresaId == userEmpresaId());
 
       // Permisos de actualización
       allow update: if isAuth() && request.auth.uid == uid;
       allow update: if isSuperAdmin()
-                    || (isAnyAdmin() && resource.data.empresaId == userEmpresaId() && request.resource.data.empresaId == userEmpresaId());
+                    || (isAnyAdmin() && (resource.data.get('empresaId', null) == null || resource.data.empresaId == userEmpresaId()) && request.resource.data.empresaId == userEmpresaId());
 
       allow delete: if isSuperAdmin();
     }
@@ -321,18 +321,10 @@ service cloud.firestore {
     // /subscriptions — usePlan hook lee/escucha el plan activo
     // ─────────────────────────────────────────────────────
     match /subscriptions/{docId} {
-      // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
-      allow read:           if isAuth() && (
-                              request.auth.uid == docId
-                              || isSuperAdmin()
-                              || (resource != null && resource.data.empresaId == userEmpresaId())
-                              || docId == userEmpresaId()
-                            );
-
+      allow read: if isAuth();
+      allow write: if isSuperAdmin() || (isAdminContrato() && docId == userEmpresaId());
       allow create, update: if isAuth() && request.auth.uid == docId;
-      allow create, update: if isSuperAdmin()
-                            || (isAdminContrato() && docId == userEmpresaId());
-      allow delete:         if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     // ─────────────────────────────────────────────────────
@@ -411,6 +403,11 @@ service cloud.firestore {
     match /mailboxes/{mailboxId} {
       allow read: if isAuth() && (isSuperAdmin() || (resource != null && resource.data.empresaId == userEmpresaId()));
       allow write: if isSuperAdmin();
+    }
+
+    // Permisos para consulta de colección grupo trabajadores (auto-vinculación de operarios por email)
+    match /{path=**}/trabajadores/{trabajadorId} {
+      allow read: if isAuth() && resource != null && (resource.data.email == request.auth.token.email || resource.data.get('portalEmail', '') == request.auth.token.email);
     }
 
     // ─────────────────────────────────────────────────────

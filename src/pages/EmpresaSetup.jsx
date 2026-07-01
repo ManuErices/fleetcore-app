@@ -14,7 +14,7 @@
 
 import React, { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
-import { collection, addDoc, doc, setDoc, getDoc, query, where, getDocs, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, doc, setDoc, getDoc, query, where, getDocs, serverTimestamp, collectionGroup } from "firebase/firestore";
 import PhoneInput from "../components/ui/PhoneInput";
 
 export default function EmpresaSetup({ user, onComplete, onLogout }) {
@@ -33,6 +33,54 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
     const checkExistingEmpresa = async () => {
       if (!user?.email) return;
       try {
+        // 1. Auto-vincular si es un operario registrado por email en la ficha de trabajadores
+        const qTrabajador = query(
+          collectionGroup(db, "trabajadores"),
+          where("email", "==", user.email)
+        );
+        const querySnapshotTrabajador = await getDocs(qTrabajador);
+        if (!active) return;
+
+        if (!querySnapshotTrabajador.empty) {
+          const trabajadorDoc = querySnapshotTrabajador.docs[0];
+          const empresaId = trabajadorDoc.ref.parent.parent.id;
+          const trabajadorData = trabajadorDoc.data();
+
+          setStep(2);
+
+          // Vincular en el documento del usuario
+          await setDoc(doc(db, "users", user.uid), {
+            empresaId: empresaId,
+            role:      "operador",
+            email:     user.email,
+            nombre:    trabajadorData.nombre || user.displayName || '',
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+
+          // Vincular en la subcolección de usuarios de la empresa
+          await setDoc(doc(db, "empresas", empresaId, "users", user.uid), {
+            empresaId: empresaId,
+            role:      "operador",
+            email:     user.email,
+            nombre:    trabajadorData.nombre || user.displayName || '',
+            createdAt: serverTimestamp(),
+          }, { merge: true });
+
+          // Vincular el portalUid en la ficha del trabajador
+          await setDoc(trabajadorDoc.ref, {
+            portalUid: user.uid,
+          }, { merge: true });
+
+          if (active) {
+            setStep(3);
+            setTimeout(() => {
+              if (active) onComplete();
+            }, 1500);
+          }
+          return;
+        }
+
+        // 2. Vincular si es el administrador principal de la empresa
         const q = query(
           collection(db, "empresas"),
           where("adminEmail", "==", user.email)

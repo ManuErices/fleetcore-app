@@ -1301,7 +1301,7 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
   const activos = trabajadores.filter(t => t.estado === 'activo');
 
   const handleSave = async () => {
-    if (!form.nivel || !form.cargo || !form.sueldoMin || !form.sueldoMax) {
+    if (!form.nivel?.trim() || !form.cargo?.trim() || form.sueldoMin === '' || form.sueldoMax === '') {
       alert('Completa nivel, cargo y rango salarial.'); return;
     }
     setSaving(true);
