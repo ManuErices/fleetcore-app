@@ -136,10 +136,6 @@ export default function LoginPage() {
             setError("Email o contraseña incorrectos");
             return;
           }
-          if (userData.role === 'operador') {
-            navigate('/workfleet-m');
-            return;
-          }
           if (userData.role === 'trabajador') {
             navigate('/trabajador');
             return;

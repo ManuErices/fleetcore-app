@@ -109,12 +109,16 @@ service cloud.firestore {
 
       // ── USUARIOS DE LA EMPRESA ──────────────────────────
       match /users/{uid} {
-        allow read:  if isSuperAdmin()
-                     || (isAuth() && userEmpresaId() == empresaId && isAnyAdmin())
-                     || (isAuth() && request.auth.uid == uid);
-        allow write: if isSuperAdmin()
-                     || (isAdminContrato() && userEmpresaId() == empresaId)
-                     || (isAuth() && request.auth.uid == uid);
+        allow read:  if isAuth() && (
+                       request.auth.uid == uid
+                       || isSuperAdmin()
+                       || (userEmpresaId() == empresaId && isAnyAdmin())
+                     );
+        allow write: if isAuth() && (
+                       request.auth.uid == uid
+                       || isSuperAdmin()
+                       || (isAdminContrato() && userEmpresaId() == empresaId)
+                     );
       }
 
       // ── TRABAJADORES ────────────────────────────────────
@@ -297,22 +301,26 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
       // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
-      allow read: if isAuth() && request.auth.uid == uid;
       allow read: if isAuth() && (
-                      isSuperAdmin()
-                      || (resource != null && (isAnyAdmin() || isMandanteAdmin()) && resource.data.get('empresaId', null) == userEmpresaId())
-                    );
+                    request.auth.uid == uid
+                    || isSuperAdmin()
+                    || (resource != null && (isAnyAdmin() || isMandanteAdmin()) && resource.data.get('empresaId', null) == userEmpresaId())
+                  );
 
       // Permisos de creación
-      allow create: if isAuth() && request.auth.uid == uid;
-      allow create: if isSuperAdmin()
-                    || (isAnyAdmin() && (request.resource.data.role == 'trabajador' || request.resource.data.role == 'operador')
-                        && request.resource.data.empresaId == userEmpresaId());
+      allow create: if isAuth() && (
+                      request.auth.uid == uid
+                      || isSuperAdmin()
+                      || (isAnyAdmin() && (request.resource.data.role == 'trabajador' || request.resource.data.role == 'operador')
+                          && request.resource.data.empresaId == userEmpresaId())
+                    );
 
       // Permisos de actualización
-      allow update: if isAuth() && request.auth.uid == uid;
-      allow update: if isSuperAdmin()
-                    || (isAnyAdmin() && (resource.data.get('empresaId', null) == null || resource.data.empresaId == userEmpresaId()) && request.resource.data.empresaId == userEmpresaId());
+      allow update: if isAuth() && (
+                      request.auth.uid == uid
+                      || isSuperAdmin()
+                      || (isAnyAdmin() && (resource.data.get('empresaId', null) == null || resource.data.empresaId == userEmpresaId()) && request.resource.data.empresaId == userEmpresaId())
+                    );
 
       allow delete: if isSuperAdmin();
     }

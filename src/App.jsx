@@ -527,19 +527,19 @@ export default function App() {
     let allowed = false;
 
     if (appName === 'fleetcore') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
     } else if (appName === 'workfleet' || appName === 'workfleet-m') {
-      allowed = isSuperAdmin || userRole === 'operador' || (isAdminContrato && canAccess('workfleet')) || (userRole === 'administrativo' && hasModulo('workfleet') && canAccess('workfleet'));
+      allowed = isSuperAdmin || userRole === 'operador' || (isAdminContrato && canAccess('workfleet')) || (['administrativo', 'operador'].includes(userRole) && hasModulo('workfleet') && canAccess('workfleet'));
     } else if (appName === 'rrhh') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('rrhh')) && canAccess('rrhh'));
     } else if (appName === 'reportes') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('reportes')) && canAccess('reportes'));
     } else if (appName === 'finanzas') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('finanzas')) && canAccess('finanzas'));
     } else if (appName === 'contabilidad') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('contabilidad')) && canAccess('contabilidad'));
     } else if (appName === 'documentos') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
     } else if (appName === 'admin') {
       allowed = isSuperAdmin || isAdminContrato || userRole === 'administrativo';
     }

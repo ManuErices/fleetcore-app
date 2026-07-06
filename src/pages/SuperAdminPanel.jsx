@@ -792,7 +792,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: newEmpresaId,
-          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
           updatedAt: serverTimestamp(),
         };
         if (form.password && form.password.trim()) {
@@ -849,7 +849,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: form.empresaId || "",
-          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
           password: form.password,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -986,7 +986,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Rol" required>
-              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: e.target.value === 'administrativo' ? form.modulos : []})}>
+              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: (e.target.value === 'administrativo' || e.target.value === 'operador') ? form.modulos : []})}>
                 {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 <option value="mandante_admin">mandante_admin</option>
               </select>
@@ -999,7 +999,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
             </Field>
           </div>
 
-          {form.role === 'administrativo' && (
+          {(form.role === 'administrativo' || form.role === 'operador') && (
             <Field label="Módulos habilitados" required>
               <div className="space-y-2 mt-1 max-h-[150px] overflow-y-auto pr-1">
                 {ALL_MODULOS.map(m => (

@@ -2711,7 +2711,7 @@ function UsuariosSection() {
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, 'empresas', empresaId, 'users'));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.role !== 'operador'));
+      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) {
       console.error("Error loading users:", e);
       setData([]);
@@ -2747,7 +2747,7 @@ function UsuariosSection() {
   };
 
   const getFilteredRolesForAdminPanel = () => {
-    let list = ROLES.filter(r => r.value !== 'operador');
+    let list = ROLES;
     if (userRole === 'admin_contrato') {
       list = list.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
       list = list.map(r => {
@@ -2799,7 +2799,7 @@ function UsuariosSection() {
         role:    form.role,
         nombre:  form.nombre.trim(),
         rut:     form.rut.trim(),
-        modulos: form.role === 'administrativo' ? form.modulos : [],
+        modulos: (form.role === 'administrativo' || form.role === 'operador') ? form.modulos : [],
         cargo:   form.role === 'operador' ? form.cargo : '',
         updatedAt: serverTimestamp(),
       };
@@ -2946,8 +2946,8 @@ function UsuariosSection() {
           <div className="p-3 rounded-xl text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200">
             {ROLES.find(r => r.value === form.role)?.desc || ''}
           </div>
-          {/* Módulos — solo para administrativo */}
-          {form.role === 'administrativo' && (
+          {/* Módulos — para administrativo y operador */}
+          {(form.role === 'administrativo' || form.role === 'operador') && (
             <Field label="Módulos habilitados" required>
               <div className="space-y-2">
                 {MODULOS.map(m => (

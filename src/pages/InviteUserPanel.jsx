@@ -20,7 +20,7 @@ import {
 const ROLES = [
   { value: "admin_contrato",  label: "Administrador",        desc: "Acceso completo a la empresa" },
   { value: "administrativo",  label: "Administrativo",       desc: "Acceso a módulos asignados" },
-  { value: "operador",        label: "Operador",             desc: "Solo WorkFleet móvil" },
+  { value: "operador",        label: "Operador",             desc: "WorkFleet móvil por defecto + módulos asignados" },
   { value: "mandante",        label: "Mandante",             desc: "Solo lectura de reportes" },
   { value: "trabajador",      label: "Trabajador",           desc: "Portal de trabajador" },
   { value: "revisor_admin",   label: "Revisor Admin",        desc: "FleetCore-I: gestiona revisores" },
@@ -150,7 +150,7 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
         empresaId,
         empresaNombre,
         rol:          form.rol,
-        modulos:      form.rol === 'administrativo' ? form.modulos : [],
+        modulos:      (form.rol === 'administrativo' || form.rol === 'operador') ? form.modulos : [],
         emailDestino: form.emailDestino.trim() || null,
         diasExpira:   form.diasExpira,
         usada:        false,
@@ -268,8 +268,8 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
                 </div>
               </div>
 
-              {/* Módulos (solo para rol administrativo) */}
-              {form.rol === 'administrativo' && (
+              {/* Módulos (para administrativo y operador) */}
+              {(form.rol === 'administrativo' || form.rol === 'operador') && (
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                     Módulos que podrá acceder
