@@ -1,5 +1,6 @@
-// src/lib/claude.js
-const FUNCTION_URL = "https://generardocumento-ybgdfxdgqq-uc.a.run.app"
+const FUNCTION_URL = import.meta.env.DEV 
+  ? "/api-generardocumento" 
+  : "https://southamerica-west1-mpf-maquinaria.cloudfunctions.net/generarDocumento"
 
 export async function generarConIA(prompt, onChunk) {
   const response = await fetch(FUNCTION_URL, {

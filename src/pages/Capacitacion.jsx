@@ -297,10 +297,37 @@ export default function Capacitacion({ user, onComplete }) {
       try {
         const docRef = doc(db, "empresas", empresaId, "config", "capacitaciones");
         const snap = await getDoc(docRef);
+        let list = [];
         if (snap.exists() && snap.data().videos) {
-          const list = snap.data().videos.filter(v => v.modulo === "reportes");
-          setVideos(list);
+          list = snap.data().videos.filter(v => v.modulo === "reportes");
         }
+        
+        // Fallback robusto por si no hay videos o faltan algunos de la capacitación
+        const hasEntrada = list.some(v => v.subcategoria === "entrada" || !v.subcategoria);
+        const hasSalida = list.some(v => v.subcategoria === "salida");
+        
+        const fallbackList = [...list];
+        if (!hasEntrada) {
+          fallbackList.push({
+            id: "default-entrada",
+            modulo: "reportes",
+            subcategoria: "entrada",
+            titulo: "Entrada combustible",
+            descripcion: "Registro de ingreso de combustible",
+            url: "https://youtube.com/shorts/J7VRNXppA_0?feature=share"
+          });
+        }
+        if (!hasSalida) {
+          fallbackList.push({
+            id: "default-salida",
+            modulo: "reportes",
+            subcategoria: "salida",
+            titulo: "Salida combustible",
+            descripcion: "Registro de salida de combustible",
+            url: "https://youtube.com/shorts/TPtonlqk1k8?feature=share"
+          });
+        }
+        setVideos(fallbackList);
       } catch (err) {
         console.error("Error loading training videos:", err);
       } finally {

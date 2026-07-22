@@ -3,8 +3,11 @@
 // functions/index.js
 // ============================================================
 
+const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+
+setGlobalOptions({ region: 'southamerica-west1' });
 const { defineSecret } = require('firebase-functions/params');
 const admin         = require('firebase-admin');
 const cors          = require('cors')({ origin: true });
@@ -21,6 +24,7 @@ const {
 
 const { MigaduClient } = require('./migadu');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun, Table, TableRow, TableCell, WidthType, AlignmentType } = require('docx');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const { FieldValue } = require('firebase-admin/firestore');
@@ -1281,4 +1285,268 @@ exports.deleteAuthUser = onRequest((req, res) => {
     }
   });
 });
+
+// ── generarDocumento ───────────────────────────────────────────
+exports.generarDocumento = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { prompt, system, messages } = req.body;
+      const userContent = prompt || (messages && messages[0] && messages[0].content);
+
+      if (!userContent) {
+        return res.status(400).json({ error: 'Se requiere prompt o messages' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: 'Falta la API Key de Gemini (GEMINI_API_KEY)' });
+      }
+
+      const ai = new GoogleGenerativeAI(apiKey);
+      const modelsToTry = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+      let responseText = null;
+      let lastErr = null;
+
+      for (const modelName of modelsToTry) {
+        try {
+          const model = ai.getGenerativeModel({
+            model: modelName,
+            systemInstruction: system || `Eres el redactor técnico oficial de MPF Ingeniería Civil SPA. 
+Tu único trabajo es transformar borradores en documentos profesionales, 
+formales y sin errores ortográficos, aptos para presentar al mandante Río Tinto Mining. 
+Responde SOLO con el documento redactado, sin comentarios adicionales.`
+          });
+          const result = await model.generateContent(userContent);
+          responseText = result.response.text();
+          if (responseText) break;
+        } catch (err) {
+          console.warn(`Modelo ${modelName} falló:`, err.message);
+          lastErr = err;
+        }
+      }
+
+      if (!responseText) throw lastErr || new Error("No se pudo generar contenido con ningún modelo de Gemini");
+
+      return res.json({
+        content: [
+          {
+            type: 'text',
+            text: responseText,
+          },
+        ],
+      });
+    } catch (err) {
+      console.error('generarDocumento error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ── generarLayout ──────────────────────────────────────────────
+exports.generarLayout = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { descripcion, equipos, sector, vistaType } = req.body;
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: 'Falta GEMINI_API_KEY' });
+
+      const ai = new GoogleGenerativeAI(apiKey);
+      const modelsToTry = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+
+      const prompt = `
+Actúa como un experto en layouts de faenas mineras y construcción para MPF Ingeniería Civil SPA.
+Dada la siguiente descripción del sitio de trabajo, sector y equipos disponibles:
+- Descripción: "${descripcion || ''}"
+- Sector: "${sector || ''}"
+- Tipo de vista: "${vistaType || 'plano'}"
+- Equipos: ${JSON.stringify(equipos || [])}
+
+Genera un JSON con la disposición de elementos en el mapa canvas de dimensiones 900x480.
+Los tipos válidos de elementos son:
+"excavadora", "retroexcavadora", "camion_tolva", "camion_aljibe", "cargador_frontal", "motoniveladora", "rodillo", "camioneta", "grua", "contenedor_oficina", "banos_quimicos", "taller", "bodega", "conos", "control_acceso", "prohibicion", "prohibido_peatones", "estacionamiento", "calzado_seguridad", "casco_seguridad", "chaleco_reflectante", "acceso_derecha", "acceso_izquierda", "espacios_confinados", "explosivos", "energia_no_controlada", "ambiente_extremo", "vehiculo_remoto", "electricidad", "caida_objetos", "izaje", "atrapamiento".
+
+Estructura de respuesta JSON requerida:
+{
+  "elements": [
+    { "type": "excavadora", "x": 150, "y": 180, "w": 120, "h": 70 },
+    { "type": "conos", "x": 200, "y": 250, "w": 70, "h": 55 }
+  ],
+  "svgOverlay": ""
+}
+`;
+
+      let parsed = null;
+      let lastErr = null;
+
+      for (const modelName of modelsToTry) {
+        try {
+          const model = ai.getGenerativeModel({
+            model: modelName,
+            generationConfig: { responseMimeType: 'application/json' }
+          });
+          const result = await model.generateContent(prompt);
+          const jsonText = result.response.text();
+          parsed = JSON.parse(jsonText);
+          if (parsed) break;
+        } catch (err) {
+          console.warn(`Modelo ${modelName} para layout falló:`, err.message);
+          lastErr = err;
+        }
+      }
+
+      if (!parsed) throw lastErr || new Error("No se pudo generar layout con ningún modelo de Gemini");
+
+      return res.json(parsed);
+    } catch (err) {
+      console.error('generarLayout error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ── exportarWord ───────────────────────────────────────────────
+exports.exportarWord = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { tipo, titulo, contenido, fecha, usuario, sector, extraFields, layoutPngB64, firmas } = req.body;
+
+      const children = [];
+
+      // Encabezado del documento
+      children.push(
+        new Paragraph({
+          text: "MPF INGENIERÍA CIVIL SPA",
+          heading: HeadingLevel.HEADING_1,
+          alignment: AlignmentType.CENTER,
+        }),
+        new Paragraph({
+          text: (titulo || "INFORME TÉCNICO OFICIAL").toUpperCase(),
+          heading: HeadingLevel.HEADING_2,
+          alignment: AlignmentType.CENTER,
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({ text: `Fecha: `, bold: true }),
+            new TextRun({ text: `${fecha || new Date().toLocaleDateString('es-CL')}   ` }),
+            new TextRun({ text: `Sector/Obra: `, bold: true }),
+            new TextRun({ text: `${sector || 'General'}   ` }),
+            new TextRun({ text: `Elaborado por: `, bold: true }),
+            new TextRun({ text: `${usuario || 'MPF Staff'}` }),
+          ],
+          alignment: AlignmentType.CENTER,
+        }),
+        new Paragraph({ text: "" })
+      );
+
+      // Campos extra si vienen
+      if (extraFields && typeof extraFields === 'object') {
+        Object.entries(extraFields).forEach(([k, v]) => {
+          if (v) {
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `${k}: `, bold: true }),
+                  new TextRun({ text: String(v) }),
+                ],
+              })
+            );
+          }
+        });
+        children.push(new Paragraph({ text: "" }));
+      }
+
+      // Imagen del layout si viene
+      if (layoutPngB64 && layoutPngB64.includes('base64,')) {
+        try {
+          const imageBuffer = Buffer.from(layoutPngB64.split('base64,')[1], 'base64');
+          children.push(
+            new Paragraph({
+              text: "LAYOUT Y DISPOSICIÓN EN TERRENO",
+              heading: HeadingLevel.HEADING_3,
+            }),
+            new Paragraph({
+              children: [
+                new ImageRun({
+                  data: imageBuffer,
+                  transformation: { width: 550, height: 290 },
+                }),
+              ],
+              alignment: AlignmentType.CENTER,
+            }),
+            new Paragraph({ text: "" })
+          );
+        } catch (imgErr) {
+          console.error("Error cargando imagen layout:", imgErr.message);
+        }
+      }
+
+      // Contenido del documento (línea por línea o párrafos)
+      if (contenido) {
+        const lines = String(contenido).split('\n');
+        lines.forEach(line => {
+          const cleanLine = line.trim();
+          if (!cleanLine) {
+            children.push(new Paragraph({ text: "" }));
+          } else if (cleanLine.startsWith('# ')) {
+            children.push(new Paragraph({ text: cleanLine.replace(/^#\s+/, ''), heading: HeadingLevel.HEADING_1 }));
+          } else if (cleanLine.startsWith('## ')) {
+            children.push(new Paragraph({ text: cleanLine.replace(/^##\s+/, ''), heading: HeadingLevel.HEADING_2 }));
+          } else if (cleanLine.startsWith('### ')) {
+            children.push(new Paragraph({ text: cleanLine.replace(/^###\s+/, ''), heading: HeadingLevel.HEADING_3 }));
+          } else if (cleanLine.startsWith('- ') || cleanLine.startsWith('* ')) {
+            children.push(new Paragraph({ text: cleanLine.replace(/^[-*]\s+/, ''), bullet: { level: 0 } }));
+          } else {
+            children.push(new Paragraph({ text: cleanLine }));
+          }
+        });
+      }
+
+      // Firmas si están disponibles
+      if (firmas && typeof firmas === 'object' && Object.keys(firmas).length > 0) {
+        children.push(
+          new Paragraph({ text: "" }),
+          new Paragraph({ text: "FIRMAS DE RESPONSABILIDAD Y APROBACIÓN", heading: HeadingLevel.HEADING_3 }),
+          new Paragraph({ text: "" })
+        );
+
+        const tableRows = [
+          new TableRow({
+            children: Object.values(firmas).map(f => new TableCell({
+              children: [
+                new Paragraph({ text: f.cargo || 'Responsable', alignment: AlignmentType.CENTER }),
+                new Paragraph({ text: f.nombre || f.usuario || '', alignment: AlignmentType.CENTER }),
+                new Paragraph({ text: f.firmado ? `Firmado: ${f.fecha || ''}` : 'Pendiente', alignment: AlignmentType.CENTER }),
+              ],
+              width: { size: 33, type: WidthType.PERCENTAGE }
+            }))
+          })
+        ];
+
+        children.push(new Table({ rows: tableRows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+      }
+
+      const doc = new Document({
+        sections: [{ properties: {}, children }],
+      });
+
+      const buffer = await Packer.toBuffer(doc);
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${(titulo || 'documento_mpf').replace(/[^a-zA-Z0-9_\-]/g, '_')}.docx"`);
+      return res.status(200).send(buffer);
+
+    } catch (err) {
+      console.error('exportarWord error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+
 

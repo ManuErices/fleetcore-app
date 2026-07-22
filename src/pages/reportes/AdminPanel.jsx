@@ -15,7 +15,7 @@ import EmailsSection from './EmailsSection';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../lib/firebase';
 
-const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 
 // ─────────────────────────────────────────────────────────────
 // QR via API confiable

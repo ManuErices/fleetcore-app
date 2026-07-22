@@ -175,7 +175,7 @@ export default function LoginPage() {
     const { totalUf } = calculateTotal(landingModules);
     if (totalUf > 0) {
       const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL
-        || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
+        || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 
       const planIdStr = landingModules.sort().join(',');
 

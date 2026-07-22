@@ -18,7 +18,7 @@ import {
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
 
-const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "firebase/auth";
 

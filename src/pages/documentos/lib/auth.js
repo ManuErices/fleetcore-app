@@ -12,7 +12,7 @@ export const ROLES_SISTEMA = {
 
 // Empresa fija según rol
 export function empresaDeRol(rol) {
-  return rol === 'mandante' ? 'Río Tinto Mining' : 'MPF Ingeniería Civil SpA'
+  return 'MPF Ingeniería Civil SpA'
 }
 
 const SESSION_KEY = 'mpf_session'

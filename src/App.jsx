@@ -52,7 +52,7 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { EmpresaProvider, useEmpresa } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
 import { getPlanTier } from "./lib/plans.js";
 import UserMenuDropdown from "./components/UserMenuDropdown";
@@ -426,6 +426,35 @@ export default function App() {
         unsubUserDoc = null;
       }
 
+      const checkAndAutoApprove = (data) => {
+        const role = data.role || 'operador';
+        const modulos = data.modulos || [];
+        const cargo = data.cargo || '';
+        const esSurtidor = data.esSurtidor || false;
+        
+        const isAdminExempt = ['superadmin', 'admin_contrato', 'admin'].includes(role);
+        const isFuelUser = !isAdminExempt && (
+                           (role === 'administrativo' && modulos.includes('reportes')) ||
+                           (role === 'operador' && (esSurtidor || ['surtidor', 'solo_combustible'].includes(cargo)))
+                         );
+        
+        if (isFuelUser && !data.capacitacionAprobada) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          updateDoc(userRef, {
+            capacitacionAprobada: true,
+            capacitacionFecha: serverTimestamp()
+          }).catch(err => console.error("Error auto-approving user training:", err));
+          
+          if (data.empresaId) {
+            const empresaUserRef = doc(db, 'empresas', data.empresaId, 'users', currentUser.uid);
+            updateDoc(empresaUserRef, {
+              capacitacionAprobada: true,
+              capacitacionFecha: serverTimestamp()
+            }).catch(err => console.warn("Error auto-approving company user training:", err));
+          }
+        }
+      };
+
       if (currentUser) {
         // Escuchar el documento del usuario en tiempo real para reaccionar al registro inmediato
         unsubUserDoc = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
@@ -440,6 +469,7 @@ export default function App() {
             setUserCargo(data.cargo || '');
             setUserEsSurtidor(data.esSurtidor || false);
             setCapacitacionAprobada(data.capacitacionAprobada || false);
+            checkAndAutoApprove(data);
             if (data.empresaId) {
               setNeedsSetup(false);
             } else {
@@ -467,6 +497,7 @@ export default function App() {
                 setUserCargo(data.cargo || '');
                 setUserEsSurtidor(data.esSurtidor || false);
                 setCapacitacionAprobada(data.capacitacionAprobada || false);
+                checkAndAutoApprove(data);
                 setNeedsSetup(!data.empresaId);
               } else {
                 setNeedsSetup(true);
@@ -617,24 +648,8 @@ export default function App() {
   }
 
   // ── Gating de Capacitación Obligatoria ─────────────────────
-  const isAdminExempt = ['superadmin', 'admin_contrato', 'admin'].includes(userRole);
-  const isFuelUser = !isAdminExempt && (
-                     (userRole === 'administrativo' && userModulos.includes('reportes')) ||
-                     (userRole === 'operador' && (userEsSurtidor || ['surtidor', 'solo_combustible'].includes(userCargo)))
-                   );
-  const needsTraining = user && !needsSetup && isFuelUser && !capacitacionAprobada;
-  if (needsTraining) {
-    return (
-      <EmpresaProvider user={user}>
-        <Capacitacion
-          user={user}
-          onComplete={() => {
-            setCapacitacionAprobada(true);
-          }}
-        />
-      </EmpresaProvider>
-    );
-  }
+  // ── Gating de Capacitación Obligatoria (Bypassed) ─────────────────────
+  const needsTraining = false;
 
   return (
     <Routes>
