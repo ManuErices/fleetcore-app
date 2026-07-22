@@ -187,13 +187,32 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
   }, [empleados]);
 
-  // Auto-asignar repartidor si el usuario logueado aparece en la lista de surtidores
+  // Auto-asignación y sincronización de repartidor para no-admins (evita quedarse vacío al hacer reset del formulario)
   useEffect(() => {
-    if (currentUserData?.id && surtidoresPersonas.length > 0 && !datosControl.repartidorId) {
-      const self = surtidoresPersonas.find(p => p.id === currentUserData.id);
-      if (self) setDatosControl(prev => ({ ...prev, repartidorId: self.id }));
+    if (!currentUserData || isAdmin) return;
+    const self = surtidoresPersonas.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+    const targetId = self ? self.id : currentUserData.id;
+    if (datosControl.repartidorId !== targetId) {
+      setDatosControl(prev => ({ ...prev, repartidorId: targetId }));
     }
-  }, [currentUserData?.id, surtidoresPersonas.length]);
+  }, [currentUserData, isAdmin, surtidoresPersonas, datosControl.repartidorId]);
+
+  // Auto-asignación y sincronización de operador receptor para no-admins
+  useEffect(() => {
+    if (!currentUserData || isAdmin) return;
+    const self = trabajadoresLocales.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+    const targetId = self ? self.id : currentUserData.id;
+    if (datosEntrada.operadorId !== targetId) {
+      setDatosEntrada(prev => ({ ...prev, operadorId: targetId }));
+    }
+  }, [currentUserData, isAdmin, trabajadoresLocales, datosEntrada.operadorId]);
+
+  // Auto-asignar receptorNombre si está vacío
+  useEffect(() => {
+    if (currentUserData?.nombre && !datosEntrada.receptorNombre) {
+      setDatosEntrada(prev => ({ ...prev, receptorNombre: currentUserData.nombre }));
+    }
+  }, [currentUserData, datosEntrada.receptorNombre]);
 
   // Auto-seleccionar proyecto cuando solo hay uno disponible
   useEffect(() => {
