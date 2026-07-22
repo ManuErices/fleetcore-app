@@ -524,7 +524,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       abort('error', 'Tu usuario no está registrado. Contacta al administrador.');
       return;
     }
-    const repartidorRequired = tipoReporte !== 'entrada' || datosEntrada.tipoOrigen !== 'estacion';
+    const repartidorRequired = tipoReporte === 'entrega' || (tipoReporte === 'entrada' && datosEntrada.tipoOrigen === 'interno');
     if (!datosControl.projectId || (repartidorRequired && !datosControl.repartidorId)) {
       abort('warning', 'Completa los campos obligatorios del control de combustible');
       return;
