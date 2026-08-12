@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
 import { listMachines, upsertFuelLog, listFuelLogsByRange } from "../lib/db";
+import { useEmpresa } from "../lib/useEmpresa";
 
 export default function FuelImporter({ projectId, onImportComplete, setShowImporter }) {
+  const { empresaId } = useEmpresa();
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -149,7 +151,7 @@ export default function FuelImporter({ projectId, onImportComplete, setShowImpor
       };
 
       console.log("🔍 Cargando máquinas existentes...");
-      const existingMachines = await listMachines(projectId);
+      const existingMachines = await listMachines(empresaId, projectId);
       console.log(`✅ ${existingMachines.length} máquinas encontradas`);
 
       const machineByCode = {};
@@ -226,7 +228,7 @@ export default function FuelImporter({ projectId, onImportComplete, setShowImpor
       
       let existingFuelLogs = [];
       if (minDate && maxDate) {
-        existingFuelLogs = await listFuelLogsByRange(projectId, minDate, maxDate);
+        existingFuelLogs = await listFuelLogsByRange(empresaId, projectId, minDate, maxDate);
         console.log(`✅ ${existingFuelLogs.length} recargas existentes`);
       }
 
@@ -266,10 +268,10 @@ export default function FuelImporter({ projectId, onImportComplete, setShowImpor
           if (existingLog) {
             fuelLogData.id = existingLog.id;
             fuelLogData.liters = (existingLog.liters || 0) + (log.liters || 0);
-            await upsertFuelLog(fuelLogData);
+            await upsertFuelLog(empresaId, fuelLogData);
             importResults.logsUpdated++;
           } else {
-            await upsertFuelLog(fuelLogData);
+            await upsertFuelLog(empresaId, fuelLogData);
             importResults.logsCreated++;
           }
         } catch (err) {

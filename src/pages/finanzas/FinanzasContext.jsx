@@ -51,53 +51,7 @@ export function FinanzasProvider({ children }) {
     setLoadingAlertas(true);
     const resultado = [];
 
-    // ── 1. Documentos vencidos/por vencer en Activos (7 días) ─────────────
-    try {
-      const snapFA = await getDocs(collection(db, "empresas", empresaId, "finanzas_activos"));
-      const snapM  = await getDocs(collection(db, "empresas", empresaId, "machines"));
-      const nombresMaq = {};
-      snapM.docs.forEach(d => { nombresMaq[d.id] = d.data().name || d.data().patente || d.id; });
-
-      snapFA.docs.forEach(d => {
-        const a = d.data();
-        const nombre = a.nombre || nombresMaq[a.machineId] || "Activo";
-        const docs = [
-          { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
-          { key: "vencSeguro",             label: "Seguro"              },
-          { key: "vencRevisionTecnica",    label: "Revisión Técnica"    },
-          { key: "vencSoapCivil",          label: "SOAP"                },
-        ];
-        docs.forEach(({ key, label }) => {
-          const dias = diasHasta(a[key]);
-          if (dias === null) return;
-          if (dias < 0) {
-            resultado.push({
-              id: `activo_doc_${d.id}_${key}`,
-              tipo: "danger",
-              categoria: "activo_doc",
-              titulo: `${label} vencido`,
-              descripcion: `${nombre} — vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? "s" : ""}`,
-              dias,
-              accion: "Activos",
-              fecha: a[key],
-            });
-          } else if (dias <= 7) {
-            resultado.push({
-              id: `activo_doc_${d.id}_${key}`,
-              tipo: dias <= 3 ? "danger" : "warning",
-              categoria: "activo_doc",
-              titulo: `${label} por vencer`,
-              descripcion: `${nombre} — vence en ${dias} día${dias !== 1 ? "s" : ""}`,
-              dias,
-              accion: "Activos",
-              fecha: a[key],
-            });
-          }
-        });
-      });
-    } catch (e) {}
-
-    // ── 2. Costos fijos con día de pago próximo (7 días) ──────────────────
+    // ── 1. Costos fijos con día de pago próximo (7 días) ──────────────────
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
       const hoy = new Date();
@@ -122,6 +76,66 @@ export function FinanzasProvider({ children }) {
             monto,
           });
         }
+      });
+    } catch (e) {}
+
+    // ── 2b. Documentos de costos fijos / créditos (faltantes / por vencer 30d / vencidos) ──
+    try {
+      const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
+      // Labels tal como se muestran en FinanzasCostos (difieren de Activos)
+      const DOCS_COSTO = [
+        { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
+        { key: "vencSeguro",             label: "Contrato"             },
+        { key: "vencRevisionTecnica",    label: "Rev. Técnica"         },
+        { key: "vencSoapCivil",          label: "SOAP / Civil"         },
+      ];
+      snap.docs.forEach(d => {
+        const c = d.data();
+        if (c.activo === false) return; // solo créditos/costos activos
+        const nombre = c.nombre || "Crédito";
+        const urls = c.archivosDoc || {};
+        DOCS_COSTO.forEach(({ key, label }) => {
+          const tieneArchivo = !!urls[key];
+          const dias = diasHasta(c[key]); // fecha de vencimiento vive en la raíz (c[key])
+
+          // Documento sin archivo cargado → info
+          if (!tieneArchivo) {
+            resultado.push({
+              id: `costo_doc_falta_${d.id}_${key}`,
+              tipo: "info",
+              categoria: "costo_doc",
+              titulo: `Documento faltante: ${label}`,
+              descripcion: `${nombre} — sin archivo cargado`,
+              dias: null,
+              accion: "Costos",
+            });
+          }
+
+          // Vencimiento (aplica haya o no archivo, si hay fecha registrada)
+          if (dias !== null) {
+            if (dias < 0) {
+              resultado.push({
+                id: `costo_doc_venc_${d.id}_${key}`,
+                tipo: "danger",
+                categoria: "costo_doc",
+                titulo: `${label} vencido`,
+                descripcion: `${nombre} — vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? "s" : ""}`,
+                dias,
+                accion: "Costos",
+              });
+            } else if (dias <= 30) {
+              resultado.push({
+                id: `costo_doc_venc_${d.id}_${key}`,
+                tipo: dias <= 7 ? "danger" : "warning",
+                categoria: "costo_doc",
+                titulo: `${label} por vencer`,
+                descripcion: `${nombre} — vence en ${dias} día${dias !== 1 ? "s" : ""}`,
+                dias,
+                accion: "Costos",
+              });
+            }
+          }
+        });
       });
     } catch (e) {}
 

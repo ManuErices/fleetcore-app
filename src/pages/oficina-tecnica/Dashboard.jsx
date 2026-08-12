@@ -144,15 +144,15 @@ export default function DashboardExecutive() {
     const totalCostoEmpresa = employeeData.reduce((sum, emp) => sum + (Number(emp.totalCosto) || 0), 0);
 
     // 4. RENDICIONES
-    const totalRendiciones = rendiciones.reduce((sum, r) => sum + (Number(r.monto) || 0), 0);
+    const totalRendiciones = rendiciones.reduce((sum, r) => sum + (Number(r.montoAprobado) || 0), 0);
     const promedioRendicion = rendiciones.length > 0 ? totalRendiciones / rendiciones.length : 0;
 
     // 5. SUBCONTRATOS
-    const totalSubcontratos = subcontratos.reduce((sum, s) => sum + (Number(s.montoPagado) || 0), 0);
+    const totalSubcontratos = subcontratos.reduce((sum, s) => sum + (Number(s.montoEP) || 0), 0);
 
     // 6. ÓRDENES DE COMPRA
-    const totalOC = ocs.reduce((sum, o) => sum + (Number(o.monto) || 0), 0);
-    const totalFacturado = ocs.reduce((sum, o) => sum + (Number(o.facturado) || 0), 0);
+    const totalOC = ocs.reduce((sum, o) => sum + (Number(o.totalMonto) || 0), 0);
+    const totalFacturado = ocs.reduce((sum, o) => sum + (Number(o.totalFacturado) || 0), 0);
 
     // 7. TOTALES
     const totalCostos = totalCostoCombustible + totalCostoEmpresa + totalRendiciones + totalSubcontratos + totalOC;

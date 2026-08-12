@@ -146,23 +146,18 @@ export default function OCImporter({ projectId, projects, onImportComplete }) {
             return String(value);
           };
 
-          // Obtener el nombre del proyecto actual
+          // Proyecto seleccionado por el usuario — el Excel ya viene filtrado a una sola obra,
+          // así que no comparamos contra la columna "Obra": todo lo que traiga el archivo
+          // se asigna directo al proyecto elegido.
           const currentProject = projects.find(p => p.id === projectId);
           const projectName = currentProject?.name || '';
-          
-          console.log(`🔍 Filtrando OCs para proyecto: "${projectName}"`);
 
           // Agrupar por N° OC y calcular totales
           const ocsMap = {};
           
           jsonData.forEach(row => {
             const numeroOC = String(row['N OC'] || '').trim();
-            const obra = String(row['Obra'] || '').trim();
-            
-            // Filtrar por proyecto
-            if (!numeroOC || (projectName && obra.toLowerCase() !== projectName.toLowerCase())) {
-              return;
-            }
+            if (!numeroOC) return;
             
             if (!ocsMap[numeroOC]) {
               ocsMap[numeroOC] = {
@@ -187,12 +182,20 @@ export default function OCImporter({ projectId, projects, onImportComplete }) {
             }
             
             // Agregar item
+            const codigoCCRaw = String(row['Codigo C.C.'] || '').trim();
+            // La columna "Cuentas de Costo" siempre trae un sufijo " % 100" (% de asignación) al final — se quita
+            const nombreCuentaRaw = String(row['Cuentas de Costo'] || '')
+              .replace(/\s*%\s*\d+(\.\d+)?\s*$/i, '')
+              .trim();
+            // Mismo formato "código nombre" que usan Subcontratos y Rendiciones (ej. "2.7 MANTENCIÓN VEHÍCULOS...")
+            const cuentaCompleta = codigoCCRaw ? `${codigoCCRaw} ${nombreCuentaRaw}` : nombreCuentaRaw;
+
             const item = {
               codMaestro: String(row['Cod. Maestro'] || ''),
               descripcion: String(row['Descripción'] || ''),
               glosa: String(row['Glosa'] || ''),
-              codigoCC: String(row['Codigo C.C.'] || ''),
-              cuentasCosto: String(row['Cuentas de Costo'] || ''),
+              codigoCC: codigoCCRaw,
+              cuentasCosto: cuentaCompleta,
               unidad: String(row['Unidad'] || ''),
               cantidad: toNumber(row['Cantidad']),
               precioUnitario: toNumber(row['Prec. Unit.']),
@@ -227,7 +230,7 @@ export default function OCImporter({ projectId, projects, onImportComplete }) {
           console.log(`📊 Total líneas procesadas: ${jsonData.length}`);
 
           if (purchaseOrders.length === 0) {
-            alert(`No se encontraron órdenes de compra para el proyecto "${projectName}".\n\nVerifica que la columna "Obra" en el Excel coincida con el nombre del proyecto seleccionado.`);
+            alert(`No se encontraron órdenes de compra en el archivo.\n\nVerifica que el Excel tenga datos desde la fila 14 y que la columna "N OC" no esté vacía.`);
           } else {
             alert(`✅ Se importaron ${purchaseOrders.length} órdenes de compra para "${projectName}"`);
           }

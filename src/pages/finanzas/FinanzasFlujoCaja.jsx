@@ -90,9 +90,8 @@ function getWeekColumns() {
   const today = new Date();
   let wNum = 1;
   const months = [
-    new Date(today.getFullYear(), today.getMonth() - 1, 1),
-    new Date(today.getFullYear(), today.getMonth(),     1),
-    new Date(today.getFullYear(), today.getMonth() + 1, 1),
+    new Date(today.getFullYear(), today.getMonth(),     1), // mes actual   → monthIndex 0
+    new Date(today.getFullYear(), today.getMonth() + 1, 1),  // mes siguiente → monthIndex 1
   ];
   months.forEach((monthDate, monthIdx) => {
     const first = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
@@ -108,7 +107,9 @@ function getWeekColumns() {
       const key = `${ws.getFullYear()}-${String(ws.getMonth()+1).padStart(2,"0")}-${String(ws.getDate()).padStart(2,"0")}`;
       if (!seen.has(key)) {
         seen.add(key);
-        const isCurrentWeek = today >= ws && today <= we;
+        // Comparación inclusiva: la semana cubre desde ws 00:00 hasta el final del día de we
+        const weEnd = new Date(we); weEnd.setHours(23, 59, 59, 999);
+        const isCurrentWeek = today >= ws && today <= weEnd;
         cols.push({
           key, label: `S${wNum}`,
           monthLabel: MESES[monthDate.getMonth()],
@@ -136,6 +137,7 @@ function ModalCuenta({ onSave, onClose, editando }) {
     recurrente: false, frecuenciaRecurrente: "mensual", montoRecurrente: "",
   });
   const [nuevaSubcat, setNuevaSubcat] = useState("");
+  const [errorNombre, setErrorNombre] = useState(false);
   const [agregandoSubcat, setAgregandoSubcat] = useState(false);
   const [gestionandoSubcat, setGestionandoSubcat] = useState(false);
   const [editandoSubcat, setEditandoSubcat] = useState(null);
@@ -169,7 +171,7 @@ function ModalCuenta({ onSave, onClose, editando }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" style={{boxShadow:"0 24px 48px -12px rgba(0,0,0,0.18)"}}>
         {/* Header */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
@@ -201,9 +203,13 @@ function ModalCuenta({ onSave, onClose, editando }) {
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Nombre *</label>
             <input value={form.nombre}
-              onChange={e => setForm(f => ({...f, nombre: e.target.value.toUpperCase()}))}
+              onChange={e => { setForm(f => ({...f, nombre: e.target.value.toUpperCase()})); if (errorNombre) setErrorNombre(false); }}
               placeholder="Ej: SUELDO BASE, CONTRATO CLIENTE ABC…"
-              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all placeholder:text-slate-300"/>
+              className={`w-full px-3.5 py-2.5 border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all placeholder:text-slate-300 ${
+                errorNombre
+                  ? "border-red-400 focus:border-red-400 focus:ring-red-100"
+                  : "border-slate-200 focus:border-purple-400 focus:ring-purple-100"}`}/>
+            {errorNombre && <p className="text-[10px] text-red-500 mt-1 font-medium">El nombre es obligatorio</p>}
           </div>
           {/* Subcategoría */}
           <div>
@@ -386,7 +392,7 @@ function ModalCuenta({ onSave, onClose, editando }) {
             <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
               Cancelar
             </button>
-            <button onClick={() => { if (!form.nombre.trim()) return; onSave(form); }}
+            <button onClick={() => { if (!form.nombre.trim()) { setErrorNombre(true); return; } onSave(form); }}
               className="flex-1 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold transition-colors shadow-sm">
               {editando ? "Guardar" : "Crear cuenta"}
             </button>
@@ -401,7 +407,7 @@ function ModalCuenta({ onSave, onClose, editando }) {
 function ModalSaldo({ saldo, onSave, onClose }) {
   const [val, setVal] = useState(fmtInput(saldo || ""));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100">
           <h3 className="text-sm font-bold text-slate-900">Saldo bancario inicial</h3>
@@ -460,12 +466,9 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`relative border-r border-slate-100 transition-all select-none
-        "bg-white"
-        ${isDragging    ? "opacity-30" : ""}
-        "" 
-        ${paid && !isDragOver ? "bg-slate-50" : ""}
-      `}
+      className={`relative border-r border-slate-100 transition-all select-none ${
+        isDragging ? "opacity-30" : ""
+      } ${paid && !isDragOver ? "bg-slate-50" : ""}`}
       style={{ minWidth: "112px", height: "36px", cursor: editing ? "text" : "default", background: isDragOver ? "#ede9fe" : isCurrentWeek ? "rgba(237,233,254,0.25)" : "white", outline: isDragOver ? "2px solid #7c3aed" : "none", outlineOffset: "-2px", zIndex: isDragOver ? 10 : "auto" }}>
 
       {/* Indicador semana actual — línea izquierda sutil */}
@@ -516,7 +519,9 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
 
       {/* Popup nota */}
       {showNota && (
-        <div className="absolute z-40 top-0 left-full ml-1 bg-white rounded-xl shadow-xl border border-slate-200 p-3 w-48" onClick={e => e.stopPropagation()}>
+        <>
+          <div className="fixed inset-0 z-30" onClick={e => { e.stopPropagation(); setShowNota(false); }}/>
+          <div className="absolute z-40 top-0 left-full ml-1 bg-white rounded-xl shadow-xl border border-slate-200 p-3 w-48" onClick={e => e.stopPropagation()}>
           <p className="text-[10px] font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Nota</p>
           <textarea value={notaVal} onChange={e => setNotaVal(e.target.value)}
             rows={2} placeholder="Agrega una nota…" autoFocus
@@ -527,6 +532,7 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
               className="flex-1 py-1 text-[10px] font-semibold bg-purple-700 text-white rounded-lg">Guardar</button>
           </div>
         </div>
+        </>
       )}
     </td>
   );
@@ -662,6 +668,15 @@ export default function FinanzasFlujoCaja() {
   const [dragOverKey,     setDragOverKey]     = useState(null);
   const [showExportMenu,  setShowExportMenu]  = useState(false);
   const [exportando,      setExportando]      = useState(null); // null | "excel" | "pdf"
+  const [expandido,       setExpandido]       = useState(false); // modo pantalla ampliada (oculta sidebar + KPIs)
+
+  // Salir del modo expandido con Escape
+  useEffect(() => {
+    if (!expandido) return;
+    const fn = e => { if (e.key === "Escape") setExpandido(false); };
+    document.addEventListener("keydown", fn);
+    return () => document.removeEventListener("keydown", fn);
+  }, [expandido]);
 
   // ── Autorrelleno de recurrentes ────────────────────────────────────────────
   // Se ejecuta cuando hay cuentas o payments listos
@@ -734,7 +749,7 @@ export default function FinanzasFlujoCaja() {
       if (nuevo) await setDoc(doc(db, "empresas", empresaId, "flujo_pagados", key), { paidAt: new Date().toISOString() });
       else await deleteDoc(doc(db, "empresas", empresaId, "flujo_pagados", key));
     } catch(e) {}
-  }, [paymentsPaid]);
+  }, [paymentsPaid, empresaId]);
 
   const handleNota = useCallback(async (key, texto) => {
     setPaymentNotas(prev => ({ ...prev, [key]: texto }));
@@ -742,7 +757,7 @@ export default function FinanzasFlujoCaja() {
       if (texto) await setDoc(doc(db, "empresas", empresaId, "flujo_notas", key), { texto, updatedAt: new Date().toISOString() });
       else await deleteDoc(doc(db, "empresas", empresaId, "flujo_notas", key));
     } catch(e) {}
-  }, []);
+  }, [empresaId]);
 
   // ── Drag & Drop ────────────────────────────────────────────────────────────
   const handleDragStart = useCallback((cuentaId, weekKey) => {
@@ -779,7 +794,7 @@ export default function FinanzasFlujoCaja() {
       ]);
     } catch(e) {}
     setDraggedPayment(null); setDragOverKey(null);
-  }, [draggedPayment, paymentNotas, paymentsPaid]);
+  }, [draggedPayment, paymentNotas, paymentsPaid, empresaId]);
 
   const handleDragEnd = useCallback(() => { setDraggedPayment(null); setDragOverKey(null); }, []);
 
@@ -803,17 +818,17 @@ export default function FinanzasFlujoCaja() {
       return prev;
     });
     setShowModalCuenta(false); setEditandoCuenta(null);
-  }, [editandoCuenta, applyRecurrentes, weekColumns]);
+  }, [editandoCuenta, applyRecurrentes, weekColumns, empresaId]);
 
   const handleDeleteCuenta = useCallback(async (id) => {
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
     try { await deleteDoc(doc(db, "empresas", empresaId, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
-  }, []);
+  }, [empresaId]);
 
   const handleSaldoBanco = useCallback(async (val) => {
     setSaldoBanco(val); setShowModalSaldo(false);
     try { await setDoc(doc(db, "empresas", empresaId, "flujo_config", "saldo_banco"), { valor: val }); } catch(e) {}
-  }, []);
+  }, [empresaId]);
 
   // ── Cálculos ───────────────────────────────────────────────────────────────
   const cuentasFiltradas = useMemo(() => {
@@ -823,7 +838,7 @@ export default function FinanzasFlujoCaja() {
     return lista;
   }, [cuentas, busqueda, proyectoId]);
 
-  const mesActualWeeks = useMemo(() => weekColumns.filter(w => w.monthIndex === 1), [weekColumns]);
+  const mesActualWeeks = useMemo(() => weekColumns.filter(w => w.monthIndex === 0), [weekColumns]);
 
   const ingresos = useMemo(() => cuentasFiltradas.filter(c => c.categoria === "INGRESOS"), [cuentasFiltradas]);
   const egresos  = useMemo(() => cuentasFiltradas.filter(c => c.categoria === "EGRESOS"),  [cuentasFiltradas]);
@@ -882,7 +897,7 @@ export default function FinanzasFlujoCaja() {
       // ── Hoja 2: Resumen mensual ────────────────────────────────────────────
       const header2 = ["MES", "SEMANA", "RANGO", "INGRESOS", "EGRESOS", "NETO"];
       const rows2 = [];
-      [0, 1, 2].forEach(mIdx => {
+      [0, 1].forEach(mIdx => {
         const sems = weekColumns.filter(w => w.monthIndex === mIdx);
         if (!sems.length) return;
         const mesNombre = sems[0].monthName + " " + sems[0].startDate.getFullYear();
@@ -945,7 +960,7 @@ export default function FinanzasFlujoCaja() {
     ).join("");
 
     // Resumen KPIs
-    const resumenHtml = [0,1,2].map(mIdx => {
+    const resumenHtml = [0,1].map(mIdx => {
       const sems = weekColumns.filter(w => w.monthIndex === mIdx);
       if (!sems.length) return "";
       const mIng = sems.reduce((s,w) => s + weekTotal(w.key, ingresos), 0);
@@ -1038,9 +1053,14 @@ export default function FinanzasFlujoCaja() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full bg-slate-50/40">
+    <div className={
+      expandido
+        ? "fixed inset-0 z-[60] flex flex-col h-screen bg-white"
+        : "flex flex-col h-full bg-slate-50/40"
+    }>
 
       {/* ── Topbar ──────────────────────────────────────────────────────────── */}
+      {!expandido && (
       <div className="bg-white border-b border-slate-100 px-5 py-4 flex-shrink-0">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
@@ -1048,7 +1068,7 @@ export default function FinanzasFlujoCaja() {
               Flujo de <span className="text-purple-700">Caja</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5 font-medium">
-              Vista semanal · {weekColumns.length} semanas · 3 meses
+              Vista semanal · {weekColumns.length} semanas · 2 meses
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1131,6 +1151,7 @@ export default function FinanzasFlujoCaja() {
           )}
         </div>
       </div>
+      )}
 
       {/* ── Tabs + nav meses ────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b border-slate-100 flex-shrink-0">
@@ -1147,18 +1168,50 @@ export default function FinanzasFlujoCaja() {
           ))}
         </div>
 
-        {tabActiva === "tabla" && (
-          <div className="flex items-center gap-1 ml-auto">
-            <span className="text-[10px] text-slate-400 font-medium mr-1">Ir a</span>
-            {weekColumns.filter((w, i, arr) => arr.findIndex(x => x.monthIndex === w.monthIndex) === i).map(w => (
-              <button key={w.monthIndex} onClick={() => scrollToMonth(w.monthIndex)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                  w.monthIndex === 1 ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-                {w.monthLabel}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2 ml-auto">
+          {tabActiva === "tabla" && (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-slate-400 font-medium mr-1">Ir a</span>
+              {weekColumns.filter((w, i, arr) => arr.findIndex(x => x.monthIndex === w.monthIndex) === i).map(w => (
+                <button key={w.monthIndex} onClick={() => scrollToMonth(w.monthIndex)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                    w.monthIndex === 0 ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                  {w.monthLabel}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Nueva cuenta — solo en modo expandido (el del topbar queda oculto) */}
+          {expandido && (
+            <button onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-semibold rounded-md transition-colors">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/></svg>
+              Nueva cuenta
+            </button>
+          )}
+
+          {/* Expandir / contraer pantalla */}
+          <button
+            onClick={() => setExpandido(v => !v)}
+            title={expandido ? "Salir de pantalla ampliada (Esc)" : "Pantalla ampliada"}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors ${
+              expandido
+                ? "bg-purple-700 text-white hover:bg-purple-600"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            {expandido ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0v4m0-4h4m7 5l5-5m0 0v4m0-4h-4M9 15l-5 5m0 0v-4m0 4h4m7-5l5 5m0 0v-4m0 4h-4"/></svg>
+                Salir
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                Ampliar
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Tabla semanal ────────────────────────────────────────────────────── */}
@@ -1181,7 +1234,7 @@ export default function FinanzasFlujoCaja() {
                   return grupos.map((g, i) => (
                     <th key={i} colSpan={g.count}
                       className={`text-center border-x text-[9px] font-bold tracking-widest uppercase py-1 ${
-                        g.idx === 1
+                        g.idx === 0
                           ? "border-violet-600"
                           : "bg-slate-700 text-slate-300 border-slate-600"}`}>
                       {g.name}
@@ -1213,19 +1266,20 @@ export default function FinanzasFlujoCaja() {
               {/* ────────── INGRESOS ────────── */}
               {/* Cabecera sección */}
               <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("INGRESOS")}>
-                <td colSpan={weekColumns.length + 2} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px"}}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#10b981"}}/>
-                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Ingresos</span>
-                      <span className="text-[10px] text-slate-400 font-medium">{ingresos.length} cuenta{ingresos.length !== 1 ? "s" : ""}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-mono font-semibold" style={{color:"#059669"}}>
-                        {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0))}
-                      </span>
-                      <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["INGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                    </div>
+                <td className="sticky left-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderRight:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px", minWidth:"220px"}}>
+                  <div className="flex items-center gap-2">
+                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#10b981"}}/>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Ingresos</span>
+                    <span className="text-[10px] text-slate-400 font-medium">{ingresos.length} cuenta{ingresos.length !== 1 ? "s" : ""}</span>
+                  </div>
+                </td>
+                <td colSpan={weekColumns.length} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", height:"30px"}}/>
+                <td className="sticky right-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderLeft:"0.5px solid #e2e8f0", paddingRight:"12px", height:"30px", minWidth:"96px"}}>
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="text-[11px] font-mono font-semibold" style={{color:"#059669"}}>
+                      {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0))}
+                    </span>
+                    <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["INGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
                   </div>
                 </td>
               </tr>
@@ -1266,19 +1320,20 @@ export default function FinanzasFlujoCaja() {
 
               {/* ────────── EGRESOS ────────── */}
               <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGRESOS")}>
-                <td colSpan={weekColumns.length + 2} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px"}}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#f43f5e"}}/>
-                      <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Egresos</span>
-                      <span className="text-[10px] text-slate-400 font-medium">{egresos.length} cuenta{egresos.length !== 1 ? "s" : ""}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-mono font-semibold" style={{color:"#e11d48"}}>
-                        {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0))}
-                      </span>
-                      <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["EGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                    </div>
+                <td className="sticky left-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderRight:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px", minWidth:"220px"}}>
+                  <div className="flex items-center gap-2">
+                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#f43f5e"}}/>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Egresos</span>
+                    <span className="text-[10px] text-slate-400 font-medium">{egresos.length} cuenta{egresos.length !== 1 ? "s" : ""}</span>
+                  </div>
+                </td>
+                <td colSpan={weekColumns.length} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", height:"30px"}}/>
+                <td className="sticky right-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderLeft:"0.5px solid #e2e8f0", paddingRight:"12px", height:"30px", minWidth:"96px"}}>
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="text-[11px] font-mono font-semibold" style={{color:"#e11d48"}}>
+                      {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0))}
+                    </span>
+                    <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["EGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
                   </div>
                 </td>
               </tr>
@@ -1291,18 +1346,19 @@ export default function FinanzasFlujoCaja() {
                   <React.Fragment key={subcat}>
                     {/* Fila subcategoría */}
                     <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGR-" + subcat)}>
-                      <td colSpan={weekColumns.length + 2} className="border-y border-slate-100 bg-white"
-                        style={{ paddingLeft: "28px", paddingRight: "12px", height: "26px", borderLeft: `3px solid ${accent}` }}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <svg className={`w-3 h-3 text-slate-300 transition-transform ${collapsed["EGR-"+subcat] ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: accent }}>{subcat}</span>
-                            <span className="text-[9px] text-slate-400">{cuentasSubcat.length} cta{cuentasSubcat.length !== 1 ? "s." : "."}</span>
-                          </div>
-                          <span className="text-[10px] font-mono font-semibold mr-3" style={{color:"#f43f5e"}}>
-                            {totSubcat < 0 ? fmtCLP(totSubcat) : ""}
-                          </span>
+                      <td className="sticky left-0 z-10 border-y border-slate-100 bg-white"
+                        style={{ paddingLeft: "28px", paddingRight: "12px", height: "26px", borderLeft: `3px solid ${accent}`, borderRight:"0.5px solid #f1f5f9", minWidth:"220px" }}>
+                        <div className="flex items-center gap-2">
+                          <svg className={`w-3 h-3 text-slate-300 transition-transform ${collapsed["EGR-"+subcat] ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
+                          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: accent }}>{subcat}</span>
+                          <span className="text-[9px] text-slate-400">{cuentasSubcat.length} cta{cuentasSubcat.length !== 1 ? "s." : "."}</span>
                         </div>
+                      </td>
+                      <td colSpan={weekColumns.length} className="border-y border-slate-100 bg-white" style={{ height: "26px" }}/>
+                      <td className="sticky right-0 z-10 border-y border-slate-100 bg-white" style={{ paddingRight: "12px", height: "26px", borderLeft:"0.5px solid #f1f5f9", minWidth:"96px", textAlign:"right" }}>
+                        <span className="text-[10px] font-mono font-semibold" style={{color:"#f43f5e"}}>
+                          {totSubcat < 0 ? fmtCLP(totSubcat) : ""}
+                        </span>
                       </td>
                     </tr>
                     {!collapsed["EGR-" + subcat] && cuentasSubcat.map(c => (
@@ -1313,7 +1369,8 @@ export default function FinanzasFlujoCaja() {
                         onDelete={handleDeleteCuenta} proyectoId={proyectoId}
                         draggedPayment={draggedPayment} dragOverKey={dragOverKey}
                         onDragStart={handleDragStart} onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}/>
+                        onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
+                        mesActualWeeks={mesActualWeeks}/>
                     ))}
                   </React.Fragment>
                 );
@@ -1366,7 +1423,7 @@ export default function FinanzasFlujoCaja() {
                 {weekColumns.map(w => {
                   const neto = weekTotal(w.key, ingresos) + weekTotal(w.key, egresos);
                   return (
-                    <td key={w.key} className={`text-center border-x border-slate-700 "foot-cell"`}
+                    <td key={w.key} className="text-center border-x border-slate-700"
                       style={{ paddingRight: "10px" }}>
                       {neto !== 0 && (
                         <span className="text-[11px] font-mono font-bold" style={{color: neto > 0 ? "#34d399" : "#f87171"}}>
@@ -1397,7 +1454,7 @@ export default function FinanzasFlujoCaja() {
                 {weekColumns.map(w => {
                   const ac = acumulados[w.key] || 0;
                   return (
-                    <td key={w.key} className={`text-center border-x border-slate-800 "foot-cell"`}
+                    <td key={w.key} className="text-center border-x border-slate-800"
                       style={{ paddingRight: "10px" }}>
                       <span className="text-[11px] font-mono font-bold" style={{color: ac >= 0 ? "#a78bfa" : "#f87171"}}>
                         {fmtCompact(ac)}
@@ -1420,13 +1477,13 @@ export default function FinanzasFlujoCaja() {
       {/* ── Resumen mensual ──────────────────────────────────────────────────── */}
       {tabActiva === "resumen" && (
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {[0, 1, 2].map(mIdx => {
+          {[0, 1].map(mIdx => {
             const semsMes = weekColumns.filter(w => w.monthIndex === mIdx);
             if (!semsMes.length) return null;
             const mesIng  = semsMes.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
             const mesEgr  = semsMes.reduce((s, w) => s + weekTotal(w.key, egresos),  0);
             const mesNeto = mesIng + mesEgr;
-            const isActual = mIdx === 1;
+            const isActual = mIdx === 0;
             return (
               <div key={mIdx} className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
                 {/* Header mes */}
@@ -1500,7 +1557,7 @@ export default function FinanzasFlujoCaja() {
                   );
                 })()}
                 {/* Compromisos futuros — solo mes siguiente */}
-                {mIdx === 2 && (() => {
+                {mIdx === 1 && (() => {
                   const recurrentes = [...ingresos, ...egresos].filter(c => c.recurrente && c.montoRecurrente);
                   if (!recurrentes.length) return null;
                   const totalProyectado = recurrentes.reduce((s, c) => {
