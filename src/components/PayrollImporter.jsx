@@ -1,8 +1,11 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
-import { getEmployeeByRut, upsertEmployee, upsertEmployeeMonthlyData, getEmployeeMonthlyData } from "../lib/db";
+import { getEmployeeByRut, upsertEmployee, upsertEmployeeMonthlyData, listEmployeeMonthlyDataForEmployee } from "../lib/db";
 
-export default function PayrollImporter({ projectId, onImportComplete }) {
+// Solo se importan empleados de estos Centros de Costo — cualquier otro se descarta
+const CENTROS_COSTO_PERMITIDOS = ['Nuevo Cobre', 'Oficina Central'];
+
+export default function PayrollImporter({ empresaId, projectId, onImportComplete }) {
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -33,10 +36,7 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
 
   const processExcelData = (rows) => {
     const employees = [];
-    let operadoresCount = 0;
-    let gastosGeneralesCount = 0;
-    let totalCostoOperadores = 0;
-    let totalCostoGastos = 0;
+    let skippedByCentroCosto = 0;
 
     rows.forEach((row, index) => {
       try {
@@ -49,6 +49,11 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
         const cargo = row['Cargo'];
         const gerencia = row['Gerencia'];
         const centroCosto = row['Centro de Costo'];
+
+        if (!CENTROS_COSTO_PERMITIDOS.includes((centroCosto || '').trim())) {
+          skippedByCentroCosto++;
+          return;
+        }
         
         // Datos de liquidación
         const diasTrabajados = row['Días Trabajados'] || 0;
@@ -69,17 +74,12 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
 
         const nombreCompleto = `${nombre} ${apellidoP || ''} ${apellidoM || ''}`.trim();
         
-        // Clasificar: DPTO. DE OPERACIONES = Operadores, resto = Gastos Generales
+        // Clasificación por defecto según Gerencia — el usuario puede reclasificar manualmente
+        // en la pantalla de Remuneraciones entre "1.1 Mano de Obra Directo" y "1.2 Mano de Obra Indirecto";
+        // esa reclasificación manual se respeta y no se pisa en reimportaciones futuras.
         const isOperador = gerencia && gerencia.toUpperCase().includes('OPERACIONES');
-        const tipo = isOperador ? 'OPERADOR' : 'GASTO_GENERAL';
-
-        if (isOperador) {
-          operadoresCount++;
-          totalCostoOperadores += totalCosto;
-        } else {
-          gastosGeneralesCount++;
-          totalCostoGastos += totalCosto;
-        }
+        const tipoManoObraDefault = isOperador ? 'DIRECTO' : 'INDIRECTO';
+        const tipo = isOperador ? 'OPERADOR' : 'GASTO_GENERAL'; // legado, se mantiene por compatibilidad
 
         employees.push({
           year: year || new Date().getFullYear(),
@@ -90,6 +90,7 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
           gerencia: gerencia || '',
           centroCosto: centroCosto || '',
           tipo: tipo,
+          tipoManoObraDefault,
           
           // Datos de liquidación completos
           diasTrabajados,
@@ -108,13 +109,26 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
       }
     });
 
+    // Algunos exports traen VARIAS filas para el mismo trabajador en el mismo mes
+    // (una por cada Centro de Costo en que trabajó). Ya NO las fusionamos: cada fila se
+    // guarda como su propia "liquidación" para poder asignarle su % de incidencia por separado.
+    // Solo contamos personas únicas (por RUT) para las estadísticas de la vista previa.
+    const uniqueRuts = new Set(employees.map(e => e.rut));
+    const operadorRuts = new Set(employees.filter(e => e.tipo === 'OPERADOR').map(e => e.rut));
+    const gastoRuts = new Set(employees.filter(e => e.tipo === 'GASTO_GENERAL').map(e => e.rut));
+    const totalCostoOperadores = employees.filter(e => e.tipo === 'OPERADOR').reduce((s, e) => s + e.totalCosto, 0);
+    const totalCostoGastos = employees.filter(e => e.tipo === 'GASTO_GENERAL').reduce((s, e) => s + e.totalCosto, 0);
+
     return {
-      employees,
-      operadoresCount,
-      gastosGeneralesCount,
+      employees, // filas SIN fusionar — cada una se guardará como su propia liquidación
+      operadoresCount: operadorRuts.size,
+      gastosGeneralesCount: gastoRuts.size,
       totalCostoOperadores,
       totalCostoGastos,
-      totalRows: rows.length
+      totalRows: rows.length,
+      uniqueEmployees: uniqueRuts.size,
+      multiLineCount: rows.length - uniqueRuts.size,
+      skippedByCentroCosto
     };
   };
 
@@ -150,85 +164,108 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
         dataByMonth[key].push(emp);
       });
 
-      for (const [monthKey, employees] of Object.entries(dataByMonth)) {
+      for (const [monthKey, monthRows] of Object.entries(dataByMonth)) {
         const [year, month] = monthKey.split('-').map(Number);
         console.log(`\n📅 Procesando ${monthKey}...`);
 
-        for (const emp of employees) {
+        // Agrupar las filas de este mes por RUT (preservando el orden del Excel:
+        // esa posición se usa para hacer match con liquidaciones ya guardadas antes)
+        const rowsByRut = {};
+        monthRows.forEach(emp => {
+          if (!rowsByRut[emp.rut]) rowsByRut[emp.rut] = [];
+          rowsByRut[emp.rut].push(emp);
+        });
+
+        for (const [rut, empRows] of Object.entries(rowsByRut)) {
+          const baseData = empRows[0]; // datos base (nombre, cargo, etc.) desde la primera fila
           try {
             // PASO 1: Buscar o crear empleado (datos base)
-            let employee = await getEmployeeByRut(projectId, emp.rut);
-            
+            let employee = await getEmployeeByRut(empresaId, projectId, rut);
+
             if (employee) {
-              // Empleado existe - actualizar datos base
-              await upsertEmployee({
+              const updatePayload = {
                 id: employee.id,
                 projectId: projectId,
-                rut: emp.rut,
-                nombre: emp.nombre,
-                cargo: emp.cargo,
-                gerencia: emp.gerencia,
-                centroCosto: emp.centroCosto,
-                tipo: emp.tipo
-              });
+                rut: rut,
+                nombre: baseData.nombre,
+                cargo: baseData.cargo,
+                gerencia: baseData.gerencia,
+                centroCosto: baseData.centroCosto
+              };
+              // Si el empleado ya tiene una clasificación (manual o de una importación anterior),
+              // se respeta y NO se pisa. Solo se setea si nunca ha tenido una.
+              if (!employee.tipoManoObra) {
+                updatePayload.tipoManoObra = baseData.tipoManoObraDefault;
+                updatePayload.tipo = baseData.tipo;
+              }
+              await upsertEmployee(empresaId, updatePayload);
               importResults.employeesUpdated++;
-              console.log(`  ✅ Empleado actualizado: ${emp.nombre}`);
+              console.log(`  ✅ Empleado actualizado: ${baseData.nombre}`);
             } else {
-              // Empleado nuevo - crear
-              const newEmployeeId = await upsertEmployee({
+              const newEmployeeId = await upsertEmployee(empresaId, {
                 projectId: projectId,
-                rut: emp.rut,
-                nombre: emp.nombre,
-                cargo: emp.cargo,
-                gerencia: emp.gerencia,
-                centroCosto: emp.centroCosto,
-                tipo: emp.tipo
+                rut: rut,
+                nombre: baseData.nombre,
+                cargo: baseData.cargo,
+                gerencia: baseData.gerencia,
+                centroCosto: baseData.centroCosto,
+                tipo: baseData.tipo,
+                tipoManoObra: baseData.tipoManoObraDefault
               });
               employee = { id: newEmployeeId };
               importResults.employeesCreated++;
-              console.log(`  🆕 Empleado creado: ${emp.nombre}`);
+              console.log(`  🆕 Empleado creado: ${baseData.nombre}`);
             }
 
-            // PASO 2: Crear/actualizar datos mensuales CON TODOS LOS CAMPOS
-            const existingMonthlyData = await getEmployeeMonthlyData(employee.id, year, month);
-            
-            const monthlyDataPayload = {
-              projectId: projectId,
-              employeeId: employee.id,
-              year: year,
-              month: month,
-              
-              // Haberes
-              diasTrabajados: emp.diasTrabajados,
-              sueldoBase: emp.sueldoBase,
-              sueldoBruto: emp.sueldoBruto,
-              
-              // Descuentos
-              descuentosLegales: emp.descuentosLegales,
-              otrosDescuentos: emp.otrosDescuentos,
-              impuestos: emp.impuestos,
-              
-              // Líquido y totales
-              sueldoLiquido: emp.sueldoLiquido,
-              aporteEmpresa: emp.aporteEmpresa,
-              finiquitos: emp.finiquitos,
-              totalCosto: emp.totalCosto
-            };
-            
-            if (existingMonthlyData) {
-              // Actualizar datos del mes
-              monthlyDataPayload.id = existingMonthlyData.id;
-              await upsertEmployeeMonthlyData(monthlyDataPayload);
-              importResults.monthlyDataUpdated++;
-              console.log(`    📅 Datos mensuales actualizados: ${year}-${month}`);
-            } else {
-              // Crear datos del mes
-              await upsertEmployeeMonthlyData(monthlyDataPayload);
-              importResults.monthlyDataCreated++;
-              console.log(`    📅 Datos mensuales creados: ${year}-${month}`);
+            // PASO 2: Traer las liquidaciones YA guardadas de este empleado ese mes,
+            // para actualizar en vez de duplicar (misma posición = misma liquidación)
+            const existingLines = await listEmployeeMonthlyDataForEmployee(empresaId, employee.id, year, month);
+
+            for (let i = 0; i < empRows.length; i++) {
+              const rowData = empRows[i];
+              const existingLine = existingLines[i];
+
+              const monthlyDataPayload = {
+                projectId: projectId,
+                employeeId: employee.id,
+                year: year,
+                month: month,
+                centroCosto: rowData.centroCosto,
+
+                // Haberes
+                diasTrabajados: rowData.diasTrabajados,
+                sueldoBase: rowData.sueldoBase,
+                sueldoBruto: rowData.sueldoBruto,
+
+                // Descuentos
+                descuentosLegales: rowData.descuentosLegales,
+                otrosDescuentos: rowData.otrosDescuentos,
+                impuestos: rowData.impuestos,
+
+                // Líquido y totales
+                sueldoLiquido: rowData.sueldoLiquido,
+                aporteEmpresa: rowData.aporteEmpresa,
+                finiquitos: rowData.finiquitos,
+                totalCosto: rowData.totalCosto,
+
+                // Si esta liquidación ya existía y alguien había ajustado su % de incidencia
+                // a esta obra, lo respetamos en vez de resetearlo a 100%
+                porcentajeIncidencia: existingLine?.porcentajeIncidencia != null ? existingLine.porcentajeIncidencia : 100
+              };
+
+              if (existingLine) {
+                monthlyDataPayload.id = existingLine.id;
+                await upsertEmployeeMonthlyData(empresaId, monthlyDataPayload);
+                importResults.monthlyDataUpdated++;
+                console.log(`    📅 Liquidación actualizada (${rowData.centroCosto || 'sin centro de costo'}): ${year}-${month}`);
+              } else {
+                await upsertEmployeeMonthlyData(empresaId, monthlyDataPayload);
+                importResults.monthlyDataCreated++;
+                console.log(`    📅 Liquidación creada (${rowData.centroCosto || 'sin centro de costo'}): ${year}-${month}`);
+              }
             }
 
-            if (emp.tipo === 'OPERADOR') {
+            if (baseData.tipo === 'OPERADOR') {
               importResults.operadores++;
             } else {
               importResults.gastosGenerales++;
@@ -236,7 +273,7 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
 
           } catch (err) {
             console.error(`❌ Error:`, err);
-            importResults.errors.push(`${emp.nombre}: ${err.message}`);
+            importResults.errors.push(`${baseData.nombre}: ${err.message}`);
           }
         }
       }
@@ -313,7 +350,7 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
               <div className="text-sm font-semibold text-blue-600">Total Empleados</div>
-              <div className="text-2xl font-black text-blue-700">{preview.employees.length}</div>
+              <div className="text-2xl font-black text-blue-700">{preview.uniqueEmployees}</div>
             </div>
             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
               <div className="text-sm font-semibold text-emerald-600">Operadores</div>
@@ -332,6 +369,21 @@ export default function PayrollImporter({ projectId, onImportComplete }) {
               </div>
             </div>
           </div>
+
+          {preview.skippedByCentroCosto > 0 && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+              ⚠️ Se descartaron <strong>{preview.skippedByCentroCosto}</strong> filas cuyo Centro de Costo no es
+              "Nuevo Cobre" ni "Oficina Central" — solo se importan esos dos.
+            </div>
+          )}
+
+          {preview.multiLineCount > 0 && (
+            <div className="mb-4 p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm text-sky-700">
+              ℹ️ El archivo trae <strong>{preview.totalRows}</strong> filas para <strong>{preview.uniqueEmployees}</strong> personas —
+              <strong> {preview.multiLineCount}</strong> tienen más de una liquidación este mes (por trabajar en distintos Centros de Costo).
+              Se guardarán todas por separado, y podrás ver el detalle y asignar el % de incidencia de cada una en la pantalla de Remuneraciones.
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <button

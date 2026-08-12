@@ -80,23 +80,42 @@ const NAV_ITEMS = [
   },
 ];
 
-function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
+// Mapa: vista activa (activeView) → valor `accion` que llevan las alertas.
+// Debe coincidir con los `accion` definidos en FinanzasContext (recalcularAlertas).
+const VIEW_TO_ACCION = {
+  dashboard:   null,            // el dashboard resume todo; no filtra
+  flujo:       "Flujo de Caja",
+  costos:      "Costos",
+  activos:     "Activos",
+  proveedores: "Proveedores",
+  deuda:       "Deuda",
+  obras:       "Obras",
+  reportes:    "Reportes",
+};
+
+function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
   const [activeView, setActiveView] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { alertas } = useFinanzas();
   const { empresa } = useEmpresa();
 
-  // Badge para Activos: docs vencidos/por vencer + activos sin datos financieros
+  // Badge para Activos: activos sin datos financieros cargados
   const badgeActivos = alertas.filter(a =>
-    a.categoria === "activo_doc" || a.categoria === "activo_sin_datos"
+    a.categoria === "activo_sin_datos"
   ).length;
-  const badgeActivosCritico = alertas.filter(a =>
-    a.categoria === "activo_doc" && a.tipo === "danger"
-  ).length > 0;
+  const badgeActivosCritico = false; // "sin datos" es informativo, nunca crítico
 
   // Badge para Deuda: documentos/proveedores con deuda vencida
   const badgeDeuda = alertas.filter(a => a.categoria === "deuda_vencida").length;
   const badgeDeudaCritico = badgeDeuda > 0;
+
+  // Badge para Costos: pagos próximos + documentos de crédito (faltantes/por vencer/vencidos)
+  const badgeCostos = alertas.filter(a =>
+    a.categoria === "costo_fijo" || a.categoria === "costo_doc"
+  ).length;
+  const badgeCostosCritico = alertas.filter(a =>
+    (a.categoria === "costo_fijo" || a.categoria === "costo_doc") && a.tipo === "danger"
+  ).length > 0;
 
   const currentNav = NAV_ITEMS.find((n) => n.id === activeView);
 
@@ -106,6 +125,9 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
     }
     if (itemId === "deuda" && badgeDeuda > 0) {
       return { count: badgeDeuda, critico: badgeDeudaCritico };
+    }
+    if (itemId === "costos" && badgeCostos > 0) {
+      return { count: badgeCostos, critico: badgeCostosCritico };
     }
     return null;
   }
@@ -293,6 +315,8 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
 
       {/* Centro de notificaciones */}
       <NotificacionesDrawer
+        seccionActiva={VIEW_TO_ACCION[activeView] || null}
+        seccionLabel={currentNav?.label}
         onNavegar={(vista) => {
           const mapa = {
             "Dashboard":     "dashboard",

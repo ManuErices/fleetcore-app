@@ -42,12 +42,13 @@ export default function Logs() {
   );
 
   useEffect(() => {
+    if (!empresaId) return; // esperar a que useEmpresa() resuelva el empresaId
     (async () => {
       const p = await listActiveProjects(empresaId);
       setProjects(p);
       if (p[0]) setProjectId(p[0].id);
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!projectId) return;

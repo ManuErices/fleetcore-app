@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useFinanzas } from "./FinanzasContext";
 
 // ─── Estilos por tipo ─────────────────────────────────────────────────────────
@@ -9,8 +9,8 @@ const TIPO = {
 };
 
 const CATEGORIA = {
-  activo_doc:       { label: "Documentos",   color: "bg-purple-100 text-purple-700" },
   costo_fijo:       { label: "Costos Fijos", color: "bg-blue-100 text-blue-700"     },
+  costo_doc:        { label: "Doc. Crédito", color: "bg-indigo-100 text-indigo-700"},
   proveedor:        { label: "Proveedores",  color: "bg-amber-100 text-amber-700"   },
   activo_sin_datos: { label: "Activos",      color: "bg-slate-100 text-slate-600"   },
   ingreso_faltante: { label: "Ingresos",     color: "bg-emerald-100 text-emerald-700"},
@@ -43,9 +43,56 @@ function AlertaCard({ alerta, onNavegar }) {
   );
 }
 
+// ─── Bloque de alertas agrupadas por tipo (críticas / avisos / info) ──────────
+function BloquesPorTipo({ lista, onNavegar }) {
+  const porTipo = {
+    danger:  lista.filter(a => a.tipo === "danger"),
+    warning: lista.filter(a => a.tipo === "warning"),
+    info:    lista.filter(a => a.tipo === "info"),
+  };
+  return (
+    <div className="space-y-5">
+      {porTipo.danger.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Críticas — acción inmediata</p>
+          </div>
+          <div className="space-y-2">
+            {porTipo.danger.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={onNavegar} />)}
+          </div>
+        </div>
+      )}
+      {porTipo.warning.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-amber-500" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Próximos vencimientos</p>
+          </div>
+          <div className="space-y-2">
+            {porTipo.warning.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={onNavegar} />)}
+          </div>
+        </div>
+      )}
+      {porTipo.info.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-blue-400" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Información</p>
+          </div>
+          <div className="space-y-2">
+            {porTipo.info.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={onNavegar} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Drawer principal ─────────────────────────────────────────────────────────
-export default function NotificacionesDrawer({ onNavegar }) {
+export default function NotificacionesDrawer({ onNavegar, seccionActiva, seccionLabel }) {
   const { drawerOpen, setDrawerOpen, alertas, loadingAlertas, recalcularAlertas, alertasCriticas, totalAlertas } = useFinanzas();
+  const [verResto, setVerResto] = useState(false);
 
   // Cerrar con Escape
   useEffect(() => {
@@ -55,12 +102,19 @@ export default function NotificacionesDrawer({ onNavegar }) {
     return () => document.removeEventListener("keydown", fn);
   }, [drawerOpen, setDrawerOpen]);
 
-  // Agrupar por tipo
+  // Al reabrir o cambiar de sección, colapsar el resto por defecto
+  useEffect(() => { setVerResto(false); }, [drawerOpen, seccionActiva]);
+
+  // Agrupar por tipo (para los badges de resumen del encabezado)
   const porTipo = {
     danger:  alertas.filter(a => a.tipo === "danger"),
     warning: alertas.filter(a => a.tipo === "warning"),
     info:    alertas.filter(a => a.tipo === "info"),
   };
+
+  // Separar según la sección que el usuario está viendo (por a.accion)
+  const deLaSeccion = seccionActiva ? alertas.filter(a => a.accion === seccionActiva) : [];
+  const resto       = seccionActiva ? alertas.filter(a => a.accion !== seccionActiva) : alertas;
 
   const handleNavegar = (vista) => {
     setDrawerOpen(false);
@@ -150,45 +204,68 @@ export default function NotificacionesDrawer({ onNavegar }) {
               <p className="text-sm font-black text-emerald-600">Todo en orden</p>
               <p className="text-xs text-slate-400 max-w-48 leading-relaxed">No hay documentos vencidos, pagos pendientes ni datos faltantes</p>
             </div>
+          ) : !seccionActiva ? (
+            // Sin sección activa conocida → lista completa agrupada por tipo
+            <BloquesPorTipo lista={alertas} onNavegar={handleNavegar} />
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-6">
 
-              {/* Críticas */}
-              {porTipo.danger.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-2 h-2 rounded-full bg-red-500" />
-                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Críticas — acción inmediata</p>
+              {/* ── Alertas de la sección que se está viendo ── */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-1 h-4 rounded-full bg-gradient-to-b from-purple-700 to-violet-500 flex-shrink-0" />
+                    <p className="text-[11px] font-black text-purple-700 uppercase tracking-wider truncate">
+                      En {seccionLabel || seccionActiva}
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    {porTipo.danger.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={handleNavegar} />)}
-                  </div>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 flex-shrink-0">
+                    {deLaSeccion.length}
+                  </span>
                 </div>
-              )}
 
-              {/* Avisos */}
-              {porTipo.warning.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-2 h-2 rounded-full bg-amber-500" />
-                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Próximos vencimientos</p>
+                {deLaSeccion.length > 0 ? (
+                  <BloquesPorTipo lista={deLaSeccion} onNavegar={handleNavegar} />
+                ) : (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-5 text-center">
+                    <span className="text-2xl">✅</span>
+                    <p className="text-xs font-black text-emerald-600 mt-1">Sin alertas en esta sección</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Nada pendiente en {seccionLabel || seccionActiva} por ahora
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    {porTipo.warning.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={handleNavegar} />)}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Info */}
-              {porTipo.info.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-2 h-2 rounded-full bg-blue-400" />
-                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Información</p>
-                  </div>
-                  <div className="space-y-2">
-                    {porTipo.info.map(a => <AlertaCard key={a.id} alerta={a} onNavegar={handleNavegar} />)}
-                  </div>
+              {/* ── Resto de alertas (otras secciones), colapsado ── */}
+              {resto.length > 0 && (
+                <div className="border-t border-slate-100 pt-4">
+                  <button
+                    onClick={() => setVerResto(v => !v)}
+                    className="w-full flex items-center justify-between gap-2 group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-1 h-4 rounded-full bg-slate-300 flex-shrink-0" />
+                      <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider truncate">
+                        Otras secciones
+                      </p>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 flex-shrink-0">
+                        {resto.length}
+                      </span>
+                    </div>
+                    <svg
+                      className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${verResto ? "rotate-180" : ""}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+
+                  {verResto && (
+                    <div className="mt-4">
+                      <BloquesPorTipo lista={resto} onNavegar={handleNavegar} />
+                    </div>
+                  )}
                 </div>
               )}
 

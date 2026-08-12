@@ -50,6 +50,47 @@ export async function listActiveProjects(empresaId) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+// Lista TODOS los proyectos (activos e inactivos) — para la pantalla de gestión
+export async function listAllProjects(empresaId) {
+  if (!empresaId) return [];
+  const q = query(
+    EMPRESA_COL(empresaId, 'projects'),
+    orderBy("name")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Crea o actualiza un proyecto
+export async function upsertProject(empresaId, project) {
+  const data = {
+    name: String(project.name || '').trim(),
+    codigo: String(project.codigo || '').trim(),
+    active: project.active !== false,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (project.id) {
+    const ref = EMPRESA_DOC(empresaId, 'projects', project.id);
+    await updateDoc(ref, data);
+    return { id: project.id, ...data };
+  } else {
+    data.createdAt = serverTimestamp();
+    const ref = await addDoc(EMPRESA_COL(empresaId, 'projects'), data);
+    return { id: ref.id, ...data };
+  }
+}
+
+// Activa/desactiva un proyecto sin tocar el resto de sus datos
+export async function toggleProjectActive(empresaId, projectId, active) {
+  const ref = EMPRESA_DOC(empresaId, 'projects', projectId);
+  await updateDoc(ref, { active, updatedAt: serverTimestamp() });
+}
+
+export async function deleteProject(empresaId, projectId) {
+  await deleteDoc(EMPRESA_DOC(empresaId, 'projects', projectId));
+}
+
 // ============================================
 // MÁQUINAS
 // ============================================
@@ -296,6 +337,24 @@ export async function listEmployeeMonthlyData(empresaId, projectId, year, month)
   }
 }
 
+// Trae los datos mensuales de payroll de TODO un año de una vez (para matrices/detalle anual),
+// en vez de tener que llamar listEmployeeMonthlyData 12 veces
+export async function listEmployeeMonthlyDataByYear(empresaId, projectId, year) {
+  if (!empresaId || !projectId || year === undefined) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'employeeMonthlyData'),
+      where("projectId", "==", projectId),
+      where("year", "==", year)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error al cargar datos mensuales del año:", error);
+    return [];
+  }
+}
+
 export async function getEmployeeMonthlyData(empresaId, employeeId, year, month) {
   try {
     const q = query(
@@ -313,6 +372,26 @@ export async function getEmployeeMonthlyData(empresaId, employeeId, year, month)
   } catch (error) {
     console.error("❌ Error buscando datos mensuales:", error);
     return null;
+  }
+}
+
+// A diferencia de getEmployeeMonthlyData (que devuelve solo la primera coincidencia),
+// esta devuelve TODAS las liquidaciones del empleado ese mes — necesario cuando una
+// persona trabajó en más de un Centro de Costo en el mismo mes.
+export async function listEmployeeMonthlyDataForEmployee(empresaId, employeeId, year, month) {
+  if (!empresaId || !employeeId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'employeeMonthlyData'),
+      where("employeeId", "==", employeeId),
+      where("year", "==", year),
+      where("month", "==", month)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error buscando liquidaciones del empleado:", error);
+    return [];
   }
 }
 
@@ -517,6 +596,23 @@ export async function deleteAllPurchaseOrders(empresaId, projectId) {
 // RENDICIONES
 // ============================================
 
+// Trae TODAS las rendiciones de un proyecto (sin filtrar por year/month, que no se guardan
+// en el documento — se filtra por fechaEmision en el cliente)
+export async function listRendicionesByProject(empresaId, projectId) {
+  if (!empresaId || !projectId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'rendiciones'),
+      where("projectId", "==", projectId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error al cargar rendiciones del proyecto:", error);
+    return [];
+  }
+}
+
 export async function listRendiciones(empresaId, projectId, year, month) {
   console.log(`📋 Cargando rendiciones: ${year}-${month}`);
   
@@ -669,6 +765,23 @@ export async function getRendicionesStats(empresaId, projectId, year, month) {
 // SUBCONTRATOS
 // ============================================
 
+// Trae TODOS los subcontratos de un proyecto (sin filtrar por year/month, que no se guardan
+// en el documento — se filtra por fechaEP en el cliente, igual que hace Subcontratos.jsx)
+export async function listSubcontratosByProject(empresaId, projectId) {
+  if (!empresaId || !projectId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'subcontratos'),
+      where("projectId", "==", projectId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error al cargar subcontratos del proyecto:", error);
+    return [];
+  }
+}
+
 export async function listSubcontratos(empresaId, projectId, year, month) {
   console.log(`👥 Cargando subcontratos: ${year}-${month}`);
   
@@ -818,4 +931,164 @@ export async function getSubcontratosStats(empresaId, projectId, year, month) {
   });
   
   return stats;
+}
+
+// ============================================
+// COMBUSTIBLE — control de entradas y salidas del camión aljibe (cuenta 4.1 Diésel)
+// Distinto de fuelLogs (litros por máquina, precio "en vivo"): esto es el detalle
+// crudo importado del camión combustible, con precio FIJADO por mes para el Estado de Pago.
+// ============================================
+
+export async function listCombustibleRegistros(empresaId, projectId) {
+  if (!empresaId || !projectId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'combustibleRegistros'),
+      where("projectId", "==", projectId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error cargando registros de combustible:", error);
+    return [];
+  }
+}
+
+export async function saveCombustibleRegistros(empresaId, registros, projectId) {
+  const batchSize = 400;
+  for (let i = 0; i < registros.length; i += batchSize) {
+    const batch = writeBatch(db);
+    registros.slice(i, i + batchSize).forEach(r => {
+      const docRef = doc(EMPRESA_COL(empresaId, 'combustibleRegistros'));
+      batch.set(docRef, { ...r, projectId, codigoCuentaContable: '4.1', createdAt: Timestamp.now() });
+    });
+    await batch.commit();
+  }
+}
+
+export async function deleteAllCombustibleRegistros(empresaId, projectId) {
+  const q = query(EMPRESA_COL(empresaId, 'combustibleRegistros'), where("projectId", "==", projectId));
+  const snap = await getDocs(q);
+  const batchSize = 400;
+  const docs = snap.docs;
+  for (let i = 0; i < docs.length; i += batchSize) {
+    const batch = writeBatch(db);
+    docs.slice(i, i + batchSize).forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+}
+
+// Precio del diésel fijado a mano para un mes específico (no el precio "en vivo" de fuelPriceService,
+// sino el que efectivamente se usa para valorizar el consumo real de ese mes en el Estado de Pago)
+export async function getCombustiblePrecioMensual(empresaId, projectId, year, month) {
+  if (!empresaId || !projectId) return null;
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'combustiblePrecioMensual'),
+      where("projectId", "==", projectId),
+      where("year", "==", year),
+      where("month", "==", month)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { id: d.id, ...d.data() };
+  } catch (error) {
+    console.error("❌ Error cargando precio mensual de combustible:", error);
+    return null;
+  }
+}
+
+export async function listCombustiblePrecioMensualByYear(empresaId, projectId, year) {
+  if (!empresaId || !projectId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'combustiblePrecioMensual'),
+      where("projectId", "==", projectId),
+      where("year", "==", year)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error cargando precios del año:", error);
+    return [];
+  }
+}
+
+export async function upsertCombustiblePrecioMensual(empresaId, data) {
+  const payload = {
+    projectId: data.projectId,
+    year: data.year,
+    month: data.month,
+    precioLitro: Number(data.precioLitro) || 0,
+    updatedAt: Timestamp.now()
+  };
+  if (data.id) {
+    await updateDoc(EMPRESA_DOC(empresaId, 'combustiblePrecioMensual', data.id), payload);
+    return data.id;
+  }
+  const ref = await addDoc(EMPRESA_COL(empresaId, 'combustiblePrecioMensual'), { ...payload, createdAt: Timestamp.now() });
+  return ref.id;
+}
+
+// ============================================
+// CARÁTULA / ESTADO DE PAGO — INGRESOS MANUALES
+// (Estados de Pago, Retenciones, Reajustes, Multas por mes)
+// ============================================
+
+export async function getEstadoPagoIngresos(empresaId, projectId, year, month) {
+  if (!empresaId || !projectId) return null;
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'estadoPagoIngresos'),
+      where("projectId", "==", projectId),
+      where("year", "==", year),
+      where("month", "==", month)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    return { id: d.id, ...d.data() };
+  } catch (error) {
+    console.error("❌ Error cargando ingresos del Estado de Pago:", error);
+    return null;
+  }
+}
+
+// Trae los ingresos manuales de los 12 meses de un año de una vez (para la vista de detalle anual)
+export async function listEstadoPagoIngresosByYear(empresaId, projectId, year) {
+  if (!empresaId || !projectId) return [];
+  try {
+    const q = query(
+      EMPRESA_COL(empresaId, 'estadoPagoIngresos'),
+      where("projectId", "==", projectId),
+      where("year", "==", year)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("❌ Error cargando ingresos del año:", error);
+    return [];
+  }
+}
+
+export async function upsertEstadoPagoIngresos(empresaId, data) {
+  const payload = {
+    projectId: data.projectId,
+    year: data.year,
+    month: data.month,
+    estadosPago: Number(data.estadosPago) || 0,
+    retenciones: Number(data.retenciones) || 0,
+    reajuste: Number(data.reajuste) || 0,
+    multas: Number(data.multas) || 0,
+    reajustePolinomico: Number(data.reajustePolinomico) || 0,
+    updatedAt: Timestamp.now()
+  };
+
+  if (data.id) {
+    await updateDoc(EMPRESA_DOC(empresaId, 'estadoPagoIngresos', data.id), payload);
+    return data.id;
+  }
+  const ref = await addDoc(EMPRESA_COL(empresaId, 'estadoPagoIngresos'), { ...payload, createdAt: Timestamp.now() });
+  return ref.id;
 }

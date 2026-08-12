@@ -1,22 +1,33 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   collection, query, orderBy, getDocs,
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
-import { db } from "../../lib/firebase";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 
+// ─── Documentos ────────────────────────────────────────────────────────────
+const DOCS_DEF_COSTO = [
+  { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
+  { key: "vencSeguro",             label: "Contrato"             },
+  { key: "vencRevisionTecnica",    label: "Rev. Técnica"         },
+  { key: "vencSoapCivil",          label: "SOAP / Civil"         },
+];
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const CATEGORIAS = [
-  { id: "credito",  label: "Crédito Bancario",       color: "from-blue-500 to-blue-700",    badge: "bg-blue-100 text-blue-700",      dot: "bg-blue-500",    icon: "M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" },
-  { id: "leasing",  label: "Leasing",                color: "from-violet-500 to-purple-700", badge: "bg-violet-100 text-violet-700",  dot: "bg-violet-500",  icon: "M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" },
-  { id: "arriendo", label: "Arriendo",               color: "from-emerald-500 to-teal-700",  badge: "bg-emerald-100 text-emerald-700",dot: "bg-emerald-500", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
-  { id: "seguro",   label: "Seguro",                 color: "from-amber-500 to-orange-600",  badge: "bg-amber-100 text-amber-700",    dot: "bg-amber-500",   icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
-  { id: "servicio", label: "Servicio / Suscripción", color: "from-sky-500 to-cyan-600",      badge: "bg-sky-100 text-sky-700",         dot: "bg-sky-500",     icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
-  { id: "otro",     label: "Crédito Automotriz",     color: "from-slate-500 to-slate-700",   badge: "bg-slate-100 text-slate-700",    dot: "bg-slate-400",   icon: "M8 17a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4zM3 9l1.5-4.5A2 2 0 016.4 3h11.2a2 2 0 011.9 1.5L21 9M3 9h18M3 9l-1 6h20l-1-6" },
+  { id: "credito",  label: "Crédito Bancario",       short: "CB", color: "from-blue-500 to-blue-700",    badge: "bg-blue-100 text-blue-700",      dot: "bg-blue-500",    icon: "M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" },
+  { id: "leasing",  label: "Leasing",                short: "CL", color: "from-violet-500 to-purple-700", badge: "bg-violet-100 text-violet-700",  dot: "bg-violet-500",  icon: "M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" },
+  { id: "arriendo", label: "Arriendo",               short: "AR", color: "from-emerald-500 to-teal-700",  badge: "bg-emerald-100 text-emerald-700",dot: "bg-emerald-500", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
+  { id: "seguro",   label: "Seguro",                 short: "SE", color: "from-amber-500 to-orange-600",  badge: "bg-amber-100 text-amber-700",    dot: "bg-amber-500",   icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
+  { id: "servicio", label: "Servicio / Suscripción", short: "SU", color: "from-sky-500 to-cyan-600",      badge: "bg-sky-100 text-sky-700",         dot: "bg-sky-500",     icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
+  { id: "otro",     label: "Crédito Automotriz",     short: "CA", color: "from-slate-500 to-slate-700",   badge: "bg-slate-100 text-slate-700",    dot: "bg-slate-400",   icon: "M8 17a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4zM3 9l1.5-4.5A2 2 0 016.4 3h11.2a2 2 0 011.9 1.5L21 9M3 9h18M3 9l-1 6h20l-1-6" },
 ];
 const CAT_MAP = Object.fromEntries(CATEGORIAS.map(c => [c.id, c]));
+// Categorías que llevan seguimiento de cuotas (créditos y leasing)
+const TIENE_CUOTAS = ["credito", "leasing", "otro"];
 
 const FRECUENCIAS = [
   { id: "mensual",    label: "Mensual"    },
@@ -37,7 +48,8 @@ const EMPTY = {
   nombre: "", categoria: "credito", descripcion: "", monto: "",
   moneda: "CLP", frecuencia: "mensual", fechaInicio: "", fechaTermino: "",
   proveedor: "", numeroContrato: "", diaPago: "", notas: "", activo: true,
-  activoVinculadoId: "",
+  activoVinculadoId: "", cuotasTotales: "", cuotasPagadas: "0",
+  archivosDoc: { vencPermisoCirculacion: "", vencSeguro: "", vencRevisionTecnica: "", vencSoapCivil: "" },
 };
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -62,8 +74,146 @@ function diasRestantes(f) {
   if (!f) return null;
   return Math.ceil((new Date(f) - new Date()) / 86400000);
 }
+function estadoDoc(f) {
+  const d = diasRestantes(f); if (d === null) return null;
+  if (d < 0) return "vencido"; if (d <= 30) return "urgente"; if (d <= 90) return "pronto"; return "ok";
+}
+// Cuántas cuotas deberían llevarse pagadas a la fecha, según fecha de inicio y frecuencia
+function cuotasEsperadas(c) {
+  const total = parseInt(c.cuotasTotales) || 0;
+  if (!c.fechaInicio || !total) return null;
+  const inicio = new Date(c.fechaInicio + "T00:00:00");
+  const hoy = new Date();
+  if (hoy < inicio) return 0;
+  const divisor = c.frecuencia === "trimestral" ? 3 : c.frecuencia === "semestral" ? 6 : c.frecuencia === "anual" ? 12 : 1;
+  const meses = (hoy.getFullYear() - inicio.getFullYear()) * 12 + (hoy.getMonth() - inicio.getMonth()) + (hoy.getDate() >= inicio.getDate() ? 1 : 0);
+  const periodos = Math.floor(meses / divisor);
+  return Math.min(Math.max(periodos, 0), total);
+}
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
+// ─── Editor inline de fecha de vencimiento (click para abrir date picker) ───
+function FechaDocEditor({ fecha, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState(fecha || "");
+  const e = estadoDoc(fecha);
+  const d = diasRestantes(fecha);
+  const s = { vencido:"text-red-600", urgente:"text-amber-600", pronto:"text-yellow-700", ok:"text-emerald-600" }[e] || "text-slate-300";
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="date" autoFocus value={draft}
+          onChange={ev => setDraft(ev.target.value)}
+          onKeyDown={ev => { if (ev.key === "Enter") { onSave(draft); setEditing(false); } if (ev.key === "Escape") setEditing(false); }}
+          className="text-[10px] px-1 py-0.5 border-2 border-purple-400 rounded-md focus:outline-none"
+        />
+        <button onClick={() => { onSave(draft); setEditing(false); }} className="w-4 h-4 rounded bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0">
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+        </button>
+        <button onClick={() => setEditing(false)} className="w-4 h-4 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0">
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }} className={`text-[10px] font-semibold hover:underline ${s}`} title="Click para fijar/editar fecha de vencimiento">
+      {fecha ? (e === "vencido" ? "Vencido" : `${d}d${e==="ok"?" ✓":""}`) : "Sin fecha"}
+    </button>
+  );
+}
+
+// ─── Uploader de documento individual (mismo patrón que Activos) ────────────
+function DocUploaderCosto({ label, docKey, costoId, empresaId, urlActual, onUploaded }) {
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress]   = useState(0);
+  const [error, setError]         = useState(null);
+  const inputRef                  = useRef(null);
+
+  const esImagen = urlActual && /\.(jpg|jpeg|png|gif|webp)/i.test(urlActual.split("?")[0]);
+  const nombreArchivo = urlActual
+    ? decodeURIComponent(urlActual.split("/").pop().split("?")[0]).replace(/.*_/, "")
+    : null;
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const maxMB = 10;
+    if (file.size > maxMB * 1024 * 1024) { setError(`Máximo ${maxMB}MB`); return; }
+    setError(null);
+    setUploading(true);
+    setProgress(0);
+    const ext     = file.name.split(".").pop();
+    const path    = `empresas/${empresaId}/costos_fijos/${costoId}/${docKey}_${Date.now()}.${ext}`;
+    const storRef = ref(storage, path);
+    const task    = uploadBytesResumable(storRef, file);
+    task.on("state_changed",
+      snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+      () => { setError("Error al subir"); setUploading(false); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        onUploaded(docKey, url);
+        setUploading(false);
+      }
+    );
+  };
+
+  const handleEliminarArchivo = async () => {
+    if (!urlActual) return;
+    try { await deleteObject(ref(storage, urlActual)); } catch (e) { /* ya no existe */ }
+    onUploaded(docKey, "");
+  };
+
+  return (
+    <div>
+      <p className="text-xs text-slate-400 font-semibold mb-1">{label}</p>
+      {urlActual ? (
+        <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+            {esImagen
+              ? <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              : <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-emerald-700 truncate">{nombreArchivo || "Archivo subido"}</p>
+            <p className="text-[10px] text-emerald-500">✓ Documento respaldado</p>
+          </div>
+          <a href={urlActual} target="_blank" rel="noopener noreferrer"
+            className="w-7 h-7 rounded-lg bg-emerald-100 hover:bg-emerald-200 flex items-center justify-center transition-all flex-shrink-0" title="Ver / Descargar">
+            <svg className="w-3.5 h-3.5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+          </a>
+          <button onClick={handleEliminarArchivo} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-all flex-shrink-0" title="Eliminar archivo">
+            <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
+          <button onClick={() => inputRef.current?.click()} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="Reemplazar archivo">
+            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          </button>
+        </div>
+      ) : uploading ? (
+        <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs font-bold text-purple-700">Subiendo...</p>
+            <p className="text-xs font-black text-purple-600">{progress}%</p>
+          </div>
+          <div className="w-full bg-purple-100 rounded-full h-1.5">
+            <div className="bg-gradient-to-r from-purple-600 to-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => inputRef.current?.click()}
+          className="w-full flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-xl text-xs font-semibold text-slate-400 hover:text-purple-600 transition-all group">
+          <svg className="w-4 h-4 flex-shrink-0 group-hover:text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+          Subir archivo (PDF, JPG, PNG — máx. 10MB)
+        </button>
+      )}
+      {error && <p className="text-xs text-red-500 font-semibold mt-1">{error}</p>}
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+        onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
+    </div>
+  );
+}
+
 function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
   const [form, setForm] = useState(EMPTY);
   const [step, setStep] = useState(1);
@@ -143,6 +293,13 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
     const payload = { ...form, monto: parseFloat(form.monto) || 0 };
     if (form.categoria !== "leasing" && form.categoria !== "otro") {
       delete payload.activoVinculadoId;
+    }
+    if (TIENE_CUOTAS.includes(form.categoria) && form.cuotasTotales) {
+      payload.cuotasTotales = parseInt(form.cuotasTotales) || 0;
+      payload.cuotasPagadas = Math.min(parseInt(form.cuotasPagadas) || 0, payload.cuotasTotales);
+    } else {
+      payload.cuotasTotales = "";
+      payload.cuotasPagadas = "0";
     }
     await onSave(payload);
     setSaving(false);
@@ -331,6 +488,30 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Proveedor / Institución</label>
                 <input value={form.proveedor} onChange={e => set("proveedor", e.target.value)} placeholder="Ej: Banco BCI, Inmobiliaria X..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
               </div>
+              {TIENE_CUOTAS.includes(form.categoria) && (
+                <div className="rounded-xl border-2 border-purple-200 bg-purple-50 p-4">
+                  <p className="text-xs font-black text-purple-800 mb-3">Seguimiento de cuotas</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-purple-700 mb-1.5">N° total de cuotas</label>
+                      <input type="number" min="0" value={form.cuotasTotales} onChange={e => set("cuotasTotales", e.target.value)} placeholder="Ej: 48" className="w-full px-4 py-2.5 border-2 border-purple-200 bg-white rounded-xl focus:outline-none focus:border-purple-500 text-sm font-bold" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-purple-700 mb-1.5">Cuotas pagadas</label>
+                      <input type="number" min="0" max={form.cuotasTotales || undefined} value={form.cuotasPagadas} onChange={e => set("cuotasPagadas", e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border-2 border-purple-200 bg-white rounded-xl focus:outline-none focus:border-purple-500 text-sm font-bold" />
+                    </div>
+                  </div>
+                  {form.cuotasTotales && (() => {
+                    const esperadas = cuotasEsperadas(form);
+                    const pagadas = parseInt(form.cuotasPagadas) || 0;
+                    if (esperadas === null) return null;
+                    const atraso = esperadas - pagadas;
+                    return atraso > 0
+                      ? <p className="text-xs text-red-600 font-bold mt-2">⚠ Van atrasadas {atraso} cuota{atraso > 1 ? "s" : ""} (deberían ir {esperadas}/{form.cuotasTotales})</p>
+                      : <p className="text-xs text-emerald-600 font-bold mt-2">✓ Al día (esperado {esperadas}/{form.cuotasTotales})</p>;
+                  })()}
+                </div>
+              )}
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border-2 border-slate-200">
                 <div>
                   <p className="text-sm font-bold text-slate-700">Estado del costo</p>
@@ -368,6 +549,9 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
                   <div><span className="text-slate-500">Frecuencia:</span><span className="font-bold text-slate-800 ml-1">{FREC_MAP[form.frecuencia]}</span></div>
                   <div><span className="text-slate-500">Inicio:</span><span className="font-bold text-slate-800 ml-1">{form.fechaInicio || "—"}</span></div>
                   <div><span className="text-slate-500">Día pago:</span><span className="font-bold text-slate-800 ml-1">{form.diaPago ? `Día ${form.diaPago}` : "—"}</span></div>
+                  {TIENE_CUOTAS.includes(form.categoria) && form.cuotasTotales && (
+                    <div><span className="text-slate-500">Cuotas:</span><span className="font-bold text-purple-700 ml-1">{form.cuotasPagadas || 0}/{form.cuotasTotales}</span></div>
+                  )}
                   <div><span className="text-slate-500">Estado:</span><span className={`font-bold ml-1 ${form.activo ? "text-purple-600" : "text-slate-400"}`}>{form.activo ? "Activo" : "Inactivo"}</span></div>
                 </div>
               </div>
@@ -406,6 +590,8 @@ export default function FinanzasCostos() {
   const [deletingId, setDeletingId]           = useState(null);
   const [sortCol, setSortCol]                 = useState("nombre");
   const [sortDir, setSortDir]                 = useState("asc");
+  const [editingCuotasId, setEditingCuotasId] = useState(null);
+  const [cuotasDraft, setCuotasDraft]         = useState("");
 
   const cargar = async () => {
     if (!empresaId) { setLoading(false); return; }
@@ -442,6 +628,34 @@ export default function FinanzasCostos() {
     cargar();
   };
 
+  const abrirEdicionCuotas = (c) => {
+    setEditingCuotasId(c.id);
+    setCuotasDraft(String(c.cuotasPagadas ?? 0));
+  };
+
+  const guardarCuotas = async (c) => {
+    const total = parseInt(c.cuotasTotales) || 0;
+    let val = parseInt(cuotasDraft);
+    if (isNaN(val)) val = 0;
+    val = Math.max(0, total ? Math.min(val, total) : val);
+    await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", c.id), { cuotasPagadas: val });
+    setEditingCuotasId(null);
+    cargar();
+  };
+
+  const handleDocUploaded = async (c, docKey, url) => {
+    const archivosDoc = { ...(c.archivosDoc || {}), [docKey]: url };
+    await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", c.id), { archivosDoc });
+    setVistaDetalle(prev => prev && prev.id === c.id ? { ...prev, archivosDoc } : prev);
+    cargar();
+  };
+
+  const handleFechaDocUpdated = async (c, fechaKey, value) => {
+    await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", c.id), { [fechaKey]: value });
+    setVistaDetalle(prev => prev && prev.id === c.id ? { ...prev, [fechaKey]: value } : prev);
+    cargar();
+  };
+
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortCol(col); setSortDir("asc"); }
@@ -468,6 +682,7 @@ export default function FinanzasCostos() {
         frec:   [a.frecuencia||"", b.frecuencia||""],
         dia:    [parseInt(a.diaPago)||0, parseInt(b.diaPago)||0],
         venc:   [a.fechaTermino||"9999", b.fechaTermino||"9999"],
+        cuotas: [parseInt(a.cuotasPagadas)||0, parseInt(b.cuotasPagadas)||0],
       };
       const [va, vb] = map[sortCol] || ["",""];
       if (va < vb) return sortDir === "asc" ? -1 : 1;
@@ -604,20 +819,21 @@ export default function FinanzasCostos() {
               <thead className="bg-gradient-to-r from-purple-700 to-violet-600 text-white">
                 <tr>
                   {[
-                    { col:"nombre", label:"Costo",          align:"text-left",   cls:"px-5 py-4"                        },
-                    { col:"cat",    label:"Categoría",       align:"text-left",   cls:"px-4 py-4"                        },
-                    { col:"prov",   label:"Proveedor",       align:"text-left",   cls:"px-4 py-4 hidden md:table-cell"   },
-                    { col:"mens",   label:"Mensual equiv.",  align:"text-right",  cls:"px-4 py-4"                        },
-                    { col:"frec",   label:"Frecuencia",      align:"text-center", cls:"px-4 py-4 hidden sm:table-cell"   },
-                    { col:"venc",   label:"Vencimiento",     align:"text-center", cls:"px-4 py-4 hidden lg:table-cell"   },
-                    { col:"dia",    label:"Día pago",        align:"text-center", cls:"px-4 py-4 hidden lg:table-cell"   },
+                    { col:"nombre", label:"Costo",          align:"text-left",   cls:"px-3 py-3 min-w-[210px]"          },
+                    { col:"cat",    label:"Cat.",            align:"text-center", cls:"px-1.5 py-3"                      },
+                    { col:"prov",   label:"Proveedor",       align:"text-left",   cls:"px-2 py-3 hidden md:table-cell"   },
+                    { col:"mens",   label:"Mensual",         align:"text-right",  cls:"px-2 py-3"                        },
+                    { col:"cuotas", label:"Cuotas",          align:"text-center", cls:"px-2 py-3"                        },
+                    { col:"frec",   label:"Frec.",           align:"text-center", cls:"px-2 py-3 hidden sm:table-cell"   },
+                    { col:"venc",   label:"Vencim.",         align:"text-center", cls:"px-2 py-3 hidden lg:table-cell"   },
+                    { col:"dia",    label:"Día pago",        align:"text-center", cls:"px-2 py-3 hidden lg:table-cell"   },
                   ].map(({ col, label, align, cls }) => (
-                    <th key={col} onClick={() => handleSort(col)} className={`${cls} ${align} text-xs font-black uppercase tracking-wider cursor-pointer hover:bg-white/10 select-none transition-colors`}>
+                    <th key={col} onClick={() => handleSort(col)} className={`${cls} ${align} text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-white/10 select-none transition-colors whitespace-nowrap`}>
                       {label}<SortIcon col={col} />
                     </th>
                   ))}
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider">Estado</th>
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider">Acciones</th>
+                  <th className="px-2 py-3 text-center text-[10px] font-black uppercase tracking-wider whitespace-nowrap">Estado</th>
+                  <th className="px-2 py-3 text-center text-[10px] font-black uppercase tracking-wider whitespace-nowrap">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -628,50 +844,86 @@ export default function FinanzasCostos() {
                     <tr key={c.id} onClick={() => setVistaDetalle(vistaDetalle?.id===c.id ? null : c)}
                       className={`cursor-pointer hover:bg-purple-50/40 transition-colors ${idx%2===0?"bg-white":"bg-slate-50/30"} ${!c.activo?"opacity-60":""}`}
                     >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${meta.color} flex items-center justify-center flex-shrink-0`}>
-                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={meta.icon} /></svg>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-6 h-6 rounded-lg bg-gradient-to-br ${meta.color} flex items-center justify-center flex-shrink-0`}>
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={meta.icon} /></svg>
                           </div>
-                          <div>
-                            <p className="font-bold text-slate-900 text-sm">{c.nombre}</p>
-                            {c.descripcion && <p className="text-xs text-slate-400 truncate max-w-[200px]">{c.descripcion}</p>}
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900 text-xs truncate">{c.nombre}</p>
+                            {c.descripcion && <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{c.descripcion}</p>}
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-4"><span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${meta.badge}`}>{meta.label}</span></td>
-                      <td className="px-4 py-4 text-sm text-slate-600 hidden md:table-cell">{c.proveedor || "—"}</td>
-                      <td className="px-4 py-4 text-right">
-                        {c.frecuencia !== "unico"
-                          ? <span className="text-sm font-semibold text-slate-700">{fmt(montoMensual(c), c.moneda)}/mes</span>
-                          : <span className="text-xs text-slate-400">Único</span>}
+                      <td className="px-1.5 py-3 text-center">
+                        <span title={meta.label} className={`inline-flex items-center justify-center w-7 h-6 rounded-lg text-[10px] font-black cursor-help ${meta.badge}`}>{meta.short || meta.label.slice(0,2).toUpperCase()}</span>
                       </td>
-                      <td className="px-4 py-4 text-center hidden sm:table-cell"><span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">{FREC_MAP[c.frecuencia]||c.frecuencia}</span></td>
-                      <td className="px-4 py-4 text-center hidden lg:table-cell">
+                      <td className="px-2 py-3 text-xs text-slate-600 hidden md:table-cell truncate max-w-[100px]">{c.proveedor || "—"}</td>
+                      <td className="px-2 py-3 text-right whitespace-nowrap">
+                        {c.frecuencia !== "unico"
+                          ? <span className="text-xs font-semibold text-slate-700">{fmt(montoMensual(c), c.moneda)}</span>
+                          : <span className="text-[10px] text-slate-400">Único</span>}
+                      </td>
+                      <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
+                        {!TIENE_CUOTAS.includes(c.categoria) || !c.cuotasTotales ? (
+                          <span className="text-slate-300 text-xs">—</span>
+                        ) : editingCuotasId === c.id ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              autoFocus type="number" min="0" max={c.cuotasTotales}
+                              value={cuotasDraft}
+                              onChange={e => setCuotasDraft(e.target.value)}
+                              onKeyDown={e => { if (e.key === "Enter") guardarCuotas(c); if (e.key === "Escape") setEditingCuotasId(null); }}
+                              className="w-12 px-1 py-0.5 border-2 border-purple-400 rounded-lg text-center text-[11px] font-bold focus:outline-none"
+                            />
+                            <span className="text-[10px] text-slate-400">/{c.cuotasTotales}</span>
+                            <button onClick={() => guardarCuotas(c)} className="w-5 h-5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0" title="Guardar">
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                            </button>
+                            <button onClick={() => setEditingCuotasId(null)} className="w-5 h-5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0" title="Cancelar">
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </div>
+                        ) : (() => {
+                          const esperadas = cuotasEsperadas(c);
+                          const pagadas = parseInt(c.cuotasPagadas) || 0;
+                          const atraso = esperadas !== null ? esperadas - pagadas : 0;
+                          return (
+                            <button onClick={() => abrirEdicionCuotas(c)} className="group inline-flex flex-col items-center gap-0.5" title="Click para actualizar cuotas pagadas">
+                              <span className={`text-xs font-black px-2 py-0.5 rounded-lg whitespace-nowrap transition-colors ${atraso > 0 ? "bg-red-100 text-red-700 group-hover:bg-red-200" : "bg-emerald-50 text-emerald-700 group-hover:bg-emerald-100"}`}>
+                                {pagadas}/{c.cuotasTotales}
+                              </span>
+                              {atraso > 0 && <span className="text-[9px] font-bold text-red-500 whitespace-nowrap">atr. {atraso}</span>}
+                            </button>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-2 py-3 text-center hidden sm:table-cell"><span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-lg whitespace-nowrap">{FREC_MAP[c.frecuencia]||c.frecuencia}</span></td>
+                      <td className="px-2 py-3 text-center hidden lg:table-cell whitespace-nowrap">
                         {c.fechaTermino
                           ? dias < 0
-                            ? <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded-lg">Vencido</span>
+                            ? <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-lg">✓ Pagado</span>
                             : dias <= 30
-                            ? <span className="bg-amber-100 text-amber-700 text-xs font-bold px-2 py-1 rounded-lg">{dias}d</span>
-                            : <span className="text-xs text-slate-500">{new Date(c.fechaTermino).toLocaleDateString("es-CL")}</span>
+                            ? <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded-lg">{dias}d</span>
+                            : <span className="text-[10px] text-slate-500">{new Date(c.fechaTermino).toLocaleDateString("es-CL")}</span>
                           : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-4 text-center hidden lg:table-cell">
-                        {c.diaPago ? <span className="bg-purple-50 text-purple-700 font-black text-sm px-3 py-1 rounded-lg">Día {c.diaPago}</span> : <span className="text-slate-300 text-xs">—</span>}
+                      <td className="px-2 py-3 text-center hidden lg:table-cell whitespace-nowrap">
+                        {c.diaPago ? <span className="bg-purple-50 text-purple-700 font-black text-xs px-2 py-0.5 rounded-lg">Día {c.diaPago}</span> : <span className="text-slate-300 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-4 text-center" onClick={e => { e.stopPropagation(); toggleActivo(c); }}>
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer transition-all ${c.activo ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
+                      <td className="px-2 py-3 text-center whitespace-nowrap" onClick={e => { e.stopPropagation(); toggleActivo(c); }}>
+                        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-all ${c.activo ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
                           <div className={`w-1.5 h-1.5 rounded-full ${c.activo ? "bg-purple-600" : "bg-slate-400"}`} />
                           {c.activo ? "Activo" : "Inactivo"}
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button onClick={() => { setEditando(c); setShowModal(true); }} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all" title="Editar">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => { setEditando(c); setShowModal(true); }} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all" title="Editar">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                           </button>
-                          <button onClick={() => handleEliminar(c.id)} disabled={deletingId===c.id} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
-                            {deletingId===c.id ? <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                          <button onClick={() => handleEliminar(c.id)} disabled={deletingId===c.id} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
+                            {deletingId===c.id ? <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
                           </button>
                         </div>
                       </td>
@@ -697,24 +949,83 @@ export default function FinanzasCostos() {
         const meta = CAT_MAP[c.categoria] || CATEGORIAS[5];
         const dias = diasRestantes(c.fechaTermino);
         return (
-          <div className="glass-card rounded-xl overflow-hidden animate-fadeInUp">
-            <div className={`bg-gradient-to-r ${meta.color} px-6 py-4 flex items-center justify-between`}>
-              <h3 className="text-white font-black text-lg">{c.nombre}</h3>
-              <button onClick={() => setVistaDetalle(null)} className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-colors">
-                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="p-6 grid grid-cols-2 sm:grid-cols-4 gap-5">
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Monto</p><p className="font-black text-slate-900">{fmt(c.monto, c.moneda)}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Mensual equiv.</p><p className="font-black text-slate-900">{c.frecuencia!=="unico"?fmt(montoMensual(c)):"Pago único"}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Frecuencia</p><p className="font-bold text-slate-700">{FREC_MAP[c.frecuencia]}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Proveedor</p><p className="font-bold text-slate-700">{c.proveedor||"—"}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Inicio</p><p className="font-bold text-slate-700">{c.fechaInicio||"—"}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Término</p><p className={`font-bold ${dias!==null&&dias<=30?"text-red-600":"text-slate-700"}`}>{c.fechaTermino||"Sin fecha"}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Día de pago</p><p className="font-black text-purple-700 text-lg">{c.diaPago?`Día ${c.diaPago}`:"—"}</p></div>
-              <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">N° Contrato</p><p className="font-bold text-slate-700 font-mono">{c.numeroContrato||"—"}</p></div>
-              {c.descripcion && <div className="col-span-2 sm:col-span-4"><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Descripción</p><p className="text-slate-700 text-sm">{c.descripcion}</p></div>}
-              {c.notas && <div className="col-span-2 sm:col-span-4"><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{c.notas}</p></div>}
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={() => setVistaDetalle(null)}>
+            <div className="w-full max-w-4xl my-8" onClick={e => e.stopPropagation()}>
+              <div className="glass-card rounded-xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col animate-fadeInUp">
+                <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-6 py-4 flex items-center justify-between flex-shrink-0">
+                  <div>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span title={meta.label} className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[10px] font-black ${meta.badge}`}>{meta.short || meta.label.slice(0,2).toUpperCase()}</span>
+                      <h3 className="text-white font-black text-lg">{c.nombre}</h3>
+                    </div>
+                    {c.descripcion && <p className="text-white/70 text-sm">{c.descripcion}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setEditando(c); setShowModal(true); setVistaDetalle(null); }} className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      Editar
+                    </button>
+                    <button onClick={() => setVistaDetalle(null)} className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-colors">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-6 bg-white">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Monto</p><p className="font-black text-slate-900">{fmt(c.monto, c.moneda)}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Mensual equiv.</p><p className="font-black text-slate-900">{c.frecuencia!=="unico"?fmt(montoMensual(c)):"Pago único"}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Frecuencia</p><p className="font-bold text-slate-700">{FREC_MAP[c.frecuencia]}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Proveedor</p><p className="font-bold text-slate-700">{c.proveedor||"—"}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Inicio</p><p className="font-bold text-slate-700">{c.fechaInicio||"—"}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Término</p><p className={`font-bold ${dias!==null&&dias<0?"text-emerald-600":dias!==null&&dias<=30?"text-amber-600":"text-slate-700"}`}>{c.fechaTermino||"Sin fecha"}{dias!==null&&dias<0?" · Pagado":""}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Día de pago</p><p className="font-black text-purple-700 text-lg">{c.diaPago?`Día ${c.diaPago}`:"—"}</p></div>
+                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">N° Contrato</p><p className="font-bold text-slate-700 font-mono">{c.numeroContrato||"—"}</p></div>
+                  </div>
+
+                  {TIENE_CUOTAS.includes(c.categoria) && c.cuotasTotales && (() => {
+                    const esperadas = cuotasEsperadas(c);
+                    const pagadas = parseInt(c.cuotasPagadas) || 0;
+                    const total = parseInt(c.cuotasTotales) || 0;
+                    const atraso = esperadas !== null ? esperadas - pagadas : 0;
+                    const pct = total ? Math.min(100, (pagadas / total) * 100) : 0;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs text-slate-400 font-semibold uppercase">Cuotas pagadas</p>
+                          <span className={`text-xs font-black ${atraso > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                            {pagadas}/{total} {atraso > 0 ? `· atrasado ${atraso} cuota${atraso>1?"s":""}` : "· al día"}
+                          </span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${atraso > 0 ? "bg-red-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Documentos</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {DOCS_DEF_COSTO.map(({ key, label }) => (
+                        <div key={key}>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs text-slate-500 font-semibold">{label}</p>
+                            <FechaDocEditor fecha={c[key]} onSave={(val) => handleFechaDocUpdated(c, key, val)} />
+                          </div>
+                          <DocUploaderCosto
+                            label="" docKey={key}
+                            costoId={c.id} empresaId={empresaId}
+                            urlActual={c.archivosDoc?.[key] || ""}
+                            onUploaded={(docKey, url) => handleDocUploaded(c, docKey, url)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {c.notas && <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{c.notas}</p></div>}
+                </div>
+              </div>
             </div>
           </div>
         );

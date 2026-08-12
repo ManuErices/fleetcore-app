@@ -98,7 +98,7 @@ export default function OC() {
   const handleImportComplete = async (importedOrders) => {
     try {
       setIsLoading(true);
-      await savePurchaseOrders(importedOrders, selectedProject);
+      await savePurchaseOrders(empresaId, importedOrders, selectedProject);
       await loadData();
       setShowImporter(false);
     } catch (error) {

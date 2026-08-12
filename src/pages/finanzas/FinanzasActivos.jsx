@@ -18,7 +18,7 @@ const TIPO_MAP = Object.fromEntries(TIPOS.map(t => [t.id, t]));
 const OWN_LABELS = { OWNED: "Propio", RENTED: "Arrendado", LEASING: "Leasing", CREDITO_AUTO: "Créd. Automotriz" };
 const DOCS_DEF = [
   { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
-  { key: "vencSeguro",             label: "Seguro"               },
+  { key: "vencSeguro",             label: "Contrato"             },
   { key: "vencRevisionTecnica",    label: "Rev. Técnica"         },
   { key: "vencSoapCivil",          label: "SOAP / Civil"         },
 ];
@@ -72,6 +72,39 @@ function BadgeDoc({fecha,label}) {
       <span className="text-xs font-bold">{label}</span>
       <span className="text-xs font-semibold">{e==="vencido"?"Vencido":`${d}d`}{e==="ok"&&<span className="ml-1">✓</span>}</span>
     </div>
+  );
+}
+
+// ─── Editor inline de fecha de vencimiento (click para abrir date picker) ───
+function FechaDocEditor({ fecha, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState(fecha || "");
+  const e = estadoDoc(fecha);
+  const d = diasR(fecha);
+  const s = { vencido:"text-red-600", urgente:"text-amber-600", pronto:"text-yellow-700", ok:"text-emerald-600" }[e] || "text-slate-300";
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="date" autoFocus value={draft}
+          onChange={ev => setDraft(ev.target.value)}
+          onKeyDown={ev => { if (ev.key === "Enter") { onSave(draft); setEditing(false); } if (ev.key === "Escape") setEditing(false); }}
+          className="text-[10px] px-1 py-0.5 border-2 border-purple-400 rounded-md focus:outline-none"
+        />
+        <button onClick={() => { onSave(draft); setEditing(false); }} className="w-4 h-4 rounded bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0">
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+        </button>
+        <button onClick={() => setEditing(false)} className="w-4 h-4 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0">
+          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }} className={`text-[10px] font-semibold hover:underline ${s}`} title="Click para fijar/editar fecha de vencimiento">
+      {fecha ? (e === "vencido" ? "Vencido" : `${d}d${e==="ok"?" ✓":""}`) : "Sin fecha"}
+    </button>
   );
 }
 
@@ -356,16 +389,19 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
   );
 }
 
-function PanelDetalle({activo,onClose,onEdit,projects}) {
+function PanelDetalle({activo,onClose,onEdit,projects,empresaId,onDocUploaded,onFechaUpdated}) {
   if(!activo) return null;
   const tipo=TIPO_MAP[activo.tipo]||TIPOS[3];
   const vl=valorLibros(activo); const dep=depAnual(activo);
   const proyecto=projects.find(p=>p.id===activo.projectId);
   return (
-    <div className="glass-card rounded-xl overflow-hidden animate-fadeInUp">
-      <div className={`bg-gradient-to-r ${tipo.color} px-6 py-4 flex items-center justify-between`}>
+    <div className="glass-card rounded-xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col animate-fadeInUp">
+      <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-6 py-4 flex items-center justify-between flex-shrink-0">
         <div>
-          <h3 className="text-white font-black text-lg">{activo.nombre}</h3>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[10px] font-black ${tipo.badge}`}>{tipo.label}</span>
+            <h3 className="text-white font-black text-lg">{activo.nombre}</h3>
+          </div>
           <p className="text-white/70 text-sm">{activo.code&&`${activo.code} · `}{activo.marca} {activo.modelo}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -378,7 +414,7 @@ function PanelDetalle({activo,onClose,onEdit,projects}) {
           </button>
         </div>
       </div>
-      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto bg-white">
         <div className="space-y-3">
           <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Identificación</p>
           {[["Tipo",TIPO_MAP[activo.tipo]?.label||"—"],["Patente",activo.patente||"—"],["Propiedad",OWN_LABELS[activo.ownership]||activo.ownership||"—"],["Propietario",activo.propietario||"—"],["Proyecto",proyecto?(proyecto.name||proyecto.nombre):"Sin proyecto"]].map(([l,v])=>(
@@ -391,33 +427,29 @@ function PanelDetalle({activo,onClose,onEdit,projects}) {
             <div key={l}><p className="text-xs text-slate-400 font-semibold">{l}</p><p className="font-bold text-slate-800 text-sm">{v}</p></div>
           ))}
         </div>
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Documentos</p>
-          <div className="space-y-2">
-            {DOCS_DEF.map(({key,label})=>{
-              const url = activo.archivosDoc?.[key];
-              return (
-                <div key={key}>
-                  {activo[key]
-                    ? <BadgeDoc fecha={activo[key]} label={label}/>
-                    : <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 text-slate-400 text-xs"><span className="font-bold">{label}</span><span>Sin fecha</span></div>
-                  }
-                  {url && (
-                    <a href={url} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 mt-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors group">
-                      <svg className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
-                      <span className="text-xs font-bold text-emerald-700 truncate flex-1">Ver / Descargar</span>
-                      <svg className="w-3 h-3 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                    </a>
-                  )}
+          {DOCS_DEF.map(({key,label})=>{
+            const url = activo.archivosDoc?.[key];
+            return (
+              <div key={key}>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-slate-500 font-semibold">{label}</p>
+                  <FechaDocEditor fecha={activo[key]} onSave={(val)=>onFechaUpdated(activo,key,val)} />
                 </div>
-              );
-            })}
-          </div>
+                <DocUploader
+                  label="" docKey={key}
+                  activoId={activo.id} empresaId={empresaId}
+                  urlActual={url || ""}
+                  onUploaded={(docKey,url)=>onDocUploaded(activo,docKey,url)}
+                />
+              </div>
+            );
+          })}
           {activo.notasDoc&&<p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">{activo.notasDoc}</p>}
         </div>
       </div>
-      {activo.notas&&<div className="px-6 pb-5"><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{activo.notas}</p></div>}
+      {activo.notas&&<div className="px-6 pb-5 bg-white"><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{activo.notas}</p></div>}
     </div>
   );
 }
@@ -518,6 +550,21 @@ export default function FinanzasActivos() {
       });
     }
     setEditando(null); await cargar();
+  };
+
+  const handleDocUploaded = async (a, docKey, url) => {
+    const archivosDoc = { ...(a.archivosDoc || {}), [docKey]: url };
+    const col = a._source === "machines" ? "machines" : "finanzas_activos";
+    await updateDoc(doc(db, "empresas", empresaId, col, a.id), { archivosDoc });
+    setDetalle(prev => prev && prev.id === a.id ? { ...prev, archivosDoc } : prev);
+    await cargar();
+  };
+
+  const handleFechaDocUpdated = async (a, fechaKey, value) => {
+    const col = a._source === "machines" ? "machines" : "finanzas_activos";
+    await updateDoc(doc(db, "empresas", empresaId, col, a.id), { [fechaKey]: value });
+    setDetalle(prev => prev && prev.id === a.id ? { ...prev, [fechaKey]: value } : prev);
+    await cargar();
   };
 
   const handleEliminar=async(a)=>{
@@ -721,7 +768,13 @@ export default function FinanzasActivos() {
         )}
       </div>
 
-      <PanelDetalle activo={detalle} onClose={()=>setDetalle(null)} onEdit={()=>{setEditando(detalle);setShowModal(true);setDetalle(null);}} projects={projects}/>
+      {detalle && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={()=>setDetalle(null)}>
+          <div className="w-full max-w-4xl my-8" onClick={e=>e.stopPropagation()}>
+            <PanelDetalle activo={detalle} onClose={()=>setDetalle(null)} onEdit={()=>{setEditando(detalle);setShowModal(true);setDetalle(null);}} projects={projects} empresaId={empresaId} onDocUploaded={handleDocUploaded} onFechaUpdated={handleFechaDocUpdated}/>
+          </div>
+        </div>
+      )}
 
       <ModalActivo isOpen={showModal} onClose={()=>{setShowModal(false);setEditando(null);}} onSave={handleSave} editando={editando} projects={projects}/>
 

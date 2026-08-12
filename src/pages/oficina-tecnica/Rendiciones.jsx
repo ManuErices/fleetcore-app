@@ -51,6 +51,7 @@ export default function Rendiciones() {
   const daysInRange = useMemo(() => getDaysDiff(dateFrom, dateTo), [dateFrom, dateTo]);
 
   useEffect(() => {
+    if (!empresaId) return;
     (async () => {
       try {
         const p = await listActiveProjects(empresaId);
@@ -60,7 +61,7 @@ export default function Rendiciones() {
         console.error("Error cargando proyectos:", err);
       }
     })();
-  }, []);
+  }, [empresaId]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -85,7 +86,7 @@ export default function Rendiciones() {
     try {
       // Cargar TODAS las rendiciones del proyecto
       const q = query(
-        collection(db, 'empresas', empresaId, 'rendiciones'),
+        collection(db, `empresas/${empresaId}/rendiciones`),
         where("projectId", "==", selectedProject)
       );
       const snap = await getDocs(q);
@@ -304,7 +305,7 @@ export default function Rendiciones() {
       };
 
       // Mapear datos del Excel
-      const rendicionesImportadas = jsonData.map(row => {
+      const todasLasFilas = jsonData.map(row => {
         // Buscar la columna de fecha con diferentes variaciones
         const fechaEmisionRaw = 
           row['Fecha de Emisión'] || 
@@ -350,20 +351,33 @@ export default function Rendiciones() {
           // NO importamos 'Fondo' - usamos 'Propietario del Gasto' en su lugar
         };
       });
+
+      // Filtrar solo filas cuya "Nombre Unidad de Rendición" sea "Nuevo Cobre"
+      const rendicionesImportadas = todasLasFilas.filter(r =>
+        r.unidadRendicion.trim().toLowerCase() === 'nuevo cobre'
+      );
+
+      console.log(`📊 Filas totales en Excel: ${todasLasFilas.length} | Filtradas "Nuevo Cobre": ${rendicionesImportadas.length}`);
       
+      if (rendicionesImportadas.length === 0) {
+        alert('⚠️ No se encontraron filas con "Nombre Unidad de Rendición" = "Nuevo Cobre" en el archivo.');
+        setIsLoading(false);
+        return;
+      }
+
       // Log para debug
       console.log('📅 Primera rendición importada:', {
         nombreGasto: rendicionesImportadas[0]?.nombreGasto,
         propietario: rendicionesImportadas[0]?.propietario,
         fechaEmision: rendicionesImportadas[0]?.fechaEmision,
-        tipo: typeof rendicionesImportadas[0]?.fechaEmision
+        unidadRendicion: rendicionesImportadas[0]?.unidadRendicion,
+        montoAprobado: rendicionesImportadas[0]?.montoAprobado,
       });
 
-      // Guardar en Firebase (sin eliminar datos previos)
-      // Solo agregar las nuevas rendiciones
+      // Guardar en Firebase bajo la ruta empresa-scoped (sin eliminar datos previos)
       const batch = writeBatch(db);
       rendicionesImportadas.forEach(rendicion => {
-        const docRef = doc(collection(db, 'empresas', empresaId, 'rendiciones'));
+        const docRef = doc(collection(db, `empresas/${empresaId}/rendiciones`));
         batch.set(docRef, {
           ...rendicion,
           empresaId,
@@ -396,7 +410,7 @@ export default function Rendiciones() {
       const batch = writeBatch(db);
       rendiciones.forEach(r => {
         if (r.id) {
-          batch.delete(doc(db, 'empresas', empresaId, 'rendiciones', r.id));
+          batch.delete(doc(db, `empresas/${empresaId}/rendiciones`, r.id));
         }
       });
       await batch.commit();

@@ -122,11 +122,11 @@ export default function EmployeeDetailModal({
                   </div>
                   <div className="flex items-center gap-2 mt-2">
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      employee.tipo === 'OPERADOR' 
+                      (employee.tipoManoObra || (employee.tipo === 'OPERADOR' ? 'DIRECTO' : 'INDIRECTO')) === 'DIRECTO'
                         ? 'bg-emerald-100 text-emerald-700'
                         : 'bg-violet-100 text-violet-700'
                     }`}>
-                      {employee.tipo === 'OPERADOR' ? '👷 Operador' : '💼 Gasto General'}
+                      {(employee.tipoManoObra || (employee.tipo === 'OPERADOR' ? 'DIRECTO' : 'INDIRECTO')) === 'DIRECTO' ? '👷 1.1 Mano de Obra Directo' : '💼 1.2 Mano de Obra Indirecto'}
                     </span>
                     <span className="px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
                       📅 {monthNames[month - 1]} {year}

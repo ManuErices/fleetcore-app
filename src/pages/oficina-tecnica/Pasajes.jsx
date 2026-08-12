@@ -6,6 +6,7 @@ import { db, auth, storage } from "../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import * as XLSX from 'xlsx';
 import SignaturePad from "../../components/SignaturePad";
+import { listRendicionesByProject } from "../../lib/db";
 import { 
   Chart as ChartJS, 
   CategoryScale, 
@@ -32,11 +33,23 @@ ChartJS.register(
   Legend
 );
 
+// Identifica si una rendición corresponde a Pasajes/Movilización (cuenta contable 5.3),
+// usando primero el código de cuenta contable (más confiable) y como respaldo palabras clave
+function esRendicionDePasaje(r) {
+  const codigo = String(r.codigoCuentaContable || '').trim();
+  if (codigo === '5.3' || codigo.startsWith('5.3 ')) return true;
+
+  const texto = `${r.cuentaContable || ''} ${r.categoria || ''} ${r.subcategoria || ''}`.toLowerCase();
+  return /pasaje|movilizaci[oó]n|vuelo|bus\b|taxi|peaje|traslado/.test(texto);
+}
+
 export default function PasajesNuevo() {
   const { empresaId } = useEmpresa();
   const [solicitudes, setSolicitudes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [rendicionesPasajes, setRendicionesPasajes] = useState([]);
+  const [loadingRendiciones, setLoadingRendiciones] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserData, setCurrentUserData] = useState(null);
   const [userRole, setUserRole] = useState('operador');
@@ -104,6 +117,20 @@ export default function PasajesNuevo() {
         ...doc.data()
       }));
       setSolicitudes(solicitudesData);
+
+      // Cargar rendiciones de todos los proyectos y quedarnos solo con las de Pasajes/Movilización (cuenta 5.3)
+      setLoadingRendiciones(true);
+      const rendicionesPorProyecto = await Promise.all(
+        projectsData.map(p => listRendicionesByProject(empresaId, p.id))
+      );
+      const todasLasRendiciones = rendicionesPorProyecto.flat().map((r, idx) => ({
+        ...r,
+        projectName: projectsData.find(p => p.id === r.projectId)?.name || ''
+      }));
+      const pasajesDeRendiciones = todasLasRendiciones.filter(esRendicionDePasaje);
+      pasajesDeRendiciones.sort((a, b) => (b.fechaEmision || '').localeCompare(a.fechaEmision || ''));
+      setRendicionesPasajes(pasajesDeRendiciones);
+      setLoadingRendiciones(false);
 
       setLoading(false);
     } catch (error) {
@@ -253,7 +280,7 @@ export default function PasajesNuevo() {
       const pasajesPendientes = pasajesActualizados.filter(p => p.estado === 'pendiente').length;
       const montoTotal = pasajesActualizados.reduce((sum, p) => sum + (parseFloat(p.precio) || 0), 0);
 
-      const solicitudRef = doc(db, 'solicitudes_pasajes', solicitudId);
+      const solicitudRef = doc(db, 'empresas', empresaId, 'solicitudes_pasajes', solicitudId);
       await updateDoc(solicitudRef, {
         pasajes: pasajesActualizados,
         pasajesComprados,
@@ -366,7 +393,13 @@ export default function PasajesNuevo() {
       </div>
 
       {/* Contenido */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Pasajes registrados vía Rendiciones (cuenta 5.3 Movilización) */}
+        <SeccionPasajesDeRendiciones
+          rendiciones={rendicionesPasajes}
+          loading={loadingRendiciones}
+        />
+
         {loading ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -613,6 +646,92 @@ export default function PasajesNuevo() {
           onClose={() => setShowGraficosModal(false)}
           calcularDatosGraficos={calcularDatosGraficos}
         />
+      )}
+    </div>
+  );
+}
+
+// Sección: Pasajes registrados a través de Rendiciones (cuenta contable 5.3 Movilización)
+// Esto es un listado de solo lectura — el gasto ya fue rendido, aquí solo se consolida para visibilidad
+function SeccionPasajesDeRendiciones({ rendiciones, loading }) {
+  const [expanded, setExpanded] = useState(true);
+
+  const totalMonto = rendiciones.reduce((sum, r) => sum + (Number(r.montoAprobado) || 0), 0);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full bg-gradient-to-r from-teal-600 to-emerald-600 text-white p-6 flex items-center justify-between text-left"
+      >
+        <div>
+          <h3 className="text-xl font-black flex items-center gap-2">
+            🧾 Pasajes desde Rendiciones
+          </h3>
+          <p className="text-teal-100 text-sm mt-1">
+            Gastos de pasajes/movilización (cuenta 5.3) ya rendidos por el personal
+          </p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-xs text-teal-100">{rendiciones.length} registros</div>
+            <div className="text-lg font-black">${totalMonto.toLocaleString('es-CL')}</div>
+          </div>
+          <svg className={`w-5 h-5 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="text-center py-8 text-slate-500">Cargando rendiciones...</div>
+          ) : rendiciones.length === 0 ? (
+            <div className="text-center py-8 text-slate-500">
+              No hay rendiciones clasificadas como Pasajes/Movilización todavía.
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Fecha</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Propietario del Gasto</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Proveedor</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Proyecto</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Cuenta Contable</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Estado</th>
+                  <th className="px-4 py-3 text-right text-xs font-bold text-slate-600 uppercase">Monto</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rendiciones.map(r => (
+                  <tr key={r.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-sm text-slate-600">{r.fechaEmision || '—'}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">{r.propietario || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700">{r.proveedor || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{r.projectName || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-500">
+                      {r.codigoCuentaContable || ''} {r.cuentaContable || ''}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                        r.estadoGasto === 'Aprobada' ? 'bg-green-100 text-green-700' :
+                        r.estadoGasto === 'Rechazada' ? 'bg-red-100 text-red-700' :
+                        'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {r.estadoGasto || 'Sin estado'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-right font-bold text-teal-700">
+                      ${(Number(r.montoAprobado) || 0).toLocaleString('es-CL')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </div>
   );
