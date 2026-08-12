@@ -644,31 +644,100 @@ function AsistenciaSection() {
   }, []);
 
   // ── Tiempo real: marcaciones del día de hoy ──
+  // Escucha documentos individuales por trabajador (patrón: ${uid}_${anio}_${mes})
+  // para evitar una query de colección completa que causa errores 400 en el WebChannel
   useEffect(() => {
     if (vista !== 'hoy' || loadingBase) return;
-    // Escuchar todos los docs del mes actual
     const mesStr = fmt2(hoy.mes + 1);
-    const q = query(collection(db, 'empresas', empresaId, 'asistencia'));
-    const unsub = onSnapshot(q, snap => {
-      const m = {};
+    const activosConPortal = trabajadores.filter(t => (!t.estado || t.estado === 'activo') && t.portalUid);
+
+    setMarcacionesHoy({});
+    if (activosConPortal.length === 0) return;
+
+    const unsubs = activosConPortal.map(t => {
+      const docId = `${t.portalUid}_${hoy.anio}_${mesStr}`;
+      const ref = doc(db, 'empresas', empresaId, 'asistencia', docId);
+      return onSnapshot(ref, snap => {
+        setMarcacionesHoy(prev => {
+          if (!snap.exists()) return prev;
+          const data = snap.data();
+          return {
+            ...prev,
+            [t.portalUid]: {
+              docId:   snap.id,
+              entrada: data.registros?.[diaKey]?.entrada || null,
+              salida:  data.registros?.[diaKey]?.salida  || null,
+              gps_e:   data.registros?.[diaKey]?.gps_e   || null,
+              gps_s:   data.registros?.[diaKey]?.gps_s   || null,
+              modificaciones: data.modificaciones || [],
+            },
+          };
+        });
+      });
+    });
+
+    return () => unsubs.forEach(u => u());
+  }, [vista, loadingBase, trabajadores, empresaId, hoy.anio, hoy.mes, diaKey]);
+
+  // ── Detectar y vincular trabajadores sin portalUid que ya marcaron asistencia ──
+  // Ocurre cuando la cuenta se creó de forma distinta a crearCuentas() y portalUid no quedó guardado
+  useEffect(() => {
+    if (loadingBase || !empresaId) return;
+    const sinPortal = trabajadores.filter(t => (!t.estado || t.estado === 'activo') && !t.portalUid);
+    if (sinPortal.length === 0) return;
+
+    const mesStr = fmt2(hoy.mes + 1);
+    getDocs(collection(db, 'empresas', empresaId, 'asistencia')).then(snap => {
+      const portalUidsConocidos = new Set(trabajadores.filter(t => t.portalUid).map(t => t.portalUid));
+      const vinculaciones = {};
+
       snap.docs.forEach(d => {
         const data = d.data();
-        // Filtrar solo documentos del mes y año actual
-        if (String(data.anio) === String(hoy.anio) && data.mes === mesStr) {
-          m[data.trabajadorId] = {
-            docId:   d.id,
-            entrada: data.registros?.[diaKey]?.entrada || null,
-            salida:  data.registros?.[diaKey]?.salida  || null,
-            gps_e:   data.registros?.[diaKey]?.gps_e   || null,
-            gps_s:   data.registros?.[diaKey]?.gps_s   || null,
-            modificaciones: data.modificaciones || [],
+        if (String(data.anio) !== String(hoy.anio) || data.mes !== mesStr) return;
+        if (portalUidsConocidos.has(data.trabajadorId)) return;
+
+        const nombreDoc = (data.trabajadorNombre || '').trim().toLowerCase();
+        const match = sinPortal.find(t => {
+          const nombreT     = `${t.nombre || ''} ${t.apellidoPaterno || ''}`.trim().toLowerCase();
+          const emailPrefix = (t.email || '').split('@')[0].toLowerCase();
+          // Coincidencia por nombre completo O por prefijo de email
+          // (cuando trabajador=null en portal, trabajadorNombre = email.split('@')[0])
+          return nombreT === nombreDoc || (emailPrefix && emailPrefix === nombreDoc);
+        });
+        if (match && !vinculaciones[match.id]) {
+          vinculaciones[match.id] = {
+            portalUid: data.trabajadorId,
+            marcacion: {
+              docId:   d.id,
+              entrada: data.registros?.[diaKey]?.entrada || null,
+              salida:  data.registros?.[diaKey]?.salida  || null,
+              gps_e:   data.registros?.[diaKey]?.gps_e   || null,
+              gps_s:   data.registros?.[diaKey]?.gps_s   || null,
+              modificaciones: data.modificaciones || [],
+            },
           };
         }
       });
-      setMarcacionesHoy(m);
-    });
-    return unsub;
-  }, [vista, loadingBase, hoy.anio, hoy.mes, diaKey]);
+
+      if (Object.keys(vinculaciones).length === 0) return;
+
+      // Actualizar estado local con el portalUid detectado (dispara re-run del listener)
+      setTrabajadores(prev => prev.map(t =>
+        vinculaciones[t.id] ? { ...t, portalUid: vinculaciones[t.id].portalUid } : t
+      ));
+      // Mostrar marcaciones de inmediato
+      setMarcacionesHoy(prev => {
+        const next = { ...prev };
+        Object.values(vinculaciones).forEach(({ portalUid, marcacion }) => { next[portalUid] = marcacion; });
+        return next;
+      });
+      // Persistir en Firestore para futuras sesiones
+      Object.entries(vinculaciones).forEach(([tDocId, { portalUid }]) => {
+        updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', tDocId), { portalUid })
+          .catch(err => console.error('Error vinculando portalUid:', err));
+      });
+    }).catch(err => console.error('Error fallback asistencia:', err));
+  }, [loadingBase, empresaId, trabajadores]); // re-run si cambian trabajadores (p.ej. al vincular)
 
   // ── Cargar historial cuando se cambia de vista ──
   useEffect(() => {
@@ -843,8 +912,17 @@ function AsistenciaSection() {
 
   // ── Vista HISTORIAL ──
   const enriquecidos = historial.map(r => {
-    const trabajador = trabajadores.find(t => t.id === r.trabajadorId || t.portalUid === r.trabajadorId);
-    const contrato   = contratos.find(c => c.trabajadorId === (trabajador?.id));
+    let trabajador = trabajadores.find(t => t.id === r.trabajadorId || t.portalUid === r.trabajadorId);
+    // Fallback: match by nombre/email when portalUid isn't linked yet
+    if (!trabajador && r.trabajadorNombre) {
+      const nombreDoc = r.trabajadorNombre.trim().toLowerCase();
+      trabajador = trabajadores.find(t => {
+        const nombreT = `${t.nombre || ''} ${t.apellidoPaterno || ''}`.trim().toLowerCase();
+        const emailPrefix = (t.email || '').split('@')[0].toLowerCase();
+        return nombreT === nombreDoc || (emailPrefix && emailPrefix === nombreDoc);
+      });
+    }
+    const contrato = contratos.find(c => c.trabajadorId === trabajador?.id);
     return { ...r, _trabajador: trabajador, _contrato: contrato };
   }).filter(r => {
     const q = busqueda.toLowerCase();

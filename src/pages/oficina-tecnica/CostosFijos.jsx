@@ -4,6 +4,7 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
 import CostosFijosModal from "../../components/CostosFijosModal";
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ function diasRestantes(fechaTermino) {
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 export default function CostosFijos() {
+  const { empresaId } = useEmpresa();
   const [costos, setCostos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -60,9 +62,10 @@ export default function CostosFijos() {
 
   // ── Cargar datos ──
   const cargarCostos = async () => {
+    if (!empresaId) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "costos_fijos"), orderBy("fechaCreacion", "desc"));
+      const q = query(collection(db, "empresas", empresaId, "costos_fijos"), orderBy("fechaCreacion", "desc"));
       const snap = await getDocs(q);
       setCostos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) {
@@ -71,15 +74,15 @@ export default function CostosFijos() {
     setLoading(false);
   };
 
-  useEffect(() => { cargarCostos(); }, []);
+  useEffect(() => { cargarCostos(); }, [empresaId]);
 
   // ── Guardar ──
   const handleSave = async (form) => {
-    const data = { ...form, monto: parseFloat(form.monto) || 0 };
+    const data = { ...form, monto: parseFloat(form.monto) || 0, empresaId };
     if (editingCosto) {
-      await updateDoc(doc(db, "costos_fijos", editingCosto.id), data);
+      await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", editingCosto.id), data);
     } else {
-      await addDoc(collection(db, "costos_fijos"), { ...data, fechaCreacion: serverTimestamp() });
+      await addDoc(collection(db, "empresas", empresaId, "costos_fijos"), { ...data, fechaCreacion: serverTimestamp() });
     }
     setEditingCosto(null);
     await cargarCostos();
@@ -89,7 +92,7 @@ export default function CostosFijos() {
   const handleEliminar = async (id) => {
     if (!window.confirm("¿Eliminar este costo? Esta acción no se puede deshacer.")) return;
     setDeletingId(id);
-    await deleteDoc(doc(db, "costos_fijos", id));
+    await deleteDoc(doc(db, "empresas", empresaId, "costos_fijos", id));
     setDeletingId(null);
     if (vistaDetalle?.id === id) setVistaDetalle(null);
     await cargarCostos();
@@ -97,7 +100,7 @@ export default function CostosFijos() {
 
   // ── Toggle activo ──
   const toggleActivo = async (costo) => {
-    await updateDoc(doc(db, "costos_fijos", costo.id), { activo: !costo.activo });
+    await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", costo.id), { activo: !costo.activo });
     await cargarCostos();
   };
 

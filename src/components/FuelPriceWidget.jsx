@@ -1,18 +1,13 @@
 import React from "react";
-import { useFuelPrices, refreshFuelPrices } from "../lib/fuelPriceService";
+import { useFuelPrices } from "../lib/fuelPriceService";
 
-/**
- * Widget de Precios de Combustible
- * Integrado con API de Bencina en Línea (api.boostr.cl)
- */
 export default function FuelPriceWidget({ compact = false }) {
-  const { prices, loading, error, refresh } = useFuelPrices(true); // Auto-refresh habilitado
+  const { prices, loading, error, refresh } = useFuelPrices(true);
   const [refreshing, setRefreshing] = React.useState(false);
 
   const handleManualRefresh = async () => {
     setRefreshing(true);
     try {
-      await refreshFuelPrices();
       await refresh();
     } catch (err) {
       console.error('Error al actualizar precios:', err);

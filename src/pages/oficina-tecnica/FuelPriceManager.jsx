@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../../lib/firebase";
-import { doc, setDoc, getDoc, collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
+import { useEmpresa } from "../../lib/useEmpresa";
 
 /**
  * Componente para gestionar los precios de referencia de combustible
  * Se actualizan manualmente desde la CNE cada semana/mes
  */
 export default function FuelPriceManager() {
+  const { empresaId } = useEmpresa();
   const [currentPrice, setCurrentPrice] = useState({
     diesel: 950,
     gasoline93: 1100,
@@ -21,15 +23,16 @@ export default function FuelPriceManager() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    if (!empresaId) return;
     loadCurrentPrice();
     loadHistory();
-  }, []);
+  }, [empresaId]);
 
   const loadCurrentPrice = async () => {
+    if (!empresaId) return;
     try {
-      const docRef = doc(db, "settings", "currentFuelPrice");
+      const docRef = doc(db, "empresas", empresaId, "fuelPrices", "current");
       const docSnap = await getDoc(docRef);
-      
       if (docSnap.exists()) {
         setCurrentPrice(docSnap.data());
       }
@@ -39,9 +42,10 @@ export default function FuelPriceManager() {
   };
 
   const loadHistory = async () => {
+    if (!empresaId) return;
     try {
       const q = query(
-        collection(db, "fuelPriceHistory"),
+        collection(db, "empresas", empresaId, "fuelPriceHistory"),
         orderBy("updatedAt", "desc"),
         limit(10)
       );
@@ -66,14 +70,15 @@ export default function FuelPriceManager() {
       const priceData = {
         ...currentPrice,
         lastUpdated: new Date().toISOString(),
-        updatedBy: "user"
+        updatedBy: "user",
+        empresaId
       };
 
       // Guardar como precio actual
-      await setDoc(doc(db, "settings", "currentFuelPrice"), priceData);
+      await setDoc(doc(db, "empresas", empresaId, "fuelPrices", "current"), priceData);
 
       // Guardar en historial
-      await setDoc(doc(collection(db, "fuelPriceHistory")), {
+      await addDoc(collection(db, "empresas", empresaId, "fuelPriceHistory"), {
         ...priceData,
         updatedAt: new Date()
       });
@@ -282,20 +287,21 @@ export default function FuelPriceManager() {
  * Usar en otros componentes
  */
 export function useCurrentFuelPrice(fuelType = 'diesel') {
+  const { empresaId } = useEmpresa();
   const [price, setPrice] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!empresaId) return;
     const fetchPrice = async () => {
       try {
-        const docRef = doc(db, "settings", "currentFuelPrice");
+        const docRef = doc(db, "empresas", empresaId, "fuelPrices", "current");
         const docSnap = await getDoc(docRef);
-        
         if (docSnap.exists()) {
           const data = docSnap.data();
           setPrice(data[fuelType] || 950);
         } else {
-          setPrice(950); // Fallback
+          setPrice(950);
         }
       } catch (error) {
         console.error("Error obteniendo precio:", error);
@@ -304,9 +310,8 @@ export function useCurrentFuelPrice(fuelType = 'diesel') {
         setLoading(false);
       }
     };
-
     fetchPrice();
-  }, [fuelType]);
+  }, [fuelType, empresaId]);
 
   return { price, loading };
 }

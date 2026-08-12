@@ -2,6 +2,16 @@ import React, { useState, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { fmt, normalizaRut } from "./ContabilidadContext";
 
+// Función para corregir dobles codificaciones UTF-8 en strings Latin1
+function fixEncoding(str) {
+  if (!str) return "";
+  try {
+    return decodeURIComponent(escape(str));
+  } catch (e) {
+    return str;
+  }
+}
+
 // ─── Clasificación automática de proveedores ──────────────────────────────────
 // Reglas basadas en razón social y RUT para asignar la cuenta de gasto correcta
 const REGLAS_CLASIFICACION = [
@@ -99,7 +109,7 @@ function normalizarRCV_Venta(fila) {
 
   return {
     "_rut":           String(fila["Rut cliente"] || "").trim(),
-    "_razonSocial":   String(fila["Razon Social"] || "").trim(),
+    "_razonSocial":   fixEncoding(String(fila["Razon Social"] || "").trim()),
     "_folio":         String(fila["Folio"] || ""),
     "_fecha":         parseFechaRCV(fila["Fecha Docto"]) || parseFechaRCV(fila["Fecha Recepcion"]),
     "_tipoDoc":       tipoDoc,
@@ -178,7 +188,7 @@ function normalizarRCV(fila) {
 
   return {
     "_rut":              String(fila["RUT Proveedor"] || "").trim(),
-    "_razonSocial":      String(fila["Razon Social"]  || "").trim(),
+    "_razonSocial":      fixEncoding(String(fila["Razon Social"]  || "").trim()),
     "_folio":            String(fila["Folio"]         || ""),
     "_fecha":            parseFechaRCV(fila["Fecha Docto"]) || parseFechaRCV(fila["Fecha Recepcion"]),
     "_tipoDoc":          tipoDoc,
@@ -218,7 +228,7 @@ function normalizarIConstruct(fila) {
 
   return {
     "_rut":         String(fila["Rut Emisor"] || "").trim(),
-    "_razonSocial": String(fila["Razón Social Emisor"] || "").trim(),
+    "_razonSocial": fixEncoding(String(fila["Razón Social Emisor"] || "").trim()),
     "_folio":       String(fila["Folio"] || ""),
     "_fecha":       parseFecha(fila["Fecha Emisión"]),
     "_tipoDoc":     tipoSII,
@@ -1106,7 +1116,7 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
 }
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
-export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglasGasto = {}, guardarAsiento, periodoActivo, onImportDone, buscarHashesExistentes }) {
+export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglasGasto = {}, guardarReglaGasto, guardarAsiento, periodoActivo, onImportDone, buscarHashesExistentes }) {
   const inputRef   = useRef(null);
   const [step, setStep]              = useState(0);
   const [filas, setFilas]            = useState([]);
@@ -1221,6 +1231,22 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
         Object.entries(a).filter(([k]) => !k.startsWith("_"))
       );
       await guardarAsiento(asientoLimpio);
+
+      // Auto-aprender la regla si el usuario la modificó o para futuros registros
+      if (a._rut) {
+        const gl = a.lineas.find(l => parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""));
+        if (gl && guardarReglaGasto) {
+          const cat = CATEGORIAS.find(c => c.label === a._clasificacion)
+                   || { label: a._clasificacion || gl.cuentaNombre, icon: "🏷" };
+          await guardarReglaGasto(a._rut, a._razonSocial, {
+            cuentaId: gl.cuentaId,
+            cuentaNombre: gl.cuentaNombre,
+            categoriaLabel: cat.label,
+            categoriaIcon: cat.icon || "🏷",
+          });
+        }
+      }
+
       ok++;
       setProgreso(Math.round(((i+1)/asientos.length)*100));
       setImportados(ok);

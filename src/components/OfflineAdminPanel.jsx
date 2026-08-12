@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { getCacheSize, clearOfflineCache } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useEmpresa } from '../lib/useEmpresa';
 
 /**
  * Panel de administración del modo offline
  * Para diagnosticar y gestionar el almacenamiento local
  */
 export default function OfflineAdminPanel() {
+  const { empresaId } = useEmpresa();
   const [cacheInfo, setCacheInfo] = useState(null);
   const [pendingDocs, setPendingDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,8 +17,8 @@ export default function OfflineAdminPanel() {
 
   useEffect(() => {
     loadCacheInfo();
-    loadPendingDocs();
-  }, []);
+    if (empresaId) loadPendingDocs();
+  }, [empresaId]);
 
   const loadCacheInfo = async () => {
     setLoading(true);
@@ -31,14 +33,13 @@ export default function OfflineAdminPanel() {
   };
 
   const loadPendingDocs = async () => {
+    if (!empresaId) return;
     try {
-      // Intentar detectar documentos pendientes de sincronización
-      // Nota: Esta es una aproximación, Firestore no expone directamente los pendientes
-      const collections = ['fuelReports', 'logs', 'rendiciones'];
+      const collections = ['reportes_combustible', 'dailyLogs', 'rendiciones'];
       const allPending = [];
 
       for (const collectionName of collections) {
-        const snapshot = await getDocs(collection(db, collectionName));
+        const snapshot = await getDocs(collection(db, 'empresas', empresaId, collectionName));
         snapshot.forEach((doc) => {
           if (doc.metadata.hasPendingWrites) {
             allPending.push({

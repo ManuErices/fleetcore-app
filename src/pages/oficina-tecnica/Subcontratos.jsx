@@ -351,6 +351,7 @@ export default function Subcontratos() {
         const docRef = doc(collection(db, 'empresas', empresaId, 'subcontratos'));
         batch.set(docRef, {
           ...subcontrato,
+          empresaId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -418,7 +419,7 @@ export default function Subcontratos() {
     
     setSavingMesAsociado(true);
     try {
-      const docRef = doc(db, 'subcontratos', itemId);
+      const docRef = doc(db, 'empresas', empresaId, 'subcontratos', itemId);
       const { updateDoc } = await import('firebase/firestore');
       
       await updateDoc(docRef, {

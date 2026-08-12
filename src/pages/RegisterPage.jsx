@@ -190,7 +190,7 @@ export default function RegisterPage() {
 
       if (totalUf === 0) {
         // Free module: directly active
-        await setDoc(doc(db, 'subscriptions', user.uid), {
+        await setDoc(doc(db, 'subscriptions', empresaId), {
           userId: user.uid,
           empresaId,
           planId: 'finanzas',
@@ -207,7 +207,7 @@ export default function RegisterPage() {
       } else {
         // Paid modules checkout: simulated bypass
         const planIdStr = landingModules.sort().join(',');
-        await setDoc(doc(db, 'subscriptions', user.uid), {
+        await setDoc(doc(db, 'subscriptions', empresaId), {
           userId: user.uid,
           empresaId,
           planId: planIdStr,

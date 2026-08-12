@@ -17,7 +17,7 @@ import {
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
 import { initializeApp, deleteApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { getAuth, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "firebase/auth";
 
 // ─── Constantes ───────────────────────────────────────────────
 const MODULES = {
@@ -227,7 +227,7 @@ function DashboardSection({ empresas, usuarios, subscriptions }) {
 }
 
 // ─── Sección: Gestión de empresas ─────────────────────────────
-function EmpresasSection({ empresas, subscriptions, onRefresh }) {
+function EmpresasSection({ empresas, subscriptions, onRefresh, onDeleteEmpresa, temporarilyDeletedIds }) {
   const [filtro,   setFiltro]   = useState("todas");
   const [busqueda, setBusqueda] = useState("");
   const [saving,   setSaving]   = useState(null);
@@ -238,22 +238,124 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
   const [form, setForm] = useState({ nombre: "", rut: "", adminEmail: "", plan: "trial", estado: "activo" });
   const [pending, setPending] = useState({}); // { [empId]: { modulos: [...], status } } cambios sin guardar
 
+  const [createdInviteLink, setCreatedInviteLink] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [modalError, setModalError] = useState("");
+
+  const formatRut = (rut) => {
+    const clean = rut.replace(/[^0-9kK]/g, "").toUpperCase();
+    if (clean.length <= 1) return clean;
+    const dv = clean.slice(-1);
+    const body = clean.slice(0, -1);
+    let formattedBody = "";
+    let count = 0;
+    for (let i = body.length - 1; i >= 0; i--) {
+      formattedBody = body[i] + formattedBody;
+      count++;
+      if (count === 3 && i > 0) {
+        formattedBody = "." + formattedBody;
+        count = 0;
+      }
+    }
+    return `${formattedBody}-${dv}`;
+  };
+
+  const handleRutChange = (e) => {
+    const value = e.target.value;
+    const clean = value.replace(/[^0-9kK]/g, "");
+    const formatted = formatRut(clean.slice(0, 9));
+    setForm(f => ({ ...f, rut: formatted }));
+  };
+
+  const validarRut = (rut) => {
+    if (!rut) return false;
+    const limpio = rut.replace(/\./g, "").replace("-", "").toUpperCase();
+    if (limpio.length < 8 || limpio.length > 9) return false;
+    const dv = limpio.slice(-1);
+    const num = limpio.slice(0, -1);
+    if (!/^\d+$/.test(num)) return false;
+    let suma = 0;
+    let mult = 2;
+    for (let i = num.length - 1; i >= 0; i--) {
+      suma += parseInt(num[i]) * mult;
+      mult = mult === 7 ? 2 : mult + 1;
+    }
+    const dvCalc = 11 - (suma % 11);
+    const dvEsp = dvCalc === 11 ? "0" : dvCalc === 10 ? "K" : String(dvCalc);
+    return dvEsp === dv;
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setCreatedInviteLink(null);
+    setCopiedLink(false);
+    setModalError("");
+  };
+
   const handleCrearEmpresa = async () => {
-    if (!form.nombre) return alert("Nombre es requerido");
+    setModalError("");
+    if (!form.nombre.trim()) return setModalError("Nombre es requerido");
+    if (!form.adminEmail.trim()) return setModalError("Email de Administrador es requerido");
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailClean = form.adminEmail.trim().toLowerCase();
+    if (!emailRegex.test(emailClean)) {
+      return setModalError("El formato del correo del administrador no es válido.");
+    }
+
+    if (form.rut.trim() && !validarRut(form.rut.trim())) {
+      return setModalError("El RUT ingresado no es válido.");
+    }
+
     setSaving("new_emp");
     try {
-      await addDoc(collection(db, "empresas"), {
-        ...form,
+      // Chequear duplicidad
+      const q = query(collection(db, "empresas"), where("adminEmail", "==", emailClean));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        setSaving(null);
+        return setModalError("El correo del administrador ya está registrado para otra empresa.");
+      }
+
+      // 1. Crear Empresa
+      const docRef = await addDoc(collection(db, "empresas"), {
+        nombre: form.nombre.trim(),
+        rut: form.rut.trim(),
+        adminEmail: emailClean,
+        plan: form.plan,
+        estado: form.estado,
         creadoEn: serverTimestamp()
       });
-      setShowModal(false);
+      const empresaId = docRef.id;
+
+      // 2. Crear Invitación
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      const inviteRef = await addDoc(collection(db, "invitaciones"), {
+        empresaId,
+        empresaNombre: form.nombre.trim(),
+        rol: "admin_contrato",
+        modulos: [],
+        emailDestino: emailClean,
+        diasExpira: 7,
+        usada: false,
+        creadaEn: serverTimestamp(),
+        expiresAt,
+      });
+
+      const inviteLink = `${window.location.origin}/invite/${inviteRef.id}`;
+      setCreatedInviteLink(inviteLink);
       setForm({ nombre: "", rut: "", adminEmail: "", plan: "trial", estado: "activo" });
       onRefresh();
-    } catch(e) { alert("Error: " + e.message); }
+    } catch (e) {
+      setModalError("Error al crear empresa: " + e.message);
+    }
     setSaving(null);
   };
 
   const filtradas = empresas
+    .filter(e => !temporarilyDeletedIds.includes(e.id))
     .filter(e => filtro === "todas" || e.estado === filtro)
     .filter(e => !busqueda || e.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
       e.rut?.includes(busqueda) || e.adminEmail?.toLowerCase().includes(busqueda.toLowerCase()));
@@ -278,14 +380,28 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
     try {
       const sub = getSub(emp);
       const planId = modulos.join(",");
-      if (sub) {
-        await updateDoc(doc(db, "subscriptions", sub.id), { planId, status, updatedAt: serverTimestamp() });
-      } else {
-        // Crear subscription si no existe
-        await setDoc(doc(db, "subscriptions", emp.adminUid || emp.id), {
-          planId, status, empresaId: emp.id, creadoEn: serverTimestamp(),
-        });
+
+      // Si la suscripción actual tiene un ID diferente al ID de la empresa (ej. user.uid),
+      // eliminamos el documento antiguo para evitar duplicación.
+      if (sub && sub.id !== emp.id) {
+        try {
+          await deleteDoc(doc(db, "subscriptions", sub.id));
+        } catch (err) {
+          console.error("Error deleting old subscription document:", err);
+        }
       }
+
+      // Guardamos la suscripción unificada bajo el ID de la empresa
+      await setDoc(doc(db, "subscriptions", emp.id), {
+        planId,
+        modules: modulos,
+        status,
+        empresaId: emp.id,
+        modifiedBy: "superadmin",
+        updatedAt: serverTimestamp(),
+        creadoEn: sub?.creadoEn || serverTimestamp(),
+      }, { merge: true });
+
       setPending(p => { const n = { ...p }; delete n[emp.id]; return n; });
       onRefresh();
     } catch (e) { alert("Error: " + e.message); }
@@ -306,36 +422,86 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
       />
 
       {/* Modal Crear Empresa */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title="Crear Empresa">
-        <Field label="Nombre" required>
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Minera del Norte" />
-        </Field>
-        <Field label="RUT">
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 77.123.456-7" />
-        </Field>
-        <Field label="Email Admin">
-          <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" type="email" value={form.adminEmail} onChange={e => setForm({...form, adminEmail: e.target.value})} placeholder="Ej: admin@empresa.com" />
-        </Field>
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Plan">
-            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.plan} onChange={e => setForm({...form, plan: e.target.value})}>
-              <option value="trial">Trial</option>
-              <option value="starter">Starter</option>
-              <option value="pro">Pro</option>
-              <option value="enterprise">Enterprise</option>
-            </select>
-          </Field>
-          <Field label="Estado">
-            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
-              <option value="pendiente">Pendiente</option>
-              <option value="activo">Activo</option>
-              <option value="suspendido">Suspendido</option>
-            </select>
-          </Field>
-        </div>
-        <button onClick={handleCrearEmpresa} disabled={saving === "new_emp"} className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
-          {saving === "new_emp" ? "Creando..." : "Crear Empresa"}
-        </button>
+      <Modal isOpen={showModal} onClose={handleCloseModal} title={createdInviteLink ? "Empresa Creada" : "Crear Empresa"}>
+        {createdInviteLink ? (
+          <div className="space-y-4 py-2">
+            <div className="text-center">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h4 className="text-sm font-black text-slate-800">¡Empresa creada con éxito!</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                Se ha generado el siguiente enlace de invitación para el nuevo administrador:
+              </p>
+            </div>
+            
+            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+              <code className="text-xs text-slate-600 break-all select-all block font-mono text-center">
+                {createdInviteLink}
+              </code>
+            </div>
+
+            <div className="flex gap-2">
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(createdInviteLink);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                }} 
+                className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all ${
+                  copiedLink ? "bg-emerald-100 text-emerald-700" : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                }`}
+              >
+                {copiedLink ? "✓ ¡Copiado!" : "Copiar Enlace"}
+              </button>
+              <button 
+                onClick={handleCloseModal} 
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-xl transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {modalError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-xl text-xs font-semibold">
+                {modalError}
+              </div>
+            )}
+            <Field label="Nombre" required>
+              <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Minera del Norte" />
+            </Field>
+            <Field label="RUT">
+              <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.rut} onChange={handleRutChange} placeholder="Ej: 77.123.456-7" />
+            </Field>
+            <Field label="Email Admin" required>
+              <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" type="email" value={form.adminEmail} onChange={e => setForm({...form, adminEmail: e.target.value})} placeholder="Ej: admin@empresa.com" />
+            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Plan">
+                <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.plan} onChange={e => setForm({...form, plan: e.target.value})}>
+                  <option value="trial">Trial</option>
+                  <option value="starter">Starter</option>
+                  <option value="pro">Pro</option>
+                  <option value="enterprise">Enterprise</option>
+                </select>
+              </Field>
+              <Field label="Estado">
+                <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="activo">Activo</option>
+                  <option value="suspendido">Suspendido</option>
+                </select>
+              </Field>
+            </div>
+            <button onClick={handleCrearEmpresa} disabled={saving === "new_emp"} className="w-full py-2.5 mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm rounded-xl transition-all disabled:opacity-50">
+              {saving === "new_emp" ? "Creando..." : "Crear Empresa"}
+            </button>
+          </>
+        )}
       </Modal>
 
       {/* Filtros y búsqueda */}
@@ -396,7 +562,7 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
                   </div>
                   {/* Módulos activos */}
                   {modActivos.length > 0 && (
-                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                       {modActivos.map(m => (
                         <span key={m} className="px-2 py-0.5 rounded-lg text-[10px] font-bold"
                           style={{ background: MODULES[m]?.color + "20", color: MODULES[m]?.color }}>
@@ -404,6 +570,15 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
                         </span>
                       ))}
                       <span className="text-[10px] font-bold text-slate-400 self-center">{fmt(mrr)}/mes</span>
+                      {sub?.modifiedBy && (
+                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold ${
+                          sub.modifiedBy === 'superadmin' 
+                            ? 'bg-red-50 text-red-600 border border-red-100' 
+                            : 'bg-purple-50 text-purple-600 border border-purple-100'
+                        }`}>
+                          Gestión: {sub.modifiedBy === 'superadmin' ? 'Soporte' : 'Cliente'}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -428,6 +603,13 @@ function EmpresasSection({ empresas, subscriptions, onRefresh }) {
                       Reactivar
                     </button>
                   )}
+                  <button onClick={() => onDeleteEmpresa(emp)} disabled={saving === emp.id}
+                    className="p-1.5 hover:bg-red-50 text-red-600 rounded-lg border border-red-100 hover:border-red-200 transition-all disabled:opacity-50"
+                    title="Eliminar empresa">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                   <button onClick={() => setExpanded(isExpanded ? null : emp.id)}
                     className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all">
                     <svg className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
@@ -649,6 +831,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       try {
         tempApp = initializeApp(firebaseConfig, "tempApp_" + Date.now());
         const tempAuth = getAuth(tempApp);
+        await setPersistence(tempAuth, inMemoryPersistence);
         const cred = await createUserWithEmailAndPassword(tempAuth, form.email, form.password);
         const uid = cred.user.uid;
 
@@ -1004,6 +1187,14 @@ export default function SuperAdminPanel({ onClose }) {
   const [subscriptions,  setSubscriptions]  = useState([]);
   const [loading,        setLoading]        = useState(true);
 
+  const [undoDelete, setUndoDelete] = useState(null); // { id, nombre, subId, timerId }
+  const [temporarilyDeletedIds, setTemporarilyDeletedIds] = useState([]);
+  const undoDeleteRef = React.useRef(null);
+
+  useEffect(() => {
+    undoDeleteRef.current = undoDelete;
+  }, [undoDelete]);
+
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
@@ -1021,12 +1212,87 @@ export default function SuperAdminPanel({ onClose }) {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  const commitDelete = useCallback(async (empId, subId) => {
+    try {
+      await deleteDoc(doc(db, "empresas", empId));
+      if (subId) {
+        await deleteDoc(doc(db, "subscriptions", subId));
+      }
+      cargar();
+    } catch (e) {
+      console.error("Error deleting company:", e);
+      alert("Error al eliminar empresa: " + e.message);
+    } finally {
+      setTemporarilyDeletedIds(prev => prev.filter(id => id !== empId));
+      setUndoDelete(null);
+    }
+  }, [cargar]);
+
+  const commitPendingDeleteImmediately = useCallback(async () => {
+    if (undoDeleteRef.current) {
+      const { id, subId, timerId } = undoDeleteRef.current;
+      clearTimeout(timerId);
+      await commitDelete(id, subId);
+    }
+  }, [commitDelete]);
+
+  useEffect(() => {
+    return () => {
+      if (undoDeleteRef.current) {
+        const { id, subId, timerId } = undoDeleteRef.current;
+        clearTimeout(timerId);
+        // Fire-and-forget delete on unmount
+        deleteDoc(doc(db, "empresas", id));
+        if (subId) {
+          deleteDoc(doc(db, "subscriptions", subId));
+        }
+      }
+    };
+  }, []);
+
+  const handleClose = useCallback(async () => {
+    await commitPendingDeleteImmediately();
+    onClose();
+  }, [commitPendingDeleteImmediately, onClose]);
+
+  const handleDeleteEmpresa = useCallback(async (emp) => {
+    if (undoDeleteRef.current) {
+      const { id, subId, timerId } = undoDeleteRef.current;
+      clearTimeout(timerId);
+      await commitDelete(id, subId);
+    }
+
+    const sub = subscriptions.find(s => s.empresaId === emp.id);
+    const subId = sub?.id || null;
+
+    setTemporarilyDeletedIds(prev => [...prev, emp.id]);
+
+    const timerId = setTimeout(() => {
+      commitDelete(emp.id, subId);
+    }, 6000);
+
+    setUndoDelete({
+      id: emp.id,
+      nombre: emp.nombre,
+      subId,
+      timerId
+    });
+  }, [subscriptions, commitDelete]);
+
+  const handleUndoDelete = useCallback(() => {
+    if (undoDelete) {
+      clearTimeout(undoDelete.timerId);
+      setTemporarilyDeletedIds(prev => prev.filter(id => id !== undoDelete.id));
+      setUndoDelete(null);
+    }
+  }, [undoDelete]);
+
   // Cerrar con Escape
   useEffect(() => {
-    const fn = e => { if (e.key === "Escape") onClose(); };
+    const fn = e => { if (e.key === "Escape") handleClose(); };
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Bloquear scroll del body
   useEffect(() => {
@@ -1045,7 +1311,7 @@ export default function SuperAdminPanel({ onClose }) {
   return (
     <>
       {/* Overlay */}
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" onClick={handleClose} />
 
       {/* Panel */}
       <div className="fixed inset-3 sm:inset-6 z-50 bg-slate-50 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
@@ -1068,7 +1334,7 @@ export default function SuperAdminPanel({ onClose }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
-            <button onClick={onClose}
+            <button onClick={handleClose}
               className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1107,13 +1373,51 @@ export default function SuperAdminPanel({ onClose }) {
           ) : (
             <>
               {activeTab === "dashboard" && <DashboardSection empresas={empresas} usuarios={usuarios} subscriptions={subscriptions} />}
-              {activeTab === "empresas"  && <EmpresasSection  empresas={empresas} subscriptions={subscriptions} onRefresh={cargar} />}
+              {activeTab === "empresas"  && (
+                <EmpresasSection
+                  empresas={empresas}
+                  subscriptions={subscriptions}
+                  onRefresh={cargar}
+                  onDeleteEmpresa={handleDeleteEmpresa}
+                  temporarilyDeletedIds={temporarilyDeletedIds}
+                />
+              )}
               {activeTab === "usuarios"  && <UsuariosSection  usuarios={usuarios} empresas={empresas} onRefresh={cargar} />}
               {activeTab === "pagos"     && <PagosSection     subscriptions={subscriptions} empresas={empresas} />}
             </>
           )}
         </div>
       </div>
+
+      {/* Banner de Deshacer */}
+      {undoDelete && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-4 border border-slate-800 animate-slide-up overflow-hidden">
+          <style>{`
+            @keyframes slideUp {
+              from { transform: translate(-50%, 1rem); opacity: 0; }
+              to { transform: translate(-50%, 0); opacity: 1; }
+            }
+            @keyframes shrink {
+              from { width: 100%; }
+              to { width: 0%; }
+            }
+            .animate-slide-up {
+              animation: slideUp 0.2s ease-out forwards;
+            }
+            .animate-shrink {
+              animation: shrink 6s linear forwards;
+            }
+          `}</style>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-semibold text-slate-400">Empresa eliminada:</span>
+            <span className="text-xs font-black text-white">{undoDelete.nombre}</span>
+          </div>
+          <button onClick={handleUndoDelete} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black rounded-xl transition-all shadow-sm">
+            Deshacer
+          </button>
+          <div className="absolute bottom-0 left-0 h-1 bg-indigo-500 animate-shrink" />
+        </div>
+      )}
     </>
   );
 }

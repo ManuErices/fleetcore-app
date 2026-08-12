@@ -380,6 +380,7 @@ export default function Rendiciones() {
         const docRef = doc(collection(db, `empresas/${empresaId}/rendiciones`));
         batch.set(docRef, {
           ...rendicion,
+          empresaId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });

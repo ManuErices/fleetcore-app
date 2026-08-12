@@ -1,32 +1,53 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MODULES, calculateTotal } from '../../lib/plans';
 import { auth, db } from '../../lib/firebase';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 export default function PricingSection({ onAuthRequired, currentUser }) {
+  const navigate = useNavigate();
   const [selectedModules, setSelectedModules] = useState(['finanzas']);
   const [ufRate, setUfRate] = useState(38300);
   const [loading, setLoading] = useState(false);
   const [successType, setSuccessType] = useState(null); // null | 'free' | 'webpay'
   const [errorMessage, setErrorMessage] = useState('');
 
+  const [empresaId, setEmpresaId] = useState('');
+  const [userRole, setUserRole] = useState(null);
+
   useEffect(() => {
-    if (!currentUser) return;
-    const ref = doc(db, 'subscriptions', currentUser.uid);
-    getDoc(ref).then(snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.modules && Array.isArray(data.modules)) {
-          // Ensure finanzas is always included
-          const mods = data.modules.includes('finanzas') ? data.modules : ['finanzas', ...data.modules];
-          setSelectedModules(mods);
-        } else if (data.planId) {
-          const parsed = data.planId.split(',').filter(Boolean);
-          const mods = parsed.includes('finanzas') ? parsed : ['finanzas', ...parsed];
-          setSelectedModules(mods);
+    if (!currentUser) {
+      setUserRole(null);
+      setEmpresaId('');
+      return;
+    }
+
+    // 1. Fetch user doc to get company ID and role
+    getDoc(doc(db, 'users', currentUser.uid)).then(userSnap => {
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        setUserRole(uData.role || 'operador');
+        const empId = uData.empresaId || '';
+        setEmpresaId(empId);
+
+        if (empId) {
+          // 2. Fetch subscription for this company
+          getDoc(doc(db, 'subscriptions', empId)).then(subSnap => {
+            if (subSnap.exists()) {
+              const data = subSnap.data();
+              if (data.modules && Array.isArray(data.modules)) {
+                const mods = data.modules.includes('finanzas') ? data.modules : ['finanzas', ...data.modules];
+                setSelectedModules(mods);
+              } else if (data.planId) {
+                const parsed = data.planId.split(',').filter(Boolean);
+                const mods = parsed.includes('finanzas') ? parsed : ['finanzas', ...parsed];
+                setSelectedModules(mods);
+              }
+            }
+          }).catch(err => console.error('Error loading company subscription:', err));
         }
       }
-    }).catch(err => console.error('Error loading user subscription:', err));
+    }).catch(err => console.error('Error fetching user document:', err));
   }, [currentUser]);
 
   useEffect(() => {
@@ -70,50 +91,11 @@ export default function PricingSection({ onAuthRequired, currentUser }) {
       return;
     }
 
-    setLoading(true);
-    try {
-      if (totalUf === 0) {
-        // Free module direct activation in Firestore
-        const ref = doc(db, 'subscriptions', currentUser.uid);
-        await setDoc(ref, {
-          userId: currentUser.uid,
-          planId: 'finanzas',
-          modules: ['finanzas'],
-          gateway: 'free',
-          status: 'authorized',
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-
-        setSuccessType('free');
-        setTimeout(() => {
-          localStorage.removeItem('selectedApp');
-          window.location.href = '/';
-        }, 3000);
-      } else {
-        // Paid modules checkout: simulated bypass
-        const planIdStr = selectedModules.sort().join(',');
-        const ref = doc(db, 'subscriptions', currentUser.uid);
-        await setDoc(ref, {
-          userId: currentUser.uid,
-          planId: planIdStr,
-          modules: selectedModules,
-          gateway: 'mock_webpay',
-          status: 'authorized',
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-
-        setSuccessType('webpay');
-        setTimeout(() => {
-          localStorage.removeItem('selectedApp');
-          window.location.href = '/';
-        }, 3000);
-      }
-    } catch (err) {
-      console.error('Error in checkout:', err);
-      setErrorMessage(err.message);
-      setSuccessType(null);
-    } finally {
-      setLoading(false);
+    if (userRole === 'admin_contrato' || userRole === 'superadmin') {
+      // Redirigir directamente al panel administrativo para confirmar o pagar la suscripción
+      navigate('/admin?tab=mi_plan');
+    } else {
+      setErrorMessage('Tu rol actual no permite gestionar la suscripción. Comunícate con el Administrador de Contrato de tu empresa.');
     }
   };
 
@@ -277,10 +259,10 @@ export default function PricingSection({ onAuthRequired, currentUser }) {
                   </div>
                 ) : !currentUser ? (
                   'Registrarse para contratar'
-                ) : totalUf === 0 ? (
-                  'Activar Módulo Gratis'
+                ) : (userRole === 'admin_contrato' || userRole === 'superadmin') ? (
+                  'Gestionar en mi Panel de Admin'
                 ) : (
-                  'Pagar con Webpay'
+                  'Gestionar plan (Solo Admin)'
                 )}
               </button>
 

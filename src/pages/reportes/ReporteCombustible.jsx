@@ -12,6 +12,156 @@ import CombustibleAnalytics from "../combustible/CombustibleAnalytics";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
 
+function SurtidoresStatsPanel({ stats, selectedSurtidorId, onSelectSurtidor, fechaInicio, fechaFin }) {
+  if (stats.length === 0) return null;
+
+  const selectedStat = stats.find(s => s.id === selectedSurtidorId);
+
+  return (
+    <div className="max-w-7xl mx-auto mb-6">
+      <div className="bg-white rounded-2xl shadow-md border-2 border-orange-100 p-5">
+        <div className="flex items-center justify-between mb-4 border-b border-orange-100 pb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🚛</span>
+            <h3 className="font-black text-slate-800 text-sm tracking-wide uppercase">
+              Control de Stock y Mermas de Surtidores
+            </h3>
+          </div>
+          <span className="text-slate-400 text-xs font-semibold">
+            {fechaInicio || fechaFin ? 'Período: ' + (fechaInicio || 'Inicio') + ' al ' + (fechaFin || 'Fin') : 'Todo el historial'}
+          </span>
+        </div>
+
+        {selectedStat ? (
+          // Vista detallada de un surtidor
+          <div className="bg-orange-50/30 rounded-xl border border-orange-100 p-4">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h4 className="text-base font-black text-orange-800 flex items-center gap-2">
+                  {selectedStat.nombre}
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs font-bold rounded-lg border border-orange-200">
+                    {selectedStat.patente}
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedStat.tipo} {selectedStat.marca ? '· ' + selectedStat.marca : ''} {selectedStat.modelo ? '· ' + selectedStat.modelo : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => onSelectSurtidor('')}
+                className="px-3 py-1 bg-white hover:bg-orange-100 border border-orange-200 text-orange-700 font-bold rounded-lg text-xs transition-all shadow-sm"
+              >
+                ✕ Mostrar Todos
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Stock actual */}
+              <div className="bg-white rounded-xl border border-orange-100 p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Stock Actual (Remanente)</span>
+                  <div className="text-2xl font-black text-slate-800">
+                    {selectedStat.stockActual.toLocaleString('es-CL')} L
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-2 font-medium">
+                  Saldo histórico acumulado
+                </div>
+              </div>
+
+              {/* Ingresos en período */}
+              <div className="bg-white rounded-xl border border-orange-100 p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Cargado en Período</span>
+                  <div className="text-2xl font-black text-amber-600">
+                    {selectedStat.totalIngresadoPeriodo.toLocaleString('es-CL')} L
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-2 font-medium">
+                  {selectedStat.totalEntradasCount} cargas registradas
+                </div>
+              </div>
+
+              {/* Entregas en período */}
+              <div className="bg-white rounded-xl border border-orange-100 p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Despachado en Período</span>
+                  <div className="text-2xl font-black text-blue-600">
+                    {selectedStat.totalEntregadoPeriodo.toLocaleString('es-CL')} L
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-2 font-medium">
+                  {selectedStat.totalEntregasCount} despachos a máquinas
+                </div>
+              </div>
+
+              {/* Mermas/Desviación */}
+              <div className="bg-white rounded-xl border border-orange-100 p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Desviación / Merma</span>
+                  <div className={`text-2xl font-black ${selectedStat.desviacionPct > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {selectedStat.diferenciaPeriodo.toLocaleString('es-CL')} L
+                  </div>
+                </div>
+                <div className={`text-[10px] font-bold mt-2 ${selectedStat.desviacionPct > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {selectedStat.desviacionPct > 0 ? '⚠️ Merma de ' : '✓ Desviación de '}{Math.abs(selectedStat.desviacionPct).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Grilla de todos los surtidores
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {stats.map(s => {
+              const statusColor = s.stockActual < 100 ? 'text-red-600 bg-red-50' : 'text-emerald-700 bg-emerald-50';
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => onSelectSurtidor(s.id)}
+                  className="bg-slate-50/50 hover:bg-orange-50/40 rounded-xl border border-slate-200 hover:border-orange-300 p-4 cursor-pointer transition-all shadow-sm group"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-slate-800 text-sm truncate group-hover:text-orange-700">
+                        {s.nombre}
+                      </h4>
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 mt-1 inline-block">
+                        {s.patente}
+                      </span>
+                    </div>
+                    <div className={`px-2.5 py-1 rounded-lg text-xs font-black ${statusColor} text-right`}>
+                      Stock: {s.stockActual.toLocaleString('es-CL')} L
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-200/60 text-[10px]">
+                    <div>
+                      <span className="text-slate-400 block font-semibold uppercase">Cargado:</span>
+                      <span className="font-bold text-slate-700">{s.totalIngresadoPeriodo.toLocaleString('es-CL')} L</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block font-semibold uppercase">Despachado:</span>
+                      <span className="font-bold text-slate-700">{s.totalEntregadoPeriodo.toLocaleString('es-CL')} L</span>
+                    </div>
+                  </div>
+
+                  {s.totalIngresadoPeriodo > 0 && (
+                    <div className="mt-2 text-[10px] font-bold text-right">
+                      <span className={s.desviacionPct > 0 ? 'text-red-500' : 'text-emerald-500'}>
+                        Merma: {s.desviacionPct.toFixed(1)}% ({s.diferenciaPeriodo.toLocaleString('es-CL')} L)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ReporteCombustible() {
   const { empresaId, empresa: tenantInfo } = useEmpresa();
   const { toast, toasts, removeToast } = useToast();
@@ -254,17 +404,39 @@ export default function ReporteCombustible() {
     }
 
     if (filtros.maquina) {
-      // Para ENTREGA: filtrar por machineId en datosEntrega
+      const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const words = norm(filtros.maquina).split(/\s+/).filter(Boolean);
       resultado = resultado.filter(r => {
-        if (r.tipo === 'entrega' && r.datosEntrega) {
-          return r.datosEntrega.machineId === filtros.maquina;
+        let m = null;
+        if (r.tipo === 'entrada' && r.datosEntrada) {
+          m = machines.find(ma => ma.id === r.datosEntrada.machineId)
+            || equiposSurtidores.find(ma => ma.id === r.datosEntrada.machineId);
+        } else if (r.tipo === 'entrega' && r.datosEntrega) {
+          m = machines.find(ma => ma.id === r.datosEntrega.machineId);
         }
-        return false;
+        if (!m) return false;
+
+        const patent = m.patente || m.code || '';
+        const name = m.nombre || m.name || '';
+        const model = m.modelo || '';
+        const brand = m.marca || '';
+        const type = m.type || '';
+        const label = [patent, name, model, brand, type].join(' ');
+        const haystack = norm(label);
+
+        return words.every(w => haystack.includes(w));
       });
     }
 
     if (filtros.surtidor) {
-      resultado = resultado.filter(r => r.repartidorId === filtros.surtidor);
+      resultado = resultado.filter(r => {
+        if (r.tipo === 'entrega') {
+          return r.datosControl?.equipoSurtidorId === filtros.surtidor;
+        } else if (r.tipo === 'entrada') {
+          return r.datosEntrada?.machineId === filtros.surtidor;
+        }
+        return false;
+      });
     }
 
     if (filtros.receptor) {
@@ -349,6 +521,59 @@ export default function ReporteCombustible() {
       };
     });
   }, [filtros, reportes, projects, machines, empleados, empresas, estaciones, equiposSurtidores]);
+
+  const surtidoresStats = useMemo(() => {
+    return equiposSurtidores.map(s => {
+      // Entradas históricas (All-Time) para calcular el stock actual real
+      const entradasHist = reportes.filter(r => r.tipo === 'entrada' && r.datosEntrada?.machineId === s.id);
+      const totalIngresadoAllTime = entradasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrada?.cantidad) || 0), 0);
+
+      // Entregas históricas (All-Time)
+      const entregasHist = reportes.filter(r => r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId === s.id);
+      const totalEntregadoAllTime = entregasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrega?.cantidadLitros) || 0), 0);
+
+      // Stock actual real (All-time balance)
+      const stockActual = totalIngresadoAllTime - totalEntregadoAllTime;
+
+      // --- Período Filtrado (según las fechas Desde/Hasta seleccionadas) ---
+      const entradasPeriodo = entradasHist.filter(r => {
+        if (filtros.fechaInicio && r.fecha < filtros.fechaInicio) return false;
+        if (filtros.fechaFin && r.fecha > filtros.fechaFin) return false;
+        return true;
+      });
+      const totalIngresadoPeriodo = entradasPeriodo.reduce((sum, r) => sum + (parseFloat(r.datosEntrada?.cantidad) || 0), 0);
+
+      const entregasPeriodo = entregasHist.filter(r => {
+        if (filtros.fechaInicio && r.fecha < filtros.fechaInicio) return false;
+        if (filtros.fechaFin && r.fecha > filtros.fechaFin) return false;
+        return true;
+      });
+      const totalEntregadoPeriodo = entregasPeriodo.reduce((sum, r) => sum + (parseFloat(r.datosEntrega?.cantidadLitros) || 0), 0);
+
+      // Mermas/Desviación en el período
+      // Diferencia = Lo que entró al camión - Lo que salió del camión
+      const diferenciaPeriodo = totalIngresadoPeriodo - totalEntregadoPeriodo;
+      const desviacionPct = totalIngresadoPeriodo > 0 
+        ? (diferenciaPeriodo / totalIngresadoPeriodo) * 100 
+        : 0;
+
+      return {
+        id: s.id,
+        nombre: s.nombre || s.name || 'Sin nombre',
+        patente: s.patente || s.code || 'Sin patente',
+        marca: s.marca || '',
+        modelo: s.modelo || '',
+        tipo: s.tipo || '',
+        stockActual,
+        totalIngresadoPeriodo,
+        totalEntregadoPeriodo,
+        diferenciaPeriodo,
+        desviacionPct,
+        totalEntradasCount: entradasPeriodo.length,
+        totalEntregasCount: entregasPeriodo.length
+      };
+    });
+  }, [equiposSurtidores, reportes, filtros.fechaInicio, filtros.fechaFin]);
 
   const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato';
 
@@ -921,7 +1146,17 @@ export default function ReporteCombustible() {
                   <input
                     type="date"
                     value={filtros.fechaInicio}
-                    onChange={(e) => { setFiltros({ ...filtros, fechaInicio: e.target.value }); setPaginaActual(1); }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFiltros(prev => {
+                        const next = { ...prev, fechaInicio: val };
+                        if (val && prev.fechaFin && val > prev.fechaFin) {
+                          next.fechaFin = val;
+                        }
+                        return next;
+                      });
+                      setPaginaActual(1);
+                    }}
                     className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
                   />
                 </div>
@@ -930,7 +1165,17 @@ export default function ReporteCombustible() {
                   <input
                     type="date"
                     value={filtros.fechaFin}
-                    onChange={(e) => { setFiltros({ ...filtros, fechaFin: e.target.value }); setPaginaActual(1); }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFiltros(prev => {
+                        const next = { ...prev, fechaFin: val };
+                        if (val && prev.fechaInicio && val < prev.fechaInicio) {
+                          next.fechaInicio = val;
+                        }
+                        return next;
+                      });
+                      setPaginaActual(1);
+                    }}
                     className="w-36 px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
                   />
                 </div>
@@ -951,19 +1196,39 @@ export default function ReporteCombustible() {
                 </select>
               </div>
 
+              {/* Surtidor */}
+              <div className="flex-1 min-w-[130px]">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Surtidor</label>
+                <select
+                  value={filtros.surtidor}
+                  onChange={(e) => { setFiltros({ ...filtros, surtidor: e.target.value }); setPaginaActual(1); }}
+                  className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
+                >
+                  <option value="">Todos</option>
+                  {equiposSurtidores.map(s => {
+                    const label = [
+                      s.patente || s.code,
+                      s.nombre || s.name,
+                      s.modelo,
+                      s.marca
+                    ].filter(Boolean).join(' - ');
+                    return (
+                      <option key={s.id} value={s.id}>{label}</option>
+                    );
+                  })}
+                </select>
+              </div>
+
               {/* Máquina */}
               <div className="flex-1 min-w-[130px]">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Máquina</label>
-                <select
+                <input
+                  type="text"
+                  placeholder="Patente, modelo, marca..."
                   value={filtros.maquina}
                   onChange={(e) => { setFiltros({ ...filtros, maquina: e.target.value }); setPaginaActual(1); }}
                   className="w-full px-2.5 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-orange-50/40"
-                >
-                  <option value="">Todas</option>
-                  {machines.map(m => (
-                    <option key={m.id} value={m.id}>{m.patente || m.code}</option>
-                  ))}
-                </select>
+                />
               </div>
 
               {/* Receptor */}
@@ -1016,7 +1281,7 @@ export default function ReporteCombustible() {
                   <span className="px-2.5 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm font-black">
                     {reportesFiltrados.length}
                   </span>
-                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.receptor || filtros.tipo || filtros.folio) && (
+                  {(filtros.fechaInicio || filtros.fechaFin || filtros.proyecto || filtros.maquina || filtros.surtidor || filtros.receptor || filtros.tipo || filtros.folio) && (
                     <button
                       onClick={() => { setFiltros({ fechaInicio: '', fechaFin: '', tipo: '', proyecto: '', maquina: '', surtidor: '', receptor: '', folio: '' }); setPaginaActual(1); }}
                       className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-xs font-bold transition-all"
@@ -1149,6 +1414,15 @@ export default function ReporteCombustible() {
             </div>
           </div>
         </div>
+
+        {/* Panel de Surtidores */}
+        <SurtidoresStatsPanel
+          stats={surtidoresStats}
+          selectedSurtidorId={filtros.surtidor}
+          onSelectSurtidor={(id) => setFiltros(prev => ({ ...prev, surtidor: id }))}
+          fechaInicio={filtros.fechaInicio}
+          fechaFin={filtros.fechaFin}
+        />
 
         {/* Tabla */}
         <div className="max-w-7xl mx-auto">

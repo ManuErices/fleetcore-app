@@ -319,7 +319,7 @@ export default function DashboardExecutive() {
           title="Personal"
           icon="👷"
           total={kpis.costoEmpresa}
-          percentage={(kpis.costoEmpresa / kpis.totalCostos * 100).toFixed(1)}
+          percentage={kpis.totalCostos > 0 ? (kpis.costoEmpresa / kpis.totalCostos * 100).toFixed(1) : "0.0"}
           color="emerald"
           items={[
             { label: 'Empleados', value: kpis.totalEmpleados },
@@ -332,7 +332,7 @@ export default function DashboardExecutive() {
           title="Combustible"
           icon="⛽"
           total={kpis.costoCombustible}
-          percentage={(kpis.costoCombustible / kpis.totalCostos * 100).toFixed(1)}
+          percentage={kpis.totalCostos > 0 ? (kpis.costoCombustible / kpis.totalCostos * 100).toFixed(1) : "0.0"}
           color="cyan"
           items={[
             { label: 'Litros', value: formatNumber(kpis.totalLitros) + ' L' },
@@ -345,7 +345,7 @@ export default function DashboardExecutive() {
           title="Subcontratos"
           icon="🤝"
           total={kpis.totalSubcontratos}
-          percentage={(kpis.totalSubcontratos / kpis.totalCostos * 100).toFixed(1)}
+          percentage={kpis.totalCostos > 0 ? (kpis.totalSubcontratos / kpis.totalCostos * 100).toFixed(1) : "0.0"}
           color="teal"
           items={[
             { label: 'Estados de Pago', value: kpis.cantidadSubcontratos },
@@ -376,7 +376,7 @@ export default function DashboardExecutive() {
             { label: 'Total Rendiciones', value: kpis.cantidadRendiciones + ' rendiciones' },
             { label: 'Monto Total', value: formatCurrency(kpis.totalRendiciones), highlight: true },
             { label: 'Promedio', value: formatCurrency(kpis.promedioRendicion) },
-            { label: '% del Total', value: ((kpis.totalRendiciones / kpis.totalCostos) * 100).toFixed(1) + '%' }
+            { label: '% del Total', value: (kpis.totalCostos > 0 ? ((kpis.totalRendiciones / kpis.totalCostos) * 100).toFixed(1) : "0.0") + '%' }
           ]}
         />
       </div>
