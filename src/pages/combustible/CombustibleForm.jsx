@@ -36,11 +36,11 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
         <div>
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-6">
+        <div className="bg-gradient-to-r from-orange-600 to-amber-600 text-white p-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-black">Control de Combustible</h2>
-              <p className="text-orange-100 text-sm mt-1">{stepLabel}</p>
+              <h2 className="text-xl font-black">Control de Combustible</h2>
+              <p className="text-orange-100 text-xs mt-0.5">{stepLabel}</p>
             </div>
             <button
               onClick={f.handleClose}
@@ -54,7 +54,7 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
         </div>
 
         {/* Step indicator */}
-        <div className="bg-orange-50 p-4 border-b border-orange-200">
+        <div className="bg-orange-50 py-2 px-4 border-b border-orange-200">
           <div className="flex items-center justify-center gap-4">
             {[1, 2, 3].map((n, i) => (
               <React.Fragment key={n}>
@@ -75,7 +75,7 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
         </div>
 
         {/* Step content */}
-        <div className="p-6">
+        <div className="p-4">
           {f.paso === 1 && (
             <TipoStep
               setTipoReporte={f.setTipoReporte}

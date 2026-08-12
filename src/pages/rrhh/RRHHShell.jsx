@@ -5,7 +5,7 @@ import { useEmpresa } from "../../lib/useEmpresa";
 import UserMenuDropdown from "../../components/UserMenuDropdown";
 import RRHH from "./index";
 
-export default function RRHHShell({ user, userRole, onLogout, onBackToSelector }) {
+export default function RRHHShell({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   const { empresa } = useEmpresa();
 
   return (
@@ -37,6 +37,8 @@ export default function RRHHShell({ user, userRole, onLogout, onBackToSelector }
             userRole={userRole}
             onLogout={onLogout}
             onBackToSelector={onBackToSelector}
+            onAdminPanel={onAdminPanel}
+            onAdminEmpresaPanel={onAdminEmpresaPanel}
           />
         </div>
       </header>

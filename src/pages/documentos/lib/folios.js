@@ -34,11 +34,13 @@ export const ESTADOS = {
 }
 
 function foliosCol(empresaId) {
-  return collection(db, 'empresas', empresaId, 'folios')
+  const targetEmpresa = (empresaId && empresaId !== 'Río Tinto Mining') ? empresaId : 'MPF Ingeniería Civil SpA'
+  return collection(db, 'empresas', targetEmpresa, 'folios')
 }
 
 function folioDoc(empresaId, folioId) {
-  return doc(db, 'empresas', empresaId, 'folios', folioId)
+  const targetEmpresa = (empresaId && empresaId !== 'Río Tinto Mining') ? empresaId : 'MPF Ingeniería Civil SpA'
+  return doc(db, 'empresas', targetEmpresa, 'folios', folioId)
 }
 
 async function todosLosFolios(empresaId) {

@@ -41,6 +41,7 @@ import PricingPage from "./pages/PricingPage.jsx";
 import PaymentResult from "./pages/PaymentResult.jsx";
 import EmpresaSetup from "./pages/EmpresaSetup.jsx";
 import InviteAccept from "./pages/InviteAccept.jsx";
+import Capacitacion from "./pages/Capacitacion.jsx";
 
 // ── Misc components ───────────────────────────────────────────
 import CombustibleModal from "./pages/combustible/CombustibleModal";
@@ -52,7 +53,7 @@ import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
 import { auth, googleProvider, db } from "./lib/firebase";
 import { EmpresaProvider, useEmpresa } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
 import { getPlanTier } from "./lib/plans.js";
 import UserMenuDropdown from "./components/UserMenuDropdown";
@@ -66,6 +67,10 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const { empresaId, empresa } = useEmpresa();
+  const navigate = useNavigate();
+  const canGoToAdmin = ['superadmin', 'admin_contrato'].includes(userRole);
+  const handleAdminPanel = canGoToAdmin ? () => { localStorage.setItem('selectedApp', 'admin'); navigate('/admin'); } : undefined;
+  const handleAdminEmpresaPanel = canGoToAdmin ? () => { localStorage.setItem('selectedApp', 'admin'); navigate('/admin/empresa'); } : undefined;
 
   const { activeModules } = usePlan();
   const planTier = getPlanTier(activeModules);
@@ -101,6 +106,8 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                     onLogout={onLogout}
                     onBackToSelector={onBackToSelector}
                     onGoToPricing={onGoToPricing}
+                    onAdminPanel={handleAdminPanel}
+                    onAdminEmpresaPanel={handleAdminEmpresaPanel}
                   />
                 </div>
               )}
@@ -191,22 +198,17 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
 
           </nav>
         </div>
+      </header>
 
-        {/* Mobile menu */}
-        {showMobileMenu && (
-          <>
-            <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
-            <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{ background: 'linear-gradient(135deg,#2A3F5F 0%,#0F1C2E 100%)' }}>
-                <div className="flex items-center gap-3">
-                  <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
-                  <h2 className="text-base font-black text-white">Menú</h2>
-                </div>
-                <button onClick={() => setShowMobileMenu(false)} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+      {/* Mobile menu */}
+      {showMobileMenu && (
+        <>
+          <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
+          <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{ background: 'linear-gradient(135deg,#2A3F5F 0%,#0F1C2E 100%)' }}>
+              <div className="flex items-center gap-3">
+                <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
+                <h2 className="text-base font-black text-white">Menú</h2>
               </div>
               <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                 <MobileNavLink to="/fleetcore" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
@@ -237,28 +239,37 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                 </button>
                 <div className="h-px bg-slate-200 my-2" />
                 <button
-                  onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
+                  onClick={() => { setShowMobileMenu(false); handleAdminPanel(); }}
                   className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
-                  Cambiar aplicación
+                  Panel de Admin
                 </button>
-                <button
-                  onClick={() => { setShowMobileMenu(false); onLogout(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
-                  </svg>
-                  Cerrar sesión
-                </button>
-              </nav>
-            </div>
-          </>
-        )}
-      </header>
+              )}
+              <button
+                onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
+                className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+                Cambiar aplicación
+              </button>
+              <button
+                onClick={() => { setShowMobileMenu(false); onLogout(); }}
+                className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                </svg>
+                Cerrar sesión
+              </button>
+            </nav>
+          </div>
+        </>
+      )}
 
       <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         <Routes>
@@ -377,6 +388,9 @@ export default function App() {
   const [postInvite, setPostInvite] = useState(false);
   const [userRole, setUserRole] = useState('operador');
   const [userModulos, setUserModulos] = useState([]);
+  const [userCargo, setUserCargo] = useState('');
+  const [userEsSurtidor, setUserEsSurtidor] = useState(false);
+  const [capacitacionAprobada, setCapacitacionAprobada] = useState(false);
 
   const { canAccess, loading: planLoading, subscription } = usePlan();
   const navigate = useNavigate();
@@ -402,13 +416,50 @@ export default function App() {
         unsubUserDoc = null;
       }
 
+      const checkAndAutoApprove = (data) => {
+        const role = data.role || 'operador';
+        const modulos = data.modulos || [];
+        const cargo = data.cargo || '';
+        const esSurtidor = data.esSurtidor || false;
+        
+        const isAdminExempt = ['superadmin', 'admin_contrato', 'admin'].includes(role);
+        const isFuelUser = !isAdminExempt && (
+                           (role === 'administrativo' && modulos.includes('reportes')) ||
+                           (role === 'operador' && (esSurtidor || ['surtidor', 'solo_combustible'].includes(cargo)))
+                         );
+        
+        if (isFuelUser && !data.capacitacionAprobada) {
+          const userRef = doc(db, 'users', currentUser.uid);
+          updateDoc(userRef, {
+            capacitacionAprobada: true,
+            capacitacionFecha: serverTimestamp()
+          }).catch(err => console.error("Error auto-approving user training:", err));
+          
+          if (data.empresaId) {
+            const empresaUserRef = doc(db, 'empresas', data.empresaId, 'users', currentUser.uid);
+            updateDoc(empresaUserRef, {
+              capacitacionAprobada: true,
+              capacitacionFecha: serverTimestamp()
+            }).catch(err => console.warn("Error auto-approving company user training:", err));
+          }
+        }
+      };
+
       if (currentUser) {
         // Escuchar el documento del usuario en tiempo real para reaccionar al registro inmediato
         unsubUserDoc = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
           if (snap.exists()) {
             const data = snap.data();
+            if (data.deleted) {
+              signOut(auth);
+              return;
+            }
             setUserRole(data.role || 'operador');
             setUserModulos(data.modulos || []);
+            setUserCargo(data.cargo || '');
+            setUserEsSurtidor(data.esSurtidor || false);
+            setCapacitacionAprobada(data.capacitacionAprobada || false);
+            checkAndAutoApprove(data);
             if (data.empresaId) {
               setNeedsSetup(false);
             } else {
@@ -417,6 +468,9 @@ export default function App() {
           } else {
             setUserRole('operador');
             setUserModulos([]);
+            setUserCargo('');
+            setUserEsSurtidor(false);
+            setCapacitacionAprobada(false);
             setNeedsSetup(true);
           }
           setLoading(false);
@@ -430,6 +484,10 @@ export default function App() {
                 const data = snap.data();
                 setUserRole(data.role || 'operador');
                 setUserModulos(data.modulos || []);
+                setUserCargo(data.cargo || '');
+                setUserEsSurtidor(data.esSurtidor || false);
+                setCapacitacionAprobada(data.capacitacionAprobada || false);
+                checkAndAutoApprove(data);
                 setNeedsSetup(!data.empresaId);
               } else {
                 setNeedsSetup(true);
@@ -443,12 +501,17 @@ export default function App() {
           }
           setUserRole('operador');
           setUserModulos([]);
+          setUserCargo('');
+          setUserEsSurtidor(false);
+          setCapacitacionAprobada(false);
           setNeedsSetup(true);
           setLoading(false);
         });
       } else {
         setUserRole('operador');
         setUserModulos([]);
+        setUserCargo('');
+        setCapacitacionAprobada(false);
         setNeedsSetup(false);
         setLoading(false);
       }
@@ -485,19 +548,19 @@ export default function App() {
     let allowed = false;
 
     if (appName === 'fleetcore') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
     } else if (appName === 'workfleet' || appName === 'workfleet-m') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('workfleet')) || ((userRole === 'administrativo' && hasModulo('workfleet')) && canAccess('workfleet')) || (userRole === 'operador' && canAccess('workfleet'));
+      allowed = isSuperAdmin || userRole === 'operador' || (isAdminContrato && canAccess('workfleet')) || (['administrativo', 'operador'].includes(userRole) && hasModulo('workfleet') && canAccess('workfleet'));
     } else if (appName === 'rrhh') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((userRole === 'administrativo' && hasModulo('rrhh')) && canAccess('rrhh'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('rrhh')) && canAccess('rrhh'));
     } else if (appName === 'reportes') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((userRole === 'administrativo' && hasModulo('reportes')) && canAccess('reportes'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('reportes')) && canAccess('reportes'));
     } else if (appName === 'finanzas') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((userRole === 'administrativo' && hasModulo('finanzas')) && canAccess('finanzas'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('finanzas')) && canAccess('finanzas'));
     } else if (appName === 'contabilidad') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((userRole === 'administrativo' && hasModulo('contabilidad')) && canAccess('contabilidad'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('contabilidad')) && canAccess('contabilidad'));
     } else if (appName === 'documentos') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((userRole === 'administrativo' && hasModulo('fleetcore')) && canAccess('fleetcore'));
+      allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
     } else if (appName === 'admin') {
       allowed = isSuperAdmin || isAdminContrato || userRole === 'administrativo';
     }
@@ -527,6 +590,16 @@ export default function App() {
   const handleBackToSelector = () => {
     localStorage.removeItem('selectedApp');
     navigate('/');
+  };
+
+  const handleGoToAdminPanel = () => {
+    localStorage.setItem('selectedApp', 'admin');
+    navigate('/admin');
+  };
+
+  const handleGoToAdminEmpresaPanel = () => {
+    localStorage.setItem('selectedApp', 'admin');
+    navigate('/admin/empresa');
   };
 
   const handleGoToPricing = () => {
@@ -563,6 +636,10 @@ export default function App() {
       </div>
     );
   }
+
+  // ── Gating de Capacitación Obligatoria ─────────────────────
+  // ── Gating de Capacitación Obligatoria (Bypassed) ─────────────────────
+  const needsTraining = false;
 
   return (
     <Routes>
@@ -603,6 +680,16 @@ export default function App() {
                 />
               } />
 
+              <Route path="/admin/empresa" element={
+                <PWAWrapper user={user}>
+                  {['superadmin', 'admin_contrato', 'administrativo'].includes(userRole) ? (
+                    <AdminPanel onClose={() => navigate('/')} />
+                  ) : (
+                    <Navigate to="/" replace />
+                  )}
+                </PWAWrapper>
+              } />
+
               <Route path="/admin" element={
                 <PWAWrapper user={user}>
                   {userRole === 'superadmin' ? (
@@ -639,6 +726,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
@@ -650,6 +739,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
@@ -661,6 +752,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
@@ -672,6 +765,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
@@ -683,6 +778,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
@@ -694,6 +791,8 @@ export default function App() {
                     userRole={userRole}
                     onLogout={handleLogout}
                     onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />

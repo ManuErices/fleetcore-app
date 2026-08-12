@@ -4,7 +4,9 @@ import { ASSETS, CATEGORIES } from '../lib/layoutAssets.js'
 
 const CANVAS_W = 900
 const CANVAS_H = 480
-const LAYOUT_URL = "https://generarlayout-ybgdfxdgqq-uc.a.run.app"
+const LAYOUT_URL = import.meta.env.DEV
+  ? "/api-generarlayout"
+  : "https://southamerica-west1-mpf-maquinaria.cloudfunctions.net/generarLayout"
 
 function drawRoundRect(ctx, x, y, w, h, r) {
   ctx.beginPath()

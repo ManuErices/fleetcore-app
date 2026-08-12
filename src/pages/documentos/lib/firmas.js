@@ -4,8 +4,8 @@ import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firest
 
 export const ROLES_FIRMA = {
   realizado:    { label: 'Realizado por',                         roles: ['supervisor', 'operador', 'admin'] },
-  aprobado:     { label: 'Aprobado por',                          roles: ['supervisor', 'admin'] },
-  conocimiento: { label: 'Toma de conocimiento / Validación (V)', roles: ['admin', 'supervisor'] },
+  aprobado:     { label: 'Aprobado por',                          roles: ['mandante'] },
+  conocimiento: { label: 'Toma de conocimiento / Validación (V)', roles: ['mandante', 'admin', 'supervisor'] },
 }
 
 export const FLUJO = ['realizado', 'aprobado', 'conocimiento']
@@ -32,6 +32,18 @@ export async function crearPin(usuario, pin) {
 }
 
 export async function verificarPin(usuario, pin) {
+  try {
+    const userSnap = await getDoc(doc(db, 'usuarios', usuario))
+    if (userSnap.exists()) {
+      const uData = userSnap.data()
+      if (uData.estado === 'finiquitado' || uData.estado === 'inactivo') {
+        return false
+      }
+    }
+  } catch (e) {
+    console.error('Error checking user status in verificarPin:', e.message)
+  }
+
   const snap = await getDoc(doc(db, 'pins', usuario))
   if (!snap.exists()) return false
   const hash = await hashPin(pin)
@@ -53,10 +65,19 @@ export async function firmarDocumento(docId, rolKey, usuario, nombre, cargo) {
   const { getSession } = await import('./auth.js')
   const session = getSession()
   if (!ROLES_FIRMA[rolKey].roles.includes(session?.rol)) {
-    throw new Error('Tu perfil no tiene permiso para firmar este rol')
+    throw new Error('Tu perfil no tiene permiso para firmar esta etapa')
   }
   const empresaId = session?.empresaId
-  const firmas = await getFirmas(docId, empresaId)
+  const snap = await getDoc(docRef(empresaId, docId))
+  const docData = snap.exists() ? snap.data() : {}
+  const firmas = docData.firmas || {}
+
+  // Regla: El creador/emisor del informe no puede aprobar su propio documento
+  const creadorUsuario = firmas?.realizado?.usuario || docData.usuario
+  if (rolKey !== 'realizado' && session?.usuario === creadorUsuario) {
+    throw new Error('El emisor del documento no puede firmar las aprobaciones de su propio informe')
+  }
+
   const idx = FLUJO.indexOf(rolKey)
   if (idx > 0 && !firmas[FLUJO[idx - 1]]?.firmado) {
     throw new Error(`Primero debe firmar "${ROLES_FIRMA[FLUJO[idx-1]].label}"`)
@@ -80,4 +101,36 @@ export async function firmarDocumento(docId, rolKey, usuario, nombre, cargo) {
   })
 
   return firma
+}
+
+export async function rechazarDocumento(docId, rolKey, usuario, nombre, cargo, motivo) {
+  const { getSession } = await import('./auth.js')
+  const session = getSession()
+  if (!ROLES_FIRMA[rolKey]?.roles.includes(session?.rol)) {
+    throw new Error('Tu perfil no tiene permiso para rechazar este documento')
+  }
+  const empresaId = session?.empresaId
+  const _usuario = usuario || session?.usuario || ''
+  const _nombre  = nombre  || session?.nombre  || ''
+  const _cargo   = cargo   || session?.cargo   || ''
+
+  const rechazo = {
+    firmado: false,
+    rechazado: true,
+    usuario: _usuario,
+    nombre: _nombre,
+    cargo: _cargo,
+    motivo: motivo || 'Sin motivo especificado',
+    fecha: new Date().toLocaleDateString('es-CL'),
+    hora:  new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date().toISOString(),
+  }
+
+  await updateDoc(docRef(empresaId, docId), {
+    [`firmas.${rolKey}`]: rechazo,
+    estadoDocumento: 'rechazado',
+    updatedAt: serverTimestamp(),
+  })
+
+  return rechazo
 }

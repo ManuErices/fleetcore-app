@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { formatMiles } from '../../../utils/formatters';
 import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
+import { PillButton } from "../../../components/ui/PillButton";
+import { useKeyboardAvoidingView } from "../../../hooks/useKeyboardAvoidingView";
 
 const incrementDocNumber = (numStr) => {
   if (!numStr) return '';
@@ -54,6 +56,9 @@ export default function EntradaStep({
   const [emailInput, setEmailInput] = useState('');
   const [searchReceptor, setSearchReceptor] = useState('');
   const [searchMaquina, setSearchMaquina] = useState('');
+  const [validationErrors, setValidationErrors] = useState([]);
+
+  useKeyboardAvoidingView();
 
   const isEstacion = datosEntrada.tipoOrigen === 'estacion';
   const firstValidRow = (datosEntrada.documentosEstacion || []).find(r => parseFloat(r.cantidad) > 0 && parseFloat(r.total) > 0);
@@ -63,10 +68,38 @@ export default function EntradaStep({
     ? (datosEntrada.documentosEstacion || []).some(d => d.numero && d.numero.trim() && parseFloat(d.cantidad) > 0 && parseFloat(d.total) > 0)
     : false;
 
-  const canSubmit = !loading
-    && (isEstacion ? hasEstacionDocs : (!!datosEntrada.cantidad && datosEntrada.numerosDocumento.filter(d => d).length > 0))
-    && !((datosEntrada.tipoOrigen === 'interno' || datosEntrada.tipoOrigen === 'externo')
-      && (!datosEntrada.operadorId || !datosEntrada.machineId));
+  const FIELD_LABELS = {
+    documentos: 'Documento de compra (N°, Litros y Monto)',
+    cantidad: 'Litros totales recibidos',
+    numerosDocumento: 'N° de documento o guía de despacho',
+    operadorId: 'Receptor (persona que recibe)',
+    machineId: 'Vehículo / Equipo que recibe',
+  };
+
+  const getMissingFields = useCallback(() => {
+    const missing = [];
+    if (isEstacion) {
+      if (!hasEstacionDocs) missing.push('documentos');
+    } else {
+      if (!datosEntrada.cantidad || parseFloat(datosEntrada.cantidad) === 0) missing.push('cantidad');
+      if (datosEntrada.numerosDocumento.filter(d => d).length === 0) missing.push('numerosDocumento');
+    }
+    if (datosEntrada.tipoOrigen === 'interno' || datosEntrada.tipoOrigen === 'externo') {
+      if (!datosEntrada.operadorId) missing.push('operadorId');
+      if (!datosEntrada.machineId) missing.push('machineId');
+    }
+    return missing;
+  }, [datosEntrada, isEstacion, hasEstacionDocs]);
+
+  const errSet = new Set(validationErrors);
+  const hasErr = (key) => errSet.has(key);
+
+  const handleSubmitWithValidation = () => {
+    const missing = getMissingFields();
+    if (missing.length > 0) { setValidationErrors(missing); return; }
+    setValidationErrors([]);
+    handleSubmit();
+  };
 
   const addEmail = () => {
     const val = emailInput.trim();
@@ -94,8 +127,8 @@ export default function EntradaStep({
   };
 
   return (
-    <div className="flex flex-col min-h-[70dvh] space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex-1 bg-white p-6 sm:p-8 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-8">
+    <div className="flex flex-col space-y-3 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex-1 bg-white p-4 sm:p-5 rounded-[2.5rem] border-2 border-slate-100 shadow-xl space-y-5">
 
         {/* Documentación y notas */}
         {isEstacion ? (
@@ -112,124 +145,133 @@ export default function EntradaStep({
               </div>
               
               <div className="space-y-4">
-                <div className="grid grid-cols-12 gap-3 px-2 text-xs font-black text-slate-500 uppercase tracking-wider">
+                {/* Cabecera — solo visible en desktop */}
+                <div className="hidden sm:grid grid-cols-12 gap-3 px-2 text-xs font-black text-slate-500 uppercase tracking-wider">
                   <div className="col-span-4 px-1">N° Doc</div>
-                  <div className="col-span-3 px-1 text-right">Cantidad (Lts)</div>
-                  <div className="col-span-3 px-1 text-right">Monto Total ($)</div>
+                  <div className="col-span-3 px-1 text-right">Litros</div>
+                  <div className="col-span-3 px-1 text-right">Monto ($)</div>
                   <div className="col-span-2"></div>
                 </div>
 
-                <div className="space-y-2.5 max-h-[290px] overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
                   {(datosEntrada.documentosEstacion || [{ numero: '', cantidad: '', total: '' }]).map((docRow, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-3 items-center animate-in fade-in duration-200">
-                      <div className="col-span-4">
-                        <input
-                          type="text" required={idx === 0} value={docRow.numero}
-                          onChange={(e) => {
-                            const arr = [...(datosEntrada.documentosEstacion || [])];
-                            arr[idx] = { ...arr[idx], numero: e.target.value };
-                            const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
-                            const numDocs = arr.map(row => row.numero);
-                            setDatosEntrada({
-                              ...datosEntrada,
-                              documentosEstacion: arr,
-                              numerosDocumento: numDocs,
-                              cantidad: totalLitros > 0 ? String(totalLitros) : ''
-                            });
-                          }}
-                          placeholder={`N° Doc ${idx + 1}`}
-                          className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-sm font-bold text-slate-700 shadow-inner"
-                        />
-                      </div>
-                      <div className="col-span-3">
-                        <input
-                          type="text" required={idx === 0}
-                          value={formatMiles(docRow.cantidad)}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                              const arr = [...(datosEntrada.documentosEstacion || [])];
-                              arr[idx] = { ...arr[idx], cantidad: raw };
-                              const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
-                              setDatosEntrada({
-                                ...datosEntrada,
-                                documentosEstacion: arr,
-                                cantidad: totalLitros > 0 ? String(totalLitros) : ''
-                              });
-                            }
-                          }}
-                          placeholder="0"
-                          className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-sm font-bold text-slate-700 shadow-inner text-right"
-                        />
-                      </div>
-                      <div className="col-span-3">
-                        <input
-                          type="text" required={idx === 0}
-                          value={formatMiles(docRow.total)}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/\./g, '').replace(',', '.');
-                            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-                              const arr = [...(datosEntrada.documentosEstacion || [])];
-                              arr[idx] = { ...arr[idx], total: raw };
-                              setDatosEntrada({
-                                ...datosEntrada,
-                                documentosEstacion: arr
-                              });
-                            }
-                          }}
-                          placeholder="$ 0"
-                          className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-sm font-bold text-slate-700 shadow-inner text-right"
-                        />
-                      </div>
-                      <div className="col-span-2 flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const rowToDup = (datosEntrada.documentosEstacion || [])[idx];
-                            const nextNum = incrementDocNumber(rowToDup.numero);
-                            const newRow = {
-                              numero: nextNum,
-                              cantidad: rowToDup.cantidad,
-                              total: rowToDup.total
-                            };
-                            const arr = [...(datosEntrada.documentosEstacion || [])];
-                            if (arr.length >= 20) return;
-                            arr.splice(idx + 1, 0, newRow);
-                            const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
-                            const numDocs = arr.map(row => row.numero);
-                            setDatosEntrada({
-                              ...datosEntrada,
-                              documentosEstacion: arr,
-                              numerosDocumento: numDocs,
-                              cantidad: totalLitros > 0 ? String(totalLitros) : ''
-                            });
-                          }}
-                          title="Duplicar y autoincrementar N° Doc"
-                          className="px-2 py-2 bg-green-50 hover:bg-green-500 hover:text-white text-green-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-green-200 flex items-center justify-center gap-1"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                          </svg>
-                          <span className="hidden sm:inline">Duplicar</span>
-                        </button>
+                    <div key={idx} className="animate-in fade-in duration-200 bg-white border-2 border-slate-100 rounded-2xl p-3 sm:p-0 sm:bg-transparent sm:border-0 sm:rounded-none">
+                      {/* Mobile: etiqueta del documento */}
+                      <div className="flex items-center justify-between mb-2 sm:hidden">
+                        <span className="text-xs font-black text-slate-400 uppercase tracking-wider">Documento {idx + 1}</span>
                         {idx > 0 && (
-                          <button
-                            type="button"
+                          <button type="button"
                             onClick={() => {
                               const arr = (datosEntrada.documentosEstacion || []).filter((_, i) => i !== idx);
                               const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
-                              const numDocs = arr.map(row => row.numero);
-                              setDatosEntrada({
-                                ...datosEntrada,
-                                documentosEstacion: arr,
-                                numerosDocumento: numDocs,
-                                cantidad: totalLitros > 0 ? String(totalLitros) : ''
-                              });
+                              setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
                             }}
-                            className="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-xs shadow-sm hover:bg-red-500 hover:text-white transition-all font-black animate-in fade-in"
+                            className="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-sm font-black hover:bg-red-500 hover:text-white transition-all"
                           >×</button>
                         )}
                       </div>
+
+                      {/* N° Doc — fila completa en mobile, col-span-4 en desktop */}
+                      <div className="sm:grid sm:grid-cols-12 sm:gap-3 sm:items-center space-y-2 sm:space-y-0">
+                        <div className="sm:col-span-4">
+                          <label className="block text-xs font-bold text-slate-500 mb-1 sm:hidden">N° Documento</label>
+                          <input
+                            type="text" required={idx === 0} value={docRow.numero}
+                            onChange={(e) => {
+                              const arr = [...(datosEntrada.documentosEstacion || [])];
+                              arr[idx] = { ...arr[idx], numero: e.target.value };
+                              const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                              setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
+                            }}
+                            placeholder={`N° Doc ${idx + 1}`}
+                            className="w-full px-4 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-base font-bold text-slate-700 shadow-inner"
+                          />
+                        </div>
+
+                        {/* Litros y Monto — side by side en mobile también */}
+                        <div className="grid grid-cols-2 gap-2 sm:contents">
+                          <div className="sm:col-span-3">
+                            <label className="block text-xs font-bold text-slate-500 mb-1 sm:hidden">⛽ Litros</label>
+                            <input
+                              type="text" inputMode="decimal" required={idx === 0}
+                              value={formatMiles(docRow.cantidad)}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                                if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                                  const arr = [...(datosEntrada.documentosEstacion || [])];
+                                  arr[idx] = { ...arr[idx], cantidad: raw };
+                                  const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                                  setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, cantidad: totalLitros > 0 ? String(totalLitros) : '' });
+                                }
+                              }}
+                              placeholder="0"
+                              className="w-full px-3 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-base font-bold text-slate-700 shadow-inner text-right"
+                            />
+                          </div>
+                          <div className="sm:col-span-3">
+                            <label className="block text-xs font-bold text-slate-500 mb-1 sm:hidden">💰 Monto ($)</label>
+                            <input
+                              type="text" inputMode="decimal" required={idx === 0}
+                              value={formatMiles(docRow.total)}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/\./g, '').replace(',', '.');
+                                if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                                  const arr = [...(datosEntrada.documentosEstacion || [])];
+                                  arr[idx] = { ...arr[idx], total: raw };
+                                  setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
+                                }
+                              }}
+                              placeholder="0"
+                              className="w-full px-3 py-3.5 bg-slate-50 border-2 border-slate-200 rounded-xl focus:border-green-500 text-base font-bold text-slate-700 shadow-inner text-right"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Botones — solo desktop (mobile los tiene arriba o al final) */}
+                        <div className="sm:col-span-2 hidden sm:flex items-center justify-end gap-1.5">
+                          <button type="button"
+                            onClick={() => {
+                              const rowToDup = (datosEntrada.documentosEstacion || [])[idx];
+                              const arr = [...(datosEntrada.documentosEstacion || [])];
+                              if (arr.length >= 20) return;
+                              arr.splice(idx + 1, 0, { numero: incrementDocNumber(rowToDup.numero), cantidad: rowToDup.cantidad, total: rowToDup.total });
+                              const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                              setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
+                            }}
+                            title="Duplicar y autoincrementar N° Doc"
+                            className="px-2 py-2 bg-green-50 hover:bg-green-500 hover:text-white text-green-600 rounded-xl text-[10px] font-black transition-all border border-green-200 flex items-center justify-center gap-1"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                            </svg>
+                          </button>
+                          {idx > 0 && (
+                            <button type="button"
+                              onClick={() => {
+                                const arr = (datosEntrada.documentosEstacion || []).filter((_, i) => i !== idx);
+                                const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                                setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
+                              }}
+                              className="w-7 h-7 bg-red-50 text-red-500 rounded-full flex items-center justify-center text-xs shadow-sm hover:bg-red-500 hover:text-white transition-all font-black"
+                            >×</button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Botón duplicar — solo mobile, al pie del card */}
+                      <button type="button"
+                        onClick={() => {
+                          const rowToDup = (datosEntrada.documentosEstacion || [])[idx];
+                          const arr = [...(datosEntrada.documentosEstacion || [])];
+                          if (arr.length >= 20) return;
+                          arr.splice(idx + 1, 0, { numero: incrementDocNumber(rowToDup.numero), cantidad: rowToDup.cantidad, total: rowToDup.total });
+                          const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
+                          setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
+                        }}
+                        className="sm:hidden mt-2 w-full py-2 bg-green-50 text-green-700 rounded-xl text-xs font-black uppercase tracking-wider border border-green-200 hover:bg-green-100 transition-all"
+                      >
+                        + Duplicar este documento
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -287,7 +329,7 @@ export default function EntradaStep({
                     />
                   </div>
                 </div>
-                <div className="space-y-2 opacity-50 pointer-events-none">
+                <div className="hidden sm:block space-y-2 opacity-50 pointer-events-none">
                   <label className="block text-sm font-black text-slate-500 uppercase tracking-widest px-1">WhatsApp</label>
                   <input
                     type="tel"
@@ -393,7 +435,7 @@ export default function EntradaStep({
                     />
                   </div>
                 </div>
-                <div className="space-y-2 opacity-50 pointer-events-none">
+                <div className="hidden sm:block space-y-2 opacity-50 pointer-events-none">
                   <label className="block text-sm font-black text-slate-500 uppercase tracking-widest px-1">WhatsApp</label>
                   <input
                     type="tel"
@@ -420,7 +462,9 @@ export default function EntradaStep({
               {/* Receptor */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
-                  <label className="block text-sm font-black text-slate-500 uppercase tracking-wider">Receptor</label>
+                  <label className={`block text-sm font-black uppercase tracking-wider ${hasErr('operadorId') ? 'text-red-600' : 'text-slate-500'}`}>
+                    Receptor{hasErr('operadorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                  </label>
                   <button type="button"
                     onClick={() => { setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: 'MPF', targetField: 'operadorEntrada' }); setShowModalEmpleado(true); }}
                     className="w-7 h-7 rounded-lg bg-green-100 text-green-700 flex items-center justify-center font-black text-base hover:bg-green-200 transition-colors"
@@ -474,7 +518,9 @@ export default function EntradaStep({
               {/* Vehículo que recibe */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
-                  <label className="block text-sm font-black text-slate-500 uppercase tracking-wider">Vehículo / Equipo</label>
+                  <label className={`block text-sm font-black uppercase tracking-wider ${hasErr('machineId') ? 'text-red-600' : 'text-slate-500'}`}>
+                    Vehículo / Equipo{hasErr('machineId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
+                  </label>
                   <button type="button"
                     onClick={() => { setNuevaMaquinaData({ patente: '', tipo: '', modelo: '', empresaId: 'MPF', targetField: 'machine_entrada' }); setShowModalMaquina(true); }}
                     className="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-black text-base hover:bg-amber-200 transition-colors"
@@ -521,11 +567,13 @@ export default function EntradaStep({
         )}
 
         {/* Cantidades */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-green-50/40 p-6 rounded-[2.5rem] border-2 border-green-100 flex flex-col justify-center">
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-3 text-center">Litros Totales</label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className={`p-3 rounded-2xl border-2 flex flex-col justify-center ${hasErr('cantidad') ? 'bg-red-50/40 border-red-300' : 'bg-green-50/40 border-green-100'}`}>
+            <label className={`block text-xs font-black uppercase tracking-widest mb-2 text-center ${hasErr('cantidad') ? 'text-red-600' : 'text-slate-500'}`}>
+              Litros Totales{hasErr('cantidad') && <span className="ml-1 font-normal normal-case">— requerido</span>}
+            </label>
             <input
-              type="text" required
+              type="text" required inputMode="decimal"
               disabled={isEstacion}
               value={formatMiles(datosEntrada.cantidad)}
               onChange={(e) => {
@@ -533,20 +581,20 @@ export default function EntradaStep({
                 const raw = e.target.value.replace(/\./g, '').replace(',', '.');
                 if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrada({ ...datosEntrada, cantidad: raw });
               }}
-              className="w-full px-4 py-5 bg-white border-2 border-green-200 rounded-2xl focus:border-green-500 font-black text-3xl text-green-700 text-center shadow-inner transition-all disabled:bg-slate-50 disabled:text-slate-500"
+              className={`w-full px-3 py-3 bg-white border-2 rounded-xl focus:border-green-500 font-black text-2xl text-center shadow-inner transition-all disabled:bg-slate-50 disabled:text-slate-500 ${hasErr('cantidad') ? 'border-red-300 text-red-700' : 'border-green-200 text-green-700'}`}
               placeholder="0"
             />
           </div>
-          <div className="bg-amber-50/40 p-6 rounded-[2.5rem] border-2 border-amber-100 flex flex-col justify-center">
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-3 text-center">Horómetro / KM</label>
+          <div className="bg-amber-50/40 p-3 rounded-2xl border-2 border-amber-100 flex flex-col justify-center">
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest mb-2 text-center">Horómetro / KM</label>
             <input
-              type="text"
+              type="text" inputMode="decimal"
               value={formatMiles(datosEntrada.horometroOdometro)}
               onChange={(e) => {
                 const raw = e.target.value.replace(/\./g, '').replace(',', '.');
                 if (raw === '' || /^\d*\.?\d*$/.test(raw)) setDatosEntrada({ ...datosEntrada, horometroOdometro: raw });
               }}
-              className="w-full px-4 py-5 bg-white border-2 border-amber-200 rounded-2xl focus:border-amber-500 font-black text-3xl text-amber-700 text-center shadow-inner transition-all"
+              className="w-full px-3 py-3 bg-white border-2 border-amber-200 rounded-xl focus:border-amber-500 font-black text-2xl text-amber-700 text-center shadow-inner transition-all"
               placeholder="0"
             />
           </div>
@@ -554,20 +602,45 @@ export default function EntradaStep({
       </div>
 
       {/* Sticky footer */}
-      <div className="sticky bottom-0 p-4 bg-white/95 backdrop-blur-md border-t border-slate-100 flex gap-4 mt-4">
-        <button
-          onClick={() => setPaso(2)}
-          className="flex-1 px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all uppercase text-sm tracking-wide"
-        >
-          ← Regresar
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className="flex-[2] px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-black rounded-2xl transition-all uppercase text-sm tracking-wide shadow-xl shadow-green-100 disabled:grayscale disabled:opacity-50 active:scale-95"
-        >
-          {loading ? 'Guardando...' : '✓ Finalizar Recepción'}
-        </button>
+      <div className="sticky bottom-0 bg-white/95 backdrop-blur-md border-t border-slate-100 mt-2">
+        {validationErrors.length > 0 && (
+          <div className="mx-4 mt-3 bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-2">
+            <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="font-black text-red-700 text-xs uppercase tracking-wider">Faltan campos requeridos</p>
+              <ul className="mt-1 space-y-0.5">
+                {validationErrors.map(key => (
+                  <li key={key} className="text-sm text-red-600 font-bold flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+                    {FIELD_LABELS[key] || key}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <button onClick={() => setValidationErrors([])} className="text-red-400 hover:text-red-600 font-black text-lg leading-none">×</button>
+          </div>
+        )}
+        <div className="p-4 flex gap-4">
+          <PillButton
+            variant="outline"
+            onClick={() => setPaso(2)}
+            className="flex-1"
+          >
+            ← Regresar
+          </PillButton>
+          <PillButton
+            variant="secondary"
+            onClick={handleSubmitWithValidation}
+            disabled={loading}
+            isLoading={loading}
+            loadingText="Guardando..."
+            className="flex-[2]"
+          >
+            ✓ Finalizar Recepción
+          </PillButton>
+        </div>
       </div>
     </div>
   );

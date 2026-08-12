@@ -1,7 +1,7 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
 import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
 
-function generarPDFContrato(contrato, trabajador) {
+function generarPDFContrato(contrato, trabajador, { preview = false } = {}) {
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
   const fmtFecha = (f) => {
     if (!f) return '_______________';
@@ -223,17 +223,18 @@ function generarPDFContrato(contrato, trabajador) {
   </div>
 
 </div>
-<script>window.onload = function(){ window.print(); }</script>
+${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body>
 </html>`;
 
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
+  if (preview) return url;
   const win  = window.open(url, '_blank');
   if (!win) alert('Permite ventanas emergentes para descargar el contrato.');
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-function generarPDFLiquidacion(rem, trabajador, contrato) {
+function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false } = {}) {
   const calc     = calcularLiquidacion({ ...contrato, ...rem });
   const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
   const nombre   = trabajador
@@ -834,12 +835,13 @@ function generarPDFLiquidacion(rem, trabajador, contrato) {
   </div>
 
 </div>
-<script>window.onload=function(){window.print();}</script>
+${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body>
 </html>`;
 
   const blob = new Blob([html], { type:'text/html;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
+  if (preview) return url;
   const win  = window.open(url,'_blank');
   if(!win) alert('Habilita ventanas emergentes para descargar la liquidación.');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
@@ -958,7 +960,7 @@ function generarPDFResumenNomina(liquidaciones, periodoLabel) {
   if(!win) alert('Habilita ventanas emergentes para descargar el resumen.');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
-function generarPDFFiniquito(fin, trabajador, contrato) {
+function generarPDFFiniquito(fin, trabajador, contrato, { preview = false } = {}) {
   const calc   = calcularFiniquito(fin, contrato, trabajador);
   const fmt    = (n) => `$${(n||0).toLocaleString('es-CL')}`;
   const fmtF   = (f) => {
@@ -1110,16 +1112,17 @@ function generarPDFFiniquito(fin, trabajador, contrato) {
     Este documento debe ser revisado por un profesional habilitado antes de su firma.
   </div>
 </div>
-<script>window.onload=function(){window.print();}</script>
+${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body></html>`;
 
   const blob = new Blob([html], {type:'text/html;charset=utf-8'});
   const url  = URL.createObjectURL(blob);
+  if (preview) return url;
   const win  = window.open(url,'_blank');
   if(!win) alert('Habilita ventanas emergentes para descargar el finiquito.');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
-function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
+function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo, { preview = false } = {}) {
   const fmtFecha = (f) => {
     if (!f) return '_______________';
     const [y,m,d] = f.split('-');
@@ -1264,11 +1267,12 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo) {
     Art. 11 CT: Las modificaciones al contrato de trabajo se consignarán por escrito y serán firmadas por ambas partes en dos ejemplares del mismo tenor.
   </div>
 </div>
-<script>window.onload=function(){window.print();}</script>
+${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body></html>`;
 
   const blob = new Blob([html],{type:'text/html;charset=utf-8'});
   const url  = URL.createObjectURL(blob);
+  if (preview) return url;
   const win  = window.open(url,'_blank');
   if(!win) alert('Habilita ventanas emergentes para descargar el anexo.');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);

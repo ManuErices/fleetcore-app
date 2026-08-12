@@ -3,7 +3,7 @@ import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/fire
 import { db, auth } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 
-const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://us-central1-mpf-maquinaria.cloudfunctions.net';
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 
 export default function EmailsSection() {
   const { empresaId } = useEmpresa();

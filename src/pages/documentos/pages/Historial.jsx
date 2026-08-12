@@ -1,8 +1,8 @@
-// src/pages/Historial.jsx
 import { useState, useEffect } from 'react'
 import { obtenerDocumentos } from '../lib/documentos.js'
-import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento } from '../lib/firmas.js'
+import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, rechazarDocumento } from '../lib/firmas.js'
 import { getSession } from '../lib/auth.js'
+import ModalVerDocumento from '../components/ModalVerDocumento.jsx'
 
 const TIPO_LABEL = { plan: 'Plan de Trabajo', informe: 'Informe Diario' }
 const TIPO_COLOR = { plan: '#0D2B45', informe: '#15803d' }
@@ -197,50 +197,141 @@ function ModalFirma({ docId, rolKey, session, rolLabel, onFirmado, onClose }) {
   )
 }
 
+// ── Modal rechazo ────────────────────────────────────────────────
+function ModalRechazo({ docId, rolKey, session, rolLabel, onRechazado, onClose }) {
+  const [pin, setPin]         = useState('')
+  const [motivo, setMotivo]   = useState('')
+  const [error, setError]     = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleRechazar() {
+    setError('')
+    if (!motivo.trim()) return setError('Ingresa el motivo del rechazo')
+    if (!pin) return setError('Ingresa tu PIN de confirmación')
+    setLoading(true)
+    try {
+      const ok = await verificarPin(session.usuario, pin)
+      if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
+      const rechazo = await rechazarDocumento(docId, rolKey, session.usuario, session.nombre, session.cargo || '', motivo)
+      onRechazado(rolKey, rechazo)
+    } catch(e) { setError(e.message) }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+      <div style={{ background:'#fff', borderRadius:16, padding:'2rem', width:380, boxShadow:'0 24px 64px rgba(0,0,0,0.3)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:16 }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.red }}>Rechazar Documento</div>
+            <div style={{ fontSize:12, color:C.gray, marginTop:2 }}>{rolLabel}</div>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:22, cursor:'pointer', color:C.gray }}>×</button>
+        </div>
+
+        <label style={{ fontSize:11, fontWeight:700, color:C.gray, textTransform:'uppercase', letterSpacing:'.06em', display:'block', marginBottom:6 }}>Motivo del rechazo</label>
+        <textarea
+          rows={3} autoFocus
+          value={motivo} onChange={e => { setMotivo(e.target.value); setError('') }}
+          placeholder="Indica la razón formal del rechazo para que el emisor pueda corregirlo..."
+          style={{ width:'100%', padding:'10px', fontSize:13, border:`1.5px solid ${C.border}`, borderRadius:8, boxSizing:'border-box', outline:'none', marginBottom:12, fontFamily:'inherit' }}
+        />
+
+        <label style={{ fontSize:11, fontWeight:700, color:C.gray, textTransform:'uppercase', letterSpacing:'.06em', display:'block', marginBottom:6 }}>PIN de confirmación</label>
+        <input
+          type="password" inputMode="numeric" maxLength={8}
+          value={pin} onChange={e => { setPin(e.target.value.replace(/\D/g,'')); setError('') }}
+          placeholder="••••"
+          style={{ width:'100%', padding:'10px', fontSize:22, letterSpacing:8, border:`1.5px solid ${error ? C.red : C.border}`, borderRadius:8, boxSizing:'border-box', outline:'none', textAlign:'center' }}
+        />
+        {error && <div style={{ marginTop:8, padding:'8px 12px', background:'#fef2f2', borderRadius:8, fontSize:13, color:C.red }}>{error}</div>}
+        <button onClick={handleRechazar} disabled={loading} style={{ width:'100%', marginTop:14, padding:'12px', fontSize:14, fontWeight:700, background:loading?'#94a3b8':C.red, color:'#fff', border:'none', borderRadius:10, cursor:loading?'not-allowed':'pointer' }}>
+          {loading ? 'Procesando...' : 'Confirmar Rechazo'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Fila de firmas ─────────────────────────────────────────────
 function FirmasRow({ doc, onFirmado }) {
   const session = getSession()
-  const [modal, setModal] = useState(null)
+  const [modalFirma, setModalFirma]     = useState(null)
+  const [modalRechazo, setModalRechazo] = useState(null)
 
   function puedeFirmar(rolKey) {
-    if (doc.firmas?.[rolKey]?.firmado) return false
+    if (doc.firmas?.[rolKey]?.firmado || doc.firmas?.[rolKey]?.rechazado || doc.estadoDocumento === 'rechazado') return false
     if (!session) return false
     if (!ROLES_FIRMA[rolKey]?.roles.includes(session.rol)) return false
+    
+    // Regla: El emisor/creador del informe no puede aprobar o validar su propio documento
+    const creadorUsuario = doc.firmas?.realizado?.usuario || doc.usuario
+    if (rolKey !== 'realizado' && session.usuario === creadorUsuario) return false
+
     const idx = FLUJO.indexOf(rolKey)
     return !(idx > 0 && !doc.firmas?.[FLUJO[idx-1]]?.firmado)
   }
 
   return (
     <>
-      <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:8 }}>
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:8 }}>
         {FLUJO.map(rolKey => {
-          const rol    = ROLES_FIRMA[rolKey]
-          const firma  = doc.firmas?.[rolKey]
-          const firmado = firma?.firmado
-          const idx    = FLUJO.indexOf(rolKey)
-          const locked = idx > 0 && !doc.firmas?.[FLUJO[idx-1]]?.firmado
+          const rol       = ROLES_FIRMA[rolKey]
+          const firma     = doc.firmas?.[rolKey]
+          const firmado   = firma?.firmado
+          const rechazado = firma?.rechazado
+          const idx       = FLUJO.indexOf(rolKey)
+          const locked    = idx > 0 && !doc.firmas?.[FLUJO[idx-1]]?.firmado
+
+          let bg = '#fff'
+          let border = C.border
+          if (firmado) { bg = '#f0fdf4'; border = '#bbf7d0' }
+          if (rechazado) { bg = '#fef2f2'; border = '#fecaca' }
+
           return (
-            <div key={rolKey} style={{ display:'flex', alignItems:'flex-start', gap:6, padding:'7px 10px', borderRadius:8, fontSize:11, minWidth:140, background:firmado?'#f0fdf4':locked?'#fafafa':'#fff', border:`1px solid ${firmado?'#bbf7d0':C.border}`, opacity:locked?0.6:1 }}>
-              <span style={{ marginTop:1, fontSize:13, color:firmado?C.green:'#cbd5e0', fontWeight:700 }}>{firmado?'✓':'○'}</span>
-              <div>
-                <div style={{ fontWeight:600, color:firmado?C.green:C.gray }}>{rol?.label}</div>
+            <div key={rolKey} style={{ display:'flex', alignItems:'flex-start', gap:6, padding:'7px 10px', borderRadius:8, fontSize:11, minWidth:160, background: bg, border:`1px solid ${border}`, opacity:locked?0.6:1 }}>
+              <span style={{ marginTop:1, fontSize:13, color:firmado?C.green:rechazado?C.red:'#cbd5e0', fontWeight:700 }}>
+                {firmado ? '✓' : rechazado ? '✕' : '○'}
+              </span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, color:firmado?C.green:rechazado?C.red:C.gray }}>{rol?.label}</div>
                 {firmado ? (
                   <>
                     <div style={{ fontSize:10, color:'#475569' }}>{firma.nombre}{firma.cargo?` · ${firma.cargo}`:''}</div>
                     <div style={{ fontSize:10, color:'#94a3b8' }}>{firma.fecha} {firma.hora}</div>
                   </>
+                ) : rechazado ? (
+                  <>
+                    <div style={{ fontSize:10, fontWeight:700, color:C.red }}>Rechazado por {firma.nombre}</div>
+                    {firma.motivo && <div style={{ fontSize:10, color:'#7f1d1d', fontStyle:'italic', marginTop:2 }}>"{firma.motivo}"</div>}
+                    <div style={{ fontSize:10, color:'#94a3b8' }}>{firma.fecha} {firma.hora}</div>
+                  </>
                 ) : <div style={{ fontSize:10, color:'#cbd5e0' }}>{locked?'Esperando anterior':'Pendiente'}</div>}
+
                 {puedeFirmar(rolKey) && (
-                  <button onClick={() => setModal(rolKey)} style={{ marginTop:5, padding:'3px 10px', fontSize:11, fontWeight:700, background:C.navy, color:'#fff', border:'none', borderRadius:6, cursor:'pointer' }}>Firmar</button>
+                  <div style={{ display:'flex', gap:4, marginTop:6 }}>
+                    <button onClick={() => setModalFirma(rolKey)} style={{ padding:'3px 10px', fontSize:11, fontWeight:700, background:C.navy, color:'#fff', border:'none', borderRadius:6, cursor:'pointer' }}>
+                      {session.rol === 'mandante' ? 'Aprobar' : 'Firmar'}
+                    </button>
+                    {(session.rol === 'mandante' || session.rol === 'admin' || session.rol === 'supervisor') && (
+                      <button onClick={() => setModalRechazo(rolKey)} style={{ padding:'3px 8px', fontSize:11, fontWeight:700, background:'#fee2e2', color:C.red, border:'none', borderRadius:6, cursor:'pointer' }}>
+                        Rechazar
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
           )
         })}
       </div>
-      {modal && session && (
-        <ModalFirma docId={doc.id} rolKey={modal} session={session} rolLabel={ROLES_FIRMA[modal]?.label}
-          onFirmado={(rk,f) => { setModal(null); onFirmado(doc.id,rk,f) }} onClose={() => setModal(null)} />
+      {modalFirma && session && (
+        <ModalFirma docId={doc.id} rolKey={modalFirma} session={session} rolLabel={ROLES_FIRMA[modalFirma]?.label}
+          onFirmado={(rk,f) => { setModalFirma(null); onFirmado(doc.id,rk,f) }} onClose={() => setModalFirma(null)} />
+      )}
+      {modalRechazo && session && (
+        <ModalRechazo docId={doc.id} rolKey={modalRechazo} session={session} rolLabel={ROLES_FIRMA[modalRechazo]?.label}
+          onRechazado={(rk,r) => { setModalRechazo(null); onFirmado(doc.id,rk,r) }} onClose={() => setModalRechazo(null)} />
       )}
     </>
   )
@@ -249,10 +340,11 @@ function FirmasRow({ doc, onFirmado }) {
 // ── Página principal ───────────────────────────────────────────
 export default function Historial() {
   const session = getSession()
-  const [docs,      setDocs]      = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState('')
-  const [exporting, setExporting] = useState(null)
+  const [docs,        setDocs]        = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState('')
+  const [exporting,   setExporting]   = useState(null)
+  const [selectedDoc, setSelectedDoc] = useState(null)
 
   useEffect(() => { cargar() }, [])
 
@@ -275,8 +367,10 @@ export default function Historial() {
   }
 
   function firmasCount(f) { return f ? FLUJO.filter(k => f[k]?.firmado).length : 0 }
-  function firmasColor(n) {
+  function firmasColor(n, est) {
     const total = FLUJO.length
+    if (est === 'rechazado') return { bg:'#fef2f2', color:C.red, border:'#fecaca' }
+    if (est === 'con_observaciones') return { bg:'#fef3c7', color:'#b45309', border:'#fde68a' }
     if (n === total) return { bg:'#dcfce7', color:C.green, border:'#bbf7d0' }
     if (n > 0)       return { bg:'#fef9c3', color:'#92400e', border:'#fde68a' }
     return { bg:'#f1f5f9', color:C.gray, border:C.border }
@@ -284,6 +378,13 @@ export default function Historial() {
 
   function handleFirmado(docId, rolKey, firma) {
     setDocs(prev => prev.map(d => d.id!==docId ? d : { ...d, firmas:{...(d.firmas||{}),[rolKey]:firma} }))
+  }
+
+  function handleUpdateDoc(updated) {
+    setDocs(prev => prev.map(d => d.id===updated.id ? updated : d))
+    if (selectedDoc && selectedDoc.id === updated.id) {
+      setSelectedDoc(updated)
+    }
   }
 
   async function descargarPDF(doc) {
@@ -327,9 +428,11 @@ export default function Historial() {
       : <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {docs.map(doc => {
             const count    = firmasCount(doc.firmas)
-            const fcolor   = firmasColor(count)
+            const fcolor   = firmasColor(count, doc.estadoDocumento)
             const isExp    = exporting===doc.id
             const completo = count===total
+            const hasObs   = (doc.observaciones?.length || 0) > 0
+
             return (
               <div key={doc.id} style={{ background:'#fff', border:`1px solid ${C.border}`, borderRadius:12, padding:'1rem 1.25rem' }}>
                 <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
@@ -338,23 +441,40 @@ export default function Historial() {
                       <span style={{ padding:'2px 10px', borderRadius:99, fontSize:11, fontWeight:700, background:TIPO_COLOR[doc.tipo]||C.gray, color:'#fff' }}>{TIPO_LABEL[doc.tipo]||doc.tipo}</span>
                       <span style={{ fontSize:12, color:'#94a3b8' }}>{formatFecha(doc.creadoEn)}</span>
                       <span style={{ fontSize:12, color:'#94a3b8' }}>· {doc.nombre||doc.usuario}</span>
+                      {hasObs && <span style={{ fontSize:11, fontWeight:700, color:'#b45309', background:'#fef3c7', padding:'2px 8px', borderRadius:6 }}>💬 {doc.observaciones.length} obs</span>}
                     </div>
-                    <div style={{ fontSize:15, fontWeight:600, color:'#1e293b', marginBottom:8, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{doc.titulo}</div>
+                    <div style={{ fontSize:15, fontWeight:600, color:'#1e293b', marginBottom:8, cursor:'pointer' }} onClick={() => setSelectedDoc(doc)}>
+                      {doc.titulo}
+                    </div>
                     <FirmasRow doc={doc} onFirmado={handleFirmado} />
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8, flexShrink:0 }}>
                     <span style={{ padding:'4px 12px', borderRadius:99, fontSize:12, fontWeight:700, background:fcolor.bg, color:fcolor.color, border:`1px solid ${fcolor.border}` }}>
-                      {completo?'✓ Listo':`${count}/${total} firmas`}
+                      {doc.estadoDocumento === 'rechazado' ? '✕ Rechazado' : doc.estadoDocumento === 'con_observaciones' ? '⚠️ Con Observaciones' : completo ? '✓ Listo' : `${count}/${total} firmas`}
                     </span>
-                    <button onClick={() => descargarPDF(doc)} disabled={isExp} style={{ padding:'7px 16px', fontSize:12, fontWeight:600, background:isExp?'#94a3b8':completo?C.green:C.navy, color:'#fff', border:'none', borderRadius:8, cursor:isExp?'not-allowed':'pointer', whiteSpace:'nowrap' }}>
-                      {isExp?'Generando...':completo?'⬇ Descargar PDF':'⬇ Borrador PDF'}
-                    </button>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={() => setSelectedDoc(doc)} style={{ padding:'7px 12px', fontSize:12, fontWeight:700, background:'#eff6ff', color:C.navy, border:`1px solid #bfdbfe`, borderRadius:8, cursor:'pointer' }}>
+                        👁️ Ver & Observaciones
+                      </button>
+                      <button onClick={() => descargarPDF(doc)} disabled={isExp} style={{ padding:'7px 14px', fontSize:12, fontWeight:600, background:isExp?'#94a3b8':completo?C.green:C.navy, color:'#fff', border:'none', borderRadius:8, cursor:isExp?'not-allowed':'pointer', whiteSpace:'nowrap' }}>
+                        {isExp?'...':completo?'⬇ PDF':'⬇ PDF'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             )
           })}
         </div>}
+
+      {selectedDoc && session && (
+        <ModalVerDocumento
+          doc={selectedDoc}
+          session={session}
+          onClose={() => setSelectedDoc(null)}
+          onUpdateDoc={handleUpdateDoc}
+        />
+      )}
     </div>
   )
 }

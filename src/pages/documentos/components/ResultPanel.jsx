@@ -3,7 +3,9 @@ import { useState, useRef, useEffect } from 'react'
 import { guardarDocumento } from '../lib/documentos.js'
 import FirmasPanel from './FirmasPanel.jsx'
 
-const EXPORT_URL = "https://exportarword-ybgdfxdgqq-uc.a.run.app"
+const EXPORT_URL = import.meta.env.DEV
+  ? "/api-exportarword"
+  : "https://southamerica-west1-mpf-maquinaria.cloudfunctions.net/exportarWord"
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
 

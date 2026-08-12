@@ -65,7 +65,7 @@ async function scrapeCNEPrices() {
     // Necesitas hacerla desde un backend
     
     // Opción A: Llamar a tu Cloud Function
-    const response = await fetch('https://us-central1-mpf-maquinaria.cloudfunctions.net/getFuelPrices');
+    const response = await fetch('https://southamerica-west1-mpf-maquinaria.cloudfunctions.net/getFuelPrices');
     
     // Opción B: Llamar a tu backend
     // const response = await fetch('https://tu-backend.com/api/cne-prices');

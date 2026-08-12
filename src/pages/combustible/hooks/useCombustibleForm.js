@@ -6,6 +6,7 @@ import { ref, uploadString, getDownloadURL } from "firebase/storage";
 import { getNextGuiaNumber } from '../../../utils/voucherThermalGenerator';
 import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
+import { useEmpresa } from '../../../lib/useEmpresa';
 
 const TODAY = () => new Date().toISOString().split('T')[0];
 
@@ -39,6 +40,7 @@ const getNextCodigoNumber = async (empresaId) => {
 };
 
 export function useCombustibleForm(empresaId, onClose, isReportesView) {
+  const { empresa: empresaPrincipal } = useEmpresa();
   const { toast, toasts, removeToast } = useToast();
   const isSubmittingRef = useRef(false);
 
@@ -185,6 +187,33 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
   }, [empleados]);
 
+  // Auto-asignación y sincronización de repartidor para no-admins (evita quedarse vacío al hacer reset del formulario)
+  useEffect(() => {
+    if (!currentUserData || isAdmin) return;
+    const self = surtidoresPersonas.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+    const targetId = self ? self.id : currentUserData.id;
+    if (datosControl.repartidorId !== targetId) {
+      setDatosControl(prev => ({ ...prev, repartidorId: targetId }));
+    }
+  }, [currentUserData, isAdmin, surtidoresPersonas, datosControl.repartidorId]);
+
+  // Auto-asignación y sincronización de operador receptor para no-admins
+  useEffect(() => {
+    if (!currentUserData || isAdmin) return;
+    const self = trabajadoresLocales.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+    const targetId = self ? self.id : currentUserData.id;
+    if (datosEntrada.operadorId !== targetId) {
+      setDatosEntrada(prev => ({ ...prev, operadorId: targetId }));
+    }
+  }, [currentUserData, isAdmin, trabajadoresLocales, datosEntrada.operadorId]);
+
+  // Auto-asignar receptorNombre si está vacío
+  useEffect(() => {
+    if (currentUserData?.nombre && !datosEntrada.receptorNombre) {
+      setDatosEntrada(prev => ({ ...prev, receptorNombre: currentUserData.nombre }));
+    }
+  }, [currentUserData, datosEntrada.receptorNombre]);
+
   // Auto-seleccionar proyecto cuando solo hay uno disponible
   useEffect(() => {
     if (projects?.length === 1 && !datosControl.projectId) {
@@ -216,15 +245,13 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     if (empresaIdONombre === 'MPF') return true;
     const nombre = resolverNombreEmpresa(empresaIdONombre);
     const n = normEmp(nombre);
-    const nombresInternos = (subEmpresasLocal || []).map(se => normEmp(se.nombre || ''));
-    
-    if (nombresInternos.length === 0) {
-      const EMPRESAS_SISTEMA = ['MPF Ingeniería Civil', 'MPF', 'LifeMed', 'Intosim', 'Río Tinto', 'Global', 'Celenor'];
-      return EMPRESAS_SISTEMA.some(na => {
-        const t = normEmp(na);
-        return n.includes(t) || t.includes(n);
-      });
+    // Filtrar la empresa principal del usuario (evitar combustible "propio")
+    if (empresaPrincipal?.nombre) {
+      const t = normEmp(empresaPrincipal.nombre);
+      if (t && n && (n.includes(t) || t.includes(n))) return true;
     }
+    const nombresInternos = (subEmpresasLocal || []).map(se => normEmp(se.nombre || ''));
+    if (nombresInternos.length === 0) return false;
     return nombresInternos.some(t => n.includes(t) || t.includes(n));
   };
   const esMPF = esEmpresaInterna;
@@ -497,7 +524,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       abort('error', 'Tu usuario no está registrado. Contacta al administrador.');
       return;
     }
-    const repartidorRequired = tipoReporte !== 'entrada' || datosEntrada.tipoOrigen !== 'estacion';
+    const repartidorRequired = tipoReporte === 'entrega' || (tipoReporte === 'entrada' && datosEntrada.tipoOrigen === 'interno');
     if (!datosControl.projectId || (repartidorRequired && !datosControl.repartidorId)) {
       abort('warning', 'Completa los campos obligatorios del control de combustible');
       return;
@@ -706,28 +733,12 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
           || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
 
-        setLastReportData({
-          reportData: {
-            ...dataToSave, numeroReporte,
-            fecha: datosControl.fecha,
-            cantidadLitros: parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.')),
-            horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')),
-            firmaReceptor, firmaRepartidor
-          },
-          reporteId: nuevoReporteId,
-          projectName: projectInfo?.nombre || projectInfo?.name || 'N/A',
-          machineInfo: finalMachineInfo,
-          operadorInfo: finalOperadorInfo,
-          empresaInfo,
-          repartidorInfo: {
-            nombre: repartidorInfo?.nombre || dataToSave.repartidorNombre || '',
-            rut: repartidorInfo?.rut || dataToSave.repartidorRut || ''
-          },
-          equipoSurtidorInfo: equipoSurtidorInfo
-            ? { nombre: equipoSurtidorInfo.nombre || '', patente: equipoSurtidorInfo.patente || '', tipo: equipoSurtidorInfo.tipo || '' }
-            : null
-        });
-        setShowVoucherModal(true);
+        toast({ type: 'success', message: `Reporte de Entrega registrado: ${numeroReporte}`, duration: 5000 });
+        if (isReportesView) {
+          onClose();
+        } else {
+          resetForm();
+        }
       } else {
         toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
         if (isReportesView) {

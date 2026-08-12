@@ -10,12 +10,15 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
-import { db } from "../lib/firebase";
+import { formatRut } from "../utils/formatters";
+import { db, auth } from "../lib/firebase";
 import {
   collection, getDocs, doc, updateDoc, setDoc, addDoc, deleteDoc,
   serverTimestamp, query, orderBy, where,
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
+
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, setPersistence, inMemoryPersistence } from "firebase/auth";
 
@@ -742,6 +745,11 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     }));
   };
 
+  const handleRutChange = (e) => {
+    const raw = e.target.value.replace(/[^0-9kK]/g, "").toUpperCase();
+    setForm(f => ({ ...f, rut: formatRut(raw) }));
+  };
+
   const openEdit = (usr) => {
     setEditId(usr.id);
     setForm({
@@ -784,7 +792,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: newEmpresaId,
-          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
           updatedAt: serverTimestamp(),
         };
         if (form.password && form.password.trim()) {
@@ -841,7 +849,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: form.empresaId || "",
-          modulos: form.role === 'administrativo' ? (form.modulos || []) : [],
+          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
           password: form.password,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -881,14 +889,19 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     }
     setSaving(usr.id);
     try {
-      // 1. Delete from root
-      await deleteDoc(doc(db, "users", usr.id));
-
-      // 2. Delete from company if empresaId is present
-      if (usr.empresaId) {
-        await deleteDoc(doc(db, "empresas", usr.empresaId, "users", usr.id));
-      }
-      
+      await Promise.all([
+        // Tombstone en vez de deleteDoc: fuerza sign out en el cliente eliminado
+        // y evita que EmpresaSetup lo re-cree via trabajadores
+        setDoc(doc(db, "users", usr.id), { deleted: true, deletedAt: serverTimestamp() }),
+        usr.empresaId
+          ? deleteDoc(doc(db, "empresas", usr.empresaId, "users", usr.id))
+          : Promise.resolve(),
+        fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUid: usr.id, callerUid: auth.currentUser?.uid, empresaId: usr.empresaId || '' }),
+        }).catch(() => {}),
+      ]);
       onRefresh();
     } catch (e) {
       alert("Error al eliminar usuario: " + e.message);
@@ -945,7 +958,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
             <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.nombre} onChange={e => setForm({...form, nombre: e.target.value})} placeholder="Ej: Juan Pérez" />
           </Field>
           <Field label="RUT">
-            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={e => setForm({...form, rut: e.target.value})} placeholder="Ej: 12.345.678-9" />
+            <input className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400" value={form.rut} onChange={handleRutChange} placeholder="Ej: 12.345.678-9" />
           </Field>
           <Field label="Email" required>
             <input
@@ -973,7 +986,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Rol" required>
-              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: e.target.value === 'administrativo' ? form.modulos : []})}>
+              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: (e.target.value === 'administrativo' || e.target.value === 'operador') ? form.modulos : []})}>
                 {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 <option value="mandante_admin">mandante_admin</option>
               </select>
@@ -986,7 +999,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
             </Field>
           </div>
 
-          {form.role === 'administrativo' && (
+          {(form.role === 'administrativo' || form.role === 'operador') && (
             <Field label="Módulos habilitados" required>
               <div className="space-y-2 mt-1 max-h-[150px] overflow-y-auto pr-1">
                 {ALL_MODULOS.map(m => (
@@ -1204,7 +1217,7 @@ export default function SuperAdminPanel({ onClose }) {
         getDocs(collection(db, "subscriptions")),
       ]);
       setEmpresas(empSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setUsuarios(usrSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setUsuarios(usrSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => !u.deleted));
       setSubscriptions(subSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);

@@ -6,9 +6,10 @@ import { useEmpresa } from '../../lib/useEmpresa';
 import AppShellLayout from '../../components/AppShellLayout';
 import { DashboardSection, TrabajadoresSection, ContratosSection,
   RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel } from './sections.a';
-import { AnexosSection, ImpuestosSection, AsistenciaSection,
+import { AnexosSection, ImpuestosSection,
   OrganizacionSection, ReportesSection, ContabilidadSection,
   PreviredAvanzadoSection, ArchivoPagoSection } from './sections.b';
+import AsistenciaSection from './AsistenciaSection';
 import TrabajadorPerfil from './TrabajadorPerfil';
 
 // ── Nav groups (shared with AppShellLayout) ──────────────────────────────────
