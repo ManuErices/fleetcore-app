@@ -71,7 +71,7 @@ export default function EntradaStep({
   const FIELD_LABELS = {
     documentos: 'Documento de compra (N°, Litros y Monto)',
     cantidad: 'Litros totales recibidos',
-    numerosDocumento: 'N° de documento o guía de despacho',
+    numerosDocumento: 'N° de Vale o Documento Interno',
     operadorId: 'Receptor (persona que recibe)',
     machineId: 'Vehículo / Equipo que recibe',
   };
@@ -147,10 +147,10 @@ export default function EntradaStep({
               <div className="space-y-4">
                 {/* Cabecera — solo visible en desktop */}
                 <div className="hidden sm:grid grid-cols-12 gap-3 px-2 text-xs font-black text-slate-500 uppercase tracking-wider">
-                  <div className="col-span-4 px-1">N° Doc</div>
+                  <div className="col-span-3 px-1">N° Doc</div>
                   <div className="col-span-3 px-1 text-right">Litros</div>
                   <div className="col-span-3 px-1 text-right">Monto ($)</div>
-                  <div className="col-span-2"></div>
+                  <div className="col-span-3 text-center">Guía Despacho / Acciones</div>
                 </div>
 
                 <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
@@ -171,9 +171,9 @@ export default function EntradaStep({
                         )}
                       </div>
 
-                      {/* N° Doc — fila completa en mobile, col-span-4 en desktop */}
+                      {/* N° Doc — fila completa en mobile, col-span-3 en desktop */}
                       <div className="sm:grid sm:grid-cols-12 sm:gap-3 sm:items-center space-y-2 sm:space-y-0">
-                        <div className="sm:col-span-4">
+                        <div className="sm:col-span-3">
                           <label className="block text-xs font-bold text-slate-500 mb-1 sm:hidden">N° Documento</label>
                           <input
                             type="text" required={idx === 0} value={docRow.numero}
@@ -227,14 +227,107 @@ export default function EntradaStep({
                           </div>
                         </div>
 
+                        {/* Mobile attachment block */}
+                        <div className="sm:hidden flex items-center gap-2 mt-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                          <span className="text-xs font-bold text-slate-500">Guía de Despacho:</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.webp"
+                            id={`file-input-mobile-${idx}`}
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                const arr = [...(datosEntrada.documentosEstacion || [])];
+                                arr[idx] = { ...arr[idx], file: file, fileName: file.name };
+                                setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById(`file-input-mobile-${idx}`).click()}
+                            className={`flex-1 py-1.5 px-3 rounded-lg border text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                              docRow.fileName
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-white text-slate-500 border-slate-200'
+                            }`}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                            <span className="truncate">{docRow.fileName || 'Adjuntar Archivo'}</span>
+                          </button>
+                          {docRow.fileName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const arr = [...(datosEntrada.documentosEstacion || [])];
+                                arr[idx] = { ...arr[idx], file: null, fileName: '', fileUrl: '' };
+                                setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
+                              }}
+                              className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center font-black"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+
                         {/* Botones — solo desktop (mobile los tiene arriba o al final) */}
-                        <div className="sm:col-span-2 hidden sm:flex items-center justify-end gap-1.5">
+                        <div className="sm:col-span-3 hidden sm:flex items-center justify-end gap-1.5">
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.webp"
+                            id={`file-input-${idx}`}
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                const arr = [...(datosEntrada.documentosEstacion || [])];
+                                arr[idx] = { ...arr[idx], file: file, fileName: file.name };
+                                setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById(`file-input-${idx}`).click()}
+                            className={`p-2 rounded-xl border text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                              docRow.fileName
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                            }`}
+                            title={docRow.fileName ? `Guía adjunta: ${docRow.fileName}` : 'Adjuntar Guía de Despacho (PDF o Imagen)'}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                            {docRow.fileName ? (
+                              <span className="max-w-[70px] truncate">{docRow.fileName}</span>
+                            ) : (
+                              <span>Adjuntar</span>
+                            )}
+                          </button>
+                          {docRow.fileName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const arr = [...(datosEntrada.documentosEstacion || [])];
+                                arr[idx] = { ...arr[idx], file: null, fileName: '', fileUrl: '' };
+                                setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
+                              }}
+                              className="text-red-500 hover:text-red-700 font-bold text-xs"
+                              title="Quitar adjunto"
+                            >
+                              ✕
+                            </button>
+                          )}
                           <button type="button"
                             onClick={() => {
                               const rowToDup = (datosEntrada.documentosEstacion || [])[idx];
                               const arr = [...(datosEntrada.documentosEstacion || [])];
                               if (arr.length >= 20) return;
-                              arr.splice(idx + 1, 0, { numero: incrementDocNumber(rowToDup.numero), cantidad: rowToDup.cantidad, total: rowToDup.total });
+                              arr.splice(idx + 1, 0, { numero: incrementDocNumber(rowToDup.numero), cantidad: rowToDup.cantidad, total: rowToDup.total, file: null, fileName: '', fileUrl: '' });
                               const totalLitros = arr.reduce((acc, row) => acc + (parseFloat(row.cantidad) || 0), 0);
                               setDatosEntrada({ ...datosEntrada, documentosEstacion: arr, numerosDocumento: arr.map(r => r.numero), cantidad: totalLitros > 0 ? String(totalLitros) : '' });
                             }}
@@ -281,7 +374,7 @@ export default function EntradaStep({
                   <button
                     type="button"
                     onClick={() => {
-                      const arr = [...(datosEntrada.documentosEstacion || [{ numero: '', cantidad: '', total: '' }]), { numero: '', cantidad: '', total: '' }];
+                      const arr = [...(datosEntrada.documentosEstacion || [{ numero: '', cantidad: '', total: '', file: null, fileName: '', fileUrl: '' }]), { numero: '', cantidad: '', total: '', file: null, fileName: '', fileUrl: '' }];
                       setDatosEntrada({ ...datosEntrada, documentosEstacion: arr });
                     }}
                     className="w-full flex items-center justify-center border-2 border-dashed border-slate-300 rounded-xl text-slate-400 hover:border-green-500 hover:text-green-600 transition-all bg-slate-50 hover:bg-green-50/50 py-3 font-bold text-xs uppercase tracking-wider"
@@ -358,7 +451,7 @@ export default function EntradaStep({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4 border-t border-slate-50">
             <div className="space-y-3">
               <div className="flex justify-between items-center px-1">
-                <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">Vales / Guías de Despacho</label>
+                <label className="block text-sm font-black text-slate-500 uppercase tracking-widest">{datosEntrada.tipoOrigen === 'interno' ? 'Vales de Consumo Interno' : 'Vales / Facturas de Proveedor'}</label>
                 <span className="text-xs font-black text-green-600 bg-green-50 px-3 py-1 rounded-full">
                   {datosEntrada.numerosDocumento.filter(d => d).length} / 20
                 </span>

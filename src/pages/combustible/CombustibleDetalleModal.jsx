@@ -269,13 +269,14 @@ export default function CombustibleDetalleModal({
                   return (
                     <div className="col-span-full space-y-3 mt-2">
                       <div className="text-xs font-black text-slate-500 uppercase tracking-widest px-1">Documentos de Compra (Estación de Servicio)</div>
-                      <div className="bg-white border-2 border-slate-100 rounded-2xl overflow-y-auto shadow-sm max-w-xl max-h-[310px]">
+                      <div className="bg-white border-2 border-slate-100 rounded-2xl overflow-y-auto shadow-sm max-w-2xl max-h-[310px]">
                         <table className="min-w-full divide-y divide-slate-100 text-xs text-left border-collapse">
                           <thead className="bg-slate-50 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(226,232,240,1)] font-bold text-slate-500 uppercase tracking-wider">
                             <tr>
                               <th className="px-4 py-3 bg-slate-50">N° Doc</th>
                               <th className="px-4 py-3 text-right bg-slate-50">Cantidad (Lts)</th>
                               <th className="px-4 py-3 text-right bg-slate-50">Monto ($)</th>
+                              {docsEstacion.some(d => d.fileUrl) && <th className="px-4 py-3 text-center bg-slate-50">Guía</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-700 font-bold">
@@ -284,6 +285,26 @@ export default function CombustibleDetalleModal({
                                 <td className="px-4 py-3 text-slate-900">{d.numero}</td>
                                 <td className="px-4 py-3 text-right text-slate-600">{Number(d.cantidad || 0).toLocaleString('es-CL')} Lts</td>
                                 <td className="px-4 py-3 text-right text-green-700">${Number(d.total || 0).toLocaleString('es-CL')}</td>
+                                {docsEstacion.some(x => x.fileUrl) && (
+                                  <td className="px-4 py-3 text-center">
+                                    {d.fileUrl ? (
+                                      <a
+                                        href={d.fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors"
+                                        title={d.fileName || 'Ver guía de despacho'}
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        </svg>
+                                        Ver
+                                      </a>
+                                    ) : (
+                                      <span className="text-slate-400 font-medium">—</span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -295,6 +316,7 @@ export default function CombustibleDetalleModal({
                                   {Number(cantidadDisplay || 0).toLocaleString('es-CL')} Lts
                                 </td>
                                 <td className="px-4 py-3 text-right bg-slate-50 text-green-800">${Number(reporte.totalMonto).toLocaleString('es-CL')}</td>
+                                {docsEstacion.some(x => x.fileUrl) && <td className="bg-slate-50"></td>}
                               </tr>
                             </tfoot>
                           )}
