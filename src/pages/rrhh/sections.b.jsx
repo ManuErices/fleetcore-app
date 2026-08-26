@@ -12,7 +12,7 @@ const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
   mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV } = Shared;
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, calcularAntiguedad, calcularFiniquito,
+  calcularLiquidacion, liquidacionDe, remDe, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, exportarAsistenciaCSV } = Calc;
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
@@ -343,7 +343,7 @@ function ImpuestosSection() {
 
       let totalImp = 0, totalNoImp = 0, totalAfp = 0, totalSalud = 0, totalCes = 0, totalIUT = 0, totalLiq = 0, maxMensual = 0;
       liqs.forEach(l => {
-        const c = calcularLiquidacionConIUT({ ...contrato, ...l }, utm);
+        const c = calcularLiquidacionConIUT(remDe(t, contrato, l), utm);
         totalImp += c.imponible;
         totalNoImp += c.noImponible;
         totalAfp += c.afpM;
@@ -1539,7 +1539,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
       if (!contrato) return sum;
       const liq = liquidaciones.find(l => l.trabajadorId === t.id && l.mes === mesAct && l.anio === anioAct);
       if (!liq) return sum + (parseInt(contrato.sueldoBase) || 0);
-      const calc = calcularLiquidacion({ ...contrato, ...liq });
+      const calc = liquidacionDe(t, contrato, liq);
       return sum + calc.imponible + calc.noImponible;
     }, 0);
 
@@ -1872,7 +1872,7 @@ function ReportesSection() {
     liqMes.forEach(l => {
       const cont = contratos.find(c => c.id === l.contratoId);
       if (!cont) return;
-      const c = calcularLiquidacion({ ...cont, ...l });
+      const c = liquidacionDe(trabajadores.find(t => t.id === l.trabajadorId), cont, l);
       masaImponible += c.imponible;
       masaNoImp += c.noImponible;
       totalCotiz += c.totalDescuentos;
@@ -1940,7 +1940,7 @@ function ReportesSection() {
     liqEmp.forEach(l => {
       const cont = contratos.find(c => c.id === l.contratoId);
       if (!cont) return;
-      const c = calcularLiquidacion({ ...cont, ...l });
+      const c = liquidacionDe(trabajadores.find(t => t.id === l.trabajadorId), cont, l);
       costo += c.imponible + (c.cesEmpM || 0) + (c.sisEmpM || 0);
     });
     return { empresa: emp, trabajadores: trabEmp.length, costo };
@@ -2517,8 +2517,8 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   })).filter(x => x.contrato);
 
   // Calcular totales del período
-  const totalesPeriodo = liqEnriquecidas.reduce((acc, { contrato, liq }) => {
-    const c = calcularLiquidacion({ ...contrato, ...liq });
+  const totalesPeriodo = liqEnriquecidas.reduce((acc, { trabajador, contrato, liq }) => {
+    const c = liquidacionDe(trabajador, contrato, liq);
     const iut = calcularIUT(calcularRentaTributable(c), utm);
     acc.masaImponible += c.imponible;
     acc.masaNoImp += c.noImponible;
@@ -2799,7 +2799,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {liqEnriquecidas.slice(0, 8).map(({ trabajador, contrato, liq }, i) => {
-                          const c = calcularLiquidacion({ ...contrato, ...liq });
+                          const c = liquidacionDe(trabajador, contrato, liq);
                           return (
                             <tr key={i} className="hover:bg-slate-50">
                               <td className="px-3 py-2 font-mono font-bold text-slate-600">{trabajador?.rut || '—'}</td>
@@ -2870,7 +2870,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {liqEnriquecidas.map(({ trabajador, contrato, liq }, i) => {
-                        const c = calcularLiquidacion({ ...contrato, ...liq });
+                        const c = liquidacionDe(trabajador, contrato, liq);
                         const iut = calcularIUT(calcularRentaTributable(c), utm);
                         const monto = Math.max(0, c.liquido - iut);
                         const tieneBanco = !!trabajador?.banco && !!trabajador?.nroCuenta;

@@ -1550,3 +1550,131 @@ exports.exportarWord = onRequest((req, res) => {
 
 
 
+// ── closeWorkOrder — cierre atómico de una Orden de Trabajo de Maquinaria ──
+// Descuenta stock de repuestos, crea el evento de mantención, calcula la
+// próxima mantención (si viene de un plan preventivo), actualiza el medidor
+// y estado de la máquina, y deja registro en machineHistory. Todo en una
+// única transacción para que nunca quede a medio camino.
+exports.closeWorkOrder = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const {
+        empresaId, workOrderId, callerUid,
+        medidorFinal, trabajoRealizado, horasTrabajo,
+        repuestosUsados = [], observaciones,
+      } = req.body;
+
+      if (!empresaId || !workOrderId || !callerUid) {
+        return res.status(400).json({ error: 'Faltan campos requeridos: empresaId, workOrderId, callerUid' });
+      }
+      if (medidorFinal === undefined || medidorFinal === null) {
+        return res.status(400).json({ error: 'Falta medidorFinal' });
+      }
+      if (!trabajoRealizado || !String(trabajoRealizado).trim()) {
+        return res.status(400).json({ error: 'Falta describir el trabajo realizado' });
+      }
+
+      // Verificar permisos del caller — solo estos roles pueden cerrar una OT
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) return res.status(403).json({ error: 'Usuario no autorizado' });
+      const callerData = callerDoc.data();
+      const rolesQuePuedenCerrar = ['superadmin', 'admin_contrato', 'administrativo', 'jefe_taller'];
+      const isSuper = callerData.role === 'superadmin';
+      const puedeCerrar = isSuper || (rolesQuePuedenCerrar.includes(callerData.role) && callerData.empresaId === empresaId);
+      if (!puedeCerrar) return res.status(403).json({ error: 'Sin permisos para cerrar órdenes de trabajo' });
+
+      const empresaPath = `empresas/${empresaId}`;
+      const woRef = db.doc(`${empresaPath}/workOrders/${workOrderId}`);
+
+      const resultado = await db.runTransaction(async (tx) => {
+        const woSnap = await tx.get(woRef);
+        if (!woSnap.exists) throw { status: 404, message: 'Orden de trabajo no encontrada' };
+        const wo = woSnap.data();
+        if (wo.estado === 'cerrada') throw { status: 409, message: 'La OT ya está cerrada' };
+
+        const machineRef = db.doc(`${empresaPath}/machines/${wo.machineId}`);
+        const machineSnap = await tx.get(machineRef);
+        if (!machineSnap.exists) throw { status: 404, message: 'Máquina no encontrada' };
+        const machine = machineSnap.data();
+
+        if (machine.medidorActual != null && Number(medidorFinal) < Number(machine.medidorActual)) {
+          throw { status: 400, message: `El medidor no puede ser menor al registrado actualmente (${machine.medidorActual})` };
+        }
+
+        // 1. Descontar stock de repuestos usados
+        let costoRepuestos = 0;
+        const partRefs = [];
+        for (const item of repuestosUsados) {
+          const partRef = db.doc(`${empresaPath}/spareParts/${item.spareId}`);
+          const partSnap = await tx.get(partRef);
+          if (!partSnap.exists) throw { status: 404, message: `Repuesto ${item.codigo || item.spareId} no encontrado` };
+          const stockActual = partSnap.data().stock || 0;
+          if (stockActual < item.cantidad) throw { status: 409, message: `Stock insuficiente: ${item.codigo || item.spareId}` };
+          partRefs.push({ partRef, stockActual, item });
+          costoRepuestos += item.cantidad * (item.costoUnitario || 0);
+        }
+        partRefs.forEach(({ partRef, stockActual, item }) => {
+          const stockResultante = stockActual - item.cantidad;
+          tx.update(partRef, { stock: stockResultante, updatedAt: FieldValue.serverTimestamp() });
+          const movRef = db.collection(`${empresaPath}/sparePartMovements`).doc();
+          tx.set(movRef, {
+            spareId: item.spareId, tipo: 'salida', cantidad: item.cantidad,
+            motivo: `OT-${workOrderId}`, workOrderId, usuarioId: callerUid,
+            fecha: new Date().toISOString(), stockResultante,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        });
+
+        // 2. Calcular próxima mantención si la OT viene de un plan preventivo
+        let proximaMantencionEn = null;
+        if (wo.origen === 'preventiva' && wo.origenRefId) {
+          const planSnap = await tx.get(db.doc(`${empresaPath}/maintenancePlans/${wo.origenRefId}`));
+          if (planSnap.exists) proximaMantencionEn = Number(medidorFinal) + (planSnap.data().intervalo || 0);
+        }
+
+        // 3. Crear el evento de mantención (historial)
+        const eventRef = db.collection(`${empresaPath}/maintenanceEvents`).doc();
+        const costoTotal = (wo.costoManoObra || 0) + costoRepuestos;
+        tx.set(eventRef, {
+          machineId: wo.machineId, planId: wo.origenRefId || null, workOrderId,
+          tipo: wo.origen === 'preventiva' ? 'preventiva' : 'correctiva',
+          fecha: new Date().toISOString(), medidorAlMomento: Number(medidorFinal),
+          mecanicoId: wo.asignadoA || callerUid, trabajoRealizado, costoTotal,
+          proximaMantencionEn, createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // 4. Cerrar la OT
+        tx.update(woRef, {
+          estado: 'cerrada', trabajoRealizado, horasTrabajo: Number(horasTrabajo) || 0, observaciones: observaciones || '',
+          medidorFinal: Number(medidorFinal), repuestosUsados, costoRepuestos, costoTotal,
+          fechaCierre: new Date().toISOString(), cerradoPor: callerUid,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        // 5. Actualizar la máquina
+        tx.update(machineRef, {
+          medidorActual: Number(medidorFinal), medidorActualizadoEn: FieldValue.serverTimestamp(),
+          medidorActualizadoPor: callerUid, status: 'operativa',
+        });
+
+        // 6. Auditoría
+        const histRef = db.collection(`${empresaPath}/machineHistory`).doc();
+        tx.set(histRef, {
+          entityType: 'workOrder', entityId: workOrderId, accion: 'cierre_ot',
+          before: { estado: wo.estado }, after: { estado: 'cerrada' },
+          userId: callerUid, timestamp: FieldValue.serverTimestamp(),
+        });
+
+        return { maintenanceEventId: eventRef.id };
+      });
+
+      return res.status(200).json({ success: true, ...resultado });
+    } catch (err) {
+      if (err && err.status) return res.status(err.status).json({ error: err.message });
+      console.error('closeWorkOrder error:', err.message || err);
+      return res.status(500).json({ error: err.message || 'Error interno' });
+    }
+  });
+});

@@ -1,16 +1,17 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
-import { fmt, normalizaRut } from "./ContabilidadContext";
+import { fmt, normalizaRut, leerTextoDetectando, repararMojibake } from "./ContabilidadContext";
 
 // Función para corregir dobles codificaciones UTF-8 en strings Latin1
-function fixEncoding(str) {
-  if (!str) return "";
-  try {
-    return decodeURIComponent(escape(str));
-  } catch (e) {
-    return str;
-  }
-}
+// Reparación de doble codificación.
+//
+// La versión anterior era `decodeURIComponent(escape(str))`. Ese truco solo
+// cubre bytes que existen en Latin-1 puro: funcionaba con "ÃRIDOS" → "ÁRIDOS"
+// (Á = C3 81), pero con "Ó" = C3 93 el byte 0x93 se convierte en comilla
+// tipográfica, escape() la codifica como %u201C, decodeURIComponent lanza y el
+// catch devolvía el texto intacto. Por eso "Ã“PTICA" nunca se arreglaba.
+// repararMojibake revierte también el rango 0x80–0x9F de Windows-1252.
+const fixEncoding = (str) => repararMojibake(str || "");
 
 // ─── Clasificación automática de proveedores ──────────────────────────────────
 // Reglas basadas en razón social y RUT para asignar la cuenta de gasto correcta
@@ -57,21 +58,44 @@ function clasificarProveedor(razonSocial) {
 
 // Aplica una regla APRENDIDA (proveedor RUT → cuenta/categoría elegida antes por el usuario)
 // a un asiento de compra ya generado. Tiene prioridad sobre la clasificación por keywords.
+/**
+ * Aplica una regla APRENDIDA (proveedor RUT → cuenta elegida antes por el usuario).
+ *
+ * Cambios respecto de la versión anterior:
+ *  · Ya no se filtra por `origen === "iconstruye"`. Las compras del RCV del SII
+ *    pasan por el mismo constructor, pero el filtro por nombre de origen era
+ *    frágil: ahora se decide por si el asiento tiene proveedor y líneas de gasto.
+ *  · Solo se reasigna la línea de gasto PRINCIPAL (la de mayor debe que no sea
+ *    IVA). Antes se reescribían todas, y un asiento que agrupaba documentos con
+ *    cuentas de costo distintas se colapsaba en una sola.
+ *  · La etiqueta se toma de la cuenta de destino, no del label guardado: así no
+ *    vuelven a quedar desalineadas ("Arriendos Oficina" rotulada como
+ *    "Gastos Generales").
+ */
 function aplicarReglaImport(asiento, reglasGasto) {
-  if (!reglasGasto || asiento.origen !== "iconstruye") return asiento;
-  if (String(asiento.glosa || "").startsWith("NC")) return asiento; // no tocar notas de crédito
+  if (!reglasGasto || !asiento._rut) return asiento;
+  if (String(asiento.glosa || "").startsWith("NC")) return asiento; // las NC siguen la cuenta original
   const regla = reglasGasto[normalizaRut(asiento._rut)];
   if (!regla || !regla.cuentaId) return asiento;
-  const lineas = (asiento.lineas || []).map(l =>
-    (parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""))
-      ? { ...l, cuentaId: regla.cuentaId, cuentaNombre: regla.cuentaNombre,
-          descripcion: `${regla.categoriaIcon || "🏷"} ${regla.categoriaLabel} — auto (aprendido)` }
-      : l
-  );
+
+  const esGasto = (l) => parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || "");
+  const candidatas = (asiento.lineas || []).filter(esGasto);
+  if (!candidatas.length) return asiento;
+
+  // La línea principal es la de mayor monto: es la que representa el gasto.
+  const principal = candidatas.reduce((a, b) => (parseFloat(b.debe) > parseFloat(a.debe) ? b : a));
+  const etiqueta = regla.categoriaLabel || regla.cuentaNombre || "Clasificado";
+
+  const lineas = (asiento.lineas || []).map(l => l === principal
+    ? { ...l, cuentaId: regla.cuentaId, cuentaNombre: regla.cuentaNombre,
+        descripcion: `${regla.categoriaIcon || "🏷"} ${etiqueta} — regla aprendida` }
+    : l);
+
   return {
     ...asiento, lineas,
-    _clasificacion: regla.categoriaLabel || asiento._clasificacion,
+    _clasificacion: etiqueta,
     _aprendido: true,
+    _multiLinea: candidatas.length > 1,
     totalDebe: lineas.reduce((s, l) => s + (l.debe || 0), 0),
   };
 }
@@ -109,7 +133,7 @@ function normalizarRCV_Venta(fila) {
 
   return {
     "_rut":           String(fila["Rut cliente"] || "").trim(),
-    "_razonSocial":   fixEncoding(String(fila["Razon Social"] || "").trim()),
+    "_razonSocial":   fixEncoding((String(fila["Razon Social"] || "").trim())),
     "_folio":         String(fila["Folio"] || ""),
     "_fecha":         parseFechaRCV(fila["Fecha Docto"]) || parseFechaRCV(fila["Fecha Recepcion"]),
     "_tipoDoc":       tipoDoc,
@@ -188,7 +212,7 @@ function normalizarRCV(fila) {
 
   return {
     "_rut":              String(fila["RUT Proveedor"] || "").trim(),
-    "_razonSocial":      fixEncoding(String(fila["Razon Social"]  || "").trim()),
+    "_razonSocial":      fixEncoding((String(fila["Razon Social"]  || "").trim())),
     "_folio":            String(fila["Folio"]         || ""),
     "_fecha":            parseFechaRCV(fila["Fecha Docto"]) || parseFechaRCV(fila["Fecha Recepcion"]),
     "_tipoDoc":          tipoDoc,
@@ -228,7 +252,7 @@ function normalizarIConstruct(fila) {
 
   return {
     "_rut":         String(fila["Rut Emisor"] || "").trim(),
-    "_razonSocial": fixEncoding(String(fila["Razón Social Emisor"] || "").trim()),
+    "_razonSocial": fixEncoding((String(fila["Razón Social Emisor"] || "").trim())),
     "_folio":       String(fila["Folio"] || ""),
     "_fecha":       parseFecha(fila["Fecha Emisión"]),
     "_tipoDoc":     tipoSII,
@@ -401,7 +425,10 @@ function generarAsientosVenta(filasNorm, cuentas, periodo) {
     // Ajuste centavos
     const sd = lineas.reduce((s,l)=>s+(l.debe||0),0);
     const sh = lineas.reduce((s,l)=>s+(l.haber||0),0);
-    if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) < 10) lineas[0].debe += sh - sd;
+    // Ajuste de redondeo: en pesos chilenos una diferencia real es de $1-2 por
+    // el cálculo del IVA. Sobre eso ya no es redondeo, es un dato mal leído, así
+    // que no se tapa. Antes se empujaban hasta $9 a la primera línea sin dejar rastro.
+    if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) <= 2) lineas[0].debe += sh - sd;
 
     return {
       fecha:         fechaRef || `${periodo}-01`,
@@ -413,7 +440,7 @@ function generarAsientosVenta(filasNorm, cuentas, periodo) {
       origen:        "rcv_venta",
       importHash:    calcularImportHash(periodo, cliente.rut, folios),
       _rut:          cliente.rut,
-      _razonSocial:  cliente.razonSocial,
+      _razonSocial:  repararMojibake(cliente.razonSocial),
       _clasificacion:"Venta",
       _nDocs:        nDocs,
       _totalTotal:   totalTotal,
@@ -480,7 +507,7 @@ function generarAsientosVenta(filasNorm, cuentas, periodo) {
       origen:        "rcv_venta",
       importHash:    calcularImportHash(periodo, `NCE-${cliente.rut}`, folios),
       _rut:          cliente.rut,
-      _razonSocial:  cliente.razonSocial,
+      _razonSocial:  repararMojibake(cliente.razonSocial),
       _clasificacion:"NC Emitida",
       _nDocs:        cliente.ncs.length,
       _totalTotal:   totalTotal,
@@ -524,8 +551,26 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
   const cCombustible = findCuenta(c => c.tipo === "costo" && /combustible/i.test(c.nombre))
                     || findCuenta(c => c.tipo === "costo" && /lubricante/i.test(c.nombre));
 
+  // Resuelve la cuenta contable a partir de la CLASIFICACIÓN completa, no solo
+  // del tipo. Antes era `findCuenta(c => c.tipo === tipo)`, un .find() que
+  // devolvía siempre la PRIMERA cuenta de ese tipo del plan: todo lo que caía en
+  // gasto_adm —peajes, seguros, software, notariales— terminaba en la misma
+  // cuenta. Las etiquetas que produce clasificarProveedor() se calculaban y se
+  // descartaban. CATEGORIAS ya traía el regex `cuentaMatch` para esto.
   const getCuentaGasto = (tipo) =>
-    findCuenta(c => c.tipo === tipo) || findCuenta(c => c.tipo === "gasto_adm");
+    findCuenta(c => c.tipo === tipo && /generales|varios/i.test(c.nombre))
+    || findCuenta(c => c.tipo === tipo)
+    || findCuenta(c => c.tipo === "gasto_adm");
+
+  const resolverCuenta = (clasif) => {
+    const cat = CATEGORIAS.find(c => c.label === clasif.label);
+    if (cat?.cuentaMatch) {
+      const exacta = findCuenta(c => c.tipo === clasif.tipo && cat.cuentaMatch.test(c.nombre))
+                  || findCuenta(c => cat.cuentaMatch.test(c.nombre));
+      if (exacta) return { cuenta: exacta, exacta: true };
+    }
+    return { cuenta: getCuentaGasto(clasif.tipo), exacta: false };
+  };
 
   const errores = [];
   if (!cIVA)      errores.push("Falta cuenta de IVA Crédito Fiscal en el Plan de Cuentas.");
@@ -552,7 +597,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
     const esComb   = prov.facturas.some(f => f["_esCombustibleSII"]);
     const cGasto   = esComb
       ? (cCombustible || getCuentaGasto("costo"))
-      : getCuentaGasto(clasif.tipo);
+      : resolverCuenta(clasif).cuenta;
     prov.clasificacion     = clasif;
     prov.esCombustible     = esComb;
     prov.cuentaGastoId     = cGasto?.id || "";
@@ -664,7 +709,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       origen:         "iconstruye",
       importHash:     calcularImportHash(periodo, prov.rut, folios),
       _rut:           prov.rut,
-      _razonSocial:   prov.razonSocial,
+      _razonSocial:   repararMojibake(prov.razonSocial),
       _clasificacion: prov.esCombustible ? "Combustible (Ley 18.502)" : prov.clasificacion.label,
       _esCombustible: prov.esCombustible,
       _nDocs:         nDocs,
@@ -702,8 +747,9 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
     });
 
     const clasif   = clasificarProveedor(prov.razonSocial);
-    const cGasto   = cuentas.find(c => c.activa !== false && c.tipo === clasif.tipo)
-                  || cuentas.find(c => c.activa !== false && c.tipo === "gasto_adm");
+    // Misma resolución por etiqueta que las facturas: la NC tiene que anular la
+    // MISMA cuenta que cargó la compra, no la primera del tipo.
+    const cGasto   = resolverCuenta(clasif).cuenta;
     const foliosTxt = folios.length <= 3 ? folios.join(", ") : `${folios.slice(0,3).join(", ")} +${folios.length-3}`;
     const nDocs = prov.ncs.length;
 
@@ -730,7 +776,10 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
     // Ajuste centavos
     const sd = lineas.reduce((s,l)=>s+(l.debe||0),0);
     const sh = lineas.reduce((s,l)=>s+(l.haber||0),0);
-    if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) < 10) lineas[0].debe += sh - sd;
+    // Ajuste de redondeo: en pesos chilenos una diferencia real es de $1-2 por
+    // el cálculo del IVA. Sobre eso ya no es redondeo, es un dato mal leído, así
+    // que no se tapa. Antes se empujaban hasta $9 a la primera línea sin dejar rastro.
+    if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) <= 2) lineas[0].debe += sh - sd;
 
     return {
       fecha:         fechaRef || `${periodo}-01`,
@@ -742,7 +791,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       origen:        "iconstruye",
       importHash:    calcularImportHash(periodo, `NC-${prov.rut}`, folios),
       _rut:          prov.rut,
-      _razonSocial:  prov.razonSocial,
+      _razonSocial:  repararMojibake(prov.razonSocial),
       _clasificacion:"Nota de Crédito",
       _esCombustible:false,
       _nDocs:        nDocs,
@@ -846,7 +895,10 @@ function reconstruirLineas(asiento, nuevaCateg, cuentas) {
   // Ajuste de centavos
   const sd = lineas.reduce((s,l)=>s+(l.debe||0),0);
   const sh = lineas.reduce((s,l)=>s+(l.haber||0),0);
-  if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) < 10) lineas[0].debe += sh - sd;
+  // Ajuste de redondeo: en pesos chilenos una diferencia real es de $1-2 por
+    // el cálculo del IVA. Sobre eso ya no es redondeo, es un dato mal leído, así
+    // que no se tapa. Antes se empujaban hasta $9 a la primera línea sin dejar rastro.
+    if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) <= 2) lineas[0].debe += sh - sd;
 
   return lineas;
 }
@@ -863,7 +915,12 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
       if (field === "cuentaId") updated.cuentaNombre = cuentas.find(x => x.id === val)?.nombre || "";
       return updated;
     });
-    onChange(idx, { ...asiento, lineas: nuevasLineas, totalDebe: nuevasLineas.reduce((s,l)=>s+(l.debe||0),0) });
+    onChange(idx, {
+      ...asiento, lineas: nuevasLineas,
+      totalDebe: nuevasLineas.reduce((s,l)=>s+(l.debe||0),0),
+      // Cambiar la cuenta a mano también es una decisión que vale la pena aprender
+      _reclasificado: field === "cuentaId" ? true : asiento._reclasificado,
+    });
   };
 
   const handleCategoria = (categ) => {
@@ -874,6 +931,7 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
       totalDebe:       nuevasLineas.reduce((s,l)=>s+(l.debe||0),0),
       _clasificacion:  categ.label,
       _esCombustible:  categ.esCombustible,
+      _reclasificado:  true,   // decisión explícita del usuario → se aprende
     });
     setTab("asiento");
   };
@@ -1172,24 +1230,26 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       setStep(1);
     };
 
+    const leerCSV = async () => {
+      // La codificación se DETECTA, no se asume. Antes era readAsText(file,"latin1")
+      // y el RCV del SII viene en UTF-8: cada byte de un acento se leía suelto y
+      // "ÓPTICA" llegaba como "Ã“PTICA". Esos nombres quedaron guardados en las
+      // reglas de gasto y en las glosas de los asientos ya importados.
+      try {
+        const texto = await leerTextoDetectando(file);
+        const lineas = texto.split(/\r?\n/);
+        if (lineas.length > 0 && !lineas[0].endsWith(";_extra")) {
+          lineas[0] = lineas[0] + ";_extra";
+        }
+        const wb  = XLSX.read(lineas.join("\n"), { type: "string", raw: false, FS: ";" });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        await procesar(XLSX.utils.sheet_to_json(ws, { defval: "" }));
+      } catch (err) { setErrores([`Error CSV: ${err.message}`]); }
+    };
+
     const reader = new FileReader();
     if (esCSV) {
-      reader.onload = (e) => {
-        try {
-          // El CSV del SII tiene un campo extra al final de cada fila (;) que
-          // desplaza las columnas si el header no lo contempla. Se agrega _extra.
-          const texto = e.target.result;
-          const lineas = texto.split(/\r?\n/);
-          if (lineas.length > 0 && !lineas[0].endsWith(";_extra")) {
-            lineas[0] = lineas[0] + ";_extra";
-          }
-          const textoCorregido = lineas.join("\n");
-          const wb  = XLSX.read(textoCorregido, { type: "string", raw: false, FS: ";" });
-          const ws  = wb.Sheets[wb.SheetNames[0]];
-          procesar(XLSX.utils.sheet_to_json(ws, { defval: "" })).catch(err => setErrores([`Error: ${err.message}`]));
-        } catch (err) { setErrores([`Error CSV: ${err.message}`]); }
-      };
-      reader.readAsText(file, "latin1");
+      leerCSV();
     } else {
       reader.onload = (e) => {
         try {
@@ -1232,17 +1292,27 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       );
       await guardarAsiento(asientoLimpio);
 
-      // Auto-aprender la regla si el usuario la modificó o para futuros registros
-      if (a._rut) {
+      // Aprender SOLO si el usuario reclasificó este asiento a mano.
+      //
+      // Antes esto corría para todos los asientos, sin condición: el resultado
+      // del regex genérico se persistía como si fuera una decisión del usuario.
+      // Como las reglas aprendidas tienen prioridad sobre el regex, la
+      // clasificación por defecto quedaba congelada y se reforzaba en cada
+      // importación. Lo que sale del regex es una sugerencia, no un aprendizaje.
+      if (a._rut && a._reclasificado) {
         const gl = a.lineas.find(l => parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || ""));
         if (gl && guardarReglaGasto) {
-          const cat = CATEGORIAS.find(c => c.label === a._clasificacion)
-                   || { label: a._clasificacion || gl.cuentaNombre, icon: "🏷" };
+          // La etiqueta se deriva de la CUENTA elegida, no de la clasificación
+          // previa: si no, quedan cuenta nueva con etiqueta vieja.
+          const cat = CATEGORIAS.find(c => c.cuentaMatch?.test(gl.cuentaNombre || ""))
+                   || CATEGORIAS.find(c => c.label === a._clasificacion)
+                   || { label: gl.cuentaNombre || "Gasto", icon: "🏷" };
           await guardarReglaGasto(a._rut, a._razonSocial, {
             cuentaId: gl.cuentaId,
             cuentaNombre: gl.cuentaNombre,
             categoriaLabel: cat.label,
             categoriaIcon: cat.icon || "🏷",
+            origen: "usuario",
           });
         }
       }

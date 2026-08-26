@@ -10,7 +10,16 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, getAuth, setPersist
 import { initializeApp } from 'firebase/app';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { usePlan } from '../../hooks/usePlan';
-import { MODULES as CONFIG_MODULES, calculateTotal } from '../../lib/plans';
+import {
+  MODULES as CONFIG_MODULES,
+  calculateTotal,
+  USER_MODULOS,
+  ROLES as SYSTEM_ROLES,
+  PSEUDO_MODULOS,
+  roleNeedsModulos,
+  normalizeModulos,
+  assignableRoles,
+} from '../../lib/plans';
 import EmailsSection from './EmailsSection';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../lib/firebase';
@@ -26,22 +35,10 @@ const getQRUrl = (text, size = 300) =>
 // ─────────────────────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────────────────────
-const ROLES = [
-  { value: 'superadmin',    label: 'Super Admin',          desc: '⚡ Acceso total al sistema. Solo para el propietario.' },
-  { value: 'admin_contrato',label: 'Admin de Contrato',    desc: '🏗️ Acceso completo a Oficina Técnica y AdminPanel.' },
-  { value: 'administrativo',label: 'Administrativo',       desc: '📋 Acceso según módulos asignados.' },
-  { value: 'operador',      label: 'Operador',             desc: '🔧 Solo WorkFleet-M según cargo (maquinaria / surtidor).' },
-  { value: 'mandante',      label: 'Mandante',             desc: '👁️ Solo lectura del Reporte WorkFleet. Sin edición.' },
-  { value: 'trabajador',    label: 'Trabajador',           desc: '👤 Solo Portal Trabajadores (remuneraciones, contratos).' },
-];
+// ── Derivado de la fuente única en lib/plans.js — no editar acá ──
+const ROLES = SYSTEM_ROLES;
 
-const MODULOS = [
-  { value: 'fleetcore', label: 'Oficina Técnica' },
-  { value: 'rrhh',      label: 'Recursos Humanos' },
-  { value: 'finanzas',  label: 'Finanzas' },
-  { value: 'reportes',  label: 'Work Fleet (Reportes)' },
-  { value: 'workfleet_m', label: 'WorkFleet-M' },
-];
+const MODULOS = USER_MODULOS;
 
 const CARGOS_OPERADOR = [
   { value: 'operador_maquinaria', label: 'Operador de Maquinaria — solo Reporte Maquinaria' },
@@ -2747,20 +2744,11 @@ function UsuariosSection() {
   };
 
   const getFilteredRolesForAdminPanel = () => {
-    let list = ROLES;
-    if (userRole === 'admin_contrato') {
-      list = list.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
-      list = list.map(r => {
-        if (r.value === 'administrativo') {
-          return { ...r, label: "Editor" };
-        }
-        if (r.value === 'mandante') {
-          return { ...r, label: "Solo Visualización" };
-        }
-        return r;
-      });
-    }
-    return list;
+    if (userRole !== 'admin_contrato') return ROLES;
+    // Nomenclatura orientada al cliente para el admin de contrato.
+    const ALIAS = { administrativo: 'Editor', mandante: 'Solo Visualización' };
+    return assignableRoles('admin_contrato')
+      .map(r => (ALIAS[r.value] ? { ...r, label: ALIAS[r.value] } : r));
   };
 
   const openEdit = (row) => {
@@ -2799,7 +2787,7 @@ function UsuariosSection() {
         role:    form.role,
         nombre:  form.nombre.trim(),
         rut:     form.rut.trim(),
-        modulos: (form.role === 'administrativo' || form.role === 'operador') ? form.modulos : [],
+        modulos: roleNeedsModulos(form.role) ? normalizeModulos(form.modulos) : [],
         cargo:   form.role === 'operador' ? form.cargo : '',
         updatedAt: serverTimestamp(),
       };
@@ -2938,7 +2926,7 @@ function UsuariosSection() {
             <p className="text-[11px] text-slate-400 mt-1">Se guarda en Firestore para poder generar el QR de acceso. Déjalo vacío si no deseas modificarla.</p>
           </Field>
           <Field label="Rol" required>
-            <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, modulos: [], cargo: '' })}>
+            <select className={selectCls} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, modulos: roleNeedsModulos(e.target.value) ? form.modulos : [], cargo: e.target.value === 'operador' ? form.cargo : '' })}>
               {getFilteredRolesForAdminPanel().map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </Field>
@@ -2947,7 +2935,7 @@ function UsuariosSection() {
             {ROLES.find(r => r.value === form.role)?.desc || ''}
           </div>
           {/* Módulos — para administrativo y operador */}
-          {(form.role === 'administrativo' || form.role === 'operador') && (
+          {roleNeedsModulos(form.role) && (
             <Field label="Módulos habilitados" required>
               <div className="space-y-2">
                 {MODULOS.map(m => (
@@ -3115,14 +3103,8 @@ function CapacitacionesSection() {
     return videos.filter(v => v.modulo === activeModule);
   }, [videos, activeModule]);
 
-  const modulesList = [
-    { value: 'fleetcore', label: 'Oficina Técnica', desc: 'Guías de payroll, consolidado y subcontratos.' },
-    { value: 'reportes', label: 'Combustible', desc: 'Guías de recepción de combustible (Entrada) y despacho (Salida).' },
-    { value: 'rrhh', label: 'Recursos Humanos', desc: 'Manuales de asistencia, vacaciones y control de personal.' },
-    { value: 'finanzas', label: 'Finanzas', desc: 'Entrenamiento sobre flujos de caja y órdenes de compra.' },
-    { value: 'contabilidad', label: 'Contabilidad', desc: 'Guías de plan de cuentas y asientos contables.' },
-    { value: 'documentos', label: 'Documentos', desc: 'Instrucciones del libro de obras y firma de contratos.' },
-  ];
+  // Módulos reales + pseudo-módulos (documentos) — fuente única en lib/plans.js
+  const modulesList = [...USER_MODULOS, ...PSEUDO_MODULOS];
 
   return (
     <>

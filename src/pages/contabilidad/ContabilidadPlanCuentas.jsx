@@ -99,14 +99,18 @@ const GRUPO_COLORS = {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadPlanCuentas() {
-  const { cuentas, loadingCuentas, guardarCuenta, eliminarCuenta, cargarCuentas, saldoCuenta } = useContabilidad();
+  const { cuentas, loadingCuentas, guardarCuenta, eliminarCuenta, fusionarCuentas, cargarCuentas, saldoCuenta } = useContabilidad();
   const [deduplicando, setDeduplicando] = useState(false);
   const [resultadoDedup, setResultadoDedup] = useState(null);
+  const [reasignadosDedup, setReasignadosDedup] = useState(0);
+  const [errorDedup, setErrorDedup] = useState(null);
 
   // ── Eliminar cuentas duplicadas (mismo código, distintos ids) ─────────────
   const deduplicarCuentas = async () => {
     setDeduplicando(true);
     setResultadoDedup(null);
+    setErrorDedup(null);
+    setReasignadosDedup(0);
     // Agrupar por código
     const porCodigo = {};
     cuentas.forEach(c => {
@@ -114,19 +118,25 @@ export default function ContabilidadPlanCuentas() {
       if (!porCodigo[c.codigo]) porCodigo[c.codigo] = [];
       porCodigo[c.codigo].push(c);
     });
-    let eliminadas = 0;
+    // Se conserva la primera (más antigua) y se FUSIONAN las demás: primero se
+    // reasignan sus asientos a la que sobrevive y recién entonces se eliminan.
+    // Antes se borraban directo, lo que habría dejado líneas apuntando a cuentas
+    // inexistentes: seguían sumando en los saldos pero desaparecían del informe.
+    let eliminadas = 0, reasignados = 0, errores = [];
     for (const [codigo, lista] of Object.entries(porCodigo)) {
       if (lista.length <= 1) continue;
-      // Conservar la primera (más antigua), eliminar el resto
-      const aEliminar = lista.slice(1);
-      for (const c of aEliminar) {
-        try {
-          await eliminarCuenta(c.id);
-          eliminadas++;
-        } catch (e) { console.error("Error eliminando cuenta duplicada:", e); }
+      try {
+        const r = await fusionarCuentas(lista[0].id, lista.slice(1).map(c => c.id));
+        eliminadas  += r.eliminadas;
+        reasignados += r.reasignados;
+      } catch (e) {
+        console.error("Error fusionando cuenta duplicada:", e);
+        errores.push(`${codigo}: ${e.message}`);
       }
     }
     await cargarCuentas();
+    if (errores.length) setErrorDedup(errores.join(" · "));
+    setReasignadosDedup(reasignados);
     setDeduplicando(false);
     setResultadoDedup(eliminadas);
     setTimeout(() => setResultadoDedup(null), 4000);
@@ -188,9 +198,13 @@ export default function ContabilidadPlanCuentas() {
               }
             </button>
           )}
+          {errorDedup && (
+            <p className="text-xs font-bold text-red-600 mt-1">⚠️ {errorDedup}</p>
+          )}
           {resultadoDedup !== null && (
             <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200">
-              ✅ {resultadoDedup} cuenta{resultadoDedup !== 1 ? "s" : ""} duplicada{resultadoDedup !== 1 ? "s" : ""} eliminada{resultadoDedup !== 1 ? "s" : ""}
+              ✅ {resultadoDedup} cuenta{resultadoDedup !== 1 ? "s" : ""} duplicada{resultadoDedup !== 1 ? "s" : ""} fusionada{resultadoDedup !== 1 ? "s" : ""}
+              {reasignadosDedup > 0 && ` · ${reasignadosDedup} asiento${reasignadosDedup !== 1 ? "s" : ""} reasignado${reasignadosDedup !== 1 ? "s" : ""}`}
             </span>
           )}
           <button

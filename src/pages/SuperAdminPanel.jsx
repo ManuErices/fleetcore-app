@@ -17,6 +17,12 @@ import {
   serverTimestamp, query, orderBy, where,
 } from "firebase/firestore";
 import { firebaseConfig } from "../lib/firebase";
+import {
+  USER_MODULOS,
+  ROLES as SYSTEM_ROLES,
+  roleNeedsModulos,
+  normalizeModulos,
+} from "../lib/plans";
 
 const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net';
 import { initializeApp, deleteApp } from "firebase/app";
@@ -24,10 +30,11 @@ import { getAuth, createUserWithEmailAndPassword, setPersistence, inMemoryPersis
 
 // ─── Constantes ───────────────────────────────────────────────
 const MODULES = {
-  fleetcore: { name: "Oficina Técnica", price: 500000, color: "#f97316" },
-  workfleet: { name: "WorkFleet",       price: 700000, color: "#3b82f6" },
-  rrhh:      { name: "RRHH",            price: 350000, color: "#10b981" },
-  finanzas:  { name: "Finanzas",        price: 400000, color: "#8b5cf6" },
+  fleetcore:  { name: "Oficina Técnica", price: 500000, color: "#f97316" },
+  workfleet:  { name: "WorkFleet",       price: 700000, color: "#3b82f6" },
+  rrhh:       { name: "RRHH",            price: 350000, color: "#10b981" },
+  finanzas:   { name: "Finanzas",        price: 400000, color: "#8b5cf6" },
+  maquinaria: { name: "Maquinaria",      price: 250000, color: "#ef4444" },
 };
 
 const ESTADOS = {
@@ -37,7 +44,8 @@ const ESTADOS = {
   suspendido: { label: "Suspendido",cls: "bg-red-100 text-red-600 border-red-200"         },
 };
 
-const ROLES = ["superadmin", "admin_contrato", "administrativo", "operador", "mandante", "trabajador"];
+// Derivado de la fuente única en lib/plans.js — no editar acá.
+const ROLES = SYSTEM_ROLES.map(r => r.value);
 
 const fmt = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", minimumFractionDigits: 0 }).format(n || 0);
 const fmtDate = (ts) => {
@@ -728,13 +736,8 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     modulos: [],
   });
 
-  const ALL_MODULOS = [
-    { value: 'fleetcore', label: 'Oficina Técnica' },
-    { value: 'rrhh',      label: 'Recursos Humanos' },
-    { value: 'finanzas',  label: 'Finanzas' },
-    { value: 'reportes',  label: 'Work Fleet (Reportes)' },
-    { value: 'workfleet_m', label: 'WorkFleet-M' },
-  ];
+  // Fuente única: lib/plans.js → USER_MODULOS
+  const ALL_MODULOS = USER_MODULOS;
 
   const toggleModulo = (val) => {
     setForm(f => ({
@@ -759,7 +762,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       empresaId: usr.empresaId || "",
       nombre: usr.nombre || "",
       rut: usr.rut || "",
-      modulos: usr.modulos || [],
+      modulos: normalizeModulos(usr.modulos),
     });
     setShowModal(true);
   };
@@ -792,7 +795,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: newEmpresaId,
-          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
+          modulos: roleNeedsModulos(form.role) ? normalizeModulos(form.modulos) : [],
           updatedAt: serverTimestamp(),
         };
         if (form.password && form.password.trim()) {
@@ -849,7 +852,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           rut: form.rut.trim(),
           role: form.role,
           empresaId: form.empresaId || "",
-          modulos: (form.role === 'administrativo' || form.role === 'operador') ? (form.modulos || []) : [],
+          modulos: roleNeedsModulos(form.role) ? normalizeModulos(form.modulos) : [],
           password: form.password,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -986,9 +989,8 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Rol" required>
-              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: (e.target.value === 'administrativo' || e.target.value === 'operador') ? form.modulos : []})}>
-                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                <option value="mandante_admin">mandante_admin</option>
+              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: roleNeedsModulos(e.target.value) ? form.modulos : []})}>
+                {SYSTEM_ROLES.map(r => <option key={r.value} value={r.value}>{r.label} ({r.value})</option>)}
               </select>
             </Field>
             <Field label="Empresa">
@@ -999,9 +1001,9 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
             </Field>
           </div>
 
-          {(form.role === 'administrativo' || form.role === 'operador') && (
+          {roleNeedsModulos(form.role) && (
             <Field label="Módulos habilitados" required>
-              <div className="space-y-2 mt-1 max-h-[150px] overflow-y-auto pr-1">
+              <div className="space-y-2 mt-1 max-h-[260px] overflow-y-auto pr-1">
                 {ALL_MODULOS.map(m => (
                   <label key={m.value} className="flex items-center gap-3 p-2 rounded-xl border border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors">
                     <input
@@ -1010,7 +1012,10 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
                       onChange={() => toggleModulo(m.value)}
                       className="w-4 h-4 rounded accent-indigo-600"
                     />
-                    <span className="text-xs font-semibold text-slate-700">{m.label}</span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-slate-700">{m.label}</span>
+                      <span className="block text-[10px] text-slate-400">{m.desc}</span>
+                    </span>
                   </label>
                 ))}
               </div>

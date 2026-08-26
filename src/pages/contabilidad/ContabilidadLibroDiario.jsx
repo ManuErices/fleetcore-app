@@ -820,8 +820,11 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadLibroDiario() {
-  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto } = useContabilidad();
+  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, reversarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto, reglasEfectivas } = useContabilidad();
   const reglasGasto = _reglasGasto || {};
+  // Para clasificar al importar se usan las reglas efectivas: lo que el usuario
+  // decidió a mano, complementado con la cuenta que más usó con cada proveedor.
+  const reglasParaImportar = useMemo(() => reglasEfectivas(), [reglasEfectivas]);
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState(null);
   const [expandido, setExpandido] = useState(null);
@@ -1053,10 +1056,30 @@ export default function ContabilidadLibroDiario() {
     return regla && regla.cuentaId && regla.cuentaId !== gl.cuentaId;
   }).length, [asientos, reglasGasto]);
 
+  // Reversar es la forma correcta de corregir un libro: el original y su reverso
+  // quedan ambos visibles. Eliminar solo se justifica ante un error recién
+  // cometido, y desde ahora queda registrado en la bitácora.
+  const handleReversar = async (a) => {
+    const motivo = window.prompt(
+      `Reversar el asiento ${a.numero || ""}\n\n${a.glosa || ""}\n\nMotivo de la corrección:`, "");
+    if (motivo === null) return;
+    setDeletingId(a.id);
+    try { await reversarAsiento(a.id, motivo.trim()); }
+    catch (e) { alert(e.message); }
+    setDeletingId(null);
+  };
+
   const handleEliminar = async (id) => {
-    if (!window.confirm("¿Eliminar este asiento? Esta acción no se puede deshacer.")) return;
+    const a = asientos.find(x => x.id === id);
+    if (!window.confirm(
+      `¿ELIMINAR definitivamente el asiento ${a?.numero || ""}?\n\n` +
+      `En contabilidad lo correcto es reversarlo, no borrarlo: el reverso deja constancia ` +
+      `de la corrección y el correlativo no queda con saltos.\n\n` +
+      `Elimina solo si acabas de registrarlo por error. Queda registrado en la bitácora.`
+    )) return;
     setDeletingId(id);
-    await eliminarAsiento(id);
+    try { await eliminarAsiento(id); }
+    catch (e) { alert(e.message); }
     setDeletingId(null);
     if (expandido === id) setExpandido(null);
   };
@@ -1338,7 +1361,24 @@ export default function ContabilidadLibroDiario() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-bold text-slate-800 truncate">{a.glosa}</p>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {a.numero && (
+                        <span className="text-[10px] font-mono font-black text-slate-400 flex-shrink-0">
+                          N° {a.numero}
+                        </span>
+                      )}
+                      {a.reversado && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex-shrink-0 uppercase">
+                          Reversado
+                        </span>
+                      )}
+                      {a.origen === "reverso" && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 flex-shrink-0 uppercase">
+                          Reverso
+                        </span>
+                      )}
+                      <p className={`text-sm font-bold truncate ${a.reversado ? "text-slate-400 line-through" : "text-slate-800"}`}>{a.glosa}</p>
+                    </div>
                     {esNotaCredito(a) ? (
                       <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 bg-pink-100 text-pink-700">
                         {a.origen === "rcv_venta" ? "nc emitida" : "nota de crédito"}
@@ -1364,10 +1404,21 @@ export default function ContabilidadLibroDiario() {
                   <p className="text-[10px] text-slate-400">Debe / Haber</p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button onClick={e => { e.stopPropagation(); setEditando(a); setShowModal(true); }}
-                    className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  </button>
+                  {(!a.origen || ["manual","reverso"].includes(a.origen)) && !a.reversado && (
+                    <button onClick={e => { e.stopPropagation(); setEditando(a); setShowModal(true); }}
+                      title="Editar"
+                      className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                  )}
+                  {!a.reversado && a.origen !== "reverso" && (
+                    <button onClick={e => { e.stopPropagation(); handleReversar(a); }}
+                      disabled={deletingId === a.id}
+                      title="Reversar"
+                      className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-amber-100 hover:text-amber-700 text-slate-500 flex items-center justify-center transition-all disabled:opacity-40">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" /></svg>
+                    </button>
+                  )}
                   <button onClick={e => { e.stopPropagation(); handleEliminar(a.id); }}
                     disabled={deletingId === a.id}
                     className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-40">
@@ -1397,7 +1448,7 @@ export default function ContabilidadLibroDiario() {
         isOpen={showImport}
         onClose={() => setShowImport(false)}
         cuentas={cuentas}
-        reglasGasto={reglasGasto}
+        reglasGasto={reglasParaImportar}
         guardarReglaGasto={guardarReglaGasto}
         guardarAsiento={guardarAsiento}
         periodoActivo={periodoActivo}

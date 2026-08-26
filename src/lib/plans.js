@@ -74,7 +74,143 @@ export const MODULES = {
       'Sincronización automática',
     ],
   },
+  maquinaria: {
+    id:          'maquinaria',
+    name:        'Maquinaria',
+    description: 'Mantenimiento preventivo, taller, órdenes de trabajo y repuestos',
+    priceUf:     3, // referencia UF; el cobro real se maneja en CLP (250.000)
+    priceClp:    250000,
+    color:       'red',
+    appKey:      'maquinaria',
+    image:       'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=600&auto=format&fit=crop&q=60',
+    features: [
+      'Ficha de mantenimiento por equipo',
+      'Órdenes de trabajo de taller',
+      'Registro de fallas y diagnósticos',
+      'Control de stock de repuestos',
+      'Alertas de mantención y stock bajo',
+    ],
+  },
 };
+
+// ============================================================
+// FUENTE ÚNICA — PERMISOS A NIVEL DE USUARIO
+//
+// Estas claves son las que consultan hasModulo() en AppSelector.jsx
+// y en el gating por URL de App.jsx. Cualquier formulario que asigne
+// `users/{uid}.modulos` DEBE consumir USER_MODULOS y nada más.
+// Agregar un módulo nuevo = agregar una línea aquí.
+// ============================================================
+
+export const USER_MODULOS = [
+  { value: 'fleetcore',    label: 'Oficina Técnica',       desc: 'Dashboard, equipos y control de costos' },
+  { value: 'maquinaria',   label: 'Maquinaria',            desc: 'Taller, órdenes de trabajo y repuestos' },
+  { value: 'rrhh',         label: 'Recursos Humanos',      desc: 'Trabajadores, contratos y nómina' },
+  { value: 'finanzas',     label: 'Finanzas',              desc: 'Flujo de caja y activos' },
+  { value: 'contabilidad', label: 'Contabilidad',          desc: 'Libro diario, balance y tributario' },
+  { value: 'reportes',     label: 'Work Fleet (Reportes)', desc: 'Informes de maquinaria y combustible' },
+  { value: 'workfleet',    label: 'WorkFleet Mobile',      desc: 'App de terreno para operadores' },
+];
+
+export const USER_MODULO_VALUES = USER_MODULOS.map(m => m.value);
+
+export const USER_MODULO_LABELS = Object.fromEntries(
+  USER_MODULOS.map(m => [m.value, m.label])
+);
+
+// FleetCore-I no tiene clave propia: se gatea con 'fleetcore'.
+// Se declara aparte solo para listados informativos (ej. capacitaciones).
+export const PSEUDO_MODULOS = [
+  { value: 'documentos', label: 'FleetCore-I (Documentos)', desc: 'Libro de obras y firma digital', gatedBy: 'fleetcore' },
+];
+
+// Claves heredadas que quedaron en Firestore → clave canónica.
+// 'workfleet_m' nunca fue consultada por ningún gate; el gate real es 'workfleet'.
+export const MODULO_ALIASES = {
+  workfleet_m: 'workfleet',
+  'workfleet-m': 'workfleet',
+};
+
+/**
+ * Normaliza un array de módulos leído de Firestore:
+ * resuelve alias heredados, descarta claves inexistentes y deduplica.
+ * Usar SIEMPRE al leer `users/{uid}.modulos`.
+ */
+export function normalizeModulos(modulos = []) {
+  if (!Array.isArray(modulos)) return [];
+  const validas = new Set(USER_MODULO_VALUES);
+  return [...new Set(
+    modulos
+      .map(m => MODULO_ALIASES[m] || m)
+      .filter(m => validas.has(m))
+  )];
+}
+
+// ── Roles del sistema ──────────────────────────────────────────
+export const ROLES = [
+  { value: 'superadmin',     label: 'Super Admin',       desc: '⚡ Acceso total al sistema. Solo para el propietario.',      scope: 'global'  },
+  { value: 'admin_contrato', label: 'Administrador',     desc: '🏗️ Acceso completo dentro de su empresa.',                   scope: 'empresa' },
+  { value: 'administrativo', label: 'Administrativo',    desc: '📋 Acceso según módulos asignados.',                         scope: 'empresa' },
+  { value: 'operador',       label: 'Operador',          desc: '🔧 WorkFleet-M según cargo + módulos asignados.',            scope: 'empresa' },
+  { value: 'jefe_taller',    label: 'Jefe de Taller',    desc: '🛠️ Maquinaria: órdenes de trabajo, fallas y repuestos.',     scope: 'empresa' },
+  { value: 'mecanico',       label: 'Mecánico',          desc: '⚙️ Maquinaria: ejecución de órdenes de trabajo.',            scope: 'empresa' },
+  { value: 'mandante_admin', label: 'Mandante Admin',    desc: '👥 Gestiona usuarios mandante de su empresa.',               scope: 'empresa' },
+  { value: 'mandante',       label: 'Mandante',          desc: '👁️ Solo lectura de reportes. Sin edición.',                  scope: 'empresa' },
+  { value: 'revisor_admin',  label: 'Revisor Admin',     desc: '📁 FleetCore-I: gestiona revisores.',                        scope: 'empresa' },
+  { value: 'revisor',        label: 'Revisor',           desc: '📄 FleetCore-I: solo lectura de documentos.',                scope: 'empresa' },
+  { value: 'trabajador',     label: 'Trabajador',        desc: '👤 Solo Portal Trabajadores (liquidaciones, contratos).',    scope: 'empresa' },
+];
+
+export const ROLE_VALUES = ROLES.map(r => r.value);
+
+export const ROLE_LABELS = Object.fromEntries(ROLES.map(r => [r.value, r.label]));
+
+/**
+ * Roles cuyo acceso depende de `users/{uid}.modulos`.
+ * Si un rol está acá, el formulario que lo asigna DEBE mostrar el selector
+ * de módulos — si no, el usuario queda sin acceso a nada.
+ * jefe_taller y mecanico dependen de 'maquinaria' (ver AppSelector.jsx).
+ */
+export const ROLES_WITH_MODULOS = ['administrativo', 'operador', 'jefe_taller', 'mecanico'];
+
+export function roleNeedsModulos(role) {
+  return ROLES_WITH_MODULOS.includes(role);
+}
+
+/** Roles que ven la vista reducida de FleetCore-I en AppSelector. */
+export const ROLES_REVISOR = ['revisor_admin', 'revisor', 'mandante_admin', 'mandante'];
+
+export function isRevisorRole(role) {
+  return ROLES_REVISOR.includes(role);
+}
+
+/**
+ * Roles que un usuario dado puede asignar a otros.
+ * superadmin asigna todo; admin_contrato no puede crear pares ni superadmins.
+ */
+export function assignableRoles(byRole) {
+  if (byRole === 'superadmin') return ROLES;
+  if (byRole === 'admin_contrato' || byRole === 'mandante_admin') {
+    return ROLES.filter(r => r.value !== 'superadmin' && r.value !== 'admin_contrato');
+  }
+  return [];
+}
+
+/** Rol principal → rol interno del módulo Documentos (FleetCore-I). */
+export function mapDocRole(mainRole) {
+  switch (mainRole) {
+    case 'superadmin':     return 'admin';
+    case 'admin_contrato': return 'supervisor';
+    case 'revisor_admin':  return 'supervisor';
+    case 'jefe_taller':    return 'supervisor';
+    case 'revisor':        return 'mandante';
+    case 'mandante_admin': return 'mandante';
+    case 'mandante':       return 'mandante';
+    case 'operador':       return 'operador';
+    case 'mecanico':       return 'operador';
+    default:               return 'supervisor';
+  }
+}
 
 // ── Helpers de cálculo en UF y CLP ─────────────────────────────
 export function calculateTotal(moduleIds) {
@@ -97,7 +233,7 @@ export function formatPrice(amountUf) {
 
 // ── Compatibilidad con usePlan (espera .modules y .features) ──
 export function buildPlanData(moduleIds = []) {
-  const modules  = { fleetcore: false, workfleet: false, rrhh: false, reportes: false, finanzas: false, contabilidad: false };
+  const modules  = { fleetcore: false, workfleet: false, rrhh: false, reportes: false, finanzas: false, contabilidad: false, maquinaria: false };
   const features = [];
   moduleIds.forEach(id => {
     if (id in modules) modules[id] = true;

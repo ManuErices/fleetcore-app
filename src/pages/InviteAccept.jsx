@@ -20,35 +20,19 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 import { hashPin } from "./documentos/lib/firmas.js";
+import {
+  ROLE_LABELS,
+  USER_MODULO_LABELS,
+  mapDocRole,
+  normalizeModulos,
+} from "../lib/plans";
 
-function mapRole(mainRole) {
-  if (mainRole === 'superadmin') return 'admin'
-  if (mainRole === 'admin_contrato') return 'supervisor'
-  if (mainRole === 'revisor_admin') return 'supervisor'
-  if (mainRole === 'revisor') return 'mandante'
-  if (mainRole === 'mandante_admin') return 'mandante'
-  if (mainRole === 'mandante') return 'mandante'
-  if (mainRole === 'operador') return 'operador'
-  return 'supervisor'
-}
+// ── Derivado de la fuente única en lib/plans.js — no editar acá ──
+// mapRole se conserva como alias local por compatibilidad con el resto del archivo.
+const mapRole = mapDocRole;
 
-
-const ROLES_LABEL = {
-  admin_contrato:  "Administrador",
-  administrativo:  "Administrativo",
-  operador:        "Operador",
-  mandante:        "Mandante",
-  trabajador:      "Trabajador",
-};
-
-const MODULOS_LABEL = {
-  fleetcore:    "Oficina Técnica",
-  reportes:     "Reportes",
-  rrhh:         "RRHH",
-  finanzas:     "Finanzas",
-  contabilidad: "Contabilidad",
-  workfleet:    "WorkFleet",
-};
+const ROLES_LABEL  = ROLE_LABELS;
+const MODULOS_LABEL = USER_MODULO_LABELS;
 
 export default function InviteAccept({ token, onAccepted }) {
   const [step,        setStep]        = useState("loading");
@@ -99,7 +83,7 @@ export default function InviteAccept({ token, onAccepted }) {
       const userUpdate = {
         empresaId: invData.empresaId,
         role:      invData.rol,
-        modulos:   invData.modulos || [],
+        modulos:   normalizeModulos(invData.modulos),
         email,
         nombre:    form.nombre || "",
         rut:       form.rut || "",
@@ -318,7 +302,7 @@ export default function InviteAccept({ token, onAccepted }) {
   );
 
   // ── Pantalla principal: aceptar invitación ─────────────────
-  const modulos = invData?.modulos || [];
+  const modulos = normalizeModulos(invData?.modulos);
 
   return (
     <Screen>
