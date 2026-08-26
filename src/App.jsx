@@ -26,7 +26,6 @@ import RRHH from "./pages/rrhh";
 // ── App shells ────────────────────────────────────────────────
 import ReportesShell from "./pages/reportes/ReportesShell";
 import RRHHShell from "./pages/rrhh/RRHHShell";
-import MaquinariaShell from "./pages/maquinaria/MaquinariaShell";
 import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
@@ -56,7 +55,6 @@ import { EmpresaProvider, useEmpresa } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
-import { normalizeModulos, isRevisorRole as checkRevisorRole } from "./lib/plans";
 import { getPlanTier } from "./lib/plans.js";
 import UserMenuDropdown from "./components/UserMenuDropdown";
 
@@ -217,6 +215,7 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                   </svg>
                 </button>
               </div>
+            </div>
               <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                 <MobileNavLink to="/fleetcore" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
@@ -275,10 +274,9 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                   Cerrar sesión
                 </button>
               </nav>
-            </div>
-          </>
-        )}
-      </header>
+          </div>
+        </>
+      )}
 
       <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         <Routes>
@@ -385,7 +383,6 @@ const APP_MAP = {
   finanzas: FinanzasApp,
   contabilidad: ContabilidadApp,
   documentos: DocumentosApp,
-  maquinaria: MaquinariaShell,
 };
 
 // ============================================================
@@ -465,7 +462,7 @@ export default function App() {
               return;
             }
             setUserRole(data.role || 'operador');
-            setUserModulos(normalizeModulos(data.modulos));
+            setUserModulos(data.modulos || []);
             setUserCargo(data.cargo || '');
             setUserEsSurtidor(data.esSurtidor || false);
             setCapacitacionAprobada(data.capacitacionAprobada || false);
@@ -493,7 +490,7 @@ export default function App() {
               if (snap.exists()) {
                 const data = snap.data();
                 setUserRole(data.role || 'operador');
-                setUserModulos(normalizeModulos(data.modulos));
+                setUserModulos(data.modulos || []);
                 setUserCargo(data.cargo || '');
                 setUserEsSurtidor(data.esSurtidor || false);
                 setCapacitacionAprobada(data.capacitacionAprobada || false);
@@ -543,12 +540,16 @@ export default function App() {
     const appName = match[1];
 
     // Ignorar si no es una app/modulo que requiere gating
-    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'maquinaria', 'admin'];
+    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'admin'];
     if (!gatedApps.includes(appName)) return;
 
     const isSuperAdmin = userRole === 'superadmin';
     const isAdminContrato = userRole === 'admin_contrato';
-    const isRevisorRole = checkRevisorRole(userRole);
+    const isRevisorAdmin = userRole === 'revisor_admin';
+    const isRevisor = userRole === 'revisor';
+    const isMandanteAdmin = userRole === 'mandante_admin';
+    const isMandante = userRole === 'mandante';
+    const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
     const hasModulo = (m) => isSuperAdmin || (userModulos && userModulos.includes(m));
 
     let allowed = false;
@@ -567,8 +568,6 @@ export default function App() {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('contabilidad')) && canAccess('contabilidad'));
     } else if (appName === 'documentos') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
-    } else if (appName === 'maquinaria') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('maquinaria')) || (['administrativo', 'jefe_taller', 'mecanico'].includes(userRole) && hasModulo('maquinaria') && canAccess('maquinaria'));
     } else if (appName === 'admin') {
       allowed = isSuperAdmin || isAdminContrato || userRole === 'administrativo';
     }
@@ -761,19 +760,6 @@ export default function App() {
                     onBackToSelector={handleBackToSelector}
                   onAdminPanel={handleGoToAdminPanel}
                   onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
-                  />
-                </PWAWrapper>
-              } />
-
-              <Route path="/maquinaria/*" element={
-                <PWAWrapper user={user}>
-                  <MaquinariaShell
-                    user={user}
-                    userRole={userRole}
-                    onLogout={handleLogout}
-                    onBackToSelector={handleBackToSelector}
-                    onAdminPanel={handleGoToAdminPanel}
-                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
