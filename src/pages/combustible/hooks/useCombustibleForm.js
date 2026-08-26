@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { collection, getDocs, addDoc, getDoc, doc, serverTimestamp } from "firebase/firestore";
 import { db, auth, storage } from "../../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { ref, uploadString, getDownloadURL } from "firebase/storage";
+import { ref, uploadString, getDownloadURL, uploadBytes } from "firebase/storage";
 import { getNextGuiaNumber } from '../../../utils/voucherThermalGenerator';
 import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
@@ -128,7 +128,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     operadorProveedorId: '',
     observaciones: '',
     extraEmails: [],
-    documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
+    documentosEstacion: [{ numero: '', cantidad: '', total: '', file: null, fileName: '', fileUrl: '' }]
   });
 
   const [datosEntrega, setDatosEntrega] = useState({
@@ -284,7 +284,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       origen: '', tipoOrigen: '', destinoCarga: '', numerosDocumento: [''], numeroDocumento: '',
       fechaDocumento: TODAY(), cantidad: '', horometroOdometro: '', machineId: '', operadorId: '',
       receptorNombre: '', maquinaProveedorId: '', operadorProveedorId: '', observaciones: '', extraEmails: [],
-      documentosEstacion: [{ numero: '', cantidad: '', total: '' }]
+      documentosEstacion: [{ numero: '', cantidad: '', total: '', file: null, fileName: '', fileUrl: '' }]
     });
     setDatosEntrega({
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
@@ -629,7 +629,9 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
             documentosEstacion: docsEstacion.map(r => ({
               numero: r.numero.trim(),
               cantidad: parseFloat(r.cantidad) || 0,
-              total: parseFloat(r.total) || 0
+              total: parseFloat(r.total) || 0,
+              fileName: r.fileName || '',
+              fileUrl: r.fileUrl || ''
             })),
             totalMonto,
             precioPorLitro,
@@ -688,6 +690,35 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
             const fileRef = ref(storage, `reportes/${empresaId}/${Date.now()}_receptor.jpg`);
             await uploadString(fileRef, firmaReceptor, 'data_url');
             dataToSave.firmaReceptor = await getDownloadURL(fileRef);
+          }
+          // Subir guías de despacho adjuntas si existen
+          if (tipoReporte === 'entrada' && datosEntrada.tipoOrigen === 'estacion') {
+            const uploadedDocs = [];
+            for (let i = 0; i < (datosEntrada.documentosEstacion || []).length; i++) {
+              const docRow = datosEntrada.documentosEstacion[i];
+              if (docRow.file) {
+                const fileRef = ref(storage, `reportes/${empresaId}/guias/${Date.now()}_doc_${i}_${docRow.file.name}`);
+                await uploadBytes(fileRef, docRow.file);
+                const url = await getDownloadURL(fileRef);
+                uploadedDocs.push({
+                  numero: docRow.numero?.trim() || '',
+                  cantidad: parseFloat(docRow.cantidad) || 0,
+                  total: parseFloat(docRow.total) || 0,
+                  fileName: docRow.fileName || '',
+                  fileUrl: url
+                });
+              } else {
+                uploadedDocs.push({
+                  numero: docRow.numero?.trim() || '',
+                  cantidad: parseFloat(docRow.cantidad) || 0,
+                  total: parseFloat(docRow.total) || 0,
+                  fileName: docRow.fileName || '',
+                  fileUrl: docRow.fileUrl || ''
+                });
+              }
+            }
+            dataToSave.documentosEstacion = uploadedDocs;
+            dataToSave.datosEntrada.documentosEstacion = uploadedDocs;
           }
         } catch (storageErr) {
           console.warn('⚠️ Error subiendo a Storage:', storageErr?.code || storageErr?.message);

@@ -206,8 +206,6 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
             userRole={userRole}
             onLogout={onLogout}
             onBackToSelector={onBackToSelector}
-            onAdminPanel={onAdminPanel}
-            onAdminEmpresaPanel={onAdminEmpresaPanel}
             placement="top-left"
           />
         </div>
@@ -299,8 +297,6 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector }) {
                 userRole={userRole}
                 onLogout={onLogout}
                 onBackToSelector={onBackToSelector}
-                onAdminPanel={onAdminPanel}
-                onAdminEmpresaPanel={onAdminEmpresaPanel}
               />
             </div>
           </div>

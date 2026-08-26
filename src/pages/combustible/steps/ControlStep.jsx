@@ -50,6 +50,24 @@ const TruckLargeIcon = ({ className = "w-7 h-7" }) => (
   </svg>
 );
 
+const isCamionCombustible = (m) => {
+  if (!m) return false;
+  const type = (m.tipo || m.type || m.nombre || m.name || '').toLowerCase();
+  const normType = type.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return normType.includes('camion') && (normType.includes('combustible') || normType.includes('surtidor') || normType.includes('aljibe'));
+};
+
+const isMochila = (m) => {
+  if (!m) return false;
+  const type = (m.tipo || m.type || m.nombre || m.name || '').toLowerCase();
+  const normType = type.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return normType.includes('mochila');
+};
+
+const canDeliverFuel = (m) => {
+  return isCamionCombustible(m) || isMochila(m);
+};
+
 export default function ControlStep({
   tipoReporte,
   datosControl, setDatosControl,
@@ -224,7 +242,7 @@ export default function ControlStep({
                 <span className={`font-black text-xs uppercase tracking-wider ${datosEntrada.tipoOrigen === 'interno' ? 'text-green-700' : 'text-slate-500'}`}>Interno</span>
               </button>
               <button
-                onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: '', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
+                onClick={() => setDatosEntrada({ ...datosEntrada, tipoOrigen: 'estacion', destinoCarga: 'camion', origen: '', machineId: '', maquinaProveedorId: '', operadorProveedorId: '' })}
                 className={`px-5 py-2 rounded-xl border-2 transition-all flex items-center gap-2 ${datosEntrada.tipoOrigen === 'estacion' ? 'bg-green-50 border-green-500 shadow-md' : 'bg-white border-slate-200 hover:border-green-200'}`}
               >
                 <span className={datosEntrada.tipoOrigen === 'estacion' ? 'text-green-600' : 'text-slate-400'}>
@@ -321,7 +339,7 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-52 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                            {equiposSurtidores.filter(m => canDeliverFuel(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -383,7 +401,7 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-52 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                            {equiposSurtidores.filter(m => isCamionCombustible(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -397,32 +415,7 @@ export default function ControlStep({
                     </div>
                   </div>
 
-                  {/* Destino de carga */}
-                  <div className="bg-orange-50/50 p-4 rounded-3xl border-2 border-orange-100 space-y-4">
-                    <div className="flex items-center gap-3 border-b border-orange-100 pb-3">
-                      <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-black">2</div>
-                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">¿A qué parte del equipo se carga?</h4>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'camion' })}
-                        className={`py-4 rounded-xl border-2 transition-all font-black text-sm uppercase flex flex-col items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'camion' ? 'bg-amber-500 border-amber-600 text-white shadow-lg scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-amber-200 shadow-sm'}`}
-                      >
-                        <TruckLargeIcon className="w-7 h-7" />
-                        <span>Al Camión</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDatosEntrada({ ...datosEntrada, destinoCarga: 'estanque' })}
-                        className={`py-4 rounded-xl border-2 transition-all font-black text-sm uppercase flex flex-col items-center justify-center gap-2 ${datosEntrada.destinoCarga === 'estanque' ? 'bg-blue-600 border-blue-700 text-white shadow-lg scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-blue-200 shadow-sm'}`}
-                      >
-                        <TankIcon className="w-7 h-7" />
-                        <span>Al Estanque</span>
-                      </button>
-                    </div>
-                    {/* Removes Estanque Receptor select */}
-                  </div>
+                  {/* Destino de carga - omitido/forzado a camión */}
 
                   {/* Quién recibe */}
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
@@ -642,7 +635,7 @@ export default function ControlStep({
                           <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                         </div>
                         <div className="max-h-52 overflow-y-auto space-y-1">
-                          {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                          {equiposSurtidores.filter(m => canDeliverFuel(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                             <button key={m.id} type="button"
                               onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                               className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
