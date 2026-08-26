@@ -26,7 +26,6 @@ import RRHH from "./pages/rrhh";
 // ── App shells ────────────────────────────────────────────────
 import ReportesShell from "./pages/reportes/ReportesShell";
 import RRHHShell from "./pages/rrhh/RRHHShell";
-import MaquinariaShell from "./pages/maquinaria/MaquinariaShell";
 import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
@@ -56,7 +55,6 @@ import { EmpresaProvider, useEmpresa } from "./lib/useEmpresa";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
-import { normalizeModulos, isRevisorRole as checkRevisorRole } from "./lib/plans";
 import { getPlanTier } from "./lib/plans.js";
 import UserMenuDropdown from "./components/UserMenuDropdown";
 
@@ -212,6 +210,7 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                 <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
                 <h2 className="text-base font-black text-white">Menú</h2>
               </div>
+            </div>
               <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                 <MobileNavLink to="/fleetcore" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
@@ -240,35 +239,36 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                   Mi plan · {planTier.label}
                 </button>
                 <div className="h-px bg-slate-200 my-2" />
+                {canGoToAdmin && (
+                  <button
+                    onClick={() => { setShowMobileMenu(false); handleAdminPanel(); }}
+                    className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                    Panel de Admin
+                  </button>
+                )}
                 <button
-                  onClick={() => { setShowMobileMenu(false); handleAdminPanel(); }}
+                  onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
                   className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                   </svg>
-                  Panel de Admin
+                  Cambiar aplicación
                 </button>
-              )}
-              <button
-                onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
-                className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-                Cambiar aplicación
-              </button>
-              <button
-                onClick={() => { setShowMobileMenu(false); onLogout(); }}
-                className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
-                </svg>
-                Cerrar sesión
-              </button>
-            </nav>
+                <button
+                  onClick={() => { setShowMobileMenu(false); onLogout(); }}
+                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                  </svg>
+                  Cerrar sesión
+                </button>
+              </nav>
           </div>
         </>
       )}
@@ -378,7 +378,6 @@ const APP_MAP = {
   finanzas: FinanzasApp,
   contabilidad: ContabilidadApp,
   documentos: DocumentosApp,
-  maquinaria: MaquinariaShell,
 };
 
 // ============================================================
@@ -458,7 +457,7 @@ export default function App() {
               return;
             }
             setUserRole(data.role || 'operador');
-            setUserModulos(normalizeModulos(data.modulos));
+            setUserModulos(data.modulos || []);
             setUserCargo(data.cargo || '');
             setUserEsSurtidor(data.esSurtidor || false);
             setCapacitacionAprobada(data.capacitacionAprobada || false);
@@ -486,7 +485,7 @@ export default function App() {
               if (snap.exists()) {
                 const data = snap.data();
                 setUserRole(data.role || 'operador');
-                setUserModulos(normalizeModulos(data.modulos));
+                setUserModulos(data.modulos || []);
                 setUserCargo(data.cargo || '');
                 setUserEsSurtidor(data.esSurtidor || false);
                 setCapacitacionAprobada(data.capacitacionAprobada || false);
@@ -536,12 +535,16 @@ export default function App() {
     const appName = match[1];
 
     // Ignorar si no es una app/modulo que requiere gating
-    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'maquinaria', 'admin'];
+    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'admin'];
     if (!gatedApps.includes(appName)) return;
 
     const isSuperAdmin = userRole === 'superadmin';
     const isAdminContrato = userRole === 'admin_contrato';
-    const isRevisorRole = checkRevisorRole(userRole);
+    const isRevisorAdmin = userRole === 'revisor_admin';
+    const isRevisor = userRole === 'revisor';
+    const isMandanteAdmin = userRole === 'mandante_admin';
+    const isMandante = userRole === 'mandante';
+    const isRevisorRole = isRevisorAdmin || isRevisor || isMandanteAdmin || isMandante;
     const hasModulo = (m) => isSuperAdmin || (userModulos && userModulos.includes(m));
 
     let allowed = false;
@@ -560,8 +563,6 @@ export default function App() {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('contabilidad')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('contabilidad')) && canAccess('contabilidad'));
     } else if (appName === 'documentos') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('fleetcore')) || isRevisorRole || ((['administrativo', 'operador'].includes(userRole) && hasModulo('fleetcore')) && canAccess('fleetcore'));
-    } else if (appName === 'maquinaria') {
-      allowed = isSuperAdmin || (isAdminContrato && canAccess('maquinaria')) || (['administrativo', 'jefe_taller', 'mecanico'].includes(userRole) && hasModulo('maquinaria') && canAccess('maquinaria'));
     } else if (appName === 'admin') {
       allowed = isSuperAdmin || isAdminContrato || userRole === 'administrativo';
     }
@@ -749,19 +750,6 @@ export default function App() {
               <Route path="/rrhh/*" element={
                 <PWAWrapper user={user}>
                   <RRHHShell
-                    user={user}
-                    userRole={userRole}
-                    onLogout={handleLogout}
-                    onBackToSelector={handleBackToSelector}
-                    onAdminPanel={handleGoToAdminPanel}
-                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
-                  />
-                </PWAWrapper>
-              } />
-
-              <Route path="/maquinaria/*" element={
-                <PWAWrapper user={user}>
-                  <MaquinariaShell
                     user={user}
                     userRole={userRole}
                     onLogout={handleLogout}
