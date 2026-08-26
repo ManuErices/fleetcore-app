@@ -9,13 +9,14 @@ import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
+import ImportarNominaModal from './ImportarNominaModal';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
   mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV, PdfPreviewModal } = Shared;
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, calcularAntiguedad, calcularFiniquito,
+  calcularLiquidacion, liquidacionDe, remDe, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, exportarAsistenciaCSV } = Calc;
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
@@ -78,19 +79,19 @@ function DashboardSection() {
   const masaSalarialBruta = remMes.reduce((s, r) => {
     const c = contratos.find(c => c.id === r.contratoId);
     if (!c) return s;
-    const calc = calcularLiquidacion({ ...c, ...r });
+    const calc = liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r);
     return s + calc.imponible + calc.noImponible;
   }, 0);
   const masaSalarialLiquida = remMes.reduce((s, r) => {
     const c = contratos.find(c => c.id === r.contratoId);
     if (!c) return s;
-    const calc = calcularLiquidacion({ ...c, ...r });
+    const calc = liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r);
     return s + calc.liquido;
   }, 0);
   const costoCotizaciones = remMes.reduce((s, r) => {
     const c = contratos.find(c => c.id === r.contratoId);
     if (!c) return s;
-    const calc = calcularLiquidacion({ ...c, ...r });
+    const calc = liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r);
     return s + calc.totalDescuentos + calc.cesEmpM + calc.sisEmpM;
   }, 0);
   const costoTotalEmpresa = masaSalarialBruta + costoCotizaciones;
@@ -180,7 +181,7 @@ function DashboardSection() {
     const total = rems.reduce((s, r) => {
       const c = contratos.find(c => c.id === r.contratoId);
       if (!c) return s;
-      return s + (calcularLiquidacion({ ...c, ...r }).liquido || 0);
+      return s + (liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r).liquido || 0);
     }, 0);
     return { label: MESES[d.getMonth()].slice(0, 3), value: total };
   });
@@ -472,6 +473,7 @@ function TrabajadoresSection() {
   const [filtroArea, setFiltroArea] = useState('');
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('activo');
+  const [importar, setImportar] = useState(false);
   const [pagina, setPagina] = useState(1);
   const [pdfPreview, setPdfPreview] = useState(null);
   const POR_PAGINA = 10;
@@ -596,12 +598,20 @@ function TrabajadoresSection() {
               <p className="text-xs text-white/70 mt-0.5">Gestión de trabajadores registrados</p>
             </div>
           </div>
-          <button onClick={openNew} className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{ background: "rgba(255,255,255,0.12)", color: "#e0d9ff", border: "1px solid rgba(255,255,255,0.15)" }}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Nuevo Trabajador
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setImportar(true)} className="flex items-center gap-1.5 px-3.5 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{ background: "rgba(255,255,255,0.06)", color: "#c4b5fd", border: "1px solid rgba(255,255,255,0.12)" }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Importar
+            </button>
+            <button onClick={openNew} className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{ background: "rgba(255,255,255,0.12)", color: "#e0d9ff", border: "1px solid rgba(255,255,255,0.15)" }}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Nuevo Trabajador
+            </button>
+          </div>
         </div>
 
         {/* Filtros */}
@@ -646,7 +656,11 @@ function TrabajadoresSection() {
             </div>
             <p className="font-semibold text-sm">{busqueda || filtroArea || filtroEmpresa ? 'Sin resultados para estos filtros' : 'No hay trabajadores registrados'}</p>
             {!busqueda && !filtroArea && !filtroEmpresa && (
-              <button onClick={openNew} className="mt-3 text-sm text-purple-600 font-bold hover:underline">+ Agregar el primero</button>
+              <div className="mt-3 flex items-center justify-center gap-4">
+                <button onClick={() => setImportar(true)} className="text-sm text-purple-600 font-bold hover:underline">Importar desde Excel</button>
+                <span className="text-slate-200">·</span>
+                <button onClick={openNew} className="text-sm text-slate-500 font-bold hover:underline">Agregar uno a mano</button>
+              </div>
             )}
           </div>
         ) : (
@@ -773,6 +787,7 @@ function TrabajadoresSection() {
       </div>
 
       <TrabajadorModal isOpen={modal} onClose={() => setModal(false)} editData={editData} onSaved={load} />
+      <ImportarNominaModal isOpen={importar} onClose={() => setImportar(false)} onImported={load} />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={handleDelete} nombre={confirm ? `${confirm.nombre} ${confirm.apellidoPaterno}` : ''} />
       <HistorialModal isOpen={!!historial} onClose={() => setHistorial(null)}
         trabajador={historial} contratos={hContratos} anexos={hAnexos}
@@ -1176,7 +1191,7 @@ function RemuneracionesSection() {
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
     const contrato = contratos.find(c => c.id === l.contratoId);
-    const calc = contrato ? calcularLiquidacion({ ...contrato, ...l }) : null;
+    const calc = contrato ? liquidacionDe(trabajador, contrato, l) : null;
     return { ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc };
   });
 

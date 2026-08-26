@@ -128,16 +128,18 @@ function Balance8Col({ cuentas, saldosMap, periodo }) {
       const tipo = TIPOS_MAP[c.tipo];
       const sDeudor   = s.debe > s.haber ? s.debe - s.haber : 0;
       const sAcreedor = s.haber > s.debe ? s.haber - s.debe : 0;
-      const esActivo  = ["ACTIVO","TRIBUTARIO"].includes(tipo?.grupo);
-      const esPasivo  = ["PASIVO","PATRIMONIO"].includes(tipo?.grupo);
-      const esRes     = tipo?.grupo === "RESULTADO";
-      const esIngreso = tipo?.id === "ingreso";
+      const esRes = tipo?.grupo === "RESULTADO";
+      // En un balance de 8 columnas la cuenta se clasifica por la naturaleza de
+      // su SALDO, no por el tipo que tenga asignado: saldo deudor va a Activo,
+      // saldo acreedor va a Pasivo. Antes se exigía que coincidieran, así que
+      // una cuenta de activo con saldo acreedor —Depreciación Acumulada, un
+      // banco sobregirado— no entraba en ninguna columna y el balance no cerraba.
       return {
         ...c, s, sDeudor, sAcreedor, tipo,
-        esfActivo:  esActivo ? sDeudor   : 0,
-        esfPasivo:  esPasivo ? sAcreedor : 0,
-        erpLoss:    (esRes && !esIngreso) ? sDeudor   : 0,
-        erpGain:    (esRes &&  esIngreso) ? sAcreedor : 0,
+        esfActivo:  esRes ? 0 : sDeudor,
+        esfPasivo:  esRes ? 0 : sAcreedor,
+        erpLoss:    esRes ? sDeudor   : 0,
+        erpGain:    esRes ? sAcreedor : 0,
       };
     }), [cuentas, saldosMap]);
 
@@ -228,7 +230,7 @@ function Balance8Col({ cuentas, saldosMap, periodo }) {
 }
 
 // ─── Estado de Situación Financiera ──────────────────────────────────────────
-function ESF({ cuentas, saldosMap, periodo }) {
+function ESF({ cuentas, saldosMap, saldosAnioMap = {}, periodo }) {
   const data = useMemo(() => {
     const get = (tipos) => cuentas
       .filter(c => tipos.includes(c.tipo) && c.activa !== false)
@@ -246,26 +248,35 @@ function ESF({ cuentas, saldosMap, periodo }) {
     const pasivoNC   = get(["pasivo_no_corriente"]);
     const patrimonio = get(["patrimonio"]);
 
-    // Resultado del período como componente de patrimonio
+    // ── Resultados como componente del patrimonio ──
+    // Mientras no exista asiento de cierre, TODO el resultado histórico sigue
+    // vivo en las cuentas de resultado. Para que A = P + Patrimonio se cumpla,
+    // el patrimonio tiene que incorporarlo completo; se separa en dos líneas
+    // para que se lea cuál corresponde al ejercicio en curso.
     const cuentasRes = cuentas.filter(c => ["costo","gasto_adm","gasto_fin","otro_resultado","ingreso"].includes(c.tipo) && c.activa !== false);
-    const resultadoPeriodo = cuentasRes.reduce((acc, c) => {
-      const s = saldosMap[c.id] || { debe: 0, haber: 0 };
+    const resultadoDe = (mapa) => cuentasRes.reduce((acc, c) => {
+      const s = mapa[c.id] || { debe: 0, haber: 0 };
       const tipo = TIPOS_MAP[c.tipo];
       return acc + (tipo?.signo === 1 ? -(s.debe - s.haber) : (s.haber - s.debe));
     }, 0);
+    const resultadoHistorico = resultadoDe(saldosMap);      // todos los ejercicios
+    const resultadoEjercicio = resultadoDe(saldosAnioMap);  // año en curso
+    const resultadoAnterior  = resultadoHistorico - resultadoEjercicio;
+    const resultadoPeriodo   = resultadoEjercicio;          // el que se destaca en KPI
 
     const totalAC  = activoC.reduce((s,c)=>s+c.saldo,0);
     const totalANC = activoNC.reduce((s,c)=>s+c.saldo,0);
     const totalPC  = pasivoC.reduce((s,c)=>s+c.saldo,0);
     const totalPNC = pasivoNC.reduce((s,c)=>s+c.saldo,0);
-    const totalPat = patrimonio.reduce((s,c)=>s+c.saldo,0) + resultadoPeriodo;
+    const totalPat = patrimonio.reduce((s,c)=>s+c.saldo,0) + resultadoHistorico;
     const totalA   = totalAC + totalANC;
     const totalP   = totalPC + totalPNC + totalPat;
     const diff     = Math.abs(totalA - totalP);
 
-    return { activoC, activoNC, pasivoC, pasivoNC, patrimonio, resultadoPeriodo,
+    return { activoC, activoNC, pasivoC, pasivoNC, patrimonio,
+             resultadoPeriodo, resultadoEjercicio, resultadoAnterior, resultadoHistorico,
              totalAC, totalANC, totalPC, totalPNC, totalPat, totalA, totalP, diff };
-  }, [cuentas, saldosMap]);
+  }, [cuentas, saldosMap, saldosAnioMap]);
 
   const kpis = [
     { label:"Total Activos",    valor:fmtM(data.totalA),   sub:"Activos netos del período", color:C.teal, bg:"#ecfdf5", icon:"🏦" },
@@ -379,12 +390,22 @@ function ESF({ cuentas, saldosMap, periodo }) {
                   <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
                 </tr>
               ))}
+              {data.resultadoAnterior !== 0 && (
+                <tr className="hover:bg-slate-50">
+                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>
+                    Resultados acumulados ejercicios anteriores
+                  </td>
+                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color: data.resultadoAnterior>=0?C.slate:"#dc2626", borderBottom:`1px solid ${C.border}` }}>
+                    {data.resultadoAnterior < 0 ? `(${fmt(Math.abs(data.resultadoAnterior))})` : fmt(data.resultadoAnterior)}
+                  </td>
+                </tr>
+              )}
               <tr className="hover:bg-slate-50">
                 <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>
-                  Resultado del Período
+                  Resultado del ejercicio
                 </td>
-                <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color: data.resultadoPeriodo>=0?C.teal:"#dc2626", borderBottom:`1px solid ${C.border}` }}>
-                  {data.resultadoPeriodo < 0 ? `(${fmt(Math.abs(data.resultadoPeriodo))})` : fmt(data.resultadoPeriodo)}
+                <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color: data.resultadoEjercicio>=0?C.teal:"#dc2626", borderBottom:`1px solid ${C.border}` }}>
+                  {data.resultadoEjercicio < 0 ? `(${fmt(Math.abs(data.resultadoEjercicio))})` : fmt(data.resultadoEjercicio)}
                 </td>
               </tr>
               <tr style={{ background:"#eff6ff" }}>
@@ -398,9 +419,18 @@ function ESF({ cuentas, saldosMap, periodo }) {
             </tbody>
           </table>
           {data.diff > 1 && (
-            <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 flex items-center gap-2">
-              <span className="text-amber-600 text-sm">⚠️</span>
-              <p className="text-xs text-amber-700 font-semibold">Diferencia de {fmt(data.diff)} — registra asientos de apertura o ingresos del período</p>
+            <div className="px-4 py-3 bg-red-50 border-t border-red-200">
+              <div className="flex items-center gap-2">
+                <span className="text-red-600 text-sm">⚠️</span>
+                <p className="text-xs text-red-700 font-black">
+                  Balance descuadrado en {fmt(data.diff)} — este informe no es válido
+                </p>
+              </div>
+              <p className="text-[11px] text-red-600 mt-1 leading-snug">
+                Activo debe igualar Pasivo más Patrimonio. Revisa el Libro Diario en busca de
+                asientos con debe distinto de haber, o de cuentas sin saldo de apertura.
+                No emitas este estado a terceros hasta cerrar la diferencia.
+              </p>
             </div>
           )}
         </div>
@@ -410,7 +440,7 @@ function ESF({ cuentas, saldosMap, periodo }) {
 }
 
 // ─── Estado de Resultados ─────────────────────────────────────────────────────
-function ERP({ cuentas, saldosMap, periodo }) {
+function ERP({ cuentas, saldosMap, periodo, tasaImpuesto = 0.27 }) {
   const data = useMemo(() => {
     const get = (tipos) => cuentas
       .filter(c => tipos.includes(c.tipo) && c.activa !== false)
@@ -438,20 +468,27 @@ function ERP({ cuentas, saldosMap, periodo }) {
     const totalGFin = gastosFin.reduce((s,c)=>s+c.saldo,0);
     const totalOtros= otrosRes.reduce((s,c)=>s+c.saldo,0);
     const utilAntes = utilOp - totalGFin - totalOtros;
-    const impuesto  = Math.max(0, utilAntes * 0.27);
-    const utilNeta  = utilAntes - impuesto;
-    const margenNeto= totalIng > 0 ? ((utilNeta/totalIng)*100).toFixed(1) : "—";
+
+    // El resultado que se informa es ANTES de impuesto, porque es el que está
+    // efectivamente contabilizado y el mismo que el ESF lleva a patrimonio.
+    // Antes se restaba acá un impuesto estimado que no generaba asiento y no
+    // existía en el balance: los dos estados publicaban utilidades distintas
+    // para el mismo período. La estimación se mantiene, pero como memo.
+    const margenNeto     = totalIng > 0 ? ((utilAntes/totalIng)*100).toFixed(1) : "—";
+    const impuestoEstim  = Math.max(0, utilAntes * tasaImpuesto);
+    const utilDespuesEst = utilAntes - impuestoEstim;
 
     return { ingresos, costos, gastosAdm, gastosFin, otrosRes, totalIng, totalCosto,
              utilBruta, margenBruto, totalGAdm, utilOp, margenOp,
-             totalGFin, totalOtros, utilAntes, impuesto, utilNeta, margenNeto };
-  }, [cuentas, saldosMap]);
+             totalGFin, totalOtros, utilAntes, margenNeto,
+             impuestoEstim, utilDespuesEst, tasaImpuesto };
+  }, [cuentas, saldosMap, tasaImpuesto]);
 
   const kpis = [
     { label:"Ingresos",         valor:fmtM(data.totalIng),  sub:"Ingresos totales del período", color:C.teal, bg:"#ecfdf5", icon:"💰" },
     { label:"Utilidad Bruta",   valor:fmtM(data.utilBruta), sub:`Margen bruto: ${data.margenBruto}%`, color: data.utilBruta>=0?C.teal:"#dc2626", bg: data.utilBruta>=0?"#ecfdf5":"#fef2f2", icon:"📊" },
     { label:"Result. Operac.",  valor:fmtM(data.utilOp),    sub:`Margen oper.: ${data.margenOp}%`, color: data.utilOp>=0?C.blue:"#dc2626", bg:"#eff6ff", icon:"⚙️" },
-    { label:"Result. del Período", valor:fmtM(data.utilNeta), sub:`Margen neto: ${data.margenNeto}%`, color: data.utilNeta>=0?C.teal:"#dc2626", bg: data.utilNeta>=0?"#ecfdf5":"#fef2f2", icon: data.utilNeta>=0?"📈":"📉" },
+    { label:"Result. antes de Imp.", valor:fmtM(data.utilAntes), sub:`Margen: ${data.margenNeto}%`, color: data.utilAntes>=0?C.teal:"#dc2626", bg: data.utilAntes>=0?"#ecfdf5":"#fef2f2", icon: data.utilAntes>=0?"📈":"📉" },
   ];
 
   const Row = ({ label, valor, nivel=0, negrita=false, total=false, separador=false }) => {
@@ -521,12 +558,34 @@ function ERP({ cuentas, saldosMap, periodo }) {
               </>
             )}
 
-            <Row label="RESULTADO ANTES DE IMPUESTO" valor={data.utilAntes} negrita />
-            <Row label="Impuesto a la Renta 1ª Categoría (27%)" valor={data.impuesto} nivel={1} />
             <Row separador />
-            <Row label="RESULTADO DEL PERÍODO" valor={data.utilNeta} total />
+            <Row label="RESULTADO DEL PERÍODO (antes de impuesto)" valor={data.utilAntes} total />
           </tbody>
         </table>
+
+        {/* Estimación tributaria — informativa, fuera de los estados */}
+        <div className="px-4 py-3 border-t" style={{ borderColor: C.border, background: "#fffbeb" }}>
+          <p className="text-[10px] font-black uppercase tracking-widest mb-2" style={{ color: C.amber }}>
+            Estimación tributaria — no contabilizada
+          </p>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-600">
+              Impuesto 1ª Categoría estimado ({(data.tasaImpuesto * 100).toFixed(1).replace(".", ",")}%)
+            </span>
+            <span className="font-mono font-bold text-slate-700">{fmt(data.impuestoEstim)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs mt-1">
+            <span className="text-slate-600">Resultado después del impuesto estimado</span>
+            <span className="font-mono font-bold" style={{ color: data.utilDespuesEst >= 0 ? C.teal : "#dc2626" }}>
+              {fmt(data.utilDespuesEst)}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-2 leading-snug">
+            Cálculo referencial sobre la utilidad financiera. El impuesto efectivo se determina
+            sobre la Renta Líquida Imponible en el F22 y no está registrado en asientos, por eso
+            no forma parte del resultado ni del patrimonio informados.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -534,10 +593,15 @@ function ERP({ cuentas, saldosMap, periodo }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadEstados() {
-  const { cuentas, saldos, periodoActivo } = useContabilidad();
+  const { cuentas, saldosPeriodo, saldosAcumulados, saldosAnio, periodoActivo, tasaPrimeraCategoria } = useContabilidad();
   const [vistaActiva, setVistaActiva] = useState("esf");
   const [showExport, setShowExport]   = useState(false);
-  const saldosMap = saldos();
+  // Cada informe pide el saldo que le corresponde:
+  //  · ESF y Balance de Comprobación → ACUMULADO hasta el corte (saldos de balance)
+  //  · Estado de Resultados          → MOVIMIENTOS del período (flujos del mes)
+  const saldosAcum   = saldosAcumulados();
+  const saldosMes    = saldosPeriodo();
+  const saldosDelAnio = saldosAnio();
 
   const VISTAS = [
     { id: "balance8", label: "Balance 8 col.",        icon: "📋" },
@@ -577,9 +641,9 @@ export default function ContabilidadEstados() {
         ))}
       </div>
 
-      {vistaActiva === "balance8" && <Balance8Col cuentas={cuentas} saldosMap={saldosMap} periodo={periodoActivo} />}
-      {vistaActiva === "esf"      && <ESF cuentas={cuentas} saldosMap={saldosMap} periodo={periodoActivo} />}
-      {vistaActiva === "erp"      && <ERP cuentas={cuentas} saldosMap={saldosMap} periodo={periodoActivo} />}
+      {vistaActiva === "balance8" && <Balance8Col cuentas={cuentas} saldosMap={saldosAcum} periodo={periodoActivo} />}
+      {vistaActiva === "esf"      && <ESF cuentas={cuentas} saldosMap={saldosAcum} saldosAnioMap={saldosDelAnio} periodo={periodoActivo} />}
+      {vistaActiva === "erp"      && <ERP cuentas={cuentas} saldosMap={saldosMes} periodo={periodoActivo} tasaImpuesto={tasaPrimeraCategoria} />}
 
       <ModalExportEstados
         isOpen={showExport}

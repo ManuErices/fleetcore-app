@@ -79,17 +79,30 @@ function calcularLiquidacion(rem) {
   const noImponible = bColacion + bMovil + viaticos + otrosNoImp;
 
   // ── Descuentos legales (cargo trabajador) ──
-  const tasaAfp = TASAS_AFP[rem.afp] || 0.1137;
+  // rem.afp viene de la FICHA del trabajador, no del contrato ni de la liquidación.
+  // Si no llega, se cae a una tasa por defecto y la cotización queda mal: por eso
+  // se expone `afpResuelta` para que la UI pueda advertirlo en vez de callar.
+  //
+  // Un trabajador PENSIONADO que sigue trabajando está exento de:
+  //   · cotización obligatoria de AFP (ya está pensionado)
+  //   · SIS — "no aplica para trabajador pensionado" (Previred)
+  //   · seguro de cesantía — por ley no puede ser beneficiario activo (AFC)
+  // Sigue cotizando el 7% de salud.
+  const esPensionado = rem.esPensionado === true;
+
+  const afpResuelta = !!TASAS_AFP[rem.afp];
+  const tasaAfp = esPensionado ? 0 : (TASAS_AFP[rem.afp] || 0.1137);
   const afpM  = Math.round(imponible * tasaAfp);
   const salM  = Math.round(imponible * TASAS.salud);
   const esCt  = rem.tipoContrato && (
     rem.tipoContrato.toLowerCase().includes('plazo') || 
     rem.tipoContrato.toLowerCase().includes('obra')
   );
-  // CEV AFC: indefinido 0.9%, plazo fijo/obra 0.6%
-  const cesM  = Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
-  // SIS: cargo empleador (solo referencial, no descuenta al trabajador)
-  const sisM  = Math.round(imponible * TASAS.sis);
+  // AFC: indefinido 0,6% trabajador; plazo fijo/obra 0% (lo paga íntegro el empleador)
+  const cesM  = esPensionado ? 0
+    : Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
+  // SIS: cargo empleador (referencial, no descuenta al trabajador)
+  const sisM  = esPensionado ? 0 : Math.round(imponible * TASAS.sis);
   const totalDescuentos = afpM + salM + cesM;
 
   // ── Descuentos manuales ──
@@ -105,8 +118,10 @@ function calcularLiquidacion(rem) {
     descAdicional, anticipo, liquido,
     diasTrab, fdias,          // expuestos para auditoría / PDF
     baseCompleto, gratCompleto: Math.round(IMM_2026 * 4.75 / 12 * fp),
-    cesEmpM: Math.round(imponible * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
-    sisEmpM: Math.round(imponible * TASAS.sis),
+    tasaAfp, afpResuelta,
+    esPensionado,
+    cesEmpM: esPensionado ? 0 : Math.round(imponible * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
+    sisEmpM: esPensionado ? 0 : Math.round(imponible * TASAS.sis),
   };
 }
 function calcularAntiguedad(fechaIngreso, fechaTermino) {
@@ -336,9 +351,12 @@ function diasDelMes(anio, mes) {
 }
 function generarTXTPrevired(liquidaciones, mes, anio) {
   // ─── Tablas de códigos Previred ───────────────────────────────────────────
+  // Códigos de la Tabla de Equivalencias de Previred (institución previsional AFP).
+  // Capital, Cuprum, ProVida y Uno estaban con el código equivocado.
   const COD_AFP = {
-    'Capital':  '08', 'Cuprum':   '02', 'Habitat':  '05',
-    'PlanVital':'29', 'ProVida':  '34', 'Uno':      '36',
+    'Cuprum':   '03', 'Habitat':  '05', 'ProVida':  '08',
+    'PlanVital':'29', 'Capital':  '33', 'Modelo':   '34',
+    'Uno':      '35',
   };
   const COD_JORNADA = {
     'Completa (45 hrs)': '07',
@@ -489,8 +507,36 @@ function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Arma el objeto que espera calcularLiquidacion() a partir de las tres piezas
+ * que viven en colecciones distintas.
+ *
+ * Existe porque la AFP está en la ficha del trabajador, mientras que el resto
+ * del cálculo sale del contrato y de la liquidación. Antes se llamaba con
+ * `{ ...contrato, ...liq }` y `rem.afp` quedaba siempre undefined, así que todos
+ * cotizaban a la tasa por defecto sin que nada lo advirtiera.
+ *
+ * Usar SIEMPRE este helper en vez de armar el objeto a mano.
+ */
+function remDe(trabajador, contrato, liq) {
+  return {
+    ...(contrato || {}),
+    ...(liq || {}),
+    afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
+    esPensionado: trabajador?.esPensionado === true,
+    prevision:    trabajador?.prevision    ?? contrato?.prevision,
+    isapre:       trabajador?.isapre       ?? contrato?.isapre,
+    planIsapre:   trabajador?.planIsapre   ?? contrato?.planIsapre,
+  };
+}
+
+/** Atajo: calcula la liquidación resolviendo la AFP desde la ficha. */
+function liquidacionDe(trabajador, contrato, liq) {
+  return calcularLiquidacion(remDe(trabajador, contrato, liq));
+}
+
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
+  calcularLiquidacion, remDe, liquidacionDe, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDiarias, analizarDia, resumenSemana, diasDelMes,
   generarTXTPrevired, exportarAsistenciaCSV };

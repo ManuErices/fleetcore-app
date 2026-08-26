@@ -1,5 +1,5 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
-import { calcularLiquidacion, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
+import { calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
 
 function generarPDFContrato(contrato, trabajador, { preview = false } = {}) {
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
@@ -235,7 +235,7 @@ ${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false } = {}) {
-  const calc     = calcularLiquidacion({ ...contrato, ...rem });
+  const calc     = liquidacionDe(trabajador, contrato, rem);
   const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
   const nombre   = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
@@ -1668,13 +1668,13 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
   // Acumular totales
   let totalImponible=0, totalNoImp=0, totalAfp=0, totalSalud=0, totalSis=0,
       totalCesTrab=0, totalCesEmp=0, totalIUT=0, totalAnticipo=0, totalLiquido=0,
-      totalGrат=0, totalHE=0;
+      totalGrat=0, totalHE=0;
 
-  liqEnriquecidas.forEach(({ contrato, liq }) => {
-    const c = calcularLiquidacion({ ...contrato, ...liq });
+  liqEnriquecidas.forEach(({ trabajador, contrato, liq }) => {
+    const c = liquidacionDe(trabajador, contrato, liq);
     const iut = calcularIUT(calcularRentaTributable(c), utm);
     totalImponible  += c.base + c.bProd + c.montoHE + c.otrosImp;
-    totalGrат       += c.gratMensual;
+    totalGrat       += c.gratMensual;
     totalHE         += c.montoHE;
     totalNoImp      += c.noImponible;
     totalAfp        += c.afpM;
@@ -1692,9 +1692,13 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
   // Asientos contables (formato libro diario)
   return [
     // ── DEBE ──
-    { lado:'D', cuenta:'4110001', glosa:'Remuneraciones brutas del período',            monto: totalImponible - totalGrат - totalHE },
+    // totalImponible se acumula SIN gratificación (ver arriba), así que aquí solo
+    // se descuentan las horas extra, que sí van en su propia cuenta. Antes se restaba
+    // también totalGrat, que nunca se había sumado: el debe quedaba corto en
+    // exactamente una gratificación y el comprobante no cuadraba.
+    { lado:'D', cuenta:'4110001', glosa:'Remuneraciones brutas del período',            monto: totalImponible - totalHE },
     { lado:'D', cuenta:'4110002', glosa:'Horas extraordinarias',                         monto: totalHE        },
-    { lado:'D', cuenta:'4110003', glosa:'Gratificaciones garantizadas',                  monto: totalGrат      },
+    { lado:'D', cuenta:'4110003', glosa:'Gratificaciones garantizadas',                  monto: totalGrat      },
     { lado:'D', cuenta:'4110004', glosa:'Beneficios no imponibles (col./mov./viáticos)', monto: totalNoImp     },
     { lado:'D', cuenta:'4120001', glosa:'Aporte empleador SIS',                          monto: totalSis       },
     { lado:'D', cuenta:'4120002', glosa:'Seguro cesantía empleador',                     monto: totalCesEmp    },
@@ -1730,7 +1734,7 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
     const validRut = validarRutPrevired(trabajador?.rut||'');
     if (!validRut.ok) errores.push(`Fila ${i+1} — ${trabajador?.nombre||'?'}: ${validRut.error}`);
 
-    const c   = calcularLiquidacion({ ...contrato, ...liq });
+    const c   = liquidacionDe(trabajador, contrato, liq);
     const rut = (trabajador?.rut||'').replace(/\./g,'').replace('-','').toUpperCase();
     const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
 
@@ -1774,7 +1778,7 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
   const filas = liqEnriquecidas
     .filter(({ liq }) => liq.estado !== 'pagado')
     .map(({ trabajador, contrato, liq }) => {
-      const c      = calcularLiquidacion({ ...contrato, ...liq });
+      const c      = liquidacionDe(trabajador, contrato, liq);
       const rut    = (trabajador?.rut||'').replace(/\./g,'').toUpperCase();
       const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
       const monto  = Math.max(0, c.liquido);

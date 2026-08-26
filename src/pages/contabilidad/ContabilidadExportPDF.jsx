@@ -387,7 +387,7 @@ function calcularESF(cuentas, saldosMap) {
     totalPat: sum(grupos.patrimonio) + resultadoPeriodo };
 }
 
-function calcularERP(cuentas, saldosMap) {
+function calcularERP(cuentas, saldosMap, tasaImpuesto = 0.27) {
   const getSaldo = (tipo) => cuentas.filter(c => c.tipo === tipo && c.activa !== false).map(c => {
     const s = saldosMap[c.id] || {debe:0, haber:0};
     return { codigo:c.codigo, nombre:c.nombre,
@@ -407,10 +407,13 @@ function calcularERP(cuentas, saldosMap) {
   const totalGFin  = sum(gastosFin);
   const totalOtros = sum(otros);
   const utilAntes  = utilOp - totalGFin - totalOtros;
-  const impuesto   = Math.max(0, utilAntes * 0.27);
+  // El impuesto no está contabilizado: se informa como estimación, no se resta
+  // del resultado. Ver la misma decisión en ContabilidadEstados.jsx.
+  const impuestoEstim = Math.max(0, utilAntes * tasaImpuesto);
   return { ingresos, costos, gastosAdm, gastosFin, otros,
     totalIng, totalCosto, utilBruta, totalGAdm, utilOp,
-    totalGFin, totalOtros, utilAntes, impuesto, utilNeta: utilAntes - impuesto };
+    totalGFin, totalOtros, utilAntes, impuestoEstim, tasaImpuesto,
+    utilDespuesEst: utilAntes - impuestoEstim };
 }
 
 // ─── Generar Balance 8 Columnas PDF ──────────────────────────────────────────
@@ -540,13 +543,13 @@ async function generarESFPDF(cuentas, saldosMap, periodoActivo, empresa) {
 }
 
 // ─── Generar ERP PDF ──────────────────────────────────────────────────────────
-async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa) {
+async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa, tasaImpuesto = 0.27) {
   const jsPDF  = await cargarJsPDF();
   const doc    = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
   const W      = doc.internal.pageSize.getWidth();
   const TITULO = "ESTADO DE RESULTADOS DEL PERÍODO";
   const SUB    = "Rendimiento económico — Base devengada — NIC 1 / IFRS — Art. 29–33 LIR";
-  const erp    = calcularERP(cuentas, saldosMap);
+  const erp    = calcularERP(cuentas, saldosMap, tasaImpuesto);
 
   const agregarHead = (p,t) => agregarHeader(doc, TITULO, SUB, empresa, periodoActivo, p, t);
 
@@ -580,10 +583,13 @@ async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa) {
     fila("RESULTADO OPERACIONAL", erp.utilOp, true, erp.utilOp>=0?[240,253,244]:[254,242,242]),
     ...(erp.gastosFin.length ? [...seccion("GASTOS FINANCIEROS", erp.gastosFin, GRAY), fila("Total Gastos Fin.", erp.totalGFin, true)] : []),
     [{content:"",colSpan:2}],
-    fila("RESULTADO ANTES DE IMPUESTO", erp.utilAntes, true),
-    fila("Impuesto 1ª Categoría (27%)", erp.impuesto, false),
     [{content:"",colSpan:2}],
-    fila("RESULTADO DEL PERÍODO", erp.utilNeta, true, NAVY),
+    fila("RESULTADO DEL PERÍODO (antes de impuesto)", erp.utilAntes, true, NAVY),
+    [{content:"",colSpan:2}],
+    [{ content:"Estimación tributaria — no contabilizada", colSpan:2,
+       styles:{ fontStyle:"bold", fontSize:7, textColor:[180,83,9], fillColor:[255,251,235] } }],
+    fila(`Impuesto 1ª Categoría estimado (${(erp.tasaImpuesto*100).toFixed(1).replace(".", ",")}%)`, erp.impuestoEstim, false),
+    fila("Resultado después del impuesto estimado", erp.utilDespuesEst, false),
   ];
 
   doc.autoTable({
@@ -597,7 +603,7 @@ async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa) {
   });
 
   // Pie con margen neto
-  const margen = erp.totalIng > 0 ? ((erp.utilNeta/erp.totalIng)*100).toFixed(1) : "—";
+  const margen = erp.totalIng > 0 ? ((erp.utilAntes/erp.totalIng)*100).toFixed(1) : "—";
   const pageH  = doc.internal.pageSize.getHeight();
   const tot    = doc.internal.getNumberOfPages();
   for (let p=1;p<=tot;p++) {
@@ -606,7 +612,7 @@ async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa) {
     if (p === tot) {
       doc.setFillColor(...NAVY); doc.rect(0, pageH-14, W, 14, "F");
       doc.setTextColor(147,197,253); doc.setFont("helvetica","bold"); doc.setFontSize(7.5);
-      doc.text(`Margen neto del período: ${margen}%  ·  Ingresos: $${fmtPDF(erp.totalIng)}  ·  Resultado: ${fmtR(erp.utilNeta)}`, W/2, pageH-7.5, {align:"center"});
+      doc.text(`Margen antes de impuesto: ${margen}%  ·  Ingresos: $${fmtPDF(erp.totalIng)}  ·  Resultado: ${fmtR(erp.utilAntes)}`, W/2, pageH-7.5, {align:"center"});
     }
   }
   const fn = `Estado_Resultados_${periodoActivo}.pdf`; doc.save(fn); return fn;
@@ -785,8 +791,13 @@ export default function ModalExportPDF({ isOpen, onClose }) {
 
 // ─── Modal exportación estados financieros ────────────────────────────────────
 export function ModalExportEstados({ isOpen, onClose, vistaActiva }) {
-  const { cuentas, saldos, periodoActivo } = useContabilidad();
-  const saldosMap = saldos();
+  const { cuentas, saldosPeriodo, saldosAcumulados, saldosAnio, periodoActivo,
+          tasaPrimeraCategoria } = useContabilidad();
+  // Mismo criterio que la pantalla: balance con saldos acumulados, resultado con
+  // los movimientos del período. Antes ambos salían del mismo mes.
+  const saldosMap     = saldosAcumulados();
+  const saldosMes     = saldosPeriodo();
+  const saldosDelAnio = saldosAnio();
   const [estado, setEstado]       = useState("idle");
   const [progreso, setProgreso]   = useState("");
   const [error, setError]         = useState("");
@@ -811,7 +822,7 @@ export function ModalExportEstados({ isOpen, onClose, vistaActiva }) {
       }
       if (tipo === "erp" || tipo === "todos") {
         setProgreso("Generando Estado de Resultados...");
-        archivos.push(await generarERPPDF(cuentas, saldosMap, periodoActivo, empresa));
+        archivos.push(await generarERPPDF(cuentas, saldosMes, periodoActivo, empresa, tasaPrimeraCategoria));
       }
       setGenerados(archivos);
       setEstado("listo");
@@ -820,7 +831,7 @@ export function ModalExportEstados({ isOpen, onClose, vistaActiva }) {
       setError(e.message || "Error al generar el PDF.");
       setEstado("error");
     }
-  }, [cuentas, saldosMap, periodoActivo]);
+  }, [cuentas, saldosMap, saldosMes, saldosDelAnio, periodoActivo, tasaPrimeraCategoria]);
 
   if (!isOpen) return null;
 

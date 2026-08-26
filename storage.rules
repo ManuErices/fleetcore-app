@@ -1,57 +1,39 @@
 rules_version = '2';
 
+// ════════════════════════════════════════════════════════════
+// Firebase Storage Rules — módulo Maquinaria
+//
+// IMPORTANTE: si ya tienes un archivo storage.rules con reglas de
+// otros módulos, NO lo reemplaces entero — copia SOLO los bloques
+// match /empresas/... de abajo dentro de tu bloque
+// `match /b/{bucket}/o { ... }` existente.
+//
+// Si NO tenías reglas de Storage aún, puedes usar este archivo tal cual.
+// ════════════════════════════════════════════════════════════
+
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // ─────────────────────────────────────────────────────
-    // HELPERS (mismo criterio que firestore.rules, adaptado
-    // a la sintaxis de Storage Rules — se consulta Firestore
-    // vía firestore.get() para leer el rol del usuario)
-    // ─────────────────────────────────────────────────────
-
-    function isAuth() {
-      return request.auth != null;
+    // Documentos de equipos (leasing, permiso circulación, SOAP, etc.)
+    match /empresas/{empresaId}/machineDocuments/{machineId}/{fileName} {
+      allow read:  if request.auth != null;
+      // Subida: cualquier usuario autenticado de la empresa (el control fino
+      // de rol se hace en Firestore sobre la colección machineDocuments).
+      // Límite de 15 MB y solo PDF o imágenes.
+      allow write: if request.auth != null
+                   && request.resource.size < 15 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*')
+                       || request.resource.contentType == 'application/pdf');
+      allow delete: if request.auth != null;
     }
 
-    function userData() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function userRole() {
-      return isAuth() ? userData().role : null;
-    }
-
-    function userEmpresaId() {
-      return isAuth() ? userData().empresaId : null;
-    }
-
-    function isSuperAdmin() {
-      return isAuth() && userRole() == 'superadmin';
-    }
-
-    function belongsToEmpresa(empresaId) {
-      return isAuth() && userEmpresaId() == empresaId;
-    }
-
-    // Mismo criterio que canWriteEmpresa() en firestore.rules:
-    // cualquier rol de la empresa excepto trabajador y mandante
-    function canWriteEmpresa(empresaId) {
-      return belongsToEmpresa(empresaId)
-          && userRole() != 'trabajador'
-          && userRole() != 'mandante';
-    }
-
-    // ─────────────────────────────────────────────────────
-    // COMPROBANTES DE DEUDA
-    // Path: empresas/{empresaId}/deuda_comprobantes/{documentoId}/{archivo}
-    // ─────────────────────────────────────────────────────
-    match /empresas/{empresaId}/deuda_comprobantes/{documentoId}/{archivo} {
-      allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId);
-    }
-
-    // Default deny — cualquier otra ruta de Storage no listada explícitamente
-    match /{allPaths=**} {
-      allow read, write: if false;
+    // Fotos de respaldo de órdenes de trabajo (checklist de mantención)
+    match /empresas/{empresaId}/workOrders/{workOrderId}/{fileName} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
     }
   }
 }

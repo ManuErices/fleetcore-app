@@ -120,6 +120,10 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     codigoPais: '+56', telefono: '', email: '',
     empresa: empresa?.nombre || '', area: '', cargo: '', fechaIngreso: '',
     afp: '', prevision: 'FONASA', isapre: '',
+    // Datos de pago: el Archivo de Pago lee banco y nroCuenta, pero no había
+    // dónde cargarlos desde la interfaz. Solo llegaban por importación.
+    banco: '', tipoCuenta: 'Cuenta Corriente', nroCuenta: '',
+    esPensionado: false,
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
     tipo: 'OPERADOR', esSurtidor: false, projectId: null,
@@ -457,6 +461,34 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         )}
 
+        <Divider label="Datos de pago" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Banco">
+            <input className={inp} value={form.banco || ''}
+              onChange={e => set('banco', e.target.value.toUpperCase())}
+              placeholder="Ej: BANCOESTADO" />
+          </Field>
+          <Field label="Tipo de cuenta">
+            <select className={inp} value={form.tipoCuenta || ''} onChange={e => set('tipoCuenta', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {['Cuenta Corriente','Cuenta Vista','Cuenta RUT','Cuenta de Ahorro'].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="N° de cuenta">
+            <input className={inp} value={form.nroCuenta || ''}
+              onChange={e => set('nroCuenta', e.target.value.replace(/\D/g, ''))}
+              placeholder="Solo números" />
+          </Field>
+        </div>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5 rounded" checked={form.esPensionado === true}
+            onChange={e => set('esPensionado', e.target.checked)} />
+          <span className="text-xs text-slate-600">
+            <b className="text-slate-700">Trabajador pensionado.</b>{' '}
+            Queda exento de cotización AFP, SIS y seguro de cesantía. Sigue cotizando salud.
+          </span>
+        </label>
+
         <Divider label="Observaciones" />
         <Field label="Observaciones">
           <textarea className={inp} rows={2} value={form.observaciones}
@@ -516,7 +548,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
   const totalLiquidaciones = liquidaciones.reduce((s, l) => {
     const c = contratos.find(c => c.id === l.contratoId) || contratoVigente;
     if (!c) return s;
-    return s + (calcularLiquidacion({ ...c, ...l }).liquido || 0);
+    return s + (Calc.liquidacionDe(trabajador, c, l).liquido || 0);
   }, 0);
 
   return (
@@ -637,7 +669,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
                   </div>
                   {liquidaciones.slice(0, 3).map(l => {
                     const c = contratos.find(c => c.id === l.contratoId) || contratoVigente;
-                    const calc = c ? calcularLiquidacion({ ...c, ...l }) : null;
+                    const calc = c ? Calc.liquidacionDe(trabajador, c, l) : null;
                     return (
                       <div key={l.id} className="flex items-center justify-between px-3.5 py-2">
                         <span className="text-xs text-slate-500">{labelPeriodo(l)}</span>
@@ -2039,7 +2071,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                 <p className="text-sm text-slate-400 text-center py-8">Sin liquidaciones registradas</p>
               ) : misLiquidaciones.map(l => {
                 const c    = misContratos.find(c => c.id === l.contratoId) || contratoVigente;
-                const calc = c ? calcularLiquidacion({ ...c, ...l }) : null;
+                const calc = c ? Calc.liquidacionDe(trabajador, c, l) : null;
                 return (
                   <div key={l.id} className="rounded-xl border border-slate-100 px-4 py-3 hover:bg-slate-50/60 transition-colors">
                     <div className="flex items-center justify-between">

@@ -7,21 +7,30 @@ export const IMM_2026 = 539000;
 export const IMM_2024 = 501787;
 
 export const TASAS_AFP = {
-  // Tasas vigentes 2026: 10% cotización obligatoria + comisión AFP
+  // Tasa total de cargo del trabajador = 10% obligatorio + comisión de la AFP.
+  // Fuente: Superintendencia de Pensiones / Indicadores Previsionales Previred.
+  // Revisar cada vez que la Superintendencia publique cambios de comisión.
   'Capital':   0.1144, // 10% + 1.44%
   'Cuprum':    0.1144, // 10% + 1.44%
-  'Habitat':   0.1137, // 10% + 1.37% ← corregido (era 1.27%)
+  'Habitat':   0.1127, // 10% + 1.27% — Indicadores Previsionales Previred
+  'Modelo':    0.1058, // 10% + 0.58%
   'PlanVital': 0.1116, // 10% + 1.16%
   'ProVida':   0.1145, // 10% + 1.45%
-  'Uno':       0.0069,
+  'Uno':       0.1046, // 10% + 0.46% ← antes 0.0069, faltaba el 10% obligatorio
 };
 
 export const TASAS = {
   afp:         0.1057,
   salud:       0.07,
-  sis:         0.0154,
-  ces_trab:    0.009,  // AFC trabajador contrato INDEFINIDO (era 0.006)
-  ces_trab_pf: 0.006,  // AFC trabajador contrato PLAZO FIJO / OBRA
+  // SIS: 1,62% desde las remuneraciones de abril 2026 (Superintendencia de
+  // Pensiones, Oficio Ord. N° 7429). Es de cargo del empleador. Antes: 0.0154.
+  sis:         0.0162,
+  // AFC — Ley 19.728, tasas publicadas por la AFC:
+  //   Indefinido:  trabajador 0,6% + empleador 2,4%
+  //   Plazo fijo:  trabajador 0%   + empleador 3,0%
+  // Antes ces_trab estaba en 0.009, que no corresponde a ninguna de las dos.
+  ces_trab:    0.006,  // AFC trabajador contrato INDEFINIDO
+  ces_trab_pf: 0.0,    // AFC trabajador contrato PLAZO FIJO / OBRA — no aporta
   ces_emp:     0.024,
   ces_pf_trab: 0.0,
   ces_pf_emp:  0.03,
@@ -33,8 +42,18 @@ export const TOPE_ANIOS_INDEMNIZACION = 11;
 export const CAUSALES_CON_INDEMNIZACION = ['161'];
 
 export const EMPRESAS = ['LifeMed','Intosim','Río Tinto','Global','Celenor','MPF Ingeniería Civil'];
-export const AREAS    = ['Operaciones','Administración','Finanzas','Oficina Técnica','Otro'];
-export const AFPS     = ['Capital','Cuprum','Habitat','PlanVital','ProVida','Uno'];
+// Gerencias reales de la organización — deben calzar exactamente con la columna
+// "Gerencia 1" de la planilla de nómina, o los filtros y reportes por área quedan vacíos.
+export const AREAS    = [
+  'GERENCIA',
+  'DPTO. DE OPERACIONES',
+  'DPTO. MAQUINARIA',
+  'DPTO. OFICINA TÉCNICA',
+  'DPTO. ADMINISTRACIÓN Y RRHH',
+  'DPTO. FINANZAS Y CONTABILIDAD',
+  'DPTO. PREVENCIÓN DE RIESGOS Y MEDIO AMBIENTE',
+];
+export const AFPS     = ['Capital','Cuprum','Habitat','Modelo','PlanVital','ProVida','Uno'];
 export const ISAPRES  = ['Banmédica','Colmena','Cruz Blanca','Esencial','Masvida','Nueva Masvida','Vida Tres'];
 export const TIPOS_CONTRATO = ['Plazo fijo', 'Indefinido', 'Por obra o faena'];
 export const JORNADAS = ['Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
@@ -59,11 +78,13 @@ export const CAUSALES_TERMINO = [
 export const CAUSALES_SIN_INDEMNIZACION = ['160-1','160-3','160-4','160-7'];
 
 export const COLORES_AREA = {
-  Operaciones:      { bg:'#7c3aed', light:'#f3f0ff', text:'#6d28d9' },
-  Administración:   { bg:'#0ea5e9', light:'#e0f2fe', text:'#0369a1' },
-  Finanzas:         { bg:'#10b981', light:'#d1fae5', text:'#065f46' },
-  'Oficina Técnica':{ bg:'#f59e0b', light:'#fef3c7', text:'#92400e' },
-  Otro:             { bg:'#64748b', light:'#f1f5f9', text:'#334155' },
+  'GERENCIA':                                     { bg:'#1e1b4b', light:'#eef2ff', text:'#312e81' },
+  'DPTO. DE OPERACIONES':                         { bg:'#7c3aed', light:'#f3f0ff', text:'#6d28d9' },
+  'DPTO. MAQUINARIA':                             { bg:'#f59e0b', light:'#fef3c7', text:'#92400e' },
+  'DPTO. OFICINA TÉCNICA':                        { bg:'#0ea5e9', light:'#e0f2fe', text:'#0369a1' },
+  'DPTO. ADMINISTRACIÓN Y RRHH':                  { bg:'#ec4899', light:'#fce7f3', text:'#9d174d' },
+  'DPTO. FINANZAS Y CONTABILIDAD':                { bg:'#10b981', light:'#d1fae5', text:'#065f46' },
+  'DPTO. PREVENCIÓN DE RIESGOS Y MEDIO AMBIENTE': { bg:'#ef4444', light:'#fee2e2', text:'#991b1b' },
 };
 
 export const TRAMOS_IUT = [

@@ -8,6 +8,8 @@ import ContabilidadEstados from "./ContabilidadEstados";
 import ContabilidadTributario from "./ContabilidadTributario";
 import ContabilidadActivos from "./ContabilidadActivos";
 import ContabilidadFlujoMensual from "./ContabilidadFlujoMensual";
+import ContabilidadDepreciacion from "./ContabilidadDepreciacion";
+import ContabilidadReglasGasto from "./ContabilidadReglasGasto";
 
 // ─── Navegación interna ───────────────────────────────────────────────────────
 const NAV_ITEMS = [
@@ -57,6 +59,24 @@ const NAV_ITEMS = [
     ),
   },
   {
+    id: "reglas",
+    label: "Reglas de Gasto",
+    short: "Reglas",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
+    ),
+  },
+  {
+    id: "depreciacion",
+    label: "Depreciación",
+    short: "Deprec.",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+    ),
+  },
+  {
     id: "flujo",
     label: "Flujo Mensual",
     short: "Flujo",
@@ -99,6 +119,8 @@ function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout, onAd
       case "estados":    return <ContabilidadEstados />;
       case "tributario": return <ContabilidadTributario />;
       case "activos":    return <ContabilidadActivos />;
+      case "reglas":       return <ContabilidadReglasGasto />;
+      case "depreciacion": return <ContabilidadDepreciacion />;
       case "flujo":      return <ContabilidadFlujoMensual />;
       default:           return <ContabilidadPlanCuentas />;
     }

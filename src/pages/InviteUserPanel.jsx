@@ -11,33 +11,27 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlan } from "../hooks/usePlan";
+import {
+  USER_MODULOS,
+  ROLES as SYSTEM_ROLES,
+  ROLE_LABELS,
+  roleNeedsModulos,
+  normalizeModulos,
+  assignableRoles,
+} from "../lib/plans";
 import { db } from "../lib/firebase";
 import {
   collection, addDoc, getDocs, getDoc, updateDoc, doc,
   serverTimestamp, query, where,
 } from "firebase/firestore";
 
-const ROLES = [
-  { value: "admin_contrato",  label: "Administrador",        desc: "Acceso completo a la empresa" },
-  { value: "administrativo",  label: "Administrativo",       desc: "Acceso a módulos asignados" },
-  { value: "operador",        label: "Operador",             desc: "WorkFleet móvil por defecto + módulos asignados" },
-  { value: "mandante",        label: "Mandante",             desc: "Solo lectura de reportes" },
-  { value: "trabajador",      label: "Trabajador",           desc: "Portal de trabajador" },
-  { value: "revisor_admin",   label: "Revisor Admin",        desc: "FleetCore-I: gestiona revisores" },
-  { value: "revisor",         label: "Revisor",              desc: "FleetCore-I: solo lectura de documentos" },
-];
+// ── Derivado de la fuente única en lib/plans.js — no editar acá ──
+// Un admin_contrato no puede invitar superadmins ni otros admin_contrato.
+const ROLES = assignableRoles("admin_contrato");
 
-const ROLES_REVISOR = [
-  { value: "revisor",  label: "Revisor",  desc: "Solo lectura de documentos en FleetCore-I" },
-];
+const ROLES_REVISOR = SYSTEM_ROLES.filter(r => r.value === "revisor");
 
-const MODULOS_ADMIN = [
-  { value: "fleetcore",    label: "Oficina Técnica",  desc: "Dashboard, equipos, combustible" },
-  { value: "reportes",     label: "Reportes",         desc: "Informes y análisis" },
-  { value: "rrhh",         label: "RRHH",             desc: "Trabajadores, contratos, nómina" },
-  { value: "finanzas",     label: "Finanzas",         desc: "Flujo de caja y activos" },
-  { value: "contabilidad", label: "Contabilidad",     desc: "Libro diario y balances" },
-];
+const MODULOS_ADMIN = USER_MODULOS;
 
 const EXPIRACION_DIAS = [1, 3, 7, 30];
 
@@ -150,7 +144,7 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
         empresaId,
         empresaNombre,
         rol:          form.rol,
-        modulos:      (form.rol === 'administrativo' || form.rol === 'operador') ? form.modulos : [],
+        modulos:      roleNeedsModulos(form.rol) ? normalizeModulos(form.modulos) : [],
         emailDestino: form.emailDestino.trim() || null,
         diasExpira:   form.diasExpira,
         usada:        false,
@@ -195,7 +189,7 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
     return { label: "Activa", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
   };
 
-  const rolLabel = (rol) => ROLES.find(r => r.value === rol)?.label || rol;
+  const rolLabel = (rol) => ROLE_LABELS[rol] || rol;
 
   const activas = invitaciones.filter(i => !i.usada && (!i.expiresAt || i.expiresAt.toDate() > new Date()));
 
@@ -269,7 +263,7 @@ export default function InviteUserPanel({ empresaId, onClose, soloRevisores = fa
               </div>
 
               {/* Módulos (para administrativo y operador) */}
-              {(form.rol === 'administrativo' || form.rol === 'operador') && (
+              {roleNeedsModulos(form.rol) && (
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                     Módulos que podrá acceder

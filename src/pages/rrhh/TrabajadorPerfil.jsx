@@ -824,7 +824,7 @@ export default function TrabajadorPerfil() {
                         <div className="py-10 text-center text-sm text-slate-400">Sin liquidaciones registradas</div>
                       ) : liquidaciones.map((l, i) => {
                         const c = contratos.find(c => c.id === l.contratoId) || contratoVigente;
-                        const calc = c ? calcularLiquidacion({ ...c, ...l }) : null;
+                        const calc = c ? Calc.liquidacionDe(trabajador, c, l) : null;
                         return (
                           <div key={l.id} className={`flex items-center justify-between px-5 py-3 ${i % 2 ? 'bg-slate-50/60' : ''}`}>
                             <span className="text-sm text-slate-600">{labelPeriodo(l)}</span>
