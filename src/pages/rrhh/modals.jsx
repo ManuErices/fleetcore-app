@@ -116,10 +116,29 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   const empty = {
     nombre: '', apellidoPaterno: '', apellidoMaterno: '',
     rut: '', fechaNacimiento: '', nacionalidad: 'Chilena',
-    direccion: '', comuna: '', region: '',
-    codigoPais: '+56', telefono: '', email: '',
-    empresa: empresa?.nombre || '', area: '', cargo: '', fechaIngreso: '',
-    afp: '', prevision: 'FONASA', isapre: '',
+    sexo: '', estadoCivil: '', profesion: '', nivelEducacional: '',
+    // Domicilio desglosado: la carta certificada del Art. 162 se envía al
+    // domicilio registrado, y para eso hace falta calle, número y depto por
+    // separado, no un solo texto. `direccion` se sigue componiendo al guardar
+    // para no romper lo que ya lo lee.
+    direccion: '', direccionCalle: '', direccionNumero: '', direccionDepto: '',
+    comuna: '', region: '', ciudad: '',
+    codigoPais: '+56', telefono: '', telefonoAlternativo: '', email: '', emailPersonal: '',
+    contactoEmergencia: '', telefonoEmergencia: '',
+    tallaChaleco: '', numeroCalzado: '',
+    empresa: empresa?.nombre || '', area: '', subArea: '', cargo: '', fechaIngreso: '',
+    sucursal: '', jefeDirecto: '', rutJefeDirecto: '', sindicato: '',
+    calificacionManoObra: '', origenTrabajador: '', tipoManoObra: '',
+    // Centro de costo: se guarda el CÓDIGO como clave estable y el nombre para
+    // mostrar. Antes no había forma de asignarlo desde la interfaz — solo
+    // llegaba por importación de nómina — y Organización contaba cero en todos.
+    centroCosto: '', centroCostoNombre: '',
+    afp: '', prevision: 'FONASA', isapre: '', planIsapre: '',
+    afpDescuentoAdicional: '',
+    apvMonto: '', apvRegimen: 'B', apvInstitucion: '',
+    // Previred declara estos tres campos (posiciones 14, 18 y 19 del archivo) y
+    // hasta ahora los mandaba siempre en cero porque no existían en ninguna parte.
+    tramoAsignacion: '', cargas: '', cargasMaternales: '', cargasInvalidez: '',
     // Datos de pago: el Archivo de Pago lee banco y nroCuenta, pero no había
     // dónde cargarlos desde la interfaz. Solo llegaban por importación.
     banco: '', tipoCuenta: 'Cuenta Corriente', nroCuenta: '',
@@ -129,6 +148,18 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     tipo: 'OPERADOR', esSurtidor: false, projectId: null,
   };
   const [form,    setForm]    = useState(empty);
+  const [centrosCosto, setCentrosCosto] = useState([]);
+  const [tab, setTab] = useState('persona');
+
+  useEffect(() => {
+    if (!isOpen || !empresaId) return;
+    getDocs(collection(db, 'empresas', empresaId, 'centros_costo'))
+      .then(snap => setCentrosCosto(
+        snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.codigo || '').localeCompare(b.codigo || ''))
+      ))
+      .catch(() => {});
+  }, [isOpen, empresaId]);
   const [saving,  setSaving]  = useState(false);
   const [cargos,  setCargos]  = useState([]);  // desde bandas_salariales
   const [isCustomCargo, setIsCustomCargo] = useState(false);
@@ -147,8 +178,24 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   // 1. Inicializar el formulario solo al abrir/cerrar o cambiar editData
   useEffect(() => {
     if (isOpen) {
-      setForm(editData ? { ...empty, ...editData } : { ...empty, empresa: empresa?.nombre || '' });
+      if (editData) {
+        const base = { ...empty, ...editData };
+        // Las fichas importadas traen la dirección en un solo texto
+        // ("RICARDO ALARCON 378, ANTILHUE"). Se desarma para poder editarla por
+        // partes sin perder lo que ya estaba escrito.
+        if (base.direccion && !base.direccionCalle) {
+          const [via, ...resto] = String(base.direccion).split(',');
+          const m = String(via).trim().match(/^(.*?)\s+(\S*\d\S*)$/);
+          base.direccionCalle  = (m ? m[1] : String(via)).trim();
+          base.direccionNumero = m ? m[2].trim() : '';
+          base.direccionDepto  = resto.join(',').trim();
+        }
+        setForm(base);
+      } else {
+        setForm({ ...empty, empresa: empresa?.nombre || '' });
+      }
     }
+    setTab('persona');
   }, [editData, isOpen]);
 
   // 2. Detectar si el cargo es personalizado (solo al abrir o cuando cargan los cargos de la DB)
@@ -227,9 +274,18 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     setSaving(true);
     try {
       const telefonoCompleto = form.telefono ? `${form.codigoPais}${form.telefono}` : '';
+      // `direccion` se mantiene como texto compuesto porque lo leen los PDFs de
+      // contrato y finiquito; las partes quedan guardadas aparte para la carta
+      // certificada y para poder editarlas sin ambigüedad.
+      const direccionCompuesta = [
+        [form.direccionCalle, form.direccionNumero].filter(Boolean).join(' '),
+        form.direccionDepto,
+      ].filter(Boolean).join(', ') || form.direccion || '';
+
       const payload = {
         ...form,
         telefono:    telefonoCompleto,
+        direccion:   direccionCompuesta,
         // Campos compatibles con WorkFleet/Payroll
         tipo:        form.tipo        || 'OPERADOR',
         esSurtidor:  form.esSurtidor  || false,
@@ -287,9 +343,27 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
       title={editData ? 'Editar Trabajador' : 'Nuevo Trabajador'}
       subtitle="Registro de personal · Código del Trabajo"
       maxWidth="max-w-3xl">
-      <div className="space-y-5">
 
-        <Divider label="Datos personales" />
+      {/* Pestañas — misma división que usa Talana: los datos personales y la
+          previsión acompañan a la persona; el contrato es una relación aparte. */}
+      <div className="flex border-b border-slate-100 mb-5 -mt-1 overflow-x-auto">
+        {[
+          ['persona',   'Persona'],
+          ['laboral',   'Laboral'],
+          ['prevision', 'Previsión'],
+          ['familia',   'Grupo familiar'],
+        ].map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className={`px-4 py-2.5 text-sm font-bold whitespace-nowrap transition-colors border-b-2 -mb-px ${
+              tab === k ? 'text-violet-700 border-violet-600' : 'text-slate-400 border-transparent hover:text-slate-600'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-5" style={{ display: tab === 'persona' ? 'block' : 'none' }}>
+
+        <Divider label="Identificación" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Nombre" required>
             <input className={inp}
@@ -325,9 +399,53 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             <input className={inp} value={form.nacionalidad} onChange={e => set('nacionalidad', e.target.value)} />
           </Field>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <Field label="Sexo">
+            <select className={inp} value={form.sexo || ''} onChange={e => set('sexo', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              <option value="masculino">Masculino</option>
+              <option value="femenino">Femenino</option>
+            </select>
+          </Field>
+          <Field label="Estado civil">
+            <select className={inp} value={form.estadoCivil || ''} onChange={e => set('estadoCivil', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {['Soltero','Casado','Conviviente civil','Separado','Divorciado','Viudo'].map(x => <option key={x}>{x}</option>)}
+            </select>
+          </Field>
+          <Field label="Profesión">
+            <input className={inp} value={form.profesion || ''} onChange={e => set('profesion', e.target.value)} placeholder="Ej: Ingeniero Civil" />
+          </Field>
+          <Field label="Nivel educacional">
+            <select className={inp} value={form.nivelEducacional || ''} onChange={e => set('nivelEducacional', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {['Básica Incompleta','Básica Completa','Media Incompleta','Media Completa',
+                'Técnica Incompleta','Técnica Completa','Universitaria Incompleta','Universitaria Completa','Postgrado']
+                .map(x => <option key={x}>{x}</option>)}
+            </select>
+          </Field>
+        </div>
+
+        <Divider label="Domicilio" />
+        <p className="text-[11px] text-slate-400 -mt-2">
+          La carta de aviso de término del Art. 162 se envía a este domicilio. Manténlo actualizado.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="sm:col-span-2">
+            <Field label="Calle">
+              <input className={inp} value={form.direccionCalle || ''} onChange={e => set('direccionCalle', e.target.value)} placeholder="Av. Patricio Lynch" />
+            </Field>
+          </div>
+          <Field label="Número">
+            <input className={inp} value={form.direccionNumero || ''} onChange={e => set('direccionNumero', e.target.value)} placeholder="950" />
+          </Field>
+          <Field label="Depto / casa">
+            <input className={inp} value={form.direccionDepto || ''} onChange={e => set('direccionDepto', e.target.value)} placeholder="Dpto C22" />
+          </Field>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Field label="Dirección">
-            <input className={inp} value={form.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle y número" />
+          <Field label="Ciudad">
+            <input className={inp} value={form.ciudad || ''} onChange={e => set('ciudad', e.target.value)} placeholder="Valdivia" />
           </Field>
           <Field label="Región">
             <select className={inp} value={form.region} onChange={e => { set('region', e.target.value); set('comuna', ''); }}>
@@ -365,6 +483,38 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             <input type="email" className={inp} value={form.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.cl" />
           </Field>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Teléfono alternativo">
+            <input className={inp} value={form.telefonoAlternativo || ''} onChange={e => set('telefonoAlternativo', e.target.value)} placeholder="Otro contacto" />
+          </Field>
+          <Field label="Email personal">
+            <input type="email" className={inp} value={form.emailPersonal || ''} onChange={e => set('emailPersonal', e.target.value)} placeholder="personal@gmail.com" />
+          </Field>
+        </div>
+
+        <Divider label="Emergencia y EPP" />
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="sm:col-span-2">
+            <Field label="Contacto de emergencia">
+              <input className={inp} value={form.contactoEmergencia || ''} onChange={e => set('contactoEmergencia', e.target.value)} placeholder="Nombre y parentesco" />
+            </Field>
+          </div>
+          <Field label="Teléfono de emergencia">
+            <input className={inp} value={form.telefonoEmergencia || ''} onChange={e => set('telefonoEmergencia', e.target.value)} placeholder="9 1234 5678" />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Talla chaleco">
+              <input className={inp} value={form.tallaChaleco || ''} onChange={e => set('tallaChaleco', e.target.value.toUpperCase())} placeholder="M" />
+            </Field>
+            <Field label="N° calzado">
+              <input className={inp} value={form.numeroCalzado || ''} onChange={e => set('numeroCalzado', e.target.value)} placeholder="41" />
+            </Field>
+          </div>
+        </div>
+      </div>
+
+      {/* ── LABORAL ── */}
+      <div className="space-y-5" style={{ display: tab === 'laboral' ? 'block' : 'none' }}>
 
         <Divider label="Datos laborales" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -379,6 +529,33 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
               <option value="">Seleccionar…</option>
               {AREAS.map(a => <option key={a}>{a}</option>)}
             </select>
+          </Field>
+          <Field label="Centro de costo">
+            <select className={inp}
+              value={form.centroCosto || ''}
+              onChange={e => {
+                const cc = centrosCosto.find(c => c.codigo === e.target.value);
+                setForm(f => ({
+                  ...f,
+                  centroCosto: e.target.value,
+                  centroCostoNombre: cc?.nombre || '',
+                }));
+              }}>
+              <option value="">Sin asignar</option>
+              {centrosCosto.map(c => (
+                <option key={c.id} value={c.codigo}>{c.codigo} · {c.nombre}</option>
+              ))}
+              {/* Valor heredado de una importación que no calza con ningún centro
+                  actual: se conserva visible para no perderlo en silencio. */}
+              {form.centroCosto && !centrosCosto.some(c => c.codigo === form.centroCosto) && (
+                <option value={form.centroCosto}>{form.centroCosto} (no registrado)</option>
+              )}
+            </select>
+            {centrosCosto.length === 0 && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                No hay centros de costo creados. Se crean en Organización.
+              </p>
+            )}
           </Field>
           <Field label="Cargo">
             <select className={inp}
@@ -430,6 +607,85 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         </div>
 
+        <Divider label="Estructura y reporte" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Sub-área / Gerencia 2">
+            <input className={inp} value={form.subArea || ''} onChange={e => set('subArea', e.target.value)} placeholder="Opcional" />
+          </Field>
+          <Field label="Sucursal">
+            <input className={inp} value={form.sucursal || ''} onChange={e => set('sucursal', e.target.value)} placeholder="Ej: Nuevo Cobre" />
+          </Field>
+          <Field label="Sindicato">
+            <input className={inp} value={form.sindicato || ''} onChange={e => set('sindicato', e.target.value)} placeholder="Si corresponde" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Jefe directo">
+            <input className={inp} value={form.jefeDirecto || ''} onChange={e => set('jefeDirecto', e.target.value)} placeholder="Nombre" />
+          </Field>
+          <Field label="RUT del jefe">
+            <input className={inp} value={form.rutJefeDirecto || ''} onChange={e => set('rutJefeDirecto', formatRut(e.target.value))} placeholder="12.345.678-9" maxLength={12} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Mano de obra">
+            <select className={inp} value={form.tipoManoObra || ''}
+              onChange={e => {
+                setForm(f => ({ ...f, tipoManoObra: e.target.value,
+                  // `tipo` es el campo que consumen Payroll y Consolidado
+                  tipo: e.target.value === 'INDIRECTO' ? 'GASTO_GENERAL' : 'OPERADOR' }));
+              }}>
+              <option value="">Seleccionar…</option>
+              <option value="DIRECTO">Directa (MOD)</option>
+              <option value="INDIRECTO">Indirecta (MOI)</option>
+            </select>
+          </Field>
+          <Field label="Calificación">
+            <select className={inp} value={form.calificacionManoObra || ''} onChange={e => set('calificacionManoObra', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              <option>Calificada</option>
+              <option>No Calificada</option>
+            </select>
+          </Field>
+          <Field label="Origen">
+            <select className={inp} value={form.origenTrabajador || ''} onChange={e => set('origenTrabajador', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              <option>Local</option>
+              <option>Externo</option>
+            </select>
+          </Field>
+        </div>
+
+        <Divider label="Datos de pago" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Banco">
+            <input className={inp} value={form.banco || ''}
+              onChange={e => set('banco', e.target.value.toUpperCase())}
+              placeholder="Ej: BANCOESTADO" />
+          </Field>
+          <Field label="Tipo de cuenta">
+            <select className={inp} value={form.tipoCuenta || ''} onChange={e => set('tipoCuenta', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {['Cuenta Corriente','Cuenta Vista','Cuenta RUT','Cuenta de Ahorro'].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="N° de cuenta">
+            <input className={inp} value={form.nroCuenta || ''}
+              onChange={e => set('nroCuenta', e.target.value.replace(/\D/g, ''))}
+              placeholder="Solo números" />
+          </Field>
+        </div>
+
+        <Divider label="Observaciones" />
+        <Field label="Observaciones">
+          <textarea className={inp} rows={2} value={form.observaciones}
+            onChange={e => set('observaciones', e.target.value)} placeholder="Notas adicionales (opcional)" />
+        </Field>
+      </div>
+
+      {/* ── PREVISIÓN ── */}
+      <div className="space-y-5" style={{ display: tab === 'prevision' ? 'block' : 'none' }}>
+
         <Divider label="Previsión y salud" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="AFP">
@@ -461,25 +717,40 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         )}
 
-        <Divider label="Datos de pago" />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Field label="Banco">
-            <input className={inp} value={form.banco || ''}
-              onChange={e => set('banco', e.target.value.toUpperCase())}
-              placeholder="Ej: BANCOESTADO" />
-          </Field>
-          <Field label="Tipo de cuenta">
-            <select className={inp} value={form.tipoCuenta || ''} onChange={e => set('tipoCuenta', e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {['Cuenta Corriente','Cuenta Vista','Cuenta RUT','Cuenta de Ahorro'].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="N° de cuenta">
-            <input className={inp} value={form.nroCuenta || ''}
-              onChange={e => set('nroCuenta', e.target.value.replace(/\D/g, ''))}
-              placeholder="Solo números" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="% descuento adicional AFP">
+            <input className={inp} value={form.afpDescuentoAdicional || ''}
+              onChange={e => set('afpDescuentoAdicional', e.target.value.replace(/[^\d.,]/g, ''))}
+              placeholder="Ej: 2" />
           </Field>
         </div>
+
+        <Divider label="APV — Ahorro Previsional Voluntario" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Monto mensual">
+            <input className={inp} value={form.apvMonto || ''}
+              onChange={e => set('apvMonto', e.target.value.replace(/\D/g, ''))}
+              placeholder="0" inputMode="numeric" />
+          </Field>
+          <Field label="Régimen">
+            <select className={inp} value={form.apvRegimen || 'B'} onChange={e => set('apvRegimen', e.target.value)}>
+              <option value="A">A — bonificación fiscal 15%</option>
+              <option value="B">B — rebaja la base del impuesto</option>
+            </select>
+          </Field>
+          <Field label="Institución">
+            <input className={inp} value={form.apvInstitucion || ''}
+              onChange={e => set('apvInstitucion', e.target.value)}
+              placeholder="Ej: Habitat" />
+          </Field>
+        </div>
+        {parseInt(form.apvMonto) > 0 && (
+          <p className="text-[11px] text-slate-500 leading-snug -mt-2">
+            {form.apvRegimen === 'A'
+              ? 'En régimen A el aporte se descuenta del líquido pero no rebaja el impuesto único: la franquicia llega como bonificación fiscal del 15% depositada en la cuenta.'
+              : 'En régimen B el aporte rebaja la renta tributable, con tope de 50 UF mensuales, así que baja el impuesto único del mes.'}
+          </p>
+        )}
         <label className="flex items-start gap-2.5 cursor-pointer">
           <input type="checkbox" className="mt-0.5 rounded" checked={form.esPensionado === true}
             onChange={e => set('esPensionado', e.target.checked)} />
@@ -488,13 +759,51 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             Queda exento de cotización AFP, SIS y seguro de cesantía. Sigue cotizando salud.
           </span>
         </label>
+      </div>
 
-        <Divider label="Observaciones" />
-        <Field label="Observaciones">
-          <textarea className={inp} rows={2} value={form.observaciones}
-            onChange={e => set('observaciones', e.target.value)} placeholder="Notas adicionales (opcional)" />
-        </Field>
+      {/* ── GRUPO FAMILIAR ── */}
+      <div className="space-y-5" style={{ display: tab === 'familia' ? 'block' : 'none' }}>
 
+        <Divider label="Asignación familiar" />
+        <p className="text-[11px] text-slate-400 -mt-2 leading-snug">
+          El archivo Previred declara el tramo y el número de cargas en las posiciones 14, 18 y 19.
+          Hasta ahora se enviaban siempre en cero porque no había dónde registrarlos.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Tramo de asignación familiar">
+            <select className={inp} value={form.tramoAsignacion || ''} onChange={e => set('tramoAsignacion', e.target.value)}>
+              <option value="">Sin asignación / no acredita</option>
+              <option value="A">Tramo A — renta más baja</option>
+              <option value="B">Tramo B</option>
+              <option value="C">Tramo C</option>
+              <option value="D">Tramo D — sin derecho a monto</option>
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Cargas simples">
+            <input className={inp} value={form.cargas || ''}
+              onChange={e => set('cargas', e.target.value.replace(/\D/g, ''))} placeholder="0" inputMode="numeric" />
+          </Field>
+          <Field label="Cargas maternales">
+            <input className={inp} value={form.cargasMaternales || ''}
+              onChange={e => set('cargasMaternales', e.target.value.replace(/\D/g, ''))} placeholder="0" inputMode="numeric" />
+          </Field>
+          <Field label="Cargas por invalidez">
+            <input className={inp} value={form.cargasInvalidez || ''}
+              onChange={e => set('cargasInvalidez', e.target.value.replace(/\D/g, ''))} placeholder="0" inputMode="numeric" />
+          </Field>
+        </div>
+        <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+          <p className="text-[11px] text-slate-500 leading-snug">
+            El tramo lo determina la renta del trabajador y lo acredita el IPS. Revísalo cada año:
+            si el tramo está mal, la asignación familiar se paga por un monto que no corresponde
+            y queda mal declarada en Previred.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
         <div className="flex justify-end gap-3 pt-2">
           <CancelBtn onClose={onClose} />
           <SaveBtn saving={saving} onClick={handleSave}
@@ -508,7 +817,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 // ─── FichaTrabajador ──────────────────────────────────────────────────────────
 
 function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa } = useEmpresa();
   const [contratos,     setContratos]     = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [anexos,        setAnexos]        = useState([]);
@@ -1145,7 +1454,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 
         <div className="flex justify-between items-center pt-2">
           {calc && (
-            <button onClick={() => generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel)}
+            <button onClick={() => generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { empresa })}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
               📄 Vista previa PDF
             </button>
@@ -1850,7 +2159,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
 // ─── HistorialModal ───────────────────────────────────────────────────────────
 
 function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquidaciones, finiquitos }) {
-  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [tab, setTab] = useState('contratos');
   const [pdfPreview, setPdfPreview] = useState(null);
   // Documentos adjuntos
@@ -2081,7 +2390,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
                           {l.estado || 'pendiente'}
                         </span>
                         <span className="text-sm font-black text-emerald-600">{calc ? fmt(calc.liquido) : '—'}</span>
-                        {c && <button onClick={() => setPdfPreview({ url: generarPDFLiquidacion(l, trabajador, c, { preview: true }), filename: `Liquidación — ${labelPeriodo(l)}` })}
+                        {c && <button onClick={() => setPdfPreview({ url: generarPDFLiquidacion(l, trabajador, c, { preview: true, empresa }), filename: `Liquidación — ${labelPeriodo(l)}` })}
                           className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver PDF liquidación">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                         </button>}

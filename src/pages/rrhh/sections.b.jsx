@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db, auth } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { writeBatch, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
@@ -1481,12 +1481,326 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
   );
 }
 
+/**
+ * ¿Este trabajador pertenece a este centro de costo?
+ *
+ * La comparación era `t.centroCosto === cc.codigo || t.centroCosto === cc.id`,
+ * exacta y sensible a mayúsculas. El importador de nómina guarda en
+ * `centroCosto` lo que trae la planilla —que puede ser el nombre, no el código—
+ * así que ningún trabajador calzaba y todos los centros mostraban cero
+ * asignados. Se acepta código, id o nombre, sin distinguir tildes ni caja.
+ */
+const claveCC = (v) => String(v ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ').trim().toUpperCase();
+
+function perteneceA(trabajador, cc) {
+  const valores = [trabajador.centroCosto, trabajador.codigoCentroCosto, trabajador.centroCostoNombre]
+    .filter(Boolean).map(claveCC);
+  if (!valores.length) return false;
+  const objetivo = [cc.codigo, cc.id, cc.nombre].filter(Boolean).map(claveCC);
+  return valores.some(v => objetivo.includes(v));
+}
+
+/**
+ * Detalle de un centro de costo: quién está asignado, cuánto cuesta cada uno y
+ * quién quedó fuera. Antes las tarjetas no eran clickeables y no había forma de
+ * ver la composición de un centro ni de mover gente entre centros.
+ */
+function CentroCostoDetalleModal({ centro, todosActivos, contratos, liquidaciones, centros, empresaId, onClose, onReload }) {
+  const [tab, setTab] = useState('asignados');
+  const [seleccion, setSeleccion] = useState(new Set());
+  const [busqueda, setBusqueda] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
+
+  if (!centro) return null;
+
+  const hoy = new Date();
+  const mesAct = String(hoy.getMonth() + 1).padStart(2, '0');
+  const anioAct = String(hoy.getFullYear());
+
+  // Costo individual: liquidación del mes si existe, si no el sueldo base pactado
+  const costoDe = (t) => {
+    const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
+    if (!contrato) return { monto: 0, fuente: 'sin contrato' };
+    const liq = liquidaciones.find(l => l.trabajadorId === t.id && l.mes === mesAct && l.anio === anioAct);
+    if (!liq) return { monto: parseInt(contrato.sueldoBase) || 0, fuente: 'sueldo base' };
+    const calc = liquidacionDe(t, contrato, liq);
+    return { monto: calc.imponible + calc.noImponible, fuente: 'liquidación' };
+  };
+
+  const asignados = todosActivos.filter(t => perteneceA(t, centro))
+    .map(t => ({ ...t, ...costoDe(t) }))
+    .sort((a, b) => b.monto - a.monto);
+
+  const costoTotal = asignados.reduce((s, t) => s + t.monto, 0);
+  const pct = centro.presupuesto > 0 ? Math.round((costoTotal / centro.presupuesto) * 100) : 0;
+  const sobrePpto = centro.presupuesto > 0 && costoTotal > centro.presupuesto;
+
+  // Composición por área — dice de dónde sale el costo del centro
+  const porArea = Object.entries(
+    asignados.reduce((acc, t) => {
+      const k = t.area || 'Sin área';
+      acc[k] = acc[k] || { n: 0, monto: 0 };
+      acc[k].n++; acc[k].monto += t.monto;
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1].monto - a[1].monto);
+
+  // Disponibles = los de otro centro o sin asignar
+  const disponibles = todosActivos
+    .filter(t => !perteneceA(t, centro))
+    .map(t => {
+      const suyo = centros.find(c => perteneceA(t, c));
+      return { ...t, _centroActual: suyo };
+    })
+    .filter(t => {
+      if (!busqueda.trim()) return true;
+      const q = busqueda.trim().toLowerCase();
+      return `${t.nombre} ${t.apellidoPaterno} ${t.apellidoMaterno} ${t.rut} ${t.cargo}`.toLowerCase().includes(q);
+    })
+    .sort((a, b) => {
+      // Los que no tienen centro primero: son los que hay que resolver
+      if (!a._centroActual && b._centroActual) return -1;
+      if (a._centroActual && !b._centroActual) return 1;
+      return (a.apellidoPaterno || '').localeCompare(b.apellidoPaterno || '');
+    });
+
+  const sinAsignar = todosActivos.filter(t => !centros.some(c => perteneceA(t, c))).length;
+
+  const toggle = (id) => setSeleccion(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const guardarAsignacion = async () => {
+    if (!seleccion.size || !empresaId) return;
+    setGuardando(true);
+    try {
+      // writeBatch: 62 trabajadores caben de sobra en una sola operación
+      const batch = writeBatch(db);
+      seleccion.forEach(id => {
+        batch.update(doc(db, 'empresas', empresaId, 'trabajadores', id), {
+          centroCosto: centro.codigo,
+          centroCostoNombre: centro.nombre,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      setSeleccion(new Set());
+      setTab('asignados');
+      onReload();
+    } catch (e) { alert('Error al asignar: ' + e.message); }
+    setGuardando(false);
+  };
+
+  const quitar = async (id) => {
+    if (!empresaId) return;
+    try {
+      await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', id), {
+        centroCosto: '', centroCostoNombre: '', updatedAt: serverTimestamp(),
+      });
+      onReload();
+    } catch (e) { alert('Error: ' + e.message); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" style={{ background: 'rgba(15,12,41,0.6)' }}
+      onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+
+        {/* Cabecera */}
+        <div className="px-6 py-5 relative" style={{ background: 'linear-gradient(135deg,#0f0c29 0%,#302b63 100%)' }}>
+          <button onClick={onClose} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+            <svg className="w-5 h-5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-white/10 text-violet-200">{centro.codigo}</span>
+          <h3 className="text-xl font-black text-white mt-1.5">{centro.nombre}</h3>
+          {centro.descripcion && <p className="text-xs text-violet-200/70 mt-0.5">{centro.descripcion}</p>}
+
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            {[
+              { l: 'Personas', v: asignados.length, c: '#e0d9ff' },
+              { l: 'Costo del mes', v: fmt(costoTotal), c: sobrePpto ? '#fca5a5' : '#6ee7b7' },
+              { l: 'Presupuesto', v: centro.presupuesto > 0 ? fmt(centro.presupuesto) : '—', c: '#e0d9ff' },
+            ].map(({ l, v, c }) => (
+              <div key={l}>
+                <p className="text-[9px] font-black uppercase tracking-widest text-white/40">{l}</p>
+                <p className="text-base font-black mt-0.5" style={{ color: c }}>{v}</p>
+              </div>
+            ))}
+          </div>
+
+          {centro.presupuesto > 0 && (
+            <div className="mt-3">
+              <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: sobrePpto ? '#ef4444' : pct > 80 ? '#f59e0b' : '#a78bfa' }} />
+              </div>
+              <p className="text-[10px] mt-1" style={{ color: sobrePpto ? '#fca5a5' : 'rgba(196,181,253,0.7)' }}>
+                {pct}% ejecutado{sobrePpto && ` · excede en ${fmt(costoTotal - centro.presupuesto)}`}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Pestañas */}
+        <div className="flex border-b border-slate-100 px-4">
+          {[
+            ['asignados', `Asignados (${asignados.length})`],
+            ['areas', 'Composición'],
+            ['agregar', 'Agregar personas'],
+          ].map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`px-4 py-3 text-sm font-bold transition-colors border-b-2 -mb-px ${
+                tab === k ? 'text-violet-700 border-violet-600' : 'text-slate-400 border-transparent hover:text-slate-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+
+          {tab === 'asignados' && (
+            asignados.length === 0 ? (
+              <p className="text-center text-slate-400 text-sm py-12">
+                Nadie asignado todavía. Usa "Agregar personas".
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    {['Trabajador', 'Cargo', 'Área', 'Costo mes', ''].map(h => (
+                      <th key={h} className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left border-b border-slate-100">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {asignados.map(t => (
+                    <tr key={t.id} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-2">
+                        <p className="font-bold text-slate-700">{t.apellidoPaterno} {t.nombre}</p>
+                        <p className="text-[11px] text-slate-400 font-mono">{t.rut}</p>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-slate-500 max-w-[160px] truncate">{t.cargo || '—'}</td>
+                      <td className="px-4 py-2 text-xs text-slate-500 max-w-[140px] truncate">{t.area || '—'}</td>
+                      <td className="px-4 py-2">
+                        <p className="font-mono font-bold text-slate-700">{fmt(t.monto)}</p>
+                        <p className="text-[10px] text-slate-300">{t.fuente}</p>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <button onClick={() => quitar(t.id)} title="Quitar del centro"
+                          className="text-[11px] text-slate-400 hover:text-red-600 font-semibold transition-colors">
+                          Quitar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50">
+                    <td colSpan={3} className="px-4 py-2.5 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</td>
+                    <td className="px-4 py-2.5 font-mono font-black text-slate-800">{fmt(costoTotal)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            )
+          )}
+
+          {tab === 'areas' && (
+            <div className="p-4 space-y-2">
+              {porArea.length === 0 && <p className="text-center text-slate-400 text-sm py-8">Sin datos</p>}
+              {porArea.map(([area, d]) => (
+                <div key={area} className="rounded-xl border border-slate-100 px-4 py-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-sm font-bold text-slate-700">{area}</p>
+                    <p className="font-mono font-bold text-slate-700">{fmt(d.monto)}</p>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-violet-500 rounded-full"
+                      style={{ width: `${costoTotal > 0 ? (d.monto / costoTotal) * 100 : 0}%` }} />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {d.n} persona{d.n !== 1 ? 's' : ''} · {costoTotal > 0 ? Math.round((d.monto / costoTotal) * 100) : 0}% del centro
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'agregar' && (
+            <div className="p-4">
+              {sinAsignar > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 mb-3">
+                  <p className="text-xs font-bold text-amber-800">
+                    {sinAsignar} trabajador{sinAsignar !== 1 ? 'es' : ''} activo{sinAsignar !== 1 ? 's' : ''} sin centro de costo
+                  </p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    Su costo no se refleja en ningún presupuesto. Aparecen primeros en la lista.
+                  </p>
+                </div>
+              )}
+              <input className={inp + ' mb-3'} placeholder="Buscar por nombre, RUT o cargo…"
+                value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+
+              <div className="space-y-1">
+                {disponibles.map(t => (
+                  <label key={t.id}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                    <input type="checkbox" className="rounded" checked={seleccion.has(t.id)} onChange={() => toggle(t.id)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-700 truncate">{t.apellidoPaterno} {t.nombre}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{t.cargo || 'Sin cargo'} · {t.area || 'Sin área'}</p>
+                    </div>
+                    {t._centroActual ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 whitespace-nowrap">
+                        {t._centroActual.codigo}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700 whitespace-nowrap">
+                        Sin centro
+                      </span>
+                    )}
+                  </label>
+                ))}
+                {disponibles.length === 0 && (
+                  <p className="text-center text-slate-400 text-sm py-8">Todos los activos ya están en este centro</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Pie */}
+        {tab === 'agregar' && (
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">
+              {seleccion.size > 0
+                ? `${seleccion.size} seleccionado${seleccion.size !== 1 ? 's' : ''}`
+                : 'Marca a quienes quieras mover a este centro'}
+            </p>
+            <button onClick={guardarAsignacion} disabled={!seleccion.size || guardando}
+              className="px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-colors">
+              {guardando ? 'Asignando…' : `Asignar a ${centro.codigo}`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, onReload }) {
   const { empresaId } = useEmpresa();
   const [form, setForm] = useState({ codigo: '', nombre: '', descripcion: '', presupuesto: '' });
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [detalle, setDetalle] = useState(null);
 
   const activos = trabajadores.filter(t => t.estado === 'activo');
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
@@ -1528,7 +1842,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
   // Calcular costo real por centro de costo basado en liquidaciones
   const centrosConData = centros.map(cc => {
     // Trabajadores asignados al centro
-    const asignados = activos.filter(t => t.centroCosto === cc.codigo || t.centroCosto === cc.id);
+    const asignados = activos.filter(t => perteneceA(t, cc));
 
     // Sumar liquidaciones del último mes de los trabajadores asignados
     const hoy = new Date();
@@ -1611,7 +1925,8 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
             const sobrePpto = cc.presupuesto > 0 && cc._costoMes > cc.presupuesto;
             const barColor = sobrePpto ? '#ef4444' : cc._pct > 80 ? '#f59e0b' : '#7c3aed';
             return (
-              <div key={cc.id} className="rounded-xl border p-4 bg-white shadow-sm transition-shadow hover:shadow-md"
+              <div key={cc.id} onClick={() => setDetalle(cc)}
+                className="rounded-xl border p-4 bg-white shadow-sm transition-all hover:shadow-md hover:border-violet-300 cursor-pointer"
                 style={{ borderColor: sobrePpto ? '#fecaca' : 'rgba(0,0,0,0.06)' }}>
                 {/* Header centro */}
                 <div className="flex items-start justify-between mb-3">
@@ -1624,10 +1939,10 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
                     {cc.descripcion && <p className="text-[11px] text-slate-400">{cc.descripcion}</p>}
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleEdit(cc)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors">
+                    <button onClick={e => { e.stopPropagation(); handleEdit(cc); }} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
-                    <button onClick={() => setConfirm(cc)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors">
+                    <button onClick={e => { e.stopPropagation(); setConfirm(cc); }} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
@@ -1676,6 +1991,19 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
             );
           })}
         </div>
+      )}
+
+      {detalle && (
+        <CentroCostoDetalleModal
+          centro={centrosConData.find(c => c.id === detalle.id) || detalle}
+          todosActivos={activos}
+          contratos={contratos}
+          liquidaciones={liquidaciones}
+          centros={centros}
+          empresaId={empresaId}
+          onClose={() => setDetalle(null)}
+          onReload={onReload}
+        />
       )}
 
       {/* Confirm delete */}

@@ -69,9 +69,16 @@ function calcularLiquidacion(rem) {
   const otrosImp   = parseInt(rem.otrosImponibles) || 0;
   const otrosNoImp = parseInt(rem.otrosNoImponibles) || 0;
 
-  // Gratificación garantizada (Art. 46 CT) = 4.75 IMM / 12
-  // También es proporcional a los días trabajados en el mes
-  const gratMensual = Math.round(IMM_2026 * 4.75 / 12 * fp * fdias);
+  // Gratificación legal (Art. 50 CT): 25% de lo devengado por el trabajador,
+  // CON TOPE de 4,75 ingresos mínimos mensuales al año (4,75 × IMM ÷ 12 al mes).
+  //
+  // Es un mínimo entre ambos, no el tope directo. Antes se pagaba siempre el
+  // tope: un trabajador con sueldo base de $600.000 recibía $213.354 de
+  // gratificación cuando le corresponden $150.000. El error inflaba el
+  // imponible y con él AFP, salud, cesantía e impuesto de todos.
+  const topeGrat  = IMM_2026 * 4.75 / 12;
+  const baseGrat  = base + bProd + otrosImp;   // remuneración devengada del mes
+  const gratMensual = Math.round(Math.min(baseGrat * 0.25, topeGrat * fp * fdias));
 
   // ── Base imponible previsional ──
   const imponible   = base + bProd + montoHE + otrosImp + gratMensual;
@@ -103,7 +110,17 @@ function calcularLiquidacion(rem) {
     : Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
   // SIS: cargo empleador (referencial, no descuenta al trabajador)
   const sisM  = esPensionado ? 0 : Math.round(imponible * TASAS.sis);
-  const totalDescuentos = afpM + salM + cesM;
+  // ── APV — Ahorro Previsional Voluntario (Art. 20 DL 3.500) ──
+  // Régimen A: el trabajador recibe la bonificación fiscal del 15%, y el aporte
+  //            NO rebaja la base del impuesto único.
+  // Régimen B: el aporte SÍ rebaja la renta tributable, con tope de 50 UF
+  //            mensuales. El tope se aplica en calcularRentaTributable.
+  // Se descuenta del líquido en ambos casos: la plata sale igual.
+  const apvMonto    = Math.max(0, parseInt(rem.apvMonto) || 0);
+  const apvRegimen  = apvMonto > 0 ? (rem.apvRegimen || 'B') : '';
+  const apvM        = esPensionado ? 0 : apvMonto;
+
+  const totalDescuentos = afpM + salM + cesM + apvM;
 
   // ── Descuentos manuales ──
   const descAdicional = parseInt(rem.descuentoAdicional) || 0;
@@ -114,7 +131,8 @@ function calcularLiquidacion(rem) {
   return {
     base, bProd, montoHE, bColacion, bMovil, viaticos, otrosImp, otrosNoImp, gratMensual,
     imponible, noImponible,
-    afpM, salM, sisM, cesM, totalDescuentos,
+    afpM, salM, sisM, cesM, apvM, apvRegimen, apvInstitucion: rem.apvInstitucion || '',
+    totalDescuentos,
     descAdicional, anticipo, liquido,
     diasTrab, fdias,          // expuestos para auditoría / PDF
     baseCompleto, gratCompleto: Math.round(IMM_2026 * 4.75 / 12 * fp),
@@ -298,8 +316,18 @@ function calcularIUT(renImponible, utm) {
   const impuesto = Math.max(0, Math.round((renImponible * tramo.tasa) - (tramo.rebaja * utm)));
   return impuesto;
 }
+// Valor de la UF de referencia para el tope de APV en régimen B.
+// El módulo no tenía ninguna constante de UF: revisar contra el valor vigente,
+// o pasarlo por `calc.uf` cuando exista una fuente de indicadores en línea.
+const UF_REFERENCIA = 39500;
+
 function calcularRentaTributable(calc) {
-  return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.sisM - calc.cesM);
+  // El APV en régimen B rebaja la base del impuesto único, con tope de 50 UF
+  // mensuales. En régimen A no rebaja nada: la franquicia llega como
+  // bonificación fiscal, no como menor impuesto.
+  const topeApvB = Math.round(50 * (calc.uf || UF_REFERENCIA));
+  const rebajaApv = calc.apvRegimen === 'B' ? Math.min(calc.apvM || 0, topeApvB) : 0;
+  return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.sisM - calc.cesM - rebajaApv);
 }
 function calcularLiquidacionConIUT(rem, utm) {
   const calc     = calcularLiquidacion(rem);
@@ -440,7 +468,7 @@ function generarTXTPrevired(liquidaciones, mes, anio) {
     fila[17] = tipoCtto(contrato.tipoContrato);     // Tipo contrato
     fila[18] = String(trab.cargas || '0');           // Cargas familiares
     fila[19] = String(trab.cargasMaternales || '0'); // Cargas maternales
-    fila[20] = '0';                           // Cargas invalidez
+    fila[20] = String(trab.cargasInvalidez || '0'); // Cargas invalidez
     fila[21] = '0';
     fila[22] = '0';
     fila[23] = '0';
@@ -524,6 +552,9 @@ function remDe(trabajador, contrato, liq) {
     ...(liq || {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,
+    apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
+    apvRegimen:    liq?.apvRegimen    ?? trabajador?.apvRegimen,
+    apvInstitucion:liq?.apvInstitucion?? trabajador?.apvInstitucion,
     prevision:    trabajador?.prevision    ?? contrato?.prevision,
     isapre:       trabajador?.isapre       ?? contrato?.isapre,
     planIsapre:   trabajador?.planIsapre   ?? contrato?.planIsapre,

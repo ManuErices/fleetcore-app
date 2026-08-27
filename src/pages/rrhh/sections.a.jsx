@@ -10,6 +10,7 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
 import ImportarNominaModal from './ImportarNominaModal';
+import CargaMasivaModal from './CargaMasivaModal';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
@@ -1082,7 +1083,7 @@ function ContratosSection() {
 }
 
 function RemuneracionesSection() {
-  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
+  const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos, setContratos] = useState([]);
@@ -1096,6 +1097,7 @@ function RemuneracionesSection() {
   const [filtroAnio, setFiltroAnio] = useState(String(new Date().getFullYear()));
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [busqueda, setBusqueda] = useState('');
+  const [cargaMasiva, setCargaMasiva] = useState(false);
   const [pagina, setPagina] = useState(1);
   const POR_PAGINA = 10;
 
@@ -1319,6 +1321,13 @@ function RemuneracionesSection() {
               <p className="text-xs text-white/70 mt-0.5">Art. 54 CT · Previred · Cotizaciones previsionales</p>
             </div>
           </div>
+          <button onClick={() => setCargaMasiva(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 font-bold text-sm rounded-xl transition-all active:scale-95"
+            style={{ background: "rgba(255,255,255,0.06)", color: "#c4b5fd", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h10M4 18h10" /></svg>
+            Carga masiva
+          </button>
           <button onClick={openNew} className="flex items-center gap-1.5 px-4 py-2 font-bold text-sm rounded-xl transition-all active:scale-95" style={{ background: "rgba(255,255,255,0.12)", color: "#e0d9ff", border: "1px solid rgba(255,255,255,0.15)" }}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
             Nueva Liquidación
@@ -1429,7 +1438,7 @@ function RemuneracionesSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
+                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </button>
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
@@ -1463,6 +1472,16 @@ function RemuneracionesSection() {
       </div>
 
       <LiquidacionModal isOpen={modal} onClose={() => setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} onSaved={load} />
+      <CargaMasivaModal
+        isOpen={cargaMasiva}
+        onClose={() => setCargaMasiva(false)}
+        trabajadores={trabajadores}
+        contratos={contratos}
+        liquidaciones={liquidaciones}
+        mes={filtroMes}
+        anio={filtroAnio}
+        onSaved={load}
+      />
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
