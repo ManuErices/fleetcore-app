@@ -198,9 +198,10 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
 
           </nav>
         </div>
+      </header>
 
-        {/* Mobile menu */}
-        {showMobileMenu && (
+      {/* Mobile menu */}
+      {showMobileMenu && (
           <>
             <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
             <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
@@ -215,7 +216,6 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                   </svg>
                 </button>
               </div>
-            </div>
               <nav className="flex-1 overflow-y-auto p-4 space-y-1">
                 <MobileNavLink to="/fleetcore" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
                 <div className="h-px bg-slate-200 my-4" />
@@ -274,9 +274,9 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
                   Cerrar sesión
                 </button>
               </nav>
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        )}
 
       <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         <Routes>
