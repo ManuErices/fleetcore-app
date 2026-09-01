@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -187,36 +187,37 @@ export default function ReporteWorkFleet() {
     cargarDatos();
   }, [empresaId]);
 
-  // Cargar reportes desde Firebase
-  useEffect(() => {
+  // Cargar reportes desde Firebase.
+  // Se extrae como callback para poder refrescar el listado tras crear o
+  // importar reportes, en vez de usar window.location.reload(): ese reload
+  // remontaba toda la app y hacía que ReportesShell volviera a su pestaña
+  // inicial, que es Reporte Combustible.
+  const cargarReportes = useCallback(async () => {
     if (!empresaId) return;
-    const cargarReportes = async () => {
-      setLoading(true);
-      try {
-        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
-        const q = query(reportesRef, orderBy('fecha', 'desc'));
-        const querySnapshot = await getDocs(q);
-        
-        const reportesData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        setReportes(reportesData);
-        
-        // Extraer operadores únicos
-        const operadoresUnicos = [...new Set(reportesData.map(r => r.operador))].filter(Boolean);
-        setOperadores(operadoresUnicos);
-        
-        setLoading(false);
-      } catch (error) {
-        console.error("Error cargando reportes:", error);
-        setLoading(false);
-      }
-    };
+    setLoading(true);
+    try {
+      const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
+      const q = query(reportesRef, orderBy('fecha', 'desc'));
+      const querySnapshot = await getDocs(q);
 
-    cargarReportes();
+      const reportesData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      setReportes(reportesData);
+
+      // Extraer operadores únicos
+      const operadoresUnicos = [...new Set(reportesData.map(r => r.operador))].filter(Boolean);
+      setOperadores(operadoresUnicos);
+    } catch (error) {
+      console.error("Error cargando reportes:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [empresaId]);
+
+  useEffect(() => { cargarReportes(); }, [cargarReportes]);
 
   // ✅ FIX correlativo: soft-delete. El documento se conserva marcado como
   // eliminado, de modo que su número de reporte sigue "tomado" y el correlativo
@@ -1668,7 +1669,10 @@ export default function ReporteWorkFleet() {
               </button>
             </div>
             <div className="flex-1 overflow-auto">
-              <ReportDetallado onClose={() => { setShowNuevoReporte(false); window.location.reload(); }} />
+              <ReportDetallado
+                onSaved={cargarReportes}
+                onClose={() => setShowNuevoReporte(false)}
+              />
             </div>
           </div>
         </div>
@@ -1681,7 +1685,7 @@ export default function ReporteWorkFleet() {
           machines={machines}
           projects={projects}
           empleados={empleados}
-          onImportado={() => { setShowImport(false); /* recargar reportes */ window.location.reload(); }}
+          onImportado={() => { setShowImport(false); cargarReportes(); }}
         />
       )}
 

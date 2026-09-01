@@ -29,7 +29,10 @@ export const ESTADOS_MAQUINA = [
 export const requiereActividadEfectiva = (estadoMaquina) =>
   !estadoMaquina || estadoMaquina === 'operativa';
 
-export default function ReportDetallado({ onClose } = {}) {
+export const etiquetaEstado = (valor) =>
+  ESTADOS_MAQUINA.find(e => e.value === valor)?.label || valor || 'Operativa';
+
+export default function ReportDetallado({ onClose, onSaved } = {}) {
   const { empresaId, empresa } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [operadoresDisponibles, setOperadoresDisponibles] = useState([]);
@@ -507,6 +510,22 @@ export default function ReportDetallado({ onClose } = {}) {
       if (!ok) return;
     }
 
+    // ✅ Si la máquina no operó, no tiene sentido pedir el detalle horario de
+    // actividades: se guarda directo desde el Paso 1. Se exige el motivo en
+    // Observaciones para no perder el dato de por qué estuvo detenida, que es
+    // lo que alimenta el cálculo de disponibilidad de flota.
+    if (!requiereActividadEfectiva(formData.estadoMaquina)) {
+      if (!formData.observaciones?.trim()) {
+        alert(
+          `La máquina está marcada como "${etiquetaEstado(formData.estadoMaquina)}".\n\n` +
+          'Describe brevemente el motivo en Observaciones antes de guardar.'
+        );
+        return;
+      }
+      await guardarReporte();
+      return;
+    }
+
     setCurrentStep(2);
     window.scrollTo(0, 0);
   };
@@ -516,8 +535,61 @@ export default function ReportDetallado({ onClose } = {}) {
     window.scrollTo(0, 0);
   };
 
-  const handleFinalSubmit = async (e) => {
-    e.preventDefault();
+  // Deja el formulario en blanco conservando los datos del operador, para
+  // encadenar un reporte tras otro sin volver a escribir lo mismo.
+  const limpiarFormulario = async () => {
+    const user = auth.currentUser;
+    let userNombre = '';
+    let userRut = '';
+
+    if (user) {
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          userNombre = userData.nombre || user.displayName || '';
+          userRut = userData.rut || '';
+        } else {
+          userNombre = user.displayName || user.email?.split('@')[0] || '';
+        }
+      } catch (error) {
+        console.error("Error cargando usuario:", error);
+        userNombre = user.displayName || user.email?.split('@')[0] || '';
+      }
+    }
+
+    setFormData({
+      fecha: isoToday(),
+      numeroReporte: '', // se genera al escanear la siguiente máquina
+      machineId: '',
+      operador: userNombre,
+      rut: userRut,
+      userId: user?.uid || '',
+      actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
+      tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
+      tiemposProgramados: {
+        charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },
+        inspeccionEquipo: { horaInicio: '08:00', horaFin: '08:30' },
+        colacion: { horaInicio: '13:00', horaFin: '14:00' }
+      },
+      tieneMantenciones: false,
+      mantenciones: [],
+      cargaCombustible: '',
+      horometroInicial: '',
+      horometroFinal: '',
+      kilometrajeInicial: '',
+      kilometrajeFinal: '',
+      estadoMaquina: 'operativa',
+      observaciones: '',
+      lugarTrabajo: ''
+    });
+    setCurrentStep(1);
+    window.scrollTo(0, 0);
+  };
+
+  // Guarda el reporte. Se llama desde el Paso 2, o directo desde el Paso 1
+  // cuando la máquina no operó.
+  const guardarReporte = async () => {
     if (!empresaId) return;
     setIsLoading(true);
     try {
@@ -529,65 +601,36 @@ export default function ReportDetallado({ onClose } = {}) {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      
-      alert("✅ Reporte guardado exitosamente");
-      if (onClose) { onClose(); return; }
-      
-      const user = auth.currentUser;
-      let userNombre = '';
-      let userRut = '';
-      
-      if (user) {
-        try {
-          const userDocRef = doc(db, "users", user.uid);
-          const userDoc = await getDoc(userDocRef);
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            userNombre = userData.nombre || user.displayName || '';
-            userRut = userData.rut || '';
-          } else {
-            userNombre = user.displayName || user.email?.split('@')[0] || '';
-          }
-        } catch (error) {
-          console.error("Error cargando usuario:", error);
-          userNombre = user.displayName || user.email?.split('@')[0] || '';
-        }
-      }
 
-      // No generamos número de reporte aquí, se generará cuando escanee la siguiente máquina
-      setFormData({
-        fecha: isoToday(),
-        numeroReporte: '', // Vacío hasta que seleccione máquina
-        machineId: '',
-        operador: userNombre,
-        rut: userRut,
-        userId: user.uid,
-        actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
-        tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
-        tiemposProgramados: {
-          charlaSegurid: { horaInicio: '07:00', horaFin: '08:00' },
-          inspeccionEquipo: { horaInicio: '08:00', horaFin: '08:30' },
-          colacion: { horaInicio: '13:00', horaFin: '14:00' }
-        },
-        tieneMantenciones: false,
-        mantenciones: [],
-        cargaCombustible: '',
-        horometroInicial: '',
-        horometroFinal: '',
-        kilometrajeInicial: '',
-        kilometrajeFinal: '',
-        estadoMaquina: 'operativa',
-        observaciones: '',
-        lugarTrabajo: ''
-      });
-      
-      setCurrentStep(1);
+      // Se avisa al contenedor para que refresque el listado sin recargar
+      // la página. El reload completo hacía perder la pestaña activa y
+      // devolvía al usuario a Reporte Combustible.
+      if (onSaved) onSaved();
+
+      // ✅ Encadenar reportes: en terreno se cargan varias máquinas seguidas.
+      const otro = window.confirm(
+        'Reporte guardado correctamente.\n\n' +
+        '¿Quieres cargar otro reporte ahora?'
+      );
+
+      if (otro) {
+        await limpiarFormulario();
+      } else if (onClose) {
+        onClose();
+      } else {
+        await limpiarFormulario();
+      }
     } catch (error) {
       console.error("Error:", error);
-      alert("❌ Error al guardar");
+      alert("❌ Error al guardar el reporte. Intenta nuevamente.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleFinalSubmit = async (e) => {
+    e.preventDefault();
+    await guardarReporte();
   };
 
   const selectedMachine = machines.find(m => m.id === formData.machineId);
@@ -1011,21 +1054,37 @@ export default function ReportDetallado({ onClose } = {}) {
                   <div className="grid grid-cols-2 gap-2">
                     {ESTADOS_MAQUINA.map((est) => {
                       const activo = formData.estadoMaquina === est.value;
-                      const colorMap = {
-                        emerald: activo ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 text-slate-600 hover:border-emerald-300',
-                        amber:   activo ? 'bg-amber-500 border-amber-500 text-white'     : 'border-slate-200 text-slate-600 hover:border-amber-300',
-                        red:     activo ? 'bg-red-600 border-red-600 text-white'         : 'border-slate-200 text-slate-600 hover:border-red-300',
-                        slate:   activo ? 'bg-slate-700 border-slate-700 text-white'     : 'border-slate-200 text-slate-600 hover:border-slate-400',
+                      // Los colores van por estilo en línea, no por clases de
+                      // Tailwind. Tenerlos como clases obligaba a poner
+                      // `bg-white` en la base y `bg-emerald-600` en el estado
+                      // activo, y Tailwind resuelve ese choque por el orden de
+                      // su hoja de estilos, no por el orden en que se escriben:
+                      // ganaba `bg-white` y la tarjeta seleccionada quedaba con
+                      // texto blanco sobre fondo blanco, ilegible.
+                      const PALETA = {
+                        emerald: '#059669',
+                        amber:   '#f59e0b',
+                        red:     '#dc2626',
+                        slate:   '#334155',
                       };
+                      const c = PALETA[est.color] || PALETA.slate;
                       return (
                         <button
                           key={est.value}
                           type="button"
                           onClick={() => setFormData({ ...formData, estadoMaquina: est.value })}
-                          className={`p-3 rounded-xl border-2 text-left transition-all bg-white ${colorMap[est.color]}`}
+                          className="p-3 rounded-xl border-2 text-left transition-all"
+                          style={{
+                            background:  activo ? c : '#ffffff',
+                            borderColor: activo ? c : '#e2e8f0',
+                            color:       activo ? '#ffffff' : '#475569',
+                          }}
                         >
                           <div className="text-xs sm:text-sm font-black">{est.label}</div>
-                          <div className={`text-[10px] mt-0.5 leading-tight ${activo ? 'text-white/80' : 'text-slate-400'}`}>
+                          <div
+                            className="text-[10px] mt-0.5 leading-tight"
+                            style={{ color: activo ? 'rgba(255,255,255,0.85)' : '#94a3b8' }}
+                          >
                             {est.desc}
                           </div>
                         </button>
@@ -1038,8 +1097,9 @@ export default function ReportDetallado({ onClose } = {}) {
                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                       </svg>
                       <span className="text-xs font-semibold text-blue-700">
-                        Al no estar operativa, el Paso 2 no exigirá actividades efectivas.
-                        Registra el motivo en Tiempos No Efectivos o Mantenciones.
+                        Al no estar operativa no se pedirá el detalle horario de
+                        actividades: el reporte se guarda desde este paso.
+                        Describe el motivo en Observaciones.
                       </span>
                     </div>
                   )}
@@ -1069,12 +1129,17 @@ export default function ReportDetallado({ onClose } = {}) {
               </div>
             </Section>
 
-            {/* Botón Siguiente */}
+            {/* Botón final del Paso 1: si la máquina no operó, guarda directo */}
             <button
               type="submit"
-              className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black rounded-xl shadow-lg hover:shadow-xl transition-all text-base sm:text-lg"
+              disabled={isLoading}
+              className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black rounded-xl shadow-lg hover:shadow-xl transition-all text-base sm:text-lg disabled:opacity-60"
             >
-              Continuar al Paso 2 →
+              {isLoading
+                ? 'Guardando…'
+                : requiereActividadEfectiva(formData.estadoMaquina)
+                  ? 'Continuar al Paso 2 →'
+                  : 'Guardar reporte'}
             </button>
           </div>
         </form>

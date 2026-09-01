@@ -1,16 +1,40 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import UserMenuDropdown from "../../components/UserMenuDropdown";
 import ReporteCombustible from "./ReporteCombustible";
 import ReporteWorkFleet from "./ReporteWorkFleet";
 import AdminPanel from "./AdminPanel";
 
+// Clave para recordar la pestaña abierta entre recargas.
+// Sin esto, cualquier window.location.reload() (por ejemplo al terminar de
+// crear un reporte) devolvía al usuario a "combustible", que es el valor
+// inicial del estado.
+const VISTA_KEY = "reportes:vistaActiva";
+const VISTAS_VALIDAS = ["combustible", "maquinaria", "admin"];
+
 export default function ReportesShell({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
-  const [activeView, setActiveView] = useState("combustible");
+  const [activeView, setActiveViewState] = useState(() => {
+    try {
+      const guardada = localStorage.getItem(VISTA_KEY);
+      if (guardada && VISTAS_VALIDAS.includes(guardada)) return guardada;
+    } catch { /* localStorage puede no estar disponible */ }
+    return "combustible";
+  });
+
+  // Se persiste en cada cambio para sobrevivir a un refresh
+  const setActiveView = (vista) => {
+    setActiveViewState(vista);
+    try { localStorage.setItem(VISTA_KEY, vista); } catch { /* ignorar */ }
+  };
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { empresa } = useEmpresa();
 
   const isAdmin = ["superadmin", "admin_contrato", "administrativo"].includes(userRole);
+
+  // Si la vista recordada es "admin" pero el rol ya no lo permite, volver a combustible
+  useEffect(() => {
+    if (activeView === "admin" && !isAdmin) setActiveView("combustible");
+  }, [activeView, isAdmin]);
 
   const navItems = [
     {
