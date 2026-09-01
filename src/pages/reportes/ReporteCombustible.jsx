@@ -1976,6 +1976,10 @@ export default function ReporteCombustible() {
         </div>
       )}
 
+      {/* ✅ FIX edición: CombustibleDetalleModal evalúa `userRole === 'administrador'`,
+          un rol que no existe en FleetCore. Al recibir 'superadmin' / 'admin_contrato'
+          su isAdmin quedaba en false y el botón "Editar Reporte" nunca se renderizaba.
+          Abajo se traduce el rol real al que espera el modal. */}
       {reporteDetalle && (
         <CombustibleDetalleModal
           reporte={{
@@ -2015,7 +2019,11 @@ export default function ReporteCombustible() {
             empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))
             || (reporteDetalle.datosEntrada?.receptorNombre ? { nombre: reporteDetalle.datosEntrada.receptorNombre, rut: '' } : null)
           }
-          userRole={userRole}
+          userRole={
+            ['superadmin', 'admin_contrato', 'administrativo'].includes(userRole)
+              ? 'administrador'
+              : userRole
+          }
           onSave={async (editedData) => {
             try {
               // Validar código si fue editado

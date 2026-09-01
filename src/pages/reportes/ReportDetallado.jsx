@@ -5,10 +5,29 @@ import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
 import Paso2Form from '../Paso2Form';
+import {
+  LIMITES_DEFAULT,
+  getLimitesReporte,
+  validarHorometro,
+  validarKilometraje,
+  validarCombustible,
+} from "../../lib/reportesConfig";
 
 function isoToday() {
   return new Date().toISOString().split('T')[0];
 }
+
+// ── Estados posibles de la máquina en el reporte ──────────────
+// Cuando el estado NO es 'operativa', el Paso 2 no exige actividad efectiva.
+export const ESTADOS_MAQUINA = [
+  { value: 'operativa',        label: 'Operativa',            desc: 'La máquina trabajó normalmente',           color: 'emerald' },
+  { value: 'mantencion',       label: 'En mantención',        desc: 'Detenida por mantención programada',       color: 'amber'   },
+  { value: 'fuera_servicio',   label: 'Fuera de servicio',    desc: 'Averiada o en taller, no operó',           color: 'red'     },
+  { value: 'detenida',         label: 'Detenida sin operar',  desc: 'Disponible pero sin trabajo asignado',     color: 'slate'   },
+];
+
+export const requiereActividadEfectiva = (estadoMaquina) =>
+  !estadoMaquina || estadoMaquina === 'operativa';
 
 export default function ReportDetallado({ onClose } = {}) {
   const { empresaId, empresa } = useEmpresa();
@@ -24,12 +43,20 @@ export default function ReportDetallado({ onClose } = {}) {
   const [qrError, setQrError] = useState('');
   const [currentStep, setCurrentStep] = useState(1);
   
-  // ✅ NUEVO: Estado para errores de validación en tiempo real
+  // Límites configurables (Firestore: empresas/{id}/configuracion/reportes)
+  const [limites, setLimites] = useState(LIMITES_DEFAULT);
+
+  // Errores (bloquean) y advertencias (solo informan) en tiempo real
   const [validationErrors, setValidationErrors] = useState({
     cargaCombustible: '',
     horometro: '',
     kilometraje: '',
     ambosEnCero: ''
+  });
+  const [validationWarnings, setValidationWarnings] = useState({
+    cargaCombustible: '',
+    horometro: '',
+    kilometraje: ''
   });
   
   const [formData, setFormData] = useState({
@@ -60,69 +87,61 @@ export default function ReportDetallado({ onClose } = {}) {
     observaciones: ''
   });
 
-  // ✅ NUEVO: Validar en tiempo real
+  // Cargar límites configurables de la empresa
   useEffect(() => {
     if (!empresaId) return;
+    let cancelado = false;
+    (async () => {
+      const l = await getLimitesReporte(empresaId);
+      if (!cancelado) setLimites(l);
+    })();
+    return () => { cancelado = true; };
+  }, [empresaId]);
+
+  // Validación en tiempo real: errores bloquean, advertencias solo informan
+  useEffect(() => {
+    if (!empresaId) return;
+
+    const hor  = validarHorometro(formData.horometroInicial, formData.horometroFinal, limites);
+    const km   = validarKilometraje(formData.kilometrajeInicial, formData.kilometrajeFinal, limites);
+    const comb = validarCombustible(formData.cargaCombustible, limites);
+
     const errors = {
-      cargaCombustible: '',
-      horometro: '',
-      kilometraje: '',
-      ambosEnCero: ''
+      horometro:        hor.error,
+      kilometraje:      km.error,
+      cargaCombustible: comb.error,
+      ambosEnCero:      ''
     };
 
-    // Validar carga de combustible
-    if (formData.cargaCombustible) {
-      const combustible = parseFloat(formData.cargaCombustible);
-      if (combustible > 500) {
-        errors.cargaCombustible = 'La carga de combustible no puede ser mayor a 500 litros';
-      }
-    }
+    // Al menos horómetro O kilometraje debe traer datos.
+    // Excepción: si la máquina no está operativa, no se exige lectura.
+    if (requiereActividadEfectiva(formData.estadoMaquina)) {
+      const horIni = parseFloat(formData.horometroInicial) || 0;
+      const horFin = parseFloat(formData.horometroFinal) || 0;
+      const kmIni  = parseFloat(formData.kilometrajeInicial) || 0;
+      const kmFin  = parseFloat(formData.kilometrajeFinal) || 0;
 
-    // Validar horómetro
-    if (formData.horometroInicial && formData.horometroFinal) {
-      const horInicial = parseFloat(formData.horometroInicial);
-      const horFinal = parseFloat(formData.horometroFinal);
-      
-      if (horInicial > horFinal) {
-        errors.horometro = 'El Horómetro Inicial debe ser menor o igual que el Final';
-      } else {
-        const diferencia = horFinal - horInicial;
-        if (diferencia >= 12) {
-          errors.horometro = 'La diferencia debe ser menor a 12 horas';
-        }
+      if (horIni === 0 && horFin === 0 && kmIni === 0 && kmFin === 0) {
+        errors.ambosEnCero = 'Debe ingresar valores en Horómetro O en Kilometraje (al menos uno distinto de 0)';
       }
-    }
-
-    // Validar kilometraje
-    if (formData.kilometrajeInicial && formData.kilometrajeFinal) {
-      const kmInicial = parseFloat(formData.kilometrajeInicial);
-      const kmFinal = parseFloat(formData.kilometrajeFinal);
-      
-      if (kmInicial > kmFinal) {
-        errors.kilometraje = 'El Kilometraje Inicial debe ser menor o igual que el Final';
-      } else {
-        const diferencia = kmFinal - kmInicial;
-        if (diferencia > 500) {
-          errors.kilometraje = 'La diferencia debe ser igual o menor a 500 km';
-        }
-      }
-    }
-
-    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
-    const horInicial = parseFloat(formData.horometroInicial) || 0;
-    const horFinal = parseFloat(formData.horometroFinal) || 0;
-    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
-    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
-    
-    const horometroEnCero = (horInicial === 0 && horFinal === 0);
-    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
-    
-    if (horometroEnCero && kilometrajeEnCero) {
-      errors.ambosEnCero = 'Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)';
     }
 
     setValidationErrors(errors);
-  }, [formData.cargaCombustible, formData.horometroInicial, formData.horometroFinal, formData.kilometrajeInicial, formData.kilometrajeFinal]);
+    setValidationWarnings({
+      horometro:        hor.warning,
+      kilometraje:      km.warning,
+      cargaCombustible: comb.warning
+    });
+  }, [
+    empresaId,
+    limites,
+    formData.cargaCombustible,
+    formData.horometroInicial,
+    formData.horometroFinal,
+    formData.kilometrajeInicial,
+    formData.kilometrajeFinal,
+    formData.estadoMaquina
+  ]);
 
   // Función para generar número de reporte automático basado en la máquina
   const generateReportNumber = async (machine) => {
@@ -143,35 +162,25 @@ export default function ReportDetallado({ onClose } = {}) {
       );
 
       const querySnapshot = await getDocs(q);
-      
-      let nextNumber = 1;
-      if (!querySnapshot.empty) {
-        // Ordenar manualmente en el cliente por fecha de creación
-        const machineReports = querySnapshot.docs
-          .map(doc => doc.data())
-          .filter(report => report.numeroReporte) // Solo reportes con número
-          .sort((a, b) => {
-            if (a.createdAt && b.createdAt) {
-              return b.createdAt.seconds - a.createdAt.seconds;
-            }
-            return 0;
-          });
-        
-        if (machineReports.length > 0) {
-          const lastReport = machineReports[0];
-          // Extraer el número del último reporte (ejemplo: "EX-01-005" → 5)
-          const match = lastReport.numeroReporte?.match(/(\d+)$/);
-          if (match) {
-            nextNumber = parseInt(match[1]) + 1;
-          }
-          console.log(`📊 Último reporte encontrado: ${lastReport.numeroReporte}, próximo número: ${nextNumber}`);
-        }
-      } else {
-        console.log(`📊 No hay reportes previos para esta máquina, iniciando en 001`);
-      }
 
+      // ✅ FIX correlativo: tomar el número MÁS ALTO jamás emitido para esta
+      // máquina — no el del último reporte creado. Así el correlativo nunca
+      // retrocede aunque se eliminen reportes (los eliminados son soft-delete
+      // y siguen contando para no reutilizar números ya impresos en terreno).
+      let maxNumber = 0;
+      querySnapshot.docs.forEach((d) => {
+        const numeroReporte = d.data()?.numeroReporte;
+        if (!numeroReporte) return;
+        const match = String(numeroReporte).match(/(\d+)\s*$/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!Number.isNaN(n) && n > maxNumber) maxNumber = n;
+        }
+      });
+
+      const nextNumber = maxNumber + 1;
       const reportNumber = `${machineIdentifier}-${String(nextNumber).padStart(3, '0')}`;
-      console.log(`📝 Número de reporte generado: ${reportNumber}`);
+      console.log(`📝 Correlativo: máximo previo ${maxNumber} → nuevo ${reportNumber}`);
       return reportNumber;
     } catch (error) {
       console.error('❌ Error generando número de reporte:', error);
@@ -296,13 +305,16 @@ export default function ReportDetallado({ onClose } = {}) {
           where('projectId', '==', selectedProject),
           where('machineId', '==', formData.machineId),
           orderBy('fecha', 'desc'),
-          limit(1)
+          limit(5) // traemos algunos para saltar los eliminados
         );
 
         const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-          const lastReport = querySnapshot.docs[0].data();
+        const vigentes = querySnapshot.docs
+          .map(d => d.data())
+          .filter(r => r.deleted !== true);
+
+        if (vigentes.length > 0) {
+          const lastReport = vigentes[0];
           
           setFormData(prev => ({
             ...prev,
@@ -410,59 +422,35 @@ export default function ReportDetallado({ onClose } = {}) {
     setFormData({ ...formData, tiemposNoEfectivos: newTiempos });
   };
 
-  // ✅ Validación antes de continuar al paso 2
+  // Validación antes de continuar al paso 2.
+  // Devuelve { errores, advertencias }: los errores bloquean, las advertencias
+  // solo piden confirmación al usuario.
   const validatePaso1 = () => {
-    const errors = [];
-    
-    if (formData.cargaCombustible) {
-      const combustible = parseFloat(formData.cargaCombustible);
-      if (combustible > 500) {
-        errors.push('❌ La carga de combustible no puede ser mayor a 500 litros por reporte');
+    const errores = [];
+    const advertencias = [];
+
+    const push = ({ error, warning }) => {
+      if (error)   errores.push(`❌ ${error}`);
+      if (warning) advertencias.push(`⚠️ ${warning}`);
+    };
+
+    push(validarHorometro(formData.horometroInicial, formData.horometroFinal, limites));
+    push(validarKilometraje(formData.kilometrajeInicial, formData.kilometrajeFinal, limites));
+    push(validarCombustible(formData.cargaCombustible, limites));
+
+    // Lectura obligatoria solo si la máquina operó
+    if (requiereActividadEfectiva(formData.estadoMaquina)) {
+      const horIni = parseFloat(formData.horometroInicial) || 0;
+      const horFin = parseFloat(formData.horometroFinal) || 0;
+      const kmIni  = parseFloat(formData.kilometrajeInicial) || 0;
+      const kmFin  = parseFloat(formData.kilometrajeFinal) || 0;
+
+      if (horIni === 0 && horFin === 0 && kmIni === 0 && kmFin === 0) {
+        errores.push('❌ Debe ingresar valores en Horómetro O en Kilometraje (al menos uno distinto de 0)');
       }
     }
-    
-    if (formData.horometroInicial && formData.horometroFinal) {
-      const horInicial = parseFloat(formData.horometroInicial);
-      const horFinal = parseFloat(formData.horometroFinal);
-      
-      if (horInicial > horFinal) {
-        errors.push('❌ El Horómetro Inicial debe ser menor o igual que el Horómetro Final');
-      }
-      
-      const difHorometro = horFinal - horInicial;
-      if (difHorometro >= 12) {
-        errors.push('❌ La diferencia entre Horómetro Final e Inicial debe ser menor a 12 horas');
-      }
-    }
-    
-    if (formData.kilometrajeInicial && formData.kilometrajeFinal) {
-      const kmInicial = parseFloat(formData.kilometrajeInicial);
-      const kmFinal = parseFloat(formData.kilometrajeFinal);
-      
-      if (kmInicial > kmFinal) {
-        errors.push('❌ El Kilometraje Inicial debe ser menor o igual que el Kilometraje Final');
-      }
-      
-      const difKilometraje = kmFinal - kmInicial;
-      if (difKilometraje > 500) {
-        errors.push('❌ La diferencia entre Kilometraje Final e Inicial debe ser igual o menor a 500 km');
-      }
-    }
-    
-    // ✅ NUEVO: Validar que al menos uno (horómetro O kilometraje) tenga valores distintos de 0
-    const horInicial = parseFloat(formData.horometroInicial) || 0;
-    const horFinal = parseFloat(formData.horometroFinal) || 0;
-    const kmInicial = parseFloat(formData.kilometrajeInicial) || 0;
-    const kmFinal = parseFloat(formData.kilometrajeFinal) || 0;
-    
-    const horometroEnCero = (horInicial === 0 && horFinal === 0);
-    const kilometrajeEnCero = (kmInicial === 0 && kmFinal === 0);
-    
-    if (horometroEnCero && kilometrajeEnCero) {
-      errors.push('❌ Debe ingresar valores en Horómetro O en Kilometraje (al menos uno debe tener valores distintos de 0)');
-    }
-    
-    return errors;
+
+    return { errores, advertencias };
   };
 
   const handleNextStep = async (e) => {
@@ -489,7 +477,9 @@ export default function ReportDetallado({ onClose } = {}) {
         where('fecha', '==', formData.fecha)
       );
       const dupSnap = await getDocs(dupQ);
-      if (!dupSnap.empty) {
+      // ✅ Los reportes eliminados (soft-delete) no cuentan como duplicados
+      const duplicadosVigentes = dupSnap.docs.filter(d => d.data()?.deleted !== true);
+      if (duplicadosVigentes.length > 0) {
         const selectedMachineName = machines.find(m => m.id === formData.machineId);
         const machineName = selectedMachineName?.code || selectedMachineName?.patente || 'esta máquina';
         alert(`❌ Ya existe un reporte de "${machineName}" para el ${formData.fecha}.\nNo se pueden ingresar dos reportes de la misma máquina el mismo día.`);
@@ -499,14 +489,24 @@ export default function ReportDetallado({ onClose } = {}) {
       console.error('Error verificando duplicados:', err);
       // Si falla la consulta, dejamos pasar (no bloqueamos por error de red)
     }
-    
-    const validationErrors = validatePaso1();
-    
-    if (validationErrors.length > 0) {
-      alert('Errores de validación:\n\n' + validationErrors.join('\n'));
+
+    const { errores, advertencias } = validatePaso1();
+
+    if (errores.length > 0) {
+      alert('Errores de validación:\n\n' + errores.join('\n'));
       return;
     }
-    
+
+    // Las advertencias no bloquean: se confirman una sola vez
+    if (advertencias.length > 0) {
+      const ok = window.confirm(
+        'Revisa estos valores antes de continuar:\n\n' +
+        advertencias.join('\n') +
+        '\n\n¿Los datos son correctos?'
+      );
+      if (!ok) return;
+    }
+
     setCurrentStep(2);
     window.scrollTo(0, 0);
   };
@@ -524,7 +524,10 @@ export default function ReportDetallado({ onClose } = {}) {
       await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
         projectId: selectedProject,
         ...formData,
-        createdAt: serverTimestamp()
+        deleted: false,           // soft-delete: nunca se borra físicamente
+        firmado: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
       
       alert("✅ Reporte guardado exitosamente");
@@ -880,13 +883,22 @@ export default function ReportDetallado({ onClose } = {}) {
                     step="0.1"
                   />
                 </div>
-                {/* ✅ Mensaje de error en tiempo real - Horómetro */}
+                {/* Error (bloquea) - Horómetro */}
                 {validationErrors.horometro && (
                   <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
                     </svg>
                     <span className="text-xs font-semibold text-red-700">{validationErrors.horometro}</span>
+                  </div>
+                )}
+                {/* Advertencia (no bloquea) - Horómetro */}
+                {!validationErrors.horometro && validationWarnings.horometro && (
+                  <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-xs font-semibold text-amber-700">{validationWarnings.horometro}</span>
                   </div>
                 )}
                 
@@ -909,7 +921,7 @@ export default function ReportDetallado({ onClose } = {}) {
                     step="0.1"
                   />
                 </div>
-                {/* ✅ Mensaje de error en tiempo real - Kilometraje */}
+                {/* Error (bloquea) - Kilometraje */}
                 {validationErrors.kilometraje && (
                   <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -918,12 +930,23 @@ export default function ReportDetallado({ onClose } = {}) {
                     <span className="text-xs font-semibold text-red-700">{validationErrors.kilometraje}</span>
                   </div>
                 )}
-                
+                {/* Advertencia (no bloquea) - Kilometraje */}
+                {!validationErrors.kilometraje && validationWarnings.kilometraje && (
+                  <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-xs font-semibold text-amber-700">{validationWarnings.kilometraje}</span>
+                  </div>
+                )}
+
                 {/* Carga Combustible - AL FINAL */}
                 <div>
                   <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
                     Carga Combustible (litros)
-                    <span className="ml-2 text-[10px] text-slate-500">(Opcional - Máx. 500 litros)</span>
+                    <span className="ml-2 text-[10px] text-slate-500">
+                      (Opcional · Máx. {limites.litrosMaximo} L)
+                    </span>
                   </label>
                   <input
                     type="number"
@@ -931,17 +954,27 @@ export default function ReportDetallado({ onClose } = {}) {
                     onChange={(e) => setFormData({ ...formData, cargaCombustible: e.target.value })}
                     placeholder="0"
                     step="0.1"
-                    max="500"
+                    min="0"
+                    max={limites.litrosMaximo}
                     className="input-modern w-full text-sm sm:text-base"
                   />
                 </div>
-                {/* ✅ Mensaje de error en tiempo real - Combustible */}
+                {/* Error (bloquea) - Combustible */}
                 {validationErrors.cargaCombustible && (
                   <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
                     <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" />
                     </svg>
                     <span className="text-xs font-semibold text-red-700">{validationErrors.cargaCombustible}</span>
+                  </div>
+                )}
+                {/* Advertencia (no bloquea) - Combustible */}
+                {!validationErrors.cargaCombustible && validationWarnings.cargaCombustible && (
+                  <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <svg className="w-4 h-4 text-amber-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span className="text-xs font-semibold text-amber-700">{validationWarnings.cargaCombustible}</span>
                   </div>
                 )}
                 
@@ -968,8 +1001,50 @@ export default function ReportDetallado({ onClose } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-    
-                
+
+                {/* ✅ Estado de la máquina — define si el Paso 2 exige actividad efectiva */}
+                <div>
+                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
+                    Estado de la máquina en la jornada
+                    <span className="ml-2 text-[10px] text-slate-500">(obligatorio)</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ESTADOS_MAQUINA.map((est) => {
+                      const activo = formData.estadoMaquina === est.value;
+                      const colorMap = {
+                        emerald: activo ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 text-slate-600 hover:border-emerald-300',
+                        amber:   activo ? 'bg-amber-500 border-amber-500 text-white'     : 'border-slate-200 text-slate-600 hover:border-amber-300',
+                        red:     activo ? 'bg-red-600 border-red-600 text-white'         : 'border-slate-200 text-slate-600 hover:border-red-300',
+                        slate:   activo ? 'bg-slate-700 border-slate-700 text-white'     : 'border-slate-200 text-slate-600 hover:border-slate-400',
+                      };
+                      return (
+                        <button
+                          key={est.value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, estadoMaquina: est.value })}
+                          className={`p-3 rounded-xl border-2 text-left transition-all bg-white ${colorMap[est.color]}`}
+                        >
+                          <div className="text-xs sm:text-sm font-black">{est.label}</div>
+                          <div className={`text-[10px] mt-0.5 leading-tight ${activo ? 'text-white/80' : 'text-slate-400'}`}>
+                            {est.desc}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!requiereActividadEfectiva(formData.estadoMaquina) && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <svg className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-xs font-semibold text-blue-700">
+                        Al no estar operativa, el Paso 2 no exigirá actividades efectivas.
+                        Registra el motivo en Tiempos No Efectivos o Mantenciones.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">Lugar de trabajo</label>
                   <input
@@ -1241,20 +1316,14 @@ function QRScannerModal({ onScan, onClose, error }) {
             </div>
           )}
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => setScanning(!scanning)}
-              className="flex-1 py-2 sm:py-3 px-3 sm:px-4 bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-lg sm:rounded-xl hover:bg-slate-200 transition-all"
-            >
-              {scanning ? '⏸️ Pausar' : '▶️ Iniciar'}
-            </button>
-            <button
-              onClick={onClose}
-              className="flex-1 py-2 sm:py-3 px-3 sm:px-4 bg-slate-600 text-white font-bold text-xs sm:text-sm rounded-lg sm:rounded-xl hover:bg-slate-700 transition-all"
-            >
-              ✕ Cerrar
-            </button>
-          </div>
+          {/* ✅ Un solo control aquí: cerrar se hace con la X del encabezado */}
+          <button
+            type="button"
+            onClick={() => setScanning(!scanning)}
+            className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-lg sm:rounded-xl hover:bg-slate-200 transition-all"
+          >
+            {scanning ? '⏸️ Pausar cámara' : '▶️ Iniciar cámara'}
+          </button>
         </div>
       </div>
     </div>

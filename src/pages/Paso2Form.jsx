@@ -148,23 +148,33 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
     return `${hours}h ${minutes}m`;
   };
 
-  const isOverlapping = () => {
-    if (!startTime || !endTime) return false;
+  // Bloques con los que choca el rango actualmente seleccionado
+  const overlappingSlots = () => {
+    if (!startTime || !endTime) return [];
     const start = timeToMinutes(startTime);
     const end = timeToMinutes(endTime);
-    
-    return existingSlots.some(slot => {
+    return existingSlots.filter(slot => {
       const slotStart = timeToMinutes(slot.start);
       const slotEnd = timeToMinutes(slot.end);
       return start < slotEnd && end > slotStart;
     });
   };
 
+  const overlappingLabels = () => {
+    const labels = overlappingSlots().map(s => s.label || 'otro bloque');
+    return labels.length ? [...new Set(labels)] : ['otro bloque'];
+  };
+
+  const isOverlapping = () => overlappingSlots().length > 0;
+
   const handleConfirm = () => {
-    if (startTime && endTime && timeToMinutes(startTime) < timeToMinutes(endTime)) {
-      onConfirm(startTime, endTime);
-      onClose();
-    }
+    if (!startTime || !endTime) return;
+    if (timeToMinutes(startTime) >= timeToMinutes(endTime)) return;
+    // ✅ No permitir confirmar un rango que pisa otro bloque ya ocupado
+    // (incluye la colación, que viaja dentro de existingSlots)
+    if (isOverlapping()) return;
+    onConfirm(startTime, endTime);
+    onClose();
   };
 
   return (
@@ -222,13 +232,15 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
           )}
 
           {isOverlapping() && (
-            <div className="bg-slate-50 border-2 border-slate-200 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-slate-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" />
+            <div className="bg-red-50 border-2 border-red-300 rounded-xl p-3 sm:p-4 flex items-start gap-2 sm:gap-3">
+              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
               <div className="flex-1">
-                <div className="font-bold text-slate-900 text-sm sm:text-base">⚠️ Horario Superpuesto</div>
-                <div className="text-xs sm:text-sm text-slate-600 mt-0.5">Este horario se superpone con otra actividad</div>
+                <div className="font-bold text-red-900 text-sm sm:text-base">Horario ocupado</div>
+                <div className="text-xs sm:text-sm text-red-700 mt-0.5">
+                  Este rango pisa {overlappingLabels().join(', ')}. Ajusta el inicio o el fin para poder confirmar.
+                </div>
               </div>
             </div>
           )}
@@ -407,10 +419,10 @@ function TimelineModal({ isOpen, onClose, onConfirm, initialStart, initialEnd, t
           </button>
           <button
             onClick={handleConfirm}
-            disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime)}
+            disabled={!startTime || !endTime || timeToMinutes(startTime) >= timeToMinutes(endTime) || isOverlapping()}
             className="order-1 sm:order-2 px-8 py-4 sm:py-3 bg-gradient-to-r from-slate-800 to-slate-900 active:from-slate-700 active:to-slate-800 disabled:from-slate-300 disabled:to-slate-300 text-white font-bold rounded-xl sm:rounded-lg transition-all shadow-lg disabled:shadow-none text-base"
           >
-            ✓ Confirmar Horario
+            {isOverlapping() ? '⚠️ Horario ocupado' : '✓ Confirmar Horario'}
           </button>
         </div>
       </div>
@@ -448,6 +460,18 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     const combinadas = [...especificas, ...genericas.filter(g => !especificas.find(e => e.id === g.id))];
     return (combinadas.length > 0 ? combinadas : delTipo).map(a => a.nombre);
   };
+
+  // ── Estado de la máquina (viene del Paso 1) ───────────────────
+  // Si no está operativa, no se exige registrar actividades efectivas.
+  const ETIQUETAS_ESTADO = {
+    operativa:      'Operativa',
+    mantencion:     'En mantención',
+    fuera_servicio: 'Fuera de servicio',
+    detenida:       'Detenida sin operar',
+  };
+  const estadoMaquina   = formData.estadoMaquina || 'operativa';
+  const maquinaOperativa = estadoMaquina === 'operativa';
+  const etiquetaEstado  = ETIQUETAS_ESTADO[estadoMaquina] || estadoMaquina;
 
   // ✅ NUEVO: Estado para errores de validación en tiempo real
   const [horariosErrors, setHorariosErrors] = useState([]);
@@ -532,6 +556,7 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
       formData.mantenciones.forEach((m, i) => check(m.horaFin, 'mantencion', i));
     }
 
+    let sugerido;
     if (!hasAny) {
       // Fallback: fin de inspección > fin charla > 08:30
       const tp = formData.tiemposProgramados;
@@ -539,11 +564,30 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         tp.inspeccionEquipo?.horaFin,
         tp.charlaSegurid?.horaFin,
       ].filter(Boolean);
-      if (candidates.length) return candidates.sort().at(-1);
-      return '08:30';
+      sugerido = candidates.length ? candidates.sort().at(-1) : '08:30';
+    } else {
+      sugerido = toTime(maxFin);
     }
 
-    return toTime(maxFin);
+    // ✅ FIX: nunca sugerir un inicio que caiga dentro de un tiempo programado
+    // (colación, charla o inspección). Si cae dentro, saltar al final del bloque.
+    // Se repite porque los bloques pueden estar encadenados.
+    const tp = formData.tiemposProgramados;
+    const bloques = [tp.colacion, tp.charlaSegurid, tp.inspeccionEquipo]
+      .filter(b => b?.horaInicio && b?.horaFin)
+      .filter(b => !(type === 'colacion' && b === tp.colacion))
+      .filter(b => !(type === 'charlaSegurid' && b === tp.charlaSegurid))
+      .filter(b => !(type === 'inspeccionEquipo' && b === tp.inspeccionEquipo));
+
+    for (let pasada = 0; pasada < bloques.length + 1; pasada++) {
+      const dentro = bloques.find(b =>
+        toMin(sugerido) >= toMin(b.horaInicio) && toMin(sugerido) < toMin(b.horaFin)
+      );
+      if (!dentro) break;
+      sugerido = dentro.horaFin;
+    }
+
+    return sugerido;
   };
 
   // ─── MODAL ──────────────────────────────────────────────────────────────────
@@ -598,6 +642,17 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
         ? { ini: s, fin: colIni } : null;
       const parteB = toMin(e) > toMin(colFin)
         ? { ini: colFin, fin: e } : null;
+
+      // ✅ FIX: si el rango queda completamente DENTRO de la colación no hay
+      // nada que guardar. Antes se cerraba el modal en silencio y la actividad
+      // quedaba sin horario; ahora se avisa y el modal permanece abierto.
+      if (!parteA && !parteB) {
+        alert(
+          `El horario ${s}–${e} está completamente dentro de la colación ` +
+          `(${colIni}–${colFin}).\n\nSelecciona un horario fuera del almuerzo.`
+        );
+        return;
+      }
 
       const applyColaSplit = (base, lista, key) => {
         const nueva = [...lista];
@@ -664,6 +719,16 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
 
     formData.actividadesEfectivas.forEach((a, i) =>
       checkEntry(a.horaInicio, a.horaFin, 'actividadEfectiva', i, `Actividad ${i+1}`));
+
+    // ✅ Antes solo se revisaban las actividades efectivas: un tiempo no
+    // efectivo o una mantención podían pisar la colación sin que nadie avisara.
+    formData.tiemposNoEfectivos.forEach((t, i) =>
+      checkEntry(t.horaInicio, t.horaFin, 'tiempoNoEfectivo', i, `Tiempo No Efectivo ${i+1}`));
+
+    if (formData.tieneMantenciones) {
+      formData.mantenciones.forEach((m, i) =>
+        checkEntry(m.horaInicio, m.horaFin, 'mantencion', i, `Mantención ${i+1}`));
+    }
 
     setHorariosErrors(errors);
   }, [
@@ -777,10 +842,25 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
     e.preventDefault();
     const errores = [];
 
-    // Al menos una actividad efectiva completa
     const actCompletas = formData.actividadesEfectivas.filter(a => a.actividad && a.horaInicio && a.horaFin);
-    if (actCompletas.length === 0)
-      errores.push('Debes registrar al menos una Actividad Efectiva completa (actividad + horario).');
+    const noEfecCompletos = formData.tiemposNoEfectivos.filter(t => t.motivo && t.horaInicio && t.horaFin);
+    const mantCompletas = (formData.mantenciones || []).filter(m => m.tipo && m.horaInicio && m.horaFin);
+
+    // ✅ FIX: la actividad efectiva solo es obligatoria si la máquina operó.
+    // Si está fuera de servicio / en mantención / detenida, basta con justificar
+    // la jornada mediante un tiempo no efectivo o una mantención.
+    if (maquinaOperativa) {
+      if (actCompletas.length === 0)
+        errores.push('Debes registrar al menos una Actividad Efectiva completa (actividad + horario).');
+    } else {
+      if (noEfecCompletos.length === 0 && mantCompletas.length === 0) {
+        errores.push(
+          `La máquina está marcada como "${etiquetaEstado}". Debes registrar al menos un ` +
+          `Tiempo No Efectivo o una Mantención que justifique la jornada.`
+        );
+      }
+    }
+
     formData.actividadesEfectivas.forEach((act, idx) => {
       const tieneAlgo = act.actividad || act.horaInicio || act.horaFin;
       if (tieneAlgo) {
@@ -858,6 +938,22 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
               Vaciar todo
             </button>
           </div>
+
+          {/* ✅ Aviso cuando la máquina no operó: no se exigen actividades efectivas */}
+          {!maquinaOperativa && (
+            <div className="mt-4 flex items-start gap-3 p-3 rounded-lg bg-amber-400/15 border border-amber-300/40">
+              <svg className="w-5 h-5 text-amber-300 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div className="text-sm">
+                <div className="font-bold text-amber-200">Máquina: {etiquetaEstado}</div>
+                <div className="text-amber-100/80 text-xs mt-0.5 leading-relaxed">
+                  No se exigen Actividades Efectivas. Registra al menos un Tiempo No Efectivo
+                  o una Mantención que justifique la jornada.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* SECCIÓN 1: Actividades Efectivas */}
@@ -865,7 +961,14 @@ export default function Paso2Form({ formData, setFormData, onBack, onSubmit, isL
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <svg className="w-7 h-7 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
-              <h3 className="text-lg sm:text-xl font-bold text-slate-900">Actividades Efectivas</h3>
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900">
+                Actividades Efectivas
+                {!maquinaOperativa && (
+                  <span className="ml-2 text-xs font-bold text-slate-400 uppercase tracking-wide">
+                    (opcional)
+                  </span>
+                )}
+              </h3>
             </div>
             <button
               type="button"
