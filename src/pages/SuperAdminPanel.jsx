@@ -731,6 +731,10 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     password: "",
     role: "mandante",
     empresaId: "",
+    // Multiempresa: lista de membresías. `empresaId` es solo la ACTIVA y
+    // debe estar siempre dentro de esta lista, o el usuario quedaría con una
+    // empresa activa a la que las reglas no le dan acceso.
+    empresasIds: [],
     nombre: "",
     rut: "",
     modulos: [],
@@ -748,6 +752,22 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
     }));
   };
 
+  // Marca o desmarca una empresa. Si se desmarca la que estaba activa, la
+  // activa pasa a la primera que quede: nunca puede quedar apuntando a una
+  // empresa fuera de la lista.
+  const toggleEmpresa = (eid) => {
+    setForm(f => {
+      const dentro = f.empresasIds.includes(eid);
+      const nuevas = dentro
+        ? f.empresasIds.filter(x => x !== eid)
+        : [...f.empresasIds, eid];
+      let activa = f.empresaId;
+      if (dentro && activa === eid) activa = nuevas[0] || "";
+      if (!dentro && !activa) activa = eid;
+      return { ...f, empresasIds: nuevas, empresaId: activa };
+    });
+  };
+
   const handleRutChange = (e) => {
     const raw = e.target.value.replace(/[^0-9kK]/g, "").toUpperCase();
     setForm(f => ({ ...f, rut: formatRut(raw) }));
@@ -760,6 +780,10 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       password: usr.password || "",
       role: usr.role || "mandante",
       empresaId: usr.empresaId || "",
+      // Fallback para cuentas que aún no pasaron por la migración
+      empresasIds: Array.isArray(usr.empresasIds) && usr.empresasIds.length
+        ? [...new Set(usr.empresasIds.filter(Boolean))]
+        : (usr.empresaId ? [usr.empresaId] : []),
       nombre: usr.nombre || "",
       rut: usr.rut || "",
       modulos: normalizeModulos(usr.modulos),
@@ -774,6 +798,7 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       password: "",
       role: "mandante",
       empresaId: "",
+      empresasIds: [],
       nombre: "",
       rut: "",
       modulos: [],
@@ -787,14 +812,22 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
       setSaving("save_usr");
       try {
         const u = usuarios.find(usr => usr.id === editId);
-        const oldEmpresaId = u?.empresaId || "";
-        const newEmpresaId = form.empresaId || "";
+        const oldEmpresasIds = Array.isArray(u?.empresasIds) && u.empresasIds.length
+          ? u.empresasIds
+          : (u?.empresaId ? [u.empresaId] : []);
+
+        const newEmpresasIds = [...new Set(form.empresasIds.filter(Boolean))];
+        // La empresa activa siempre debe pertenecer a la lista
+        let newEmpresaId = form.empresaId || "";
+        if (newEmpresaId && !newEmpresasIds.includes(newEmpresaId)) newEmpresaId = "";
+        if (!newEmpresaId && newEmpresasIds.length) newEmpresaId = newEmpresasIds[0];
 
         const updates = {
           nombre: form.nombre.trim(),
           rut: form.rut.trim(),
           role: form.role,
           empresaId: newEmpresaId,
+          empresasIds: newEmpresasIds,
           modulos: roleNeedsModulos(form.role) ? normalizeModulos(form.modulos) : [],
           updatedAt: serverTimestamp(),
         };
@@ -805,29 +838,32 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
         // 1. Update root collection
         await updateDoc(doc(db, "users", editId), updates);
 
-        // 2. Sync tenant collection: handle company change or creation
-        if (oldEmpresaId && oldEmpresaId !== newEmpresaId) {
-          // Delete from old company subcollection
+        // 2. Sincronizar las subcolecciones de cada empresa.
+        // Ahora el usuario puede pertenecer a varias, así que se escribe su
+        // ficha en TODAS las marcadas y se borra de las que se desmarcaron.
+        const quitadas = oldEmpresasIds.filter(e => !newEmpresasIds.includes(e));
+        for (const eid of quitadas) {
           try {
-            await deleteDoc(doc(db, "empresas", oldEmpresaId, "users", editId));
+            await deleteDoc(doc(db, "empresas", eid, "users", editId));
           } catch (err) {
-            console.error("Error deleting user from old company subcollection:", err);
+            console.error("Error quitando usuario de la empresa " + eid + ":", err);
           }
         }
 
-        if (newEmpresaId) {
-          // Merge updates into the new/existing tenant document
-          const fullUserDoc = {
-            ...updates,
-            email: form.email || u?.email || "",
-            createdAt: u?.createdAt || serverTimestamp(),
-          };
-          await setDoc(doc(db, "empresas", newEmpresaId, "users", editId), fullUserDoc, { merge: true });
+        const fullUserDoc = {
+          ...updates,
+          email: form.email || u?.email || "",
+          createdAt: u?.createdAt || serverTimestamp(),
+        };
+        for (const eid of newEmpresasIds) {
+          // Cada ficha guarda su propia empresa, no la activa del usuario
+          await setDoc(doc(db, "empresas", eid, "users", editId),
+            { ...fullUserDoc, empresaId: eid }, { merge: true });
         }
 
         setShowModal(false);
         setEditId(null);
-        setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "", modulos: [] });
+        setForm({ email: "", password: "", role: "mandante", empresaId: "", empresasIds: [], nombre: "", rut: "", modulos: [] });
         onRefresh();
       } catch (e) {
         alert("Error al actualizar usuario: " + e.message);
@@ -846,12 +882,19 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
         const cred = await createUserWithEmailAndPassword(tempAuth, form.email, form.password);
         const uid = cred.user.uid;
 
+        // Multiempresa: la lista manda y la activa debe estar dentro de ella
+        const empresasIdsNuevo = [...new Set(form.empresasIds.filter(Boolean))];
+        let empresaActivaNueva = form.empresaId || "";
+        if (empresaActivaNueva && !empresasIdsNuevo.includes(empresaActivaNueva)) empresaActivaNueva = "";
+        if (!empresaActivaNueva && empresasIdsNuevo.length) empresaActivaNueva = empresasIdsNuevo[0];
+
         const newUserData = {
           email: form.email,
           nombre: form.nombre.trim(),
           rut: form.rut.trim(),
           role: form.role,
-          empresaId: form.empresaId || "",
+          empresaId: empresaActivaNueva,
+          empresasIds: empresasIdsNuevo,
           modulos: roleNeedsModulos(form.role) ? normalizeModulos(form.modulos) : [],
           password: form.password,
           createdAt: serverTimestamp(),
@@ -861,13 +904,14 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
         // Write to root users collection
         await setDoc(doc(db, "users", uid), newUserData);
 
-        // Write to tenant users collection if empresaId is set
-        if (form.empresaId) {
-          await setDoc(doc(db, "empresas", form.empresaId, "users", uid), newUserData);
+        // Ficha en cada empresa marcada, con su propio empresaId
+        for (const eid of empresasIdsNuevo) {
+          await setDoc(doc(db, "empresas", eid, "users", uid),
+            { ...newUserData, empresaId: eid });
         }
 
         setShowModal(false);
-        setForm({ email: "", password: "", role: "mandante", empresaId: "", nombre: "", rut: "", modulos: [] });
+        setForm({ email: "", password: "", role: "mandante", empresaId: "", empresasIds: [], nombre: "", rut: "", modulos: [] });
         onRefresh();
       } catch (e) {
         let msg = e.message;
@@ -987,19 +1031,76 @@ function UsuariosSection({ usuarios, empresas, onRefresh }) {
               </p>
             )}
           </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Rol" required>
-              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: roleNeedsModulos(e.target.value) ? form.modulos : []})}>
-                {SYSTEM_ROLES.map(r => <option key={r.value} value={r.value}>{r.label} ({r.value})</option>)}
-              </select>
-            </Field>
-            <Field label="Empresa">
-              <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.empresaId} onChange={e => setForm({...form, empresaId: e.target.value})}>
-                <option value="">Ninguna</option>
-                {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-              </select>
-            </Field>
-          </div>
+          <Field label="Rol" required>
+            <select className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-400 bg-white" value={form.role} onChange={e => setForm({...form, role: e.target.value, modulos: roleNeedsModulos(e.target.value) ? form.modulos : []})}>
+              {SYSTEM_ROLES.map(r => <option key={r.value} value={r.value}>{r.label} ({r.value})</option>)}
+            </select>
+            <p className="text-[10px] text-slate-400 mt-1">
+              El rol es el mismo en todas las empresas de la persona.
+            </p>
+          </Field>
+
+          {/* ── Empresas ──
+              Una persona puede trabajar en varias empresas con una sola
+              cuenta. Se marcan todas a las que pertenece y se elige cuál
+              queda abierta al entrar; después puede cambiarla ella misma
+              desde su menú de usuario. */}
+          <Field label="Empresas">
+            <div className="space-y-1.5 mt-1 max-h-[220px] overflow-y-auto pr-1">
+              {empresas.length === 0 && (
+                <p className="text-xs text-slate-400">No hay empresas registradas.</p>
+              )}
+              {empresas.map(e => {
+                const marcada = form.empresasIds.includes(e.id);
+                const activa = form.empresaId === e.id;
+                return (
+                  <div key={e.id}
+                    className={`flex items-center gap-3 p-2 rounded-xl border transition-colors ${
+                      marcada ? 'border-indigo-200 bg-indigo-50/50' : 'border-slate-100 hover:bg-slate-50'
+                    }`}>
+                    <input
+                      type="checkbox"
+                      checked={marcada}
+                      onChange={() => toggleEmpresa(e.id)}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer flex-shrink-0"
+                    />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold text-slate-700 truncate">{e.nombre}</span>
+                      {e.rut && <span className="block text-[10px] text-slate-400">{e.rut}</span>}
+                    </span>
+
+                    {marcada && (
+                      activa ? (
+                        <span className="text-[10px] font-black px-2 py-1 rounded-lg bg-indigo-600 text-white flex-shrink-0">
+                          ACTIVA
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, empresaId: e.id }))}
+                          className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors flex-shrink-0"
+                        >
+                          Hacer activa
+                        </button>
+                      )
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {form.empresasIds.length > 1 && (
+              <p className="text-[10px] text-indigo-600 font-semibold mt-1.5">
+                Pertenece a {form.empresasIds.length} empresas. Podrá alternar entre
+                ellas desde su menú de usuario, sin cerrar sesión.
+              </p>
+            )}
+            {form.empresasIds.length === 0 && (
+              <p className="text-[10px] text-amber-600 font-semibold mt-1.5">
+                Sin empresa asignada: no podrá entrar a ningún módulo.
+              </p>
+            )}
+          </Field>
 
           {roleNeedsModulos(form.role) && (
             <Field label="Módulos habilitados" required>

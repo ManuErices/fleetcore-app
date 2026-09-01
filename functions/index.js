@@ -1678,3 +1678,186 @@ exports.closeWorkOrder = onRequest((req, res) => {
     }
   });
 });
+
+// ============================================================
+// MULTIEMPRESA — vincular una persona existente a otra empresa
+//
+// PEGAR ESTE BLOQUE EN functions/index.js
+// (al final del archivo, o junto a exports.createUser)
+//
+// Por qué una Cloud Function y no reglas de Firestore:
+//   Para vincular a alguien de la empresa A hacia la empresa B, el admin de
+//   B necesitaría leer un documento de usuario que no le pertenece y escribir
+//   su `empresasIds`, que es justamente el campo blindado contra escalada de
+//   privilegios. Relajar esas reglas reabriría el agujero. Acá el Admin SDK
+//   se salta las reglas, pero la función valida ella misma quién llama y
+//   solo permite AGREGAR la empresa del propio admin, nunca quitar otras ni
+//   tocar el rol.
+// ============================================================
+
+// ── Buscar si un correo ya tiene cuenta en el sistema ─────────
+// Devuelve los datos mínimos para que el panel pregunte "¿la vinculas?".
+// No expone nada sensible: nombre, rol y en qué empresas está.
+exports.buscarUsuarioPorEmail = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { email, callerUid } = req.body;
+      if (!email || !callerUid) {
+        return res.status(400).json({ error: 'Faltan campos requeridos: email, callerUid' });
+      }
+
+      // Solo admins pueden buscar
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) return res.status(403).json({ error: 'Usuario no autorizado' });
+      const caller = callerDoc.data();
+      const esAdmin = ['superadmin', 'admin_contrato'].includes(caller.role);
+      if (!esAdmin) return res.status(403).json({ error: 'Sin permisos para buscar usuarios' });
+
+      const emailNorm = String(email).trim().toLowerCase();
+      const snap = await db.collection('users').where('email', '==', emailNorm).limit(1).get();
+
+      if (snap.empty) {
+        return res.status(200).json({ existe: false });
+      }
+
+      const doc = snap.docs[0];
+      const u = doc.data() || {};
+      const empresasIds = Array.isArray(u.empresasIds) && u.empresasIds.length
+        ? u.empresasIds
+        : (u.empresaId ? [u.empresaId] : []);
+
+      // Resolver nombres de empresa para mostrarlos en el panel
+      const empresas = [];
+      for (const eid of empresasIds) {
+        const e = await db.collection('empresas').doc(eid).get();
+        empresas.push({ id: eid, nombre: e.exists ? (e.data().nombre || eid) : eid });
+      }
+
+      return res.status(200).json({
+        existe: true,
+        uid: doc.id,
+        email: u.email || '',
+        nombre: u.nombre || '',
+        rut: u.rut || '',
+        role: u.role || '',
+        empresaActivaId: u.empresaId || '',
+        empresas,
+      });
+
+    } catch (err) {
+      console.error('buscarUsuarioPorEmail error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ── Vincular / desvincular a una empresa ──────────────────────
+exports.vincularUsuarioAEmpresa = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+    try {
+      const { uid, empresaId, callerUid, accion = 'vincular' } = req.body;
+      if (!uid || !empresaId || !callerUid) {
+        return res.status(400).json({ error: 'Faltan campos requeridos: uid, empresaId, callerUid' });
+      }
+
+      // ── Validar al que llama ──────────────────────────────
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) return res.status(403).json({ error: 'Usuario no autorizado' });
+      const caller = callerDoc.data();
+
+      const callerEmpresas = Array.isArray(caller.empresasIds) && caller.empresasIds.length
+        ? caller.empresasIds
+        : (caller.empresaId ? [caller.empresaId] : []);
+
+      const isSuper = caller.role === 'superadmin';
+      // Un admin_contrato solo puede vincular hacia una empresa suya.
+      // Esto es lo que impide que el admin de B meta gente en la empresa C.
+      const isAdmin = caller.role === 'admin_contrato' && callerEmpresas.includes(empresaId);
+      if (!isSuper && !isAdmin) {
+        return res.status(403).json({ error: 'Sin permisos sobre esa empresa' });
+      }
+
+      // Nadie se vincula a sí mismo: sería auto-otorgarse acceso
+      if (uid === callerUid && !isSuper) {
+        return res.status(403).json({ error: 'No puedes modificar tus propias empresas' });
+      }
+
+      // ── Validar destino ───────────────────────────────────
+      const empresaDoc = await db.collection('empresas').doc(empresaId).get();
+      if (!empresaDoc.exists) return res.status(404).json({ error: 'La empresa no existe' });
+
+      const userRef = db.collection('users').doc(uid);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: 'El usuario no existe' });
+      const u = userDoc.data() || {};
+
+      const actuales = Array.isArray(u.empresasIds) && u.empresasIds.length
+        ? [...u.empresasIds]
+        : (u.empresaId ? [u.empresaId] : []);
+
+      // ── DESVINCULAR ───────────────────────────────────────
+      if (accion === 'desvincular') {
+        if (!actuales.includes(empresaId)) {
+          return res.status(400).json({ error: 'El usuario no pertenece a esa empresa' });
+        }
+        if (actuales.length <= 1) {
+          return res.status(400).json({ error: 'No se puede quitar la única empresa del usuario' });
+        }
+
+        const nuevas = actuales.filter(e => e !== empresaId);
+        const patch = {
+          empresasIds: nuevas,
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+        // Si estaba trabajando justo en esa empresa, se le mueve la activa
+        // a otra suya; si no, quedaría con un empresaId al que ya no accede.
+        if (u.empresaId === empresaId) patch.empresaId = nuevas[0];
+
+        await userRef.update(patch);
+        await db.collection('empresas').doc(empresaId)
+          .collection('users').doc(uid)
+          .set({ estado: 'inactivo', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+        return res.status(200).json({ success: true, empresasIds: nuevas, empresaActivaId: patch.empresaId || u.empresaId });
+      }
+
+      // ── VINCULAR ──────────────────────────────────────────
+      if (actuales.includes(empresaId)) {
+        return res.status(200).json({ success: true, yaEstaba: true, empresasIds: actuales });
+      }
+
+      const nuevas = [...new Set([...actuales, empresaId])];
+
+      // Solo se agrega la empresa. El rol y los módulos NO se tocan: por
+      // definición del modelo, la persona tiene el mismo rol en todas.
+      await userRef.update({
+        empresasIds: nuevas,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Espejo en la subcolección de la empresa, que es donde el resto del
+      // sistema busca a los usuarios de un tenant.
+      await db.collection('empresas').doc(empresaId).collection('users').doc(uid).set({
+        empresaId,
+        email:   u.email   || '',
+        nombre:  u.nombre  || '',
+        rut:     u.rut     || '',
+        role:    u.role    || 'operador',
+        modulos: u.modulos || [],
+        estado:  'activo',
+        vinculadoPor: callerUid,
+        createdAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return res.status(200).json({ success: true, empresasIds: nuevas });
+
+    } catch (err) {
+      console.error('vincularUsuarioAEmpresa error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});

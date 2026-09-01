@@ -20,6 +20,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useOnlineStatus } from './ConnectionStatus';
+import { useEmpresa } from '../lib/useEmpresa';
 
 const ROLE_LABELS = {
   superadmin: 'Super Admin',
@@ -65,8 +66,30 @@ export default function UserMenuDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [triggerRect, setTriggerRect] = useState(null);
+  const [errorCambio, setErrorCambio] = useState('');
   const triggerRef = useRef(null);
   const isOnline = useOnlineStatus();
+
+  // Multiempresa: lista de empresas del usuario y función para cambiarse
+  const {
+    empresa,
+    empresaId,
+    empresasDisponibles = [],
+    tieneMultiEmpresa,
+    cambiandoEmpresa,
+    cambiarEmpresa,
+  } = useEmpresa();
+
+  const handleCambiarEmpresa = async (nuevoId) => {
+    if (nuevoId === empresaId) { setOpen(false); return; }
+    setErrorCambio('');
+    const r = await cambiarEmpresa(nuevoId);
+    if (r?.ok) {
+      setOpen(false);
+    } else {
+      setErrorCambio(r?.error || 'No se pudo cambiar de empresa.');
+    }
+  };
 
   const isDark = theme === 'dark';
 
@@ -166,6 +189,80 @@ export default function UserMenuDropdown({
                 </div>
               </div>
             </div>
+
+            {/* ── Selector de empresa ──
+                Solo aparece cuando el usuario pertenece a más de una. Con una
+                sola empresa se muestra el nombre sin controles, para no
+                agregar ruido a la mayoría de las cuentas. */}
+            {empresasDisponibles.length > 0 && (
+              <div className={`px-4 py-3 ${isDark ? 'border-b border-white/10' : 'border-b border-slate-100'}`}>
+                <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isDark ? 'text-white/35' : 'text-slate-400'}`}>
+                  {tieneMultiEmpresa ? 'Empresa activa' : 'Empresa'}
+                </p>
+
+                {!tieneMultiEmpresa ? (
+                  <p className={`text-sm font-semibold truncate ${isDark ? 'text-white/80' : 'text-slate-700'}`}>
+                    {empresa?.nombre || '—'}
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {empresasDisponibles.map(e => {
+                      const activa = e.id === empresaId;
+                      return (
+                        <button
+                          key={e.id}
+                          disabled={cambiandoEmpresa}
+                          onClick={() => handleCambiarEmpresa(e.id)}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-colors disabled:opacity-50 ${
+                            activa
+                              ? (isDark ? 'bg-white/10' : 'bg-blue-50')
+                              : (isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50')
+                          }`}
+                        >
+                          <span
+                            className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
+                              activa
+                                ? 'bg-blue-600 text-white'
+                                : (isDark ? 'bg-white/10 text-white/60' : 'bg-slate-200 text-slate-500')
+                            }`}
+                          >
+                            {e.nombre?.[0]?.toUpperCase() || '?'}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block text-xs font-semibold truncate ${
+                              activa
+                                ? (isDark ? 'text-white' : 'text-blue-900')
+                                : (isDark ? 'text-white/70' : 'text-slate-600')
+                            }`}>
+                              {e.nombre}
+                            </span>
+                            {e.rut && (
+                              <span className={`block text-[10px] truncate ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                                {e.rut}
+                              </span>
+                            )}
+                          </span>
+                          {activa && (
+                            <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+
+                    {cambiandoEmpresa && (
+                      <p className={`text-[10px] px-2.5 pt-1 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                        Cambiando de empresa…
+                      </p>
+                    )}
+                    {errorCambio && (
+                      <p className="text-[10px] px-2.5 pt-1 font-semibold text-red-500">{errorCambio}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Estado de conexión */}
             <div className={`px-4 py-2.5 ${isDark ? 'border-b border-white/10' : 'border-b border-slate-100'}`}>
