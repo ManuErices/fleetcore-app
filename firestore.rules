@@ -22,9 +22,28 @@ service cloud.firestore {
       return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? userData().role : null;
     }
 
-    // EmpresaId del usuario
+    // EmpresaId ACTIVO del usuario (la empresa en la que está trabajando ahora)
     function userEmpresaId() {
       return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? userData().empresaId : null;
+    }
+
+    // ── MULTIEMPRESA ─────────────────────────────────────
+    // Lista de empresas a las que el usuario pertenece. Es la fuente de
+    // verdad de la membresía y SOLO un admin puede modificarla (ver la
+    // regla de /users/{uid} más abajo).
+    //
+    // El fallback a [empresaId] mantiene funcionando a los usuarios que
+    // todavía no han pasado por la migración: siguen viendo su empresa
+    // de siempre y nada se rompe.
+    function misEmpresas() {
+      return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? userData().get('empresasIds', userEmpresaId() != null ? [userEmpresaId()] : [])
+        : [];
+    }
+
+    // ¿El usuario es miembro de esta empresa? (activa o no)
+    function esMiembroDe(empresaId) {
+      return isAuth() && (userEmpresaId() == empresaId || empresaId in misEmpresas());
     }
 
     // Superadmin global — acceso total a todo
@@ -47,9 +66,14 @@ service cloud.firestore {
       return isSuperAdmin() || isAdminContrato();
     }
 
-    // Usuario pertenece a esta empresa
+    // Usuario pertenece a esta empresa.
+    // Antes solo comparaba contra la empresa activa; ahora acepta cualquiera
+    // de sus membresías, porque al cambiar de empresa hay un instante en que
+    // el cliente ya pide datos de la nueva mientras el doc de usuario aún
+    // viaja. La separación de datos la hace la interfaz mostrando una sola
+    // empresa a la vez; las reglas solo verifican que tenga derecho a ambas.
     function belongsToEmpresa(empresaId) {
-      return isAuth() && userEmpresaId() == empresaId;
+      return esMiembroDe(empresaId);
     }
 
     // Usuario tiene acceso de lectura/escritura a la empresa
@@ -442,11 +466,41 @@ service cloud.firestore {
     // Necesario porque AppSelector y useEmpresa leen de aquí
     // ─────────────────────────────────────────────────────
     match /users/{uid} {
+      // ══════════════════════════════════════════════════════
+      // Campos que definen los privilegios del usuario. Antes el dueño del
+      // documento podía escribir cualquier cosa aquí, incluido
+      // role:'superadmin' o el empresaId de otra empresa — y como
+      // userRole() y userEmpresaId() leen justamente de este documento,
+      // eso permitía saltarse por completo el aislamiento entre empresas.
+      //
+      // Ahora el usuario puede editar sus datos personales, pero no puede
+      // tocar su rol, sus módulos ni su lista de empresas.
+      // ══════════════════════════════════════════════════════
+      function mismoValor(campo) {
+        return request.resource.data.get(campo, null) == resource.data.get(campo, null);
+      }
+
+      // El usuario puede cambiar su empresa ACTIVA, pero solo a una empresa
+      // que ya esté en su lista de membresías. Esa lista es inmutable para él.
+      function empresaActivaValida() {
+        return mismoValor('empresaId')
+            || request.resource.data.empresaId in resource.data.get('empresasIds', []);
+      }
+
+      function noEscalaPrivilegios() {
+        return mismoValor('role')
+            && mismoValor('empresasIds')
+            && mismoValor('modulos')
+            && mismoValor('estado')
+            && empresaActivaValida();
+      }
+
       // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
       allow read: if isAuth() && (
                     request.auth.uid == uid
                     || isSuperAdmin()
-                    || (resource != null && (isAnyAdmin() || isMandanteAdmin()) && resource.data.get('empresaId', null) == userEmpresaId())
+                    || (resource != null && (isAnyAdmin() || isMandanteAdmin())
+                        && esMiembroDe(resource.data.get('empresaId', '__ninguna__')))
                   );
 
       // Permisos de creación
@@ -454,14 +508,19 @@ service cloud.firestore {
                       request.auth.uid == uid
                       || isSuperAdmin()
                       || (isAnyAdmin() && (request.resource.data.role == 'trabajador' || request.resource.data.role == 'operador')
-                          && request.resource.data.empresaId == userEmpresaId())
+                          && esMiembroDe(request.resource.data.empresaId))
                     );
 
       // Permisos de actualización
       allow update: if isAuth() && (
-                      request.auth.uid == uid
+                      // El propio usuario: solo datos no privilegiados + cambio de empresa activa
+                      (request.auth.uid == uid && noEscalaPrivilegios())
                       || isSuperAdmin()
-                      || (isAnyAdmin() && (resource.data.get('empresaId', null) == null || resource.data.empresaId == userEmpresaId()) && request.resource.data.empresaId == userEmpresaId())
+                      // Un admin gestiona usuarios de las empresas donde él es miembro
+                      || (isAnyAdmin()
+                          && (resource.data.get('empresaId', null) == null
+                              || esMiembroDe(resource.data.empresaId))
+                          && esMiembroDe(request.resource.data.empresaId))
                     );
 
       allow delete: if isSuperAdmin();
