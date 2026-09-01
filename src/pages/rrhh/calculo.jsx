@@ -162,24 +162,47 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const { anios, meses, dias, totalMeses } = calcularAntiguedad(fechaIng, fechaTerm);
 
   // ── Feriado proporcional (Art. 73 CT) ──
-  // 15 días hábiles anuales. Proporcional = (15/12) × meses trabajados en el año de término
-  const dtTerm             = new Date(fechaTerm);
-  const mesesEnAnioActual  = dtTerm.getMonth() + 1; // 1–12
-  const diasEnMesActual    = dtTerm.getDate();
-  // Fracción del mes actual: días trabajados / 30
-  const fraccionMesActual  = Math.min(1, diasEnMesActual / 30);
-  const mesesFeriado       = mesesEnAnioActual - 1 + fraccionMesActual;
+  //
+  // El período corre desde la ÚLTIMA FECHA DE ANIVERSARIO del contrato, no desde
+  // enero. Antes se usaba `dtTerm.getMonth() + 1`, o sea los meses del año
+  // calendario: a alguien con 3 años 2 meses que sale en agosto se le pagaban
+  // 7,9 meses de feriado en vez de los 2 que le corresponden.
+  const dtTerm  = new Date(fechaTerm);
+  const dtIng   = fechaIng ? new Date(fechaIng) : null;
+
+  let mesesFeriado = 0;
+  if (dtIng && !isNaN(dtIng) && !isNaN(dtTerm)) {
+    // Último aniversario cumplido antes del término
+    const aniv = new Date(dtIng);
+    aniv.setFullYear(dtIng.getFullYear() + anios);
+    if (aniv > dtTerm) aniv.setFullYear(aniv.getFullYear() - 1);
+    const dias = Math.max(0, Math.round((dtTerm - aniv) / 86400000));
+    mesesFeriado = Math.min(12, dias / 30);
+  }
+
+  // 15 días HÁBILES al año (Art. 67). Se pagan como días corridos, así que hay
+  // que convertirlos: 15 hábiles ≈ 21 corridos (se agregan los días de descanso
+  // comprendidos en el período, Art. 69).
+  const FACTOR_HABIL_CORRIDO = 21 / 15;
   const feriadoPropDias    = Math.round((15 / 12) * mesesFeriado * 10) / 10;
-  const feriadoPropMonto   = Math.round(ult / 30 * feriadoPropDias);
-  const feriadoPendiente   = parseInt(fin.diasFeriadoPendiente || 0);
-  const feriadoPendMonto   = Math.round(ult / 30 * feriadoPendiente);
+  const feriadoPropMonto   = Math.round(ult / 30 * feriadoPropDias * FACTOR_HABIL_CORRIDO);
+  const feriadoPendiente   = parseFloat(fin.diasFeriadoPendiente || 0);
+  const feriadoPendMonto   = Math.round(ult / 30 * feriadoPendiente * FACTOR_HABIL_CORRIDO);
   const totalFeriado       = feriadoPropMonto + feriadoPendMonto;
+  const mesesEnAnioActual  = dtTerm.getMonth() + 1; // se conserva por compatibilidad
 
   // ── Gratificación proporcional (Art. 50 CT) ──
   // 25% de lo devengado en el año, tope 4.75 IMM anual. Proporcional a meses.
   // Usamos IMM_2026 vigente
+  // Mismo criterio que la liquidación mensual: 25% de lo devengado CON TOPE de
+  // 4,75 IMM al año, no el tope directo.
   const gratAnualTope      = IMM_2026 * 4.75;
-  const gratPropMonto      = Math.round(gratAnualTope / 12 * mesesFeriado);
+  const gratMensualPagable = Math.min(ult * 0.25, gratAnualTope / 12);
+  // Si la gratificación ya se paga mes a mes (garantizada), no corresponde
+  // volver a pagarla acá: se controla con `fin.gratificacionYaPagada`.
+  const gratPropMonto      = fin.gratificacionYaPagada === 'si'
+    ? 0
+    : Math.round(gratMensualPagable * mesesFeriado);
 
   // ── Remuneración del mes en curso (proporcional si no está pagada) ──
   const remMesEnCurso      = parseInt(fin.remMesEnCurso || 0);
@@ -188,12 +211,23 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const tieneIndemnizacion = CAUSALES_CON_INDEMNIZACION.includes(causal)
     && (!contrato?.tipoContrato || contrato.tipoContrato.toLowerCase().includes('indefinido'))
     && anios >= 1;
-  const aniosIndemnizacion = Math.min(anios, TOPE_ANIOS_INDEMNIZACION);
-  // Base indemnización = última remuneración mensual imponible (tope 90 UF ≈ referencial)
-  const indemMonto         = tieneIndemnizacion ? ult * aniosIndemnizacion : 0;
+
+  // Art. 163: la fracción superior a seis meses se cuenta como año completo.
+  // Antes se truncaba: 3 años 7 meses pagaban 3 años en vez de 4.
+  const aniosConFraccion   = anios + (meses > 6 ? 1 : 0);
+  const aniosIndemnizacion = Math.min(aniosConFraccion, TOPE_ANIOS_INDEMNIZACION);
+
+  // Art. 172: la base no puede exceder 90 UF. El comentario anterior lo
+  // mencionaba pero el tope no se aplicaba en ninguna parte.
+  const topeIndem          = Math.round(90 * (fin.uf || UF_REFERENCIA));
+  const baseIndem          = Math.min(ult, topeIndem);
+  const baseTopeada        = ult > topeIndem;
+  const indemMonto         = tieneIndemnizacion ? baseIndem * aniosIndemnizacion : 0;
 
   // ── Indemnización sustitutiva aviso previo (Art. 161 CT) ──
-  const indемAvisoPrevio   = fin.pagoAvisoPrevio === 'si' ? ult : 0;
+  // La indemnización sustitutiva del aviso previo usa la misma base topeada.
+  // (La variable se llamaba `indemAvisoPrevio`, con "ем" en cirílico.)
+  const indemAvisoPrevio   = fin.pagoAvisoPrevio === 'si' ? baseIndem : 0;
 
   // ── Remuneraciones pendientes (períodos anteriores no pagados) ──
   const remPendiente       = parseInt(fin.remuneracionesPendientes || 0);
@@ -215,7 +249,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const otrosDescuentos    = parseInt(fin.otrosDescuentos || 0);
 
   // ── Totales ──
-  const totalHaberes    = totalFeriado + gratPropMonto + remMesEnCurso + remPendiente + indemMonto + indемAvisoPrevio + otrosHaberes;
+  const totalHaberes    = totalFeriado + gratPropMonto + remMesEnCurso + remPendiente + indemMonto + indemAvisoPrevio + otrosHaberes;
   const totalDescuentos = totalDescPrev + anticipoPend + otrosDescuentos;
   const totalFiniquito  = totalHaberes - totalDescuentos;
 
@@ -226,8 +260,9 @@ function calcularFiniquito(fin, contrato, trabajador) {
     feriadoPendiente, feriadoPendMonto, totalFeriado,
     gratPropMonto, gratAnualTope,
     remMesEnCurso, remPendiente, otrosHaberes,
-    tieneIndemnizacion, aniosIndemnizacion, indemMonto,
-    indемAvisoPrevio,
+    tieneIndemnizacion, aniosIndemnizacion, aniosConFraccion, indemMonto,
+    baseIndem, baseTopeada, topeIndem, gratMensualPagable,
+    indemAvisoPrevio,
     descAfp, descSalud, descCes, totalDescPrev,
     anticipoPend, otrosDescuentos, totalDescuentos,
     totalHaberes, totalFiniquito,

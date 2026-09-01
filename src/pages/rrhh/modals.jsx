@@ -1471,6 +1471,31 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 
 // ─── FiniquitoModal ───────────────────────────────────────────────────────────
 
+/**
+ * Pie de campo autorrellenado: dice de dónde salió el valor y, si el usuario lo
+ * cambió, ofrece volver al automático. Todos los campos del finiquito se
+ * precargan pero siguen siendo editables, y editarlos recalcula el total.
+ */
+function Auto({ valor, sugerido, fuente, onRestaurar, formato = (v) => v }) {
+  if (sugerido === null || sugerido === undefined || sugerido === '') return null;
+  const modificado = String(valor ?? '') !== String(sugerido);
+  return (
+    <p className="text-[11px] mt-1 leading-snug">
+      {modificado ? (
+        <>
+          <span className="text-amber-600">Modificado a mano. </span>
+          <button type="button" onClick={onRestaurar} className="text-violet-600 hover:underline font-semibold">
+            Volver a {formato(sugerido)}
+          </button>
+          <span className="text-slate-400"> ({fuente})</span>
+        </>
+      ) : (
+        <span className="text-slate-400">Automático desde {fuente}</span>
+      )}
+    </p>
+  );
+}
+
 function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
   const { empresaId } = useEmpresa();
   const empty = {
@@ -1479,6 +1504,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     causal: '', ultimaRemuneracion: '',
     diasFeriadoPendiente: '0', remuneracionesPendientes: '0',
     pagoAvisoPrevio: 'no', anticipoPendiente: '0', otrosDescuentos: '0',
+    gratificacionYaPagada: 'si',
     estadoFirma: 'pendiente', observaciones: '',
   };
   const [form,   setForm]   = useState(empty);
@@ -1498,20 +1524,39 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
       const contratoActual = contratos?.find(c => c.id === f.contratoId);
       const fechaAuto = causal === '159-4' && contratoActual?.fechaFin
         ? contratoActual.fechaFin : f.fechaTermino;
-      return { ...f, causal, fechaTermino: fechaAuto };
+      // La causal manda sobre el aviso previo: solo procede en la 161.
+      // Se propone el valor correcto, pero el usuario puede cambiarlo.
+      return { ...f, causal, fechaTermino: fechaAuto,
+               pagoAvisoPrevio: causal === '161' ? 'si' : 'no' };
     });
   };
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente')
       || contratos?.find(c => c.trabajadorId === tid);
+    const trab = trabajadores?.find(t => t.id === tid);
     setForm(f => ({
       ...f, trabajadorId: tid,
       contratoId: contrato?.id || '',
       ultimaRemuneracion: contrato?.sueldoBase || '',
+      // Los días de feriado ya están en la ficha: no hay por qué escribirlos
+      // de nuevo y arriesgar una diferencia con lo que el trabajador tiene.
+      diasFeriadoPendiente: trab?.diasVacacionesDisponibles != null
+        ? String(trab.diasVacacionesDisponibles)
+        : f.diasFeriadoPendiente,
     }));
   };
 
   const contratoSel   = contratos?.find(c => c.id === form.contratoId);
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
+  // Lo que el sistema propone para cada campo. Se usa tanto para precargar como
+  // para poder volver atrás si el usuario lo cambió.
+  const sugerido = {
+    ultimaRemuneracion: contratoSel?.sueldoBase ?? '',
+    diasFeriadoPendiente: trabajadorSel?.diasVacacionesDisponibles ?? '',
+    // El aviso previo sustitutivo solo procede en la causal 161
+    pagoAvisoPrevio: form.causal === '161' ? 'si' : 'no',
+  };
+  const restaurar = (campo) => set(campo, String(sugerido[campo]));
+
   const calc = (form.fechaTermino && form.ultimaRemuneracion)
     ? calcularFiniquito(form, contratoSel, trabajadorSel) : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
@@ -1590,6 +1635,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
           </Field>
           <Field label="Última remuneración ($)" required>
             <input type="text" className={inp} value={formatCLP(form.ultimaRemuneracion)} onChange={e => set('ultimaRemuneracion', parseCLP(e.target.value))} />
+            <Auto valor={form.ultimaRemuneracion} sugerido={sugerido.ultimaRemuneracion}
+              fuente="el sueldo base del contrato" onRestaurar={() => restaurar('ultimaRemuneracion')}
+              formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
         </div>
         {calc && (
@@ -1606,7 +1654,17 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
         <Divider label="Haberes del finiquito" />
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Field label="Días feriado pendientes">
-            <input type="number" className={inp} value={form.diasFeriadoPendiente} onChange={e => set('diasFeriadoPendiente', e.target.value)} />
+            <input type="number" step="0.5" className={inp} value={form.diasFeriadoPendiente} onChange={e => set('diasFeriadoPendiente', e.target.value)} />
+            <Auto valor={form.diasFeriadoPendiente} sugerido={sugerido.diasFeriadoPendiente}
+              fuente="el saldo de vacaciones de la ficha" onRestaurar={() => restaurar('diasFeriadoPendiente')}
+              formato={v => `${v} días`} />
+            {calc && (
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                Son los días de años anteriores que no alcanzó a tomar. El proporcional
+                del período en curso ({calc.feriadoPropDias} días) se calcula aparte,
+                desde el último aniversario del contrato.
+              </p>
+            )}
           </Field>
           <Field label="Remuneraciones pendientes ($)">
             <input type="text" className={inp} value={formatCLP(form.remuneracionesPendientes)} onChange={e => set('remuneracionesPendientes', parseCLP(e.target.value))} />
@@ -1616,8 +1674,32 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
               <option value="no">No aplica / ya dado</option>
               <option value="si">Sí — pagar 1 mes</option>
             </select>
+            <Auto valor={form.pagoAvisoPrevio} sugerido={sugerido.pagoAvisoPrevio}
+              fuente="la causal seleccionada" onRestaurar={() => restaurar('pagoAvisoPrevio')}
+              formato={v => v === 'si' ? 'sí, pagar 1 mes' : 'no aplica'} />
           </Field>
         </div>
+
+        {form.pagoAvisoPrevio === 'si' && form.causal && form.causal !== '161' && (
+          <p className="text-[11px] text-amber-600 -mt-2">
+            La indemnización sustitutiva del aviso previo solo procede en la causal 161
+            (necesidades de la empresa). Con la causal seleccionada no corresponde pagarla.
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Gratificación proporcional">
+            <select className={inp} value={form.gratificacionYaPagada || 'si'}
+              onChange={e => set('gratificacionYaPagada', e.target.value)}>
+              <option value="si">Ya pagada mes a mes — no incluir</option>
+              <option value="no">Pendiente — incluir en el finiquito</option>
+            </select>
+          </Field>
+        </div>
+        <p className="text-[11px] text-slate-400 -mt-2 leading-snug">
+          Si la gratificación se paga garantizada en cada liquidación, volver a pagarla
+          proporcional acá la duplica. Déjala en "no incluir" salvo que se pague una vez al año.
+        </p>
 
         <Divider label="Descuentos" />
         <div className="grid grid-cols-2 gap-4">
@@ -1632,20 +1714,87 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
         {calc && (
           <>
             <Divider label="Resumen finiquito" />
-            <div className="rounded-xl border border-slate-200 overflow-hidden">
-              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-slate-100">
-                {[
-                  { label: 'Feriado',        value: fmt(calc.totalFeriado),   color: 'text-blue-600' },
-                  { label: 'Gratificación',  value: fmt(calc.gratPropMonto),  color: 'text-indigo-600' },
-                  { label: 'Indemnización',  value: fmt(calc.indemMonto),     color: 'text-purple-600' },
-                  { label: 'Total finiquito',value: fmt(calc.totalFiniquito), color: 'text-emerald-600' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="px-4 py-3 text-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
-                    <p className={`text-base font-black ${color} mt-1`}>{value}</p>
-                  </div>
-                ))}
+
+            {!form.causal && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-bold text-amber-800">Falta la causal de término</p>
+                <p className="text-xs text-amber-700 mt-0.5 leading-snug">
+                  La causal determina si corresponde indemnización por años de servicio.
+                  Sin ella el cálculo muestra $0 en esa línea, y el Art. 162 exige indicarla
+                  en la carta de aviso. No se puede guardar el finiquito sin causal.
+                </p>
               </div>
+            )}
+
+            {/* Desglose completo: antes solo se mostraban 4 KPIs y el aviso previo
+                sumaba al total sin aparecer, así que las cifras no cuadraban. */}
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-slate-50">
+                  {[
+                    ['Feriado proporcional',
+                      `${calc.feriadoPropDias} días hábiles · desde el último aniversario`,
+                      calc.feriadoPropMonto],
+                    ['Feriado pendiente',
+                      `${calc.feriadoPendiente} días acumulados`,
+                      calc.feriadoPendMonto],
+                    ['Gratificación proporcional',
+                      form.gratificacionYaPagada === 'si'
+                        ? 'Ya pagada mes a mes — no se duplica'
+                        : `${fmt(calc.gratMensualPagable)}/mes × ${calc.mesesFeriado.toFixed(1)} meses`,
+                      calc.gratPropMonto],
+                    ['Remuneración del mes en curso', '', calc.remMesEnCurso],
+                    ['Remuneraciones pendientes', '', calc.remPendiente],
+                    ['Indemnización por años de servicio',
+                      calc.tieneIndemnizacion
+                        ? `${calc.aniosIndemnizacion} año(s) × ${fmt(calc.baseIndem)}${calc.baseTopeada ? ' (base topeada a 90 UF)' : ''}`
+                        : (form.causal ? 'No corresponde por la causal seleccionada' : 'Requiere causal'),
+                      calc.indemMonto],
+                    ['Indemnización sustitutiva del aviso previo',
+                      form.pagoAvisoPrevio === 'si' ? 'Art. 161 — un mes de remuneración' : '',
+                      calc.indemAvisoPrevio],
+                  ].filter(([, , v]) => v > 0).map(([label, nota, v]) => (
+                    <tr key={label}>
+                      <td className="px-4 py-2">
+                        <p className="text-slate-700 font-semibold">{label}</p>
+                        {nota && <p className="text-[11px] text-slate-400">{nota}</p>}
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono font-bold text-slate-700 whitespace-nowrap">{fmt(v)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-50">
+                    <td className="px-4 py-2 font-black text-slate-700">TOTAL HABERES</td>
+                    <td className="px-4 py-2 text-right font-mono font-black text-slate-800">{fmt(calc.totalHaberes)}</td>
+                  </tr>
+
+                  {calc.totalDescuentos > 0 && (
+                    <>
+                      {[
+                        ['Anticipo pendiente', calc.anticipoPend],
+                        ['Otros descuentos',   calc.otrosDescuentos],
+                        ['Cotizaciones del mes de término', calc.totalDescPrev],
+                      ].filter(([, v]) => v > 0).map(([label, v]) => (
+                        <tr key={label}>
+                          <td className="px-4 py-2 text-slate-600">{label}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-red-600 whitespace-nowrap">−{fmt(v)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-50">
+                        <td className="px-4 py-2 font-black text-slate-700">TOTAL DESCUENTOS</td>
+                        <td className="px-4 py-2 text-right font-mono font-black text-red-600">−{fmt(calc.totalDescuentos)}</td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#0f0c29' }}>
+                    <td className="px-4 py-3 font-black text-white uppercase tracking-widest text-xs">Total finiquito</td>
+                    <td className="px-4 py-3 text-right font-mono font-black text-lg" style={{ color: '#6ee7b7' }}>
+                      {fmt(calc.totalFiniquito)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </>
         )}
