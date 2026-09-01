@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, doc, getDoc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { onAuthStateChanged } from "firebase/auth";
@@ -8,6 +8,77 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
+
+// ═══════════════════════════════════════════════════════════════
+// PLANTILLA DE IMPORTACIÓN
+// Los encabezados deben coincidir con lo que busca el parser de
+// ImportarExcelModal (búsqueda por "incluye", sin distinguir mayúsculas).
+// ═══════════════════════════════════════════════════════════════
+const COLUMNAS_PLANTILLA = [
+  { header: 'Folio',              ancho: 12, ejemplo: 'F-001' },
+  { header: 'Fecha',              ancho: 12, ejemplo: '2026-08-31' },
+  { header: 'Proyecto',           ancho: 24, ejemplo: 'OBRA NORTE' },
+  { header: 'Patente',            ancho: 14, ejemplo: 'EC-M02' },
+  { header: 'Tipo Maquina',       ancho: 18, ejemplo: 'EXCAVADORA' },
+  { header: 'Marca',              ancho: 14, ejemplo: 'CATERPILLAR' },
+  { header: 'Modelo',             ancho: 16, ejemplo: '320D' },
+  { header: 'Empleado',           ancho: 26, ejemplo: 'JUAN PEREZ SOTO' },
+  { header: 'Horometro Inicial',  ancho: 16, ejemplo: '1250.5' },
+  { header: 'Horometro Final',    ancho: 16, ejemplo: '1258.5' },
+  { header: 'Kilometraje Inicial',ancho: 18, ejemplo: '0' },
+  { header: 'Kilometraje Final',  ancho: 18, ejemplo: '0' },
+  { header: 'Litros',             ancho: 12, ejemplo: '420' },
+  { header: 'Obs',                ancho: 32, ejemplo: 'Sin novedad' },
+];
+
+// Descarga un .xlsx vacío con los encabezados exactos + una fila de ejemplo
+// y una hoja de instrucciones.
+export function descargarPlantillaReportes() {
+  const wb = XLSX.utils.book_new();
+
+  // Hoja 1: plantilla (encabezados + fila de ejemplo)
+  const headers = COLUMNAS_PLANTILLA.map(c => c.header);
+  const ejemplo = COLUMNAS_PLANTILLA.map(c => c.ejemplo);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ejemplo]);
+  ws['!cols'] = COLUMNAS_PLANTILLA.map(c => ({ wch: c.ancho }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Reportes');
+
+  // Hoja 2: instrucciones
+  const instrucciones = [
+    ['PLANTILLA DE CARGA MASIVA — REPORTES DE MAQUINARIA'],
+    [''],
+    ['1. No cambies ni borres los nombres de las columnas de la hoja "Reportes".'],
+    ['2. Borra la fila de ejemplo antes de cargar tus datos reales.'],
+    ['3. La Fecha debe ir como AAAA-MM-DD (ej: 2026-08-31) o DD/MM/AAAA.'],
+    ['4. Patente debe coincidir con la patente o el código de la máquina en el sistema.'],
+    ['5. Proyecto debe coincidir con el nombre o el código de la obra en el sistema.'],
+    ['6. Empleado debe coincidir con el nombre del trabajador para traer su RUT automáticamente.'],
+    ['7. Si una máquina, obra o trabajador no calza, la fila igual se importa pero queda sin vincular.'],
+    ['8. Usa punto como separador decimal (1250.5), no coma.'],
+    ['9. Puedes dejar en blanco las columnas que no apliquen.'],
+    [''],
+    ['COLUMNA', 'DESCRIPCIÓN'],
+    ['Folio',               'Número de la hoja física del reporte (opcional).'],
+    ['Fecha',               'Fecha de la jornada. Obligatoria.'],
+    ['Proyecto',            'Obra o centro de costo.'],
+    ['Patente',             'Patente o código del equipo. Obligatoria.'],
+    ['Tipo Maquina',        'Solo se usa si la máquina no existe en el sistema.'],
+    ['Marca',               'Solo se usa si la máquina no existe en el sistema.'],
+    ['Modelo',              'Solo se usa si la máquina no existe en el sistema.'],
+    ['Empleado',            'Nombre completo del operador.'],
+    ['Horometro Inicial',   'Lectura al iniciar la jornada.'],
+    ['Horometro Final',     'Lectura al terminar la jornada.'],
+    ['Kilometraje Inicial', 'Solo para vehículos con odómetro.'],
+    ['Kilometraje Final',   'Solo para vehículos con odómetro.'],
+    ['Litros',              'Combustible cargado durante la jornada.'],
+    ['Obs',                 'Observaciones libres.'],
+  ];
+  const wsInfo = XLSX.utils.aoa_to_sheet(instrucciones);
+  wsInfo['!cols'] = [{ wch: 24 }, { wch: 70 }];
+  XLSX.utils.book_append_sheet(wb, wsInfo, 'Instrucciones');
+
+  XLSX.writeFile(wb, 'Plantilla_Reportes_Maquinaria.xlsx');
+}
 
 export default function ReporteWorkFleet() {
   const { empresaId } = useEmpresa();
@@ -22,8 +93,15 @@ export default function ReporteWorkFleet() {
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
   const [showImport, setShowImport] = useState(false);
   const [showNuevoReporte, setShowNuevoReporte] = useState(false);
+  const [mostrarEliminados, setMostrarEliminados] = useState(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const ITEMS_POR_PAGINA = 10;
+
+  // ✅ Roles que pueden editar/firmar. El modal de detalle espera literalmente
+  // 'administrador'; los roles reales del sistema son otros, por eso el botón
+  // "Editar Reporte" nunca aparecía. Aquí se traduce el rol.
+  const puedeEditar = ['superadmin', 'admin_contrato', 'administrativo'].includes(userRole);
+  const rolParaModal = puedeEditar ? 'administrador' : userRole;
   
   // Filtros
   const [filtros, setFiltros] = useState({
@@ -140,19 +218,55 @@ export default function ReporteWorkFleet() {
     cargarReportes();
   }, [empresaId]);
 
+  // ✅ FIX correlativo: soft-delete. El documento se conserva marcado como
+  // eliminado, de modo que su número de reporte sigue "tomado" y el correlativo
+  // de la máquina nunca retrocede ni reutiliza folios ya impresos en terreno.
   const handleEliminarReporte = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este reporte? Esta acción no se puede deshacer.')) return;
+    const reporte = reportes.find(r => r.id === id);
+    const ok = window.confirm(
+      `¿Eliminar el reporte ${reporte?.numeroReporte || ''}?\n\n` +
+      'Quedará oculto del listado pero se conserva en la base de datos, ' +
+      'para no reutilizar su número correlativo.'
+    );
+    if (!ok) return;
+
     try {
-      await deleteDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id));
-      setReportes(prev => prev.filter(r => r.id !== id));
+      await updateDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        deletedBy: {
+          uid:   currentUser?.uid   || '',
+          email: currentUser?.email || '',
+          role:  userRole,
+        },
+      });
+      setReportes(prev => prev.map(r => (r.id === id ? { ...r, deleted: true } : r)));
     } catch (err) {
       alert('Error al eliminar: ' + err.message);
+    }
+  };
+
+  // Restaurar un reporte eliminado (solo visible con el filtro de eliminados activo)
+  const handleRestaurarReporte = async (id) => {
+    try {
+      await updateDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id), {
+        deleted: false,
+        restoredAt: serverTimestamp(),
+      });
+      setReportes(prev => prev.map(r => (r.id === id ? { ...r, deleted: false } : r)));
+    } catch (err) {
+      alert('Error al restaurar: ' + err.message);
     }
   };
 
   // Aplicar filtros y enriquecer datos
   const reportesFiltrados = useMemo(() => {
     let resultado = [...reportes];
+
+    // ✅ Ocultar los eliminados (soft-delete) salvo que se pidan explícitamente
+    resultado = mostrarEliminados
+      ? resultado.filter(r => r.deleted === true)
+      : resultado.filter(r => r.deleted !== true);
 
     // Si el usuario es mandante, solo mostrar reportes firmados
     if (userRole === 'mandante') {
@@ -194,7 +308,7 @@ export default function ReporteWorkFleet() {
         machineMarca:   machine?.marca   || r.machineMarca   || '',
       };
     });
-  }, [filtros, reportes, projects, machines, userRole]);
+  }, [filtros, reportes, projects, machines, userRole, mostrarEliminados]);
 
   const handleFiltroChange = (campo, valor) => {
     setFiltros(prev => ({
@@ -933,6 +1047,17 @@ export default function ReporteWorkFleet() {
               </svg>
               Importar Excel
             </button>
+            {/* ✅ Plantilla en blanco con el formato de reportes */}
+            <button
+              onClick={descargarPlantillaReportes}
+              className="px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl bg-white border-2 border-emerald-300 hover:bg-emerald-50 text-emerald-700 font-semibold text-sm transition-all shadow-sm flex items-center gap-2"
+              title="Descargar planilla Excel en blanco con el formato de reportes"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Plantilla
+            </button>
             <button
               onClick={() => setShowPreview(true)}
               disabled={reportesFiltrados.length === 0}
@@ -974,6 +1099,23 @@ export default function ReporteWorkFleet() {
               </svg>
               PDF Resumen
             </button>
+            {/* ✅ Papelera: los eliminados siguen existiendo para no romper el correlativo */}
+            {puedeEditar && (
+              <button
+                onClick={() => { setMostrarEliminados(v => !v); setPaginaActual(1); setReportesSeleccionados([]); }}
+                className={`px-3 sm:px-4 py-2 rounded-lg sm:rounded-xl font-semibold text-sm transition-all shadow-sm flex items-center gap-2 border-2 ${
+                  mostrarEliminados
+                    ? 'bg-slate-800 border-slate-800 text-white'
+                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+                title="Ver los reportes eliminados y restaurarlos si corresponde"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                {mostrarEliminados ? 'Ver vigentes' : 'Ver eliminados'}
+              </button>
+            )}
             <div className="flex-1"></div>
             <div className="text-sm text-slate-600 flex items-center gap-2">
               <span className="font-semibold">Total registros:</span>
@@ -1122,18 +1264,48 @@ export default function ReporteWorkFleet() {
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-3 text-center">
-                        {(userRole === 'superadmin' || userRole === 'admin_contrato') && !reporte.firmado && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleEliminarReporte(reporte.id); }}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition-all border border-red-200"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                            Eliminar
-                          </button>
-                        )}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {/* ✅ Editar: abre el modal de detalle (que ahora sí muestra el botón) */}
+                          {puedeEditar && !reporte.deleted && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setReporteDetalle(reporte); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-bold transition-all border border-blue-200"
+                              title="Ver y editar el reporte"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Editar
+                            </button>
+                          )}
+
+                          {/* Restaurar (solo en la vista de eliminados) */}
+                          {puedeEditar && reporte.deleted && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleRestaurarReporte(reporte.id); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition-all border border-emerald-200"
+                              title="Restaurar este reporte"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              Restaurar
+                            </button>
+                          )}
+
+                          {(userRole === 'superadmin' || userRole === 'admin_contrato') && !reporte.firmado && !reporte.deleted && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleEliminarReporte(reporte.id); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition-all border border-red-200"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Eliminar
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1348,13 +1520,35 @@ export default function ReporteWorkFleet() {
             type:    reporteDetalle.machineType    || '',
             marca:   reporteDetalle.machineMarca   || '',
           }}
-          userRole={userRole}
+          userRole={rolParaModal}
           onSave={async (editedData) => {
             try {
-              // Aquí implementarás la lógica para guardar los cambios en Firebase
+              if (!puedeEditar) {
+                alert('No tienes permisos para editar reportes.');
+                return;
+              }
+              if (reporteDetalle.firmado) {
+                const ok = window.confirm(
+                  'Este reporte ya está firmado y validado.\n\n' +
+                  '¿Confirmas que quieres modificarlo? El cambio quedará registrado.'
+                );
+                if (!ok) return;
+              }
+
+              // No dejar que el editor sobrescriba campos de control
+              const { id, deleted, deletedAt, deletedBy, createdAt, firmaAdmin, ...camposEditables } = editedData;
+
               const reporteRef = doc(db, 'empresas', empresaId, 'reportes_detallados', reporteDetalle.id);
-              await updateDoc(reporteRef, editedData);
-              console.log('Reporte actualizado:', editedData);
+              await updateDoc(reporteRef, {
+                ...camposEditables,
+                updatedAt: serverTimestamp(),
+                editadoPor: {
+                  uid:   currentUser?.uid   || '',
+                  email: currentUser?.email || '',
+                  role:  userRole,
+                  fecha: new Date().toISOString(),
+                },
+              });
               
               // Recargar reportes
               const reportesRef = collection(db, 'empresas', empresaId, 'reportes_detallados');
@@ -1482,6 +1676,7 @@ export default function ReporteWorkFleet() {
 
       {showImport && (
         <ImportarExcelModal
+          empresaId={empresaId}
           onClose={() => setShowImport(false)}
           machines={machines}
           projects={projects}
@@ -1573,7 +1768,10 @@ export default function ReporteWorkFleet() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE: ImportarExcelModal
 // ─────────────────────────────────────────────────────────────
-function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImportado }) {
+// ✅ FIX: antes esta función usaba `empresaId` sin recibirlo como prop, así que
+// cada addDoc lanzaba ReferenceError y la importación fallaba en silencio
+// (el error quedaba atrapado en el try/catch de cada fila).
+function ImportarExcelModal({ empresaId, onClose, machines, projects, empleados = [], onImportado }) {
   const [filas, setFilas] = React.useState([]);
   const [seleccionadas, setSeleccionadas] = React.useState(new Set());
   const [importando, setImportando] = React.useState(false);
@@ -1667,14 +1865,35 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
   const toggleTodas = () => setSeleccionadas(seleccionadas.size === filas.length ? new Set() : new Set(filas.map((_, i) => i)));
 
   const importar = async () => {
+    if (!empresaId) { alert('No se pudo determinar la empresa. Recarga la página.'); return; }
     setImportando(true);
     const ok = [], errores = [];
+
+    // ✅ FIX correlativo: se calcula el máximo por máquina una sola vez y se va
+    // incrementando en memoria. Antes se usaba el total de documentos de la
+    // colección, lo que generaba números repetidos entre máquinas distintas.
+    const maxPorMaquina = new Map();
+    try {
+      const todosSnap = await getDocs(collection(db, 'empresas', empresaId, 'reportes_detallados'));
+      todosSnap.docs.forEach((d) => {
+        const r = d.data() || {};
+        const clave = r.machineCode || r.machinePatente || 'XX';
+        const match = String(r.numeroReporte || '').match(/(\d+)\s*$/);
+        if (!match) return;
+        const n = parseInt(match[1], 10);
+        if (Number.isNaN(n)) return;
+        if (n > (maxPorMaquina.get(clave) || 0)) maxPorMaquina.set(clave, n);
+      });
+    } catch (e) {
+      console.warn('No se pudo leer correlativos existentes:', e?.message);
+    }
+
     for (const fila of filas.filter((_, i) => seleccionadas.has(i))) {
       try {
-        const patente = fila.machinePatente || 'XX';
-        const countSnap = await getDocs(collection(db, 'empresas', empresaId, 'reportes_detallados'));
-        const num = (countSnap.size + 1).toString().padStart(3, '0');
-        const numeroReporte = `${patente}-${num}`;
+        const patente = fila.machineCode || fila.machinePatente || 'XX';
+        const siguiente = (maxPorMaquina.get(patente) || 0) + 1;
+        maxPorMaquina.set(patente, siguiente);
+        const numeroReporte = `${patente}-${String(siguiente).padStart(3, '0')}`;
         await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
           numeroReporte, folioExterno: fila.folioExterno, fecha: fila.fecha,
           projectId: fila.projectId, projectName: fila.projectName,
@@ -1689,7 +1908,7 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
           tiemposProgramados: fila.tiemposProgramados,
           mantenciones: [], tieneMantenciones: false,
           observaciones: fila.observaciones, estadoMaquina: 'operativa',
-          firmado: false, importadoDeExcel: true,
+          firmado: false, importadoDeExcel: true, deleted: false,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         });
         ok.push(numeroReporte);
@@ -1730,14 +1949,37 @@ function ImportarExcelModal({ onClose, machines, projects, empleados = [], onImp
         <div className="flex-1 overflow-auto p-5">
 
           {paso === 'upload' && (
-            <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-amber-300 rounded-2xl cursor-pointer hover:bg-amber-50 transition-all bg-amber-50/50">
-              <svg className="w-10 h-10 text-amber-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="text-sm font-bold text-amber-700">Haz clic para seleccionar el archivo Excel</span>
-              <span className="text-xs text-amber-500 mt-1">.xlsx o .xls</span>
-              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => e.target.files[0] && parsearExcel(e.target.files[0])} />
-            </label>
+            <div className="space-y-4">
+              {/* ✅ Plantilla descargable con el formato exacto que espera el importador */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                <div className="flex-1">
+                  <div className="text-sm font-black text-emerald-800">¿Primera vez? Descarga la plantilla</div>
+                  <div className="text-xs text-emerald-600 mt-0.5 leading-relaxed">
+                    Trae los encabezados exactos, una fila de ejemplo y una hoja con instrucciones.
+                    Rellénala y súbela aquí mismo.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={descargarPlantillaReportes}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-all shadow-sm flex-shrink-0"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Descargar plantilla
+                </button>
+              </div>
+
+              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-amber-300 rounded-2xl cursor-pointer hover:bg-amber-50 transition-all bg-amber-50/50">
+                <svg className="w-10 h-10 text-amber-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="text-sm font-bold text-amber-700">Haz clic para seleccionar el archivo Excel</span>
+                <span className="text-xs text-amber-500 mt-1">.xlsx o .xls</span>
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={e => e.target.files[0] && parsearExcel(e.target.files[0])} />
+              </label>
+            </div>
           )}
 
           {paso === 'preview' && (
