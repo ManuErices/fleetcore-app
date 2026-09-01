@@ -22,15 +22,15 @@ import { db } from './firebase';
 export const LIMITES_DEFAULT = {
   // ── Horómetro ────────────────────────────────────────────
   horasAdvertencia: 12,   // sobre esto avisa (jornada larga)
-  horasMaximo:      24,   // sobre esto bloquea (imposible en 1 día)
+  horasMaximo:      12,   // sobre esto bloquea (imposible en 1 día)
 
   // ── Kilometraje ──────────────────────────────────────────
-  kmAdvertencia:    500,
-  kmMaximo:         1500,
+  kmAdvertencia:    800,
+  kmMaximo:         800,
 
   // ── Carga de combustible ─────────────────────────────────
-  litrosAdvertencia: 500,
-  litrosMaximo:      3000, // camiones/estanques grandes
+  litrosAdvertencia: 700,
+  litrosMaximo:      700, // camiones/estanques grandes
 
   // ── Jornada (para el timeline del Paso 2) ────────────────
   jornadaInicio: '07:00',
