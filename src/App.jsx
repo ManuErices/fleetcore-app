@@ -25,6 +25,7 @@ import RRHH from "./pages/rrhh";
 
 // ── App shells ────────────────────────────────────────────────
 import ReportesShell from "./pages/reportes/ReportesShell";
+import MaquinariaShell from "./pages/maquinaria/MaquinariaShell";
 import RRHHShell from "./pages/rrhh/RRHHShell";
 import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
@@ -540,7 +541,7 @@ export default function App() {
     const appName = match[1];
 
     // Ignorar si no es una app/modulo que requiere gating
-    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'admin'];
+    const gatedApps = ['fleetcore', 'workfleet', 'workfleet-m', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'maquinaria', 'admin'];
     if (!gatedApps.includes(appName)) return;
 
     const isSuperAdmin = userRole === 'superadmin';
@@ -562,6 +563,13 @@ export default function App() {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('rrhh')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('rrhh')) && canAccess('rrhh'));
     } else if (appName === 'reportes') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('reportes')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('reportes')) && canAccess('reportes'));
+    } else if (appName === 'maquinaria') {
+      // jefe_taller y mecanico existen específicamente para este módulo:
+      // sin ellos acá, un mecánico quedaría fuera de sus propias OT.
+      allowed = isSuperAdmin
+        || (isAdminContrato && canAccess('maquinaria'))
+        || (['administrativo', 'jefe_taller', 'mecanico'].includes(userRole)
+            && hasModulo('maquinaria') && canAccess('maquinaria'));
     } else if (appName === 'finanzas') {
       allowed = isSuperAdmin || (isAdminContrato && canAccess('finanzas')) || ((['administrativo', 'operador'].includes(userRole) && hasModulo('finanzas')) && canAccess('finanzas'));
     } else if (appName === 'contabilidad') {
@@ -773,6 +781,19 @@ export default function App() {
                     onBackToSelector={handleBackToSelector}
                   onAdminPanel={handleGoToAdminPanel}
                   onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
+                  />
+                </PWAWrapper>
+              } />
+
+              <Route path="/maquinaria/*" element={
+                <PWAWrapper user={user}>
+                  <MaquinariaShell
+                    user={user}
+                    userRole={userRole}
+                    onLogout={handleLogout}
+                    onBackToSelector={handleBackToSelector}
+                    onAdminPanel={handleGoToAdminPanel}
+                    onAdminEmpresaPanel={handleGoToAdminEmpresaPanel}
                   />
                 </PWAWrapper>
               } />
