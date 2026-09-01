@@ -1215,7 +1215,243 @@ function OldAsistenciaSection() {
 }
 
 
-function Organigrama({ trabajadores, contratos, filtroEmpresa }) {
+// ─── Organigrama ──────────────────────────────────────────────────────────────
+// Arma el árbol real de reporte usando `jefeDirectoId`. Las fichas que aún
+// tienen el jefe escrito a mano (`jefeDirecto` en texto) no se pueden enlazar,
+// así que caen en un grupo aparte y se avisa para que las reasignen.
+//
+// El líquido se muestra en dos sabores:
+//   • REAL       → última liquidación cargada del trabajador
+//   • PROYECTADO → calculado desde el contrato vigente cuando no hay liquidación
+// Se distinguen visualmente para no confundir un dato pagado con una estimación.
+function Organigrama({ trabajadores, contratos, liquidaciones = [], filtroEmpresa }) {
+  const [expandidos, setExpandidos] = useState({});
+  const [verSueldos, setVerSueldos] = useState(true);
+
+  const activos = trabajadores.filter(t =>
+    t.estado === 'activo' && (!filtroEmpresa || t.empresa === filtroEmpresa)
+  );
+
+  const fmtM = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
+  const nombreDe = t => [t?.nombre, t?.apellidoPaterno].filter(Boolean).join(' ');
+
+  // ── Datos económicos por trabajador ──────────────────────────
+  const datosDe = (t) => {
+    const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
+      || contratos.find(c => c.trabajadorId === t.id);
+    const base = parseInt(contrato?.sueldoBase) || 0;
+
+    // Liquidaciones del trabajador, la más reciente primero
+    const propias = liquidaciones
+      .filter(l => l.trabajadorId === t.id)
+      .sort((a, b) => (b.anio - a.anio) || (b.mes - a.mes));
+    const ultima = propias[0];
+
+    let liquido = 0;
+    let esReal = false;
+    let periodo = '';
+
+    if (ultima) {
+      try {
+        const calc = liquidacionDe(t, contrato, ultima);
+        liquido = Math.max(0, calc?.liquido || 0);
+        esReal = liquido > 0;
+        periodo = `${MESES[(ultima.mes || 1) - 1]?.slice(0, 3)} ${ultima.anio || ''}`.trim();
+      } catch { /* cae a proyectado */ }
+    }
+
+    // Fallback: proyectar desde el contrato vigente
+    if (!esReal && contrato) {
+      try {
+        const calc = liquidacionDe(t, contrato, null);
+        liquido = Math.max(0, calc?.liquido || 0);
+      } catch { liquido = 0; }
+    }
+
+    return { contrato, base, liquido, esReal, periodo };
+  };
+
+  // ── Construcción del árbol ───────────────────────────────────
+  const idsActivos = new Set(activos.map(t => t.id));
+
+  // Un jefe que no está activo o que no existe se trata como sin jefe,
+  // para que su equipo no desaparezca del organigrama.
+  const jefeVigenteDe = (t) =>
+    t.jefeDirectoId && idsActivos.has(t.jefeDirectoId) && t.jefeDirectoId !== t.id
+      ? t.jefeDirectoId
+      : null;
+
+  const hijosPorJefe = {};
+  activos.forEach(t => {
+    const jid = jefeVigenteDe(t) || '__raiz__';
+    (hijosPorJefe[jid] = hijosPorJefe[jid] || []).push(t);
+  });
+  Object.values(hijosPorJefe).forEach(arr =>
+    arr.sort((a, b) => nombreDe(a).localeCompare(nombreDe(b)))
+  );
+
+  // Cuántas personas cuelgan de alguien, contando todos los niveles.
+  // El set `vistos` corta cualquier ciclo (A jefe de B y B jefe de A).
+  const contarEquipo = (id, vistos = new Set()) => {
+    if (vistos.has(id)) return 0;
+    vistos.add(id);
+    const hijos = hijosPorJefe[id] || [];
+    return hijos.reduce((s, h) => s + 1 + contarEquipo(h.id, vistos), 0);
+  };
+
+  const raices = hijosPorJefe['__raiz__'] || [];
+  const sinVincular = activos.filter(t => !jefeVigenteDe(t) && t.jefeDirecto);
+
+  const toggle = (id) => setExpandidos(e => ({ ...e, [id]: !(e[id] ?? true) }));
+
+  // ── Nodo del árbol ───────────────────────────────────────────
+  const Nodo = ({ t, nivel, vistos }) => {
+    if (vistos.has(t.id)) return null;              // corta ciclos
+    const nuevosVistos = new Set(vistos).add(t.id);
+
+    const hijos = hijosPorJefe[t.id] || [];
+    const abierto = expandidos[t.id] ?? true;
+    const { contrato, base, liquido, esReal, periodo } = datosDe(t);
+    const color = COLORES_AREA[t.area] || { bg: '#7c3aed', light: '#f8f8ff', text: '#334155' };
+    const ini = `${t.nombre?.[0] || ''}${t.apellidoPaterno?.[0] || ''}`.toUpperCase();
+    const equipo = hijos.length ? contarEquipo(t.id) : 0;
+
+    return (
+      <div style={{ marginLeft: nivel === 0 ? 0 : 22 }}>
+        <div className="relative">
+          {/* Guía vertical del nivel */}
+          {nivel > 0 && (
+            <span className="absolute -left-[13px] top-0 bottom-0 w-px bg-slate-200" aria-hidden />
+          )}
+          {nivel > 0 && (
+            <span className="absolute -left-[13px] top-6 w-3 h-px bg-slate-200" aria-hidden />
+          )}
+
+          <div className="flex items-center gap-2.5 rounded-xl border px-3 py-2.5 mb-2 bg-white transition-shadow hover:shadow-sm"
+            style={{ borderColor: color.bg + '33' }}>
+
+            {/* Expandir / colapsar */}
+            {hijos.length > 0 ? (
+              <button onClick={() => toggle(t.id)}
+                className="w-5 h-5 rounded-md flex items-center justify-center text-slate-400 hover:bg-slate-100 flex-shrink-0"
+                title={abierto ? 'Contraer equipo' : 'Expandir equipo'}>
+                <svg className={`w-3.5 h-3.5 transition-transform ${abierto ? 'rotate-90' : ''}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            ) : <span className="w-5 flex-shrink-0" />}
+
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs flex-shrink-0"
+              style={{ background: color.bg }}>
+              {ini}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black text-slate-800 truncate">
+                {nombreDe(t)}
+                {equipo > 0 && (
+                  <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                    {equipo} a cargo
+                  </span>
+                )}
+              </p>
+              <p className="text-[10px] font-medium truncate" style={{ color: color.text }}>
+                {contrato?.cargo || t.cargo || 'Sin cargo'}
+                {t.area ? ` · ${t.area}` : ''}
+              </p>
+            </div>
+
+            {verSueldos && (
+              <div className="text-right flex-shrink-0">
+                <p className="text-[10px] text-slate-400 font-semibold leading-tight">
+                  Base {fmtM(base)}
+                </p>
+                <p className="text-xs font-black leading-tight"
+                  style={{ color: esReal ? '#047857' : '#94a3b8' }}>
+                  {fmtM(liquido)}
+                  <span className="ml-1 text-[9px] font-bold uppercase tracking-wide">
+                    {esReal ? 'líquido' : 'estim.'}
+                  </span>
+                </p>
+                <p className="text-[9px] text-slate-300 leading-tight">
+                  {esReal ? periodo : 'sin liquidación'}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {abierto && hijos.map(h => (
+          <Nodo key={h.id} t={h} nivel={nivel + 1} vistos={nuevosVistos} />
+        ))}
+      </div>
+    );
+  };
+
+  if (activos.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+        <span className="text-4xl mb-3">🏢</span>
+        <p className="font-semibold text-sm">Sin personal activo{filtroEmpresa ? ` en ${filtroEmpresa}` : ''}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+
+      {/* Leyenda y controles */}
+      <div className="flex flex-wrap items-center gap-3 justify-between">
+        <div className="flex items-center gap-4 text-[11px] font-semibold">
+          <span className="flex items-center gap-1.5 text-emerald-700">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
+            Líquido real (última liquidación)
+          </span>
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
+            Estimado desde el contrato
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setVerSueldos(v => !v)}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+            {verSueldos ? 'Ocultar sueldos' : 'Mostrar sueldos'}
+          </button>
+          <button onClick={() => setExpandidos({})}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+            Expandir todo
+          </button>
+        </div>
+      </div>
+
+      {/* Aviso de fichas sin jefe vinculado */}
+      {sinVincular.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-xs font-black text-amber-800">
+            {sinVincular.length} ficha{sinVincular.length === 1 ? '' : 's'} con jefe escrito a mano
+          </p>
+          <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
+            Aparecen en el nivel superior porque su jefe está como texto y no como
+            vínculo. Ábrelas en Trabajadores → pestaña Laboral y selecciona al jefe
+            desde la lista: {sinVincular.slice(0, 5).map(nombreDe).join(', ')}
+            {sinVincular.length > 5 ? ` y ${sinVincular.length - 5} más` : ''}.
+          </p>
+        </div>
+      )}
+
+      {/* Árbol */}
+      <div>
+        {raices.map(t => (
+          <Nodo key={t.id} t={t} nivel={0} vistos={new Set()} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Vista antigua agrupada por área, se conserva por si se quiere volver a ella.
+function OrganigramaPorArea({ trabajadores, contratos, filtroEmpresa }) {
   const activos = trabajadores.filter(t =>
     t.estado === 'activo' && (!filtroEmpresa || t.empresa === filtroEmpresa)
   );
@@ -1337,16 +1573,61 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
     setConfirm(null);
   };
 
-  // Para cada banda calcular cuántos trabajadores están dentro del rango
+  // Sueldo base vigente de un trabajador
+  const sueldoDe = (t) => {
+    const c = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
+      || contratos.find(c => c.trabajadorId === t.id);
+    return parseInt(c?.sueldoBase) || 0;
+  };
+
+  // Ocupantes de cada banda.
+  //
+  // Antes se decidía solo por "el sueldo cae dentro del rango", lo que tenía
+  // dos problemas: alguien pagado fuera de su banda desaparecía del análisis
+  // (justo el caso que interesa detectar), y quien calzaba por casualidad con
+  // el rango de otro cargo aparecía donde no correspondía.
+  //
+  // Ahora manda la banda asignada en la ficha (`bandaSalarialId`). Si la ficha
+  // no la tiene todavía, se cae al cargo como respaldo, para que las bandas
+  // sigan mostrando gente mientras se completan las asignaciones.
   const bandasConPersonal = bandas.map(b => {
-    const dentro = activos.filter(t => {
-      const c = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
-      if (!c?.sueldoBase) return false;
-      const s = parseInt(c.sueldoBase);
-      return s >= b.sueldoMin && s <= b.sueldoMax &&
-        (!b.area || t.area === b.area);
-    });
-    return { ...b, _dentro: dentro };
+    const porAsignacion = activos.filter(t => t.bandaSalarialId === b.id);
+
+    const porCargo = activos.filter(t =>
+      !t.bandaSalarialId &&
+      b.cargo &&
+      (t.cargo || '').trim().toLowerCase() === String(b.cargo).trim().toLowerCase() &&
+      (!b.area || t.area === b.area)
+    );
+
+    const ocupantes = [...porAsignacion, ...porCargo]
+      .map(t => ({ ...t, _sueldo: sueldoDe(t) }))
+      .filter(t => t._sueldo > 0);
+
+    const sueldos  = ocupantes.map(t => t._sueldo);
+    const promedio = sueldos.length
+      ? Math.round(sueldos.reduce((s, n) => s + n, 0) / sueldos.length)
+      : null;
+
+    // Quiénes están pagados fuera del rango definido
+    const bajoMin  = ocupantes.filter(t => t._sueldo < b.sueldoMin);
+    const sobreMax = ocupantes.filter(t => t._sueldo > b.sueldoMax);
+
+    // Posición del promedio dentro del rango, en porcentaje (0 = mín, 100 = máx)
+    const amplitud = (b.sueldoMax || 0) - (b.sueldoMin || 0);
+    const posPromedio = promedio != null && amplitud > 0
+      ? Math.min(100, Math.max(0, ((promedio - b.sueldoMin) / amplitud) * 100))
+      : null;
+
+    return {
+      ...b,
+      _dentro: ocupantes,
+      _promedio: promedio,
+      _posPromedio: posPromedio,
+      _bajoMin: bajoMin,
+      _sobreMax: sobreMax,
+      _sinAsignar: porCargo.length,
+    };
   });
 
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
@@ -1414,13 +1695,64 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
                     </td>
                     <td className="px-4 py-3 text-sm font-bold text-slate-700">{b.cargo}</td>
                     <td className="px-4 py-3 text-sm text-slate-500">{b.area || 'Todas'}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 min-w-[240px]">
                       <div>
-                        <p className="text-sm font-bold text-slate-700">{fmt(b.sueldoMin)} — {fmt(b.sueldoMax)}</p>
-                        <div className="w-full h-1.5 bg-slate-100 rounded-full mt-1.5 overflow-hidden">
-                          <div className="h-full rounded-full bg-gradient-to-r from-violet-400 to-indigo-400" style={{ width: '100%' }} />
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="text-sm font-bold text-slate-700">{fmt(b.sueldoMin)} — {fmt(b.sueldoMax)}</p>
+                          {b._promedio != null && (
+                            <span className="text-[11px] font-black text-violet-700 whitespace-nowrap">
+                              prom. {fmt(b._promedio)}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Amplitud: {fmt(rango)}</p>
+
+                        {/* Barra del rango con el promedio marcado */}
+                        <div className="relative mt-2.5 mb-1">
+                          <div className="w-full h-1.5 rounded-full bg-gradient-to-r from-violet-200 via-violet-400 to-indigo-500" />
+
+                          {/* Punto medio teórico de la banda, como referencia */}
+                          <span className="absolute top-1/2 -translate-y-1/2 w-px h-3 bg-slate-300"
+                            style={{ left: '50%' }} title="Punto medio de la banda" aria-hidden />
+
+                          {/* Promedio real de quienes ocupan la banda */}
+                          {b._posPromedio != null && (
+                            <span
+                              className="absolute top-1/2 w-3.5 h-3.5 rounded-full border-2 border-white shadow-md"
+                              style={{
+                                left: `${b._posPromedio}%`,
+                                transform: 'translate(-50%, -50%)',
+                                background: b._posPromedio < 33 ? '#f59e0b'
+                                  : b._posPromedio > 80 ? '#ef4444' : '#059669',
+                              }}
+                              title={`Promedio real: ${fmt(b._promedio)} (${Math.round(b._posPromedio)}% del rango)`}
+                            />
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] text-slate-400">Amplitud: {fmt(rango)}</p>
+                          {b._promedio == null && b._dentro.length === 0 && (
+                            <p className="text-[10px] text-slate-300 italic">sin ocupantes</p>
+                          )}
+                        </div>
+
+                        {/* Gente pagada fuera del rango: es el dato accionable */}
+                        {(b._bajoMin.length > 0 || b._sobreMax.length > 0) && (
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {b._bajoMin.length > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200"
+                                title={b._bajoMin.map(t => `${t.nombre} ${t.apellidoPaterno}`).join(', ')}>
+                                {b._bajoMin.length} bajo el mínimo
+                              </span>
+                            )}
+                            {b._sobreMax.length > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200"
+                                title={b._sobreMax.map(t => `${t.nombre} ${t.apellidoPaterno}`).join(', ')}>
+                                {b._sobreMax.length} sobre el máximo
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -2115,7 +2447,8 @@ function OrganizacionSection() {
                   {EMPRESAS.map(e => <option key={e}>{e}</option>)}
                 </select>
               </div>
-              <Organigrama trabajadores={trabajadores} contratos={contratos} filtroEmpresa={filtroEmpresa} />
+              <Organigrama trabajadores={trabajadores} contratos={contratos}
+                liquidaciones={liquidaciones} filtroEmpresa={filtroEmpresa} />
             </div>
           )}
 

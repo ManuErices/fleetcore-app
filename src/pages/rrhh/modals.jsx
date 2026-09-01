@@ -128,6 +128,14 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     tallaChaleco: '', numeroCalzado: '',
     empresa: empresa?.nombre || '', area: '', subArea: '', cargo: '', fechaIngreso: '',
     sucursal: '', jefeDirecto: '', rutJefeDirecto: '', sindicato: '',
+    // Jefatura por referencia. `jefeDirecto` / `rutJefeDirecto` se mantienen
+    // como texto porque los PDF de contrato ya los imprimen, pero el
+    // organigrama se arma con `jefeDirectoId`: un nombre escrito a mano no
+    // permite saber si "J. Pérez" y "Juan Pérez Soto" son la misma persona.
+    // Al elegir un jefe se escriben los tres campos a la vez.
+    jefeDirectoId: '',
+    // Banda salarial a la que pertenece el cargo (colección bandas_salariales)
+    bandaSalarialId: '',
     calificacionManoObra: '', origenTrabajador: '', tipoManoObra: '',
     // Centro de costo: se guarda el CÓDIGO como clave estable y el nombre para
     // mostrar. Antes no había forma de asignarlo desde la interfaz — solo
@@ -162,18 +170,75 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
   }, [isOpen, empresaId]);
   const [saving,  setSaving]  = useState(false);
   const [cargos,  setCargos]  = useState([]);  // desde bandas_salariales
+  const [bandas,  setBandas]  = useState([]);  // bandas completas, para asignar
+  const [posiblesJefes, setPosiblesJefes] = useState([]);
   const [isCustomCargo, setIsCustomCargo] = useState(false);
 
-  // Cargar cargos desde Firestore al abrir
+  // Cargar bandas salariales (que hacen de catálogo de cargos) al abrir
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !empresaId) return;
     getDocs(collection(db, 'empresas', empresaId, 'bandas_salariales'))
       .then(snap => {
-        const lista = [...new Set(snap.docs.map(d => d.data().cargo).filter(Boolean))].sort();
-        setCargos(lista);
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setBandas(docs.sort((a, b) =>
+          (a.nivel || '').localeCompare(b.nivel || '') ||
+          (a.cargo || '').localeCompare(b.cargo || '')
+        ));
+        setCargos([...new Set(docs.map(b => b.cargo).filter(Boolean))].sort());
       })
-      .catch(() => setCargos([]));
+      .catch(() => { setBandas([]); setCargos([]); });
   }, [isOpen, empresaId]);
+
+  // Cargar trabajadores activos para el selector de jefe directo.
+  // Se excluye a la propia persona para que nadie sea su propio jefe.
+  useEffect(() => {
+    if (!isOpen || !empresaId) return;
+    getDocs(collection(db, 'empresas', empresaId, 'trabajadores'))
+      .then(snap => {
+        const lista = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(t => t.estado === 'activo' && t.id !== editData?.id)
+          .sort((a, b) => (a.apellidoPaterno || '').localeCompare(b.apellidoPaterno || ''));
+        setPosiblesJefes(lista);
+      })
+      .catch(() => setPosiblesJefes([]));
+  }, [isOpen, empresaId, editData?.id]);
+
+  const nombreCompletoDe = (t) =>
+    [t?.nombre, t?.apellidoPaterno, t?.apellidoMaterno].filter(Boolean).join(' ');
+
+  // Al elegir jefe desde la lista se escriben los tres campos: el id (que usa
+  // el organigrama) y el nombre y rut en texto (que usan los PDF existentes).
+  const seleccionarJefe = (jefeId) => {
+    if (!jefeId) {
+      setForm(f => ({ ...f, jefeDirectoId: '', jefeDirecto: '', rutJefeDirecto: '' }));
+      return;
+    }
+    const j = posiblesJefes.find(p => p.id === jefeId);
+    if (!j) return;
+    setForm(f => ({
+      ...f,
+      jefeDirectoId:  j.id,
+      jefeDirecto:    nombreCompletoDe(j),
+      rutJefeDirecto: j.rut || '',
+    }));
+  };
+
+  // Al elegir banda se sincroniza el cargo, porque la banda ES el catálogo
+  // de cargos: dejar ambos sueltos permitiría un cargo que no calza con
+  // ninguna banda y rompería el cálculo de posición en el rango.
+  const seleccionarBanda = (bandaId) => {
+    if (!bandaId) { setForm(f => ({ ...f, bandaSalarialId: '' })); return; }
+    const b = bandas.find(x => x.id === bandaId);
+    if (!b) return;
+    setForm(f => ({
+      ...f,
+      bandaSalarialId: b.id,
+      cargo: b.cargo || f.cargo,
+      area:  b.area || f.area,
+    }));
+    setIsCustomCargo(false);
+  };
 
   // 1. Inicializar el formulario solo al abrir/cerrar o cambiar editData
   useEffect(() => {
@@ -621,11 +686,71 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Jefe directo">
-            <input className={inp} value={form.jefeDirecto || ''} onChange={e => set('jefeDirecto', e.target.value)} placeholder="Nombre" />
+            <select className={inp} value={form.jefeDirectoId || ''}
+              onChange={e => seleccionarJefe(e.target.value)}>
+              <option value="">Sin jefe directo (nivel superior)</option>
+              {posiblesJefes.map(j => (
+                <option key={j.id} value={j.id}>
+                  {nombreCompletoDe(j)}{j.cargo ? ` — ${j.cargo}` : ''}
+                </option>
+              ))}
+            </select>
+            {/* Fichas antiguas traen el jefe escrito a mano y sin vínculo.
+                Se muestra para que se note que hay que reasignarlo. */}
+            {!form.jefeDirectoId && form.jefeDirecto && (
+              <p className="text-[11px] text-amber-600 font-semibold mt-1.5">
+                Registrado como texto: “{form.jefeDirecto}”. Selecciónalo de la
+                lista para que aparezca en el organigrama.
+              </p>
+            )}
           </Field>
           <Field label="RUT del jefe">
-            <input className={inp} value={form.rutJefeDirecto || ''} onChange={e => set('rutJefeDirecto', formatRut(e.target.value))} placeholder="12.345.678-9" maxLength={12} />
+            <input className={inp} value={form.rutJefeDirecto || ''}
+              onChange={e => set('rutJefeDirecto', formatRut(e.target.value))}
+              placeholder="12.345.678-9" maxLength={12}
+              readOnly={!!form.jefeDirectoId} />
+            {form.jefeDirectoId && (
+              <p className="text-[11px] text-slate-400 mt-1.5">Se completa desde la ficha del jefe.</p>
+            )}
           </Field>
+        </div>
+
+        <Divider label="Banda salarial" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Banda asignada">
+            <select className={inp} value={form.bandaSalarialId || ''}
+              onChange={e => seleccionarBanda(e.target.value)}>
+              <option value="">Sin banda asignada</option>
+              {bandas.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.nivel ? `${b.nivel} · ` : ''}{b.cargo}
+                  {b.area ? ` (${b.area})` : ''}
+                </option>
+              ))}
+            </select>
+            {bandas.length === 0 && (
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                Aún no hay bandas definidas. Créalas en Organización → Bandas salariales.
+              </p>
+            )}
+          </Field>
+          {(() => {
+            const b = bandas.find(x => x.id === form.bandaSalarialId);
+            if (!b) return <div />;
+            const fmtM = n => `$${(n || 0).toLocaleString('es-CL')}`;
+            return (
+              <Field label="Rango de la banda">
+                <div className="px-3.5 py-2.5 rounded-xl bg-violet-50 border border-violet-100">
+                  <p className="text-sm font-black text-violet-800">
+                    {fmtM(b.sueldoMin)} — {fmtM(b.sueldoMax)}
+                  </p>
+                  <p className="text-[11px] text-violet-500 font-semibold mt-0.5">
+                    Punto medio {fmtM(Math.round(((b.sueldoMin || 0) + (b.sueldoMax || 0)) / 2))}
+                  </p>
+                </div>
+              </Field>
+            );
+          })()}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Mano de obra">

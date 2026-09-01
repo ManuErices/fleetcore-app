@@ -1,39 +1,85 @@
 rules_version = '2';
 
 // ════════════════════════════════════════════════════════════
-// Firebase Storage Rules — módulo Maquinaria
+// Firebase Storage Rules — FleetCore
 //
 // IMPORTANTE: si ya tienes un archivo storage.rules con reglas de
 // otros módulos, NO lo reemplaces entero — copia SOLO los bloques
 // match /empresas/... de abajo dentro de tu bloque
 // `match /b/{bucket}/o { ... }` existente.
 //
-// Si NO tenías reglas de Storage aún, puedes usar este archivo tal cual.
+// Desplegar con:  firebase deploy --only storage
 // ════════════════════════════════════════════════════════════
 
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // ── Helpers ──────────────────────────────────────────────
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function esPdfOImagen() {
+      return request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf';
+    }
+
+    // Word .doc y .docx: varios certificados y contratos llegan así
+    function esWord() {
+      return request.resource.contentType == 'application/msword'
+          || request.resource.contentType ==
+             'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+
     // Documentos de equipos (leasing, permiso circulación, SOAP, etc.)
     match /empresas/{empresaId}/machineDocuments/{machineId}/{fileName} {
-      allow read:  if request.auth != null;
+      allow read:  if autenticado();
       // Subida: cualquier usuario autenticado de la empresa (el control fino
       // de rol se hace en Firestore sobre la colección machineDocuments).
       // Límite de 15 MB y solo PDF o imágenes.
-      allow write: if request.auth != null
+      allow write: if autenticado()
                    && request.resource.size < 15 * 1024 * 1024
-                   && (request.resource.contentType.matches('image/.*')
-                       || request.resource.contentType == 'application/pdf');
-      allow delete: if request.auth != null;
+                   && esPdfOImagen();
+      allow delete: if autenticado();
     }
 
     // Fotos de respaldo de órdenes de trabajo (checklist de mantención)
     match /empresas/{empresaId}/workOrders/{workOrderId}/{fileName} {
-      allow read:  if request.auth != null;
-      allow write: if request.auth != null
+      allow read:  if autenticado();
+      allow write: if autenticado()
                    && request.resource.size < 15 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
-      allow delete: if request.auth != null;
+      allow delete: if autenticado();
+    }
+
+    // ════════════════════════════════════════════════════════
+    // RRHH — Documentos de trabajadores
+    //
+    // Ruta que ya escribe HistorialModal (pestaña "Documentos"):
+    //   empresas/{empresaId}/documentos/{trabajadorId}/{timestamp}_{nombre}
+    //
+    // Sin esta regla toda subida fallaba con storage/unauthorized: el
+    // código existía, faltaba el permiso.
+    //
+    // Contenido sensible (contratos, licencias médicas, certificados),
+    // por eso el límite es más bajo que el de máquinas. Los tipos
+    // aceptados calzan con TIPOS_PERMITIDOS del componente de subida.
+    // ════════════════════════════════════════════════════════
+    match /empresas/{empresaId}/documentos/{trabajadorId}/{fileName} {
+      allow read:  if autenticado();
+      allow write: if autenticado()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
+    // Anexos de contrato firmados y escaneados (los sube SubirDocumentoAnexo)
+    match /empresas/{empresaId}/anexos/{trabajadorId}/{fileName} {
+      allow read:  if autenticado();
+      allow write: if autenticado()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
     }
   }
 }
