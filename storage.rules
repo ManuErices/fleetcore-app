@@ -81,5 +81,64 @@ service firebase.storage {
                    && (esPdfOImagen() || esWord());
       allow delete: if autenticado();
     }
+
+    // ════════════════════════════════════════════════════════
+    // MPF RENTAL — respaldos del ciclo comercial
+    //
+    // Una carpeta por tipo de documento, todas con la misma forma:
+    //   empresas/{empresaId}/{coleccion}/{docId}/{timestamp}_{nombre}
+    //
+    // Qué guarda cada una:
+    //   rentalClients        certificado de estatutos, e-RUT, poderes
+    //   rentalQuotes         cotización enviada, correos del cliente
+    //   rentalPurchaseOrders OC del mandante y sus enmiendas
+    //   rentalContracts      contrato firmado, anexos, actas de entrega
+    //   rentalPayments       factura, aprobación del mandante, guías
+    //
+    // El límite de 15 MB calza con MAX_ARCHIVO_MB de src/lib/rental.js.
+    // Se acepta Word además de PDF e imagen porque varios certificados y
+    // contratos llegan en .doc o .docx.
+    // ════════════════════════════════════════════════════════
+    match /empresas/{empresaId}/rentalClients/{docId}/{fileName} {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 15 * 1024 * 1024
+                    && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
+    match /empresas/{empresaId}/rentalQuotes/{docId}/{fileName} {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 15 * 1024 * 1024
+                    && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
+    match /empresas/{empresaId}/rentalPurchaseOrders/{docId}/{fileName} {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 15 * 1024 * 1024
+                    && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
+    match /empresas/{empresaId}/rentalContracts/{docId}/{fileName} {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 15 * 1024 * 1024
+                    && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
+    // La factura es el respaldo tributario del cobro: se sube, no se pisa.
+    // Si hay que corregirla, se anula el estado de pago y se emite otro.
+    match /empresas/{empresaId}/rentalPayments/{docId}/{fileName} {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 15 * 1024 * 1024
+                    && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
   }
 }

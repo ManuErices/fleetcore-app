@@ -459,6 +459,25 @@ service cloud.firestore {
         allow read:  if isAuth() && belongsToEmpresa(empresaId);
         allow write: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
       }
+
+      // Órdenes de compra que emite el mandante. Abren y amplían (vía
+      // enmienda) el monto autorizado del contrato, así que son el respaldo
+      // de todo lo que se factura después.
+      match /rentalPurchaseOrders/{docId} {
+        allow read:  if isAuth() && belongsToEmpresa(empresaId);
+        allow write: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
+      }
+
+      // Contadores de folios correlativos (COT / CTR / EP).
+      // Se leen y escriben dentro de una transacción cada vez que se crea una
+      // cotización, un contrato o un estado de pago: sin permiso de escritura
+      // aquí, no se puede crear ninguno de los tres.
+      // No se borran nunca: retroceder un correlativo genera folios repetidos.
+      match /counters/{docId} {
+        allow read:          if isAuth() && belongsToEmpresa(empresaId);
+        allow create, update: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
+        allow delete:        if false;
+      }
     }
 
     // ─────────────────────────────────────────────────────
