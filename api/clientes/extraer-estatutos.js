@@ -10,28 +10,54 @@
 // Nunca inventa: lo que no está en el papel vuelve como null, para que
 // la pantalla lo muestre vacío en vez de rellenarlo con algo plausible.
 //
+// POR QUÉ NO USA firebase-admin
+// La versión anterior validaba el token con verifyIdToken(), que exige la
+// cuenta de servicio en FIREBASE_SERVICE_ACCOUNT. Eso agrega tres formas
+// silenciosas de fallar: JSON mal pegado, clave de otro proyecto, o variable
+// ausente en el entorno donde corre. Todas devuelven el mismo 401 sin pista.
+//
+// Aquí el token se valida contra Identity Toolkit, el mismo servicio que
+// emitió el token. Solo necesita la API key web — la que ya está en
+// src/lib/firebase.js y que es pública por diseño, porque no da acceso a
+// nada por sí sola. Menos piezas, menos formas de romperse.
+//
 // SETUP — variables de entorno en Vercel:
-//   ANTHROPIC_API_KEY=sk-ant-xxxx
+//   ANTHROPIC_API_KEY=sk-ant-xxxx            (obligatoria)
 //   ANTHROPIC_MODEL=claude-sonnet-5          (opcional)
-//   FIREBASE_SERVICE_ACCOUNT={"type":"service_account",...}   (ya existe)
-//   APP_URL=https://tuapp.vercel.app                          (ya existe)
+//   FIREBASE_API_KEY=AIza...                 (opcional, ver abajo)
+//   APP_URL=https://fleetcore.cl             (opcional, para CORS)
 // ============================================================
-
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 
 const MEDIA_PERMITIDOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
 
 // Vercel corta los cuerpos sobre ~4.5 MB y base64 infla un tercio.
-// Un certificado de estatutos rara vez pasa de 1 MB.
 const MAX_BYTES = 3 * 1024 * 1024;
 
-function getFirebaseAuth() {
-  if (!getApps().length) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    initializeApp({ credential: cert(serviceAccount) });
+// Misma key que usa el navegador. Se deja por defecto para que el endpoint
+// funcione sin configurar nada más; la variable de entorno permite rotarla
+// sin tocar el código.
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY
+  || 'AIzaSyByzRUHnLrxAaZOS9Dap1Kl0ZH5STWWzKE';
+
+// Valida el idToken contra el propio Firebase. Devuelve el uid, o null.
+async function validarToken(idToken) {
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    }
+  );
+
+  if (!r.ok) {
+    const detalle = await r.text();
+    console.error('Token rechazado por Identity Toolkit:', r.status, detalle);
+    return null;
   }
-  return getAuth();
+
+  const data = await r.json();
+  return data?.users?.[0]?.localId || null;
 }
 
 const INSTRUCCIONES = `Eres un asistente que lee documentos societarios chilenos: certificados de estatutos, escrituras de constitución, certificados de vigencia y e-RUT del SII.
@@ -69,21 +95,29 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    // Marca de versión: sirve para saber desde fuera qué código está corriendo.
+    console.log('extraer-estatutos v2 (identity-toolkit)');
+
     // ── Autenticación ──────────────────────────────────────
     // Sin esto el endpoint queda abierto y cualquiera puede consumir
     // la cuota de la API a tu costo.
     const header = req.headers.authorization || '';
     const idToken = header.startsWith('Bearer ') ? header.slice(7) : null;
-    if (!idToken) return res.status(401).json({ error: 'Falta el token de sesión' });
+    if (!idToken) {
+      return res.status(401).json({ error: 'v2: la petición llegó sin token de sesión' });
+    }
 
-    try {
-      await getFirebaseAuth().verifyIdToken(idToken);
-    } catch {
-      return res.status(401).json({ error: 'Sesión inválida o expirada' });
+    const uid = await validarToken(idToken);
+    if (!uid) {
+      return res.status(401).json({
+        error: 'v2: Firebase rechazó el token. Cierra sesión y vuelve a entrar.',
+      });
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: 'Falta configurar ANTHROPIC_API_KEY en el servidor' });
+      return res.status(500).json({
+        error: 'Falta configurar ANTHROPIC_API_KEY en Vercel. Recuerda redeployar después de agregarla.',
+      });
     }
 
     // ── Validación del archivo ─────────────────────────────
@@ -131,7 +165,15 @@ export default async function handler(req, res) {
     if (!respuesta.ok) {
       const detalle = await respuesta.text();
       console.error('Error de la API de Anthropic:', respuesta.status, detalle);
-      return res.status(502).json({ error: 'No se pudo leer el documento. Inténtalo de nuevo o llena los datos a mano.' });
+      // El detalle sí importa para depurar: una key inválida y un modelo mal
+      // escrito fallan igual desde el navegador si no se distinguen.
+      const motivo = respuesta.status === 401 ? ' (ANTHROPIC_API_KEY inválida)'
+        : respuesta.status === 404 ? ' (nombre de modelo inexistente)'
+        : respuesta.status === 429 ? ' (límite de uso alcanzado)'
+        : '';
+      return res.status(502).json({
+        error: `No se pudo leer el documento${motivo}. Inténtalo de nuevo o llena los datos a mano.`,
+      });
     }
 
     const data = await respuesta.json();
@@ -172,7 +214,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, datos: limpios, extraidos });
   } catch (err) {
     console.error('extraer-estatutos:', err);
-    return res.status(500).json({ error: 'Error inesperado al leer el documento' });
+    return res.status(500).json({ error: `Error inesperado: ${err.message}` });
   }
 }
 
