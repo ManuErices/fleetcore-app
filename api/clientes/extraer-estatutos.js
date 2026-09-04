@@ -76,14 +76,42 @@ export default async function handler(req, res) {
     const idToken = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!idToken) return res.status(401).json({ error: 'Falta el token de sesión' });
 
+    // La inicialización va aparte de la verificación: si se mezclan, una
+    // variable de entorno mal cargada se reporta como "sesión inválida" y se
+    // busca el problema en el lugar equivocado.
+    if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+      return res.status(500).json({
+        error: 'Falta configurar FIREBASE_SERVICE_ACCOUNT en Vercel (Settings → Environment Variables).',
+      });
+    }
+
+    let firebaseAuth;
     try {
-      await getFirebaseAuth().verifyIdToken(idToken);
-    } catch {
-      return res.status(401).json({ error: 'Sesión inválida o expirada' });
+      firebaseAuth = getFirebaseAuth();
+    } catch (e) {
+      console.error('FIREBASE_SERVICE_ACCOUNT inválido:', e.message);
+      return res.status(500).json({
+        error: 'FIREBASE_SERVICE_ACCOUNT no es un JSON válido. Pégalo completo, en una sola línea.',
+      });
+    }
+
+    try {
+      const decodificado = await firebaseAuth.verifyIdToken(idToken);
+      if (!decodificado?.uid) throw new Error('Token sin uid');
+    } catch (e) {
+      console.error('Token rechazado:', e.message);
+      // El caso típico: la cuenta de servicio pertenece a otro proyecto de
+      // Firebase y por eso no puede validar tokens de este.
+      const detalle = /audience|project/i.test(e.message || '')
+        ? 'La cuenta de servicio parece ser de otro proyecto de Firebase.'
+        : 'Cierra sesión y vuelve a entrar.';
+      return res.status(401).json({ error: `Sesión no válida. ${detalle}` });
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: 'Falta configurar ANTHROPIC_API_KEY en el servidor' });
+      return res.status(500).json({
+        error: 'Falta configurar ANTHROPIC_API_KEY en Vercel. Recuerda hacer redeploy después de agregarla.',
+      });
     }
 
     // ── Validación del archivo ─────────────────────────────
