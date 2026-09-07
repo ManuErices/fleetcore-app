@@ -231,6 +231,14 @@ service cloud.firestore {
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
                     && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.trabajadorDocId == resource.data.trabajadorId));
+        // Acuse de recibo: el trabajador puede confirmar la recepción de SU
+        // liquidación, pero SOLO puede tocar el campo acuseRecibo — nunca los
+        // montos ni ningún otro dato de la remuneración.
+        allow update: if isTrabajador()
+                      && belongsToEmpresa(empresaId)
+                      && resource.data.trabajadorId != null
+                      && miTrabajadorDocId(empresaId) == resource.data.trabajadorId
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acuseRecibo']);
       }
 
       // ── ASISTENCIA ───────────────────────────────────────

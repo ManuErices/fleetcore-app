@@ -82,6 +82,28 @@ service firebase.storage {
       allow delete: if autenticado();
     }
 
+    // Evidencia de finiquitos firmados/ratificados ante notario o DT.
+    // Los finiquitos NO van por firma electrónica (solo DT presencial), así
+    // que la validez se respalda con la foto/escaneo del documento firmado.
+    //   empresas/{empresaId}/finiquitos/{finiquitoId}/{timestamp}_{nombre}
+    match /empresas/{empresaId}/finiquitos/{docId}/{fileName} {
+      allow read:  if autenticado();
+      allow write: if autenticado()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && esPdfOImagen();
+      allow delete: if autenticado();
+    }
+
+    // Contratos firmados vía ValidaFirma (PDF final descargado del proceso FES).
+    //   empresas/{empresaId}/contratos/{contratoId}/{timestamp}_{nombre}
+    match /empresas/{empresaId}/contratos/{docId}/{fileName} {
+      allow read:  if autenticado();
+      allow write: if autenticado()
+                   && request.resource.size < 15 * 1024 * 1024
+                   && (esPdfOImagen() || esWord());
+      allow delete: if autenticado();
+    }
+
     // ════════════════════════════════════════════════════════
     // MPF RENTAL — respaldos del ciclo comercial
     //
