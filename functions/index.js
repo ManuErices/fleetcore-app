@@ -668,11 +668,10 @@ exports.testEmail = onRequest({ secrets: SES_SECRETS }, (req, res) => {
       if (!to) return res.status(400).json({ error: 'Falta query/body "to"' });
       const subject = req.query.subject || req.body?.subject || 'FleetCore — email de prueba';
       const tpl = genericNotification({
-        title: subject,
-        heading: '✅ Integración SES OK',
-        body: `Este es un email de prueba enviado desde FleetCore Cloud Functions a las <strong>${new Date().toISOString()}</strong>.<br><br>Si recibís este correo, la integración con AWS SES está funcionando correctamente.`,
-        ctaUrl: process.env.APP_URL || 'https://fleetcore.cl',
-        ctaLabel: 'Ir a FleetCore',
+        subject,
+        title: '✅ Integración Resend OK',
+        message: `Este es un email de prueba enviado desde FleetCore Cloud Functions a las ${new Date().toISOString()}. Si recibes este correo, el envío por Resend está funcionando correctamente.`,
+        details: { Proveedor: 'Resend', Proyecto: 'FleetCore' },
       });
       const result = await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
       return res.status(200).json({ success: true, ...result });
