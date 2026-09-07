@@ -7,6 +7,8 @@ import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
+import FirmaContratoModal from './FirmaContratoModal';
+import { ESTADOS_FIRMA, badgeFirma, esFirmadoCompleto } from './firma';
 
 const { MESES, TIPOS_ANEXO } = Shared;
 const { calcularAntiguedad, calcularLiquidacion, alertaVencimiento, labelPeriodo, exportarAsistenciaCSV } = Calc;
@@ -29,9 +31,12 @@ function Section({ title, icon, children, defaultOpen = true, actions }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border-b border-slate-100 last:border-0">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 py-3.5 px-5 text-left hover:bg-slate-50/60 transition-colors"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); } }}
+        className="w-full flex items-center gap-2 py-3.5 px-5 text-left hover:bg-slate-50/60 transition-colors cursor-pointer"
       >
         <svg
           className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${open ? '' : '-rotate-90'}`}
@@ -41,7 +46,7 @@ function Section({ title, icon, children, defaultOpen = true, actions }) {
         {icon && <span className="text-slate-500">{icon}</span>}
         <span className="font-semibold text-slate-800 text-base">{title}</span>
         {actions && <div className="ml-auto" onClick={e => e.stopPropagation()}>{actions}</div>}
-      </button>
+      </div>
       <div
         className="border-t-2 border-blue-100"
         style={{ display: open ? 'block' : 'none' }}
@@ -106,7 +111,7 @@ function fmtFecha(str) {
 export default function TrabajadorPerfil() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa } = useEmpresa();
 
   const [trabajador, setTrabajador]   = useState(null);
   const [loadingWorker, setLW]        = useState(true);
@@ -118,6 +123,7 @@ export default function TrabajadorPerfil() {
   const [asistencia, setAsistencia]   = useState([]);
   const [loading, setLoading]         = useState(true);
   const [pdfPreview, setPdfPreview]   = useState(null); // { url, filename }
+  const [firmaContrato, setFirmaContrato] = useState(null); // contrato en proceso de firma
   const iframeRef                     = useRef(null);
   const [editModal, setEditModal]     = useState(false);
   const [showAusenciaModal, setShowAusenciaModal] = useState(false);
@@ -293,7 +299,7 @@ export default function TrabajadorPerfil() {
                   Editar ficha
                 </LeftBtn>
                 {contratoVigente && (
-                  <LeftBtn onClick={() => setPdfPreview({ url: generarPDFContrato(contratoVigente, trabajador, { preview: true }), filename: 'Contrato de Trabajo' })}>
+                  <LeftBtn onClick={() => setPdfPreview({ url: generarPDFContrato(contratoVigente, trabajador, { preview: true, empresa }), filename: 'Contrato de Trabajo' })}>
                     {Ico.doc}
                     Contrato
                   </LeftBtn>
@@ -492,8 +498,23 @@ export default function TrabajadorPerfil() {
                             }`}>
                               {c.estado || 'vigente'}
                             </span>
+                            {c.firma?.estado && (
+                              <span className={badgeFirma(c.firma.estado)}>
+                                {ESTADOS_FIRMA[c.firma.estado]?.dot} {ESTADOS_FIRMA[c.firma.estado]?.label || c.firma.estado}
+                              </span>
+                            )}
                             <button
-                              onClick={() => setPdfPreview({ url: generarPDFContrato(c, trabajador, { preview: true }), filename: 'Contrato de Trabajo' })}
+                              onClick={() => setFirmaContrato(c)}
+                              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${
+                                esFirmadoCompleto(c.firma?.estado)
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                                  : 'bg-violet-50 hover:bg-violet-100 text-violet-700'
+                              }`}
+                            >
+                              {esFirmadoCompleto(c.firma?.estado) ? 'Ver firma' : 'Firmar'}
+                            </button>
+                            <button
+                              onClick={() => setPdfPreview({ url: generarPDFContrato(c, trabajador, { preview: true, empresa }), filename: 'Contrato de Trabajo' })}
                               className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors"
                             >
                               {Ico.dl} PDF
@@ -903,6 +924,25 @@ export default function TrabajadorPerfil() {
             const snap = await getDoc(doc(db, 'empresas', empresaId, 'trabajadores', id));
             if (snap.exists()) setTrabajador({ id: snap.id, ...snap.data() });
             load();
+          }}
+        />
+      )}
+
+      {/* Firma electrónica de contrato */}
+      {firmaContrato && (
+        <FirmaContratoModal
+          isOpen={!!firmaContrato}
+          onClose={() => setFirmaContrato(null)}
+          empresaId={empresaId}
+          trabajador={trabajador}
+          documento={firmaContrato}
+          coleccion="contratos"
+          nombreArchivo={`Contrato ${nombreCompleto}.pdf`}
+          generarHtml={() => generarPDFContrato(firmaContrato, trabajador, { returnHtml: true, empresa })}
+          onUpdated={(firmaObj) => {
+            // Reflejar el cambio en la lista y en el propio modal, sin recargar todo.
+            setContratos(prev => prev.map(c => c.id === firmaContrato.id ? { ...c, firma: firmaObj || undefined } : c));
+            setFirmaContrato(prev => prev ? { ...prev, firma: firmaObj || undefined } : prev);
           }}
         />
       )}

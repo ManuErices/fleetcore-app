@@ -14,7 +14,7 @@ const cors          = require('cors')({ origin: true });
 const { MercadoPagoConfig, PreApproval } = require('mercadopago');
 const { WebpayPlus } = require('transbank-sdk');
 const axios = require('axios');
-const { sendEmail } = require('./ses');
+const { sendEmail } = require('./email');
 const { sendWhatsapp } = require('./twilio');
 const {
   entradaCombustible, voucherEntrega, genericNotification,
@@ -32,17 +32,14 @@ const { FieldValue } = require('firebase-admin/firestore');
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// ── SES Secrets ───────────────────────────────────────────────
-// Configurar con: firebase functions:secrets:set AWS_SES_ACCESS_KEY_ID
-//                 firebase functions:secrets:set AWS_SES_SECRET_ACCESS_KEY
-//                 firebase functions:secrets:set AWS_SES_REGION
-//                 firebase functions:secrets:set AWS_SES_SENDER
-// Para desarrollo local: agregar las 4 variables a functions/.env
-const AWS_SES_ACCESS_KEY_ID     = defineSecret('AWS_SES_ACCESS_KEY_ID');
-const AWS_SES_SECRET_ACCESS_KEY = defineSecret('AWS_SES_SECRET_ACCESS_KEY');
-const AWS_SES_REGION            = defineSecret('AWS_SES_REGION');
-const AWS_SES_SENDER            = defineSecret('AWS_SES_SENDER');
-const SES_SECRETS = [AWS_SES_ACCESS_KEY_ID, AWS_SES_SECRET_ACCESS_KEY, AWS_SES_REGION, AWS_SES_SENDER];
+// ── Email Secrets (Resend) ────────────────────────────────────
+// Configurar con: firebase functions:secrets:set RESEND_API_KEY
+//                 firebase functions:secrets:set RESEND_FROM
+// RESEND_FROM: remitente de dominio propio verificado, ej. "FleetCore <no-reply@tudominio.cl>"
+// Para desarrollo local: agregar RESEND_API_KEY / RESEND_FROM a functions/.env
+const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
+const RESEND_FROM    = defineSecret('RESEND_FROM');
+const SES_SECRETS = [RESEND_API_KEY, RESEND_FROM]; // nombre histórico; ahora son los secrets de Resend
 
 // ── Twilio Secrets ────────────────────────────────────────────
 // Configurar con: firebase functions:secrets:set TWILIO_ACCOUNT_SID
@@ -519,11 +516,11 @@ async function getNotifTargets(empresaId, eventoTipo) {
 
   // Siempre incluir al remitente para registro/auditoría (antes del check de enabled)
   try {
-    const senderRaw = process.env.AWS_SES_SENDER || '';
+    const senderRaw = process.env.RESEND_FROM || '';
     const match = senderRaw.match(/<(.+)>|(\S+@\S+)/);
     const senderEmail = match ? (match[1] || match[2]) : null;
     if (senderEmail) emails.add(senderEmail.toLowerCase());
-    else console.warn('getNotifTargets: AWS_SES_SENDER vacío o inválido');
+    else console.warn('getNotifTargets: RESEND_FROM vacío o inválido');
   } catch (e) {
     console.warn('Error al extraer senderEmail para auditoría:', e.message);
   }
@@ -611,18 +608,17 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
         && !String(process.env.TWILIO_AUTH_TOKEN).startsWith('PLACEHOLDER');
 
       // DIAGNOSTICO: Ver destinatarios finales
-      console.log('[DIAGNOSTICO SES] Intentando enviar email...', {
+      console.log('[DIAGNOSTICO EMAIL] Intentando enviar email...', {
         empresaId,
         reporteId,
         allTo,
-        sender: process.env.AWS_SES_SENDER,
-        region: process.env.AWS_SES_REGION
+        sender: process.env.RESEND_FROM,
       });
 
       // Email + WhatsApp en paralelo, sin que uno tumbe al otro
       const [emailRes, waRes] = await Promise.allSettled([
         allTo.length > 0
-          ? sendEmail({ to: allTo, subject: template.subject, html: template.html, text: template.text, replyTo: process.env.AWS_SES_REPLY_TO })
+          ? sendEmail({ to: allTo, subject: template.subject, html: template.html, text: template.text, replyTo: process.env.RESEND_REPLY_TO })
           : Promise.resolve({ skipped: true, reason: 'no_recipients' }),
         twilioConfigured
           ? sendWhatsapp({ to: whatsapps, body: waBody })
@@ -672,11 +668,10 @@ exports.testEmail = onRequest({ secrets: SES_SECRETS }, (req, res) => {
       if (!to) return res.status(400).json({ error: 'Falta query/body "to"' });
       const subject = req.query.subject || req.body?.subject || 'FleetCore — email de prueba';
       const tpl = genericNotification({
-        title: subject,
-        heading: '✅ Integración SES OK',
-        body: `Este es un email de prueba enviado desde FleetCore Cloud Functions a las <strong>${new Date().toISOString()}</strong>.<br><br>Si recibís este correo, la integración con AWS SES está funcionando correctamente.`,
-        ctaUrl: process.env.APP_URL || 'https://fleetcore.cl',
-        ctaLabel: 'Ir a FleetCore',
+        subject,
+        title: '✅ Integración Resend OK',
+        message: `Este es un email de prueba enviado desde FleetCore Cloud Functions a las ${new Date().toISOString()}. Si recibes este correo, el envío por Resend está funcionando correctamente.`,
+        details: { Proveedor: 'Resend', Proyecto: 'FleetCore' },
       });
       const result = await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
       return res.status(200).json({ success: true, ...result });
@@ -1858,6 +1853,223 @@ exports.vincularUsuarioAEmpresa = onRequest((req, res) => {
     } catch (err) {
       console.error('vincularUsuarioAEmpresa error:', err.message);
       return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ============================================================
+// VALIDAFIRMA — Proxy server-side para Firma Electrónica Simple
+// ------------------------------------------------------------
+// La API key NUNCA llega al navegador: vive como secret y solo la
+// usa esta Function. El frontend (src/pages/rrhh/firma.js) llama acá.
+//
+// Configurar con:
+//   firebase functions:secrets:set VALIDAFIRMA_API_KEY
+//   (test: vf_test_… → sandbox.validafirma.cl · prod: → api.validafirma.cl)
+// Para desarrollo local: agregar VALIDAFIRMA_API_KEY a functions/.env
+//
+// Acciones (por query o body, campo "action"):
+//   crear     POST  { pdfBase64, nombreArchivo, firmantes[], webhookUrl? }
+//   estado    GET   ?procesoId=
+//   descargar GET   ?procesoId=      → { pdfBase64 }
+//   cancelar  POST  { procesoId }
+//   reenviar  POST  { procesoId, email }
+// ============================================================
+const VALIDAFIRMA_API_KEY = defineSecret('VALIDAFIRMA_API_KEY');
+
+const _vfSafeJson = (text) => { try { return JSON.parse(text); } catch { return text; } };
+const _vfBase = (key) => (key || '').startsWith('vf_test_')
+  ? 'https://sandbox.validafirma.cl'
+  : 'https://api.validafirma.cl';
+
+exports.validafirma = onRequest({ secrets: [VALIDAFIRMA_API_KEY] }, (req, res) => {
+  cors(req, res, async () => {
+    try {
+      const API_KEY = process.env.VALIDAFIRMA_API_KEY || '';
+      if (!API_KEY) return res.status(500).json({ error: 'VALIDAFIRMA_API_KEY no configurada en Secret Manager' });
+
+      const IS_SANDBOX = API_KEY.startsWith('vf_test_');
+      const API_BASE   = _vfBase(API_KEY);
+      const HEADERS    = { 'accept': 'application/json', 'X-API-Key': API_KEY };
+
+      const action    = req.query.action    || req.body?.action;
+      const procesoId  = req.query.procesoId || req.body?.procesoId;
+
+      // ── crear ──────────────────────────────────────────────
+      if (action === 'crear') {
+        const { pdfBase64, nombreArchivo, firmantes, webhookUrl } = req.body || {};
+        if (!pdfBase64)        return res.status(400).json({ error: 'pdfBase64 requerido' });
+        if (!firmantes?.length) return res.status(400).json({ error: 'Al menos un firmante requerido' });
+
+        const buf = Buffer.from(pdfBase64, 'base64');
+        const form = new FormData();
+        form.append('documento', new Blob([buf], { type: 'application/pdf' }), nombreArchivo || 'documento.pdf');
+        form.append('firmantes', JSON.stringify(firmantes.map((f) => ({
+          email:  f.email,
+          nombre: f.nombre,
+          rut:    f.rut,
+          ...(f.telefono ? { telefono: f.telefono } : {}),
+        }))));
+        form.append('requiere_todas_firmas', 'true');
+        form.append('sin_caratula', 'false');
+        if (webhookUrl) form.append('webhook_url', webhookUrl);
+
+        const r = await fetch(`${API_BASE}/api/fes/documentos`, { method: 'POST', headers: HEADERS, body: form });
+        const text = await r.text();
+        if (r.ok) return res.status(200).json({ data: _vfSafeJson(text) });
+        // 402 = saldo insuficiente. En sandbox el frontend lo usa para simular.
+        if (r.status === 402) return res.status(402).json({ error: text, sandbox: IS_SANDBOX });
+        return res.status(r.status).json({ error: text });
+      }
+
+      // ── estado ─────────────────────────────────────────────
+      if (action === 'estado') {
+        if (!procesoId) return res.status(400).json({ error: 'procesoId requerido' });
+        const r = await fetch(`${API_BASE}/api/fes/documentos/${procesoId}`, { headers: HEADERS });
+        const text = await r.text();
+        if (!r.ok) return res.status(r.status).json({ error: text });
+        return res.status(200).json({ data: _vfSafeJson(text) });
+      }
+
+      // ── descargar ──────────────────────────────────────────
+      if (action === 'descargar') {
+        if (!procesoId) return res.status(400).json({ error: 'procesoId requerido' });
+        const r = await fetch(`${API_BASE}/api/fes/documentos/${procesoId}/descargar`, { headers: HEADERS });
+        if (!r.ok) {
+          const t = await r.text().catch(() => r.statusText);
+          return res.status(r.status).json({ error: t });
+        }
+        const ab = await r.arrayBuffer();
+        return res.status(200).json({ pdfBase64: Buffer.from(ab).toString('base64') });
+      }
+
+      // ── listar (documentos existentes del usuario) ─────────
+      // Permite recuperar/reconciliar documentos ya creados sin volver a
+      // crearlos (no consume créditos). GET /api/fes/documentos.
+      if (action === 'listar') {
+        const r = await fetch(`${API_BASE}/api/fes/documentos`, { headers: HEADERS });
+        const text = await r.text();
+        if (!r.ok) return res.status(r.status).json({ error: text });
+        return res.status(200).json({ data: _vfSafeJson(text) });
+      }
+
+      // ── cancelar (PATCH según la API de ValidaFirma) ───────
+      if (action === 'cancelar') {
+        if (!procesoId) return res.status(400).json({ error: 'procesoId requerido' });
+        const r = await fetch(`${API_BASE}/api/fes/documentos/${procesoId}/cancelar`, { method: 'PATCH', headers: HEADERS });
+        const text = await r.text();
+        if (!r.ok) return res.status(r.status).json({ error: text });
+        return res.status(200).json({ data: _vfSafeJson(text) });
+      }
+
+      // ── reenviar ───────────────────────────────────────────
+      if (action === 'reenviar') {
+        if (!procesoId) return res.status(400).json({ error: 'procesoId requerido' });
+        const r = await fetch(`${API_BASE}/api/fes/documentos/${procesoId}/reenviar`, {
+          method:  'POST',
+          headers: { ...HEADERS, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ email: req.body?.email }),
+        });
+        const text = await r.text();
+        if (!r.ok) return res.status(r.status).json({ error: text });
+        return res.status(200).json({ data: _vfSafeJson(text) });
+      }
+
+      return res.status(400).json({ error: `Acción no reconocida: ${action}` });
+    } catch (err) {
+      console.error('validafirma error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ============================================================
+// VALIDAFIRMA WEBHOOK — actualiza el estado de firma automáticamente
+// ------------------------------------------------------------
+// ValidaFirma llama a este endpoint (webhook_url configurado al crear el
+// documento) cuando cambia el estado de firma. En vez de confiar en el
+// payload, RE-CONSULTAMOS el estado real a ValidaFirma con la secret y
+// actualizamos empresas/{empresaId}/{coleccion}/{docId}.firma.
+//
+// El destino (empresaId/coleccion/docId) viaja en el query del webhook_url.
+// Seguridad: solo se actualiza si el firma.procesoId guardado coincide con el
+// id del documento que reporta ValidaFirma (binding), así nadie puede voltear
+// el estado de un documento arbitrario.
+// ============================================================
+const _vfWebhookDocId = (b) => {
+  if (!b || typeof b !== 'object') return null;
+  return b.documento_id || b.documentoId || b.id
+    || (b.documento && (b.documento.id || b.documento.documento_id))
+    || (b.data && (b.data.id || (b.data.documento && b.data.documento.id)))
+    || null;
+};
+const _vfWebhookEstado = (b) => {
+  if (!b || typeof b !== 'object') return null;
+  return b.estado
+    || (b.documento && b.documento.estado)
+    || (b.data && (b.data.estado || (b.data.documento && b.data.documento.estado)))
+    || null;
+};
+
+exports.validafirmaWebhook = onRequest({ secrets: [VALIDAFIRMA_API_KEY] }, (req, res) => {
+  cors(req, res, async () => {
+    // Siempre respondemos 200 para que ValidaFirma no reintente en loop por un
+    // problema nuestro; el detalle del resultado va en el cuerpo.
+    try {
+      const empresaId = req.query.empresaId || req.body?.empresaId;
+      const coleccion = req.query.coleccion || req.body?.coleccion || 'contratos';
+      const docId     = req.query.docId || req.body?.docId;
+      const body      = req.body || {};
+      const vfId      = _vfWebhookDocId(body) || req.query.procesoId;
+
+      if (!empresaId || !docId) return res.status(200).json({ ok: true, skipped: 'faltan empresaId/docId' });
+      if (!['contratos', 'anexos'].includes(coleccion)) return res.status(200).json({ ok: true, skipped: 'coleccion inválida' });
+      if (!vfId) return res.status(200).json({ ok: true, skipped: 'sin id de documento en el payload' });
+
+      const API_KEY  = process.env.VALIDAFIRMA_API_KEY || '';
+      const API_BASE = _vfBase(API_KEY);
+      const HEADERS  = { 'accept': 'application/json', 'X-API-Key': API_KEY };
+
+      // Estado autoritativo: re-consultamos a ValidaFirma
+      let estado = null, firmantes = [];
+      try {
+        const r = await fetch(`${API_BASE}/api/fes/documentos/${vfId}`, { headers: HEADERS });
+        if (r.ok) {
+          const data = await r.json();
+          const d = (data && data.documento) ? data.documento : data;
+          estado = d.estado || null;
+          firmantes = Array.isArray(d.firmantes) ? d.firmantes : [];
+        }
+      } catch (e) { console.warn('[validafirmaWebhook] GET falló:', e.message); }
+      if (!estado) estado = _vfWebhookEstado(body);
+      if (!estado) return res.status(200).json({ ok: true, skipped: 'sin estado' });
+
+      const ref = db.doc(`empresas/${empresaId}/${coleccion}/${docId}`);
+      const snap = await ref.get();
+      if (!snap.exists) return res.status(200).json({ ok: true, skipped: 'doc no existe' });
+
+      const firma = snap.get('firma') || {};
+      // Binding de seguridad: el procesoId guardado debe coincidir con el reportado.
+      if (firma.procesoId && String(firma.procesoId) !== String(vfId)) {
+        return res.status(200).json({ ok: true, skipped: 'procesoId no coincide' });
+      }
+
+      const update = {
+        'firma.estado': estado,
+        'firma.updatedAt': new Date().toISOString(),
+      };
+      if (firmantes.length) {
+        update['firma.firmantes'] = firmantes.map(f => ({
+          nombre: f.nombre || null, email: f.email || null, rut: f.rut || null, estado: f.estado || null,
+        }));
+        update['firma.firmantesUrls'] = firmantes;
+      }
+      await ref.update(update);
+
+      return res.status(200).json({ ok: true, estado });
+    } catch (err) {
+      console.error('validafirmaWebhook error:', err.message);
+      return res.status(200).json({ ok: false, error: err.message });
     }
   });
 });
