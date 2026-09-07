@@ -14,7 +14,7 @@ const cors          = require('cors')({ origin: true });
 const { MercadoPagoConfig, PreApproval } = require('mercadopago');
 const { WebpayPlus } = require('transbank-sdk');
 const axios = require('axios');
-const { sendEmail } = require('./ses');
+const { sendEmail } = require('./email');
 const { sendWhatsapp } = require('./twilio');
 const {
   entradaCombustible, voucherEntrega, genericNotification,
@@ -32,17 +32,14 @@ const { FieldValue } = require('firebase-admin/firestore');
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// ── SES Secrets ───────────────────────────────────────────────
-// Configurar con: firebase functions:secrets:set AWS_SES_ACCESS_KEY_ID
-//                 firebase functions:secrets:set AWS_SES_SECRET_ACCESS_KEY
-//                 firebase functions:secrets:set AWS_SES_REGION
-//                 firebase functions:secrets:set AWS_SES_SENDER
-// Para desarrollo local: agregar las 4 variables a functions/.env
-const AWS_SES_ACCESS_KEY_ID     = defineSecret('AWS_SES_ACCESS_KEY_ID');
-const AWS_SES_SECRET_ACCESS_KEY = defineSecret('AWS_SES_SECRET_ACCESS_KEY');
-const AWS_SES_REGION            = defineSecret('AWS_SES_REGION');
-const AWS_SES_SENDER            = defineSecret('AWS_SES_SENDER');
-const SES_SECRETS = [AWS_SES_ACCESS_KEY_ID, AWS_SES_SECRET_ACCESS_KEY, AWS_SES_REGION, AWS_SES_SENDER];
+// ── Email Secrets (Resend) ────────────────────────────────────
+// Configurar con: firebase functions:secrets:set RESEND_API_KEY
+//                 firebase functions:secrets:set RESEND_FROM
+// RESEND_FROM: remitente de dominio propio verificado, ej. "FleetCore <no-reply@tudominio.cl>"
+// Para desarrollo local: agregar RESEND_API_KEY / RESEND_FROM a functions/.env
+const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
+const RESEND_FROM    = defineSecret('RESEND_FROM');
+const SES_SECRETS = [RESEND_API_KEY, RESEND_FROM]; // nombre histórico; ahora son los secrets de Resend
 
 // ── Twilio Secrets ────────────────────────────────────────────
 // Configurar con: firebase functions:secrets:set TWILIO_ACCOUNT_SID
@@ -519,11 +516,11 @@ async function getNotifTargets(empresaId, eventoTipo) {
 
   // Siempre incluir al remitente para registro/auditoría (antes del check de enabled)
   try {
-    const senderRaw = process.env.AWS_SES_SENDER || '';
+    const senderRaw = process.env.RESEND_FROM || '';
     const match = senderRaw.match(/<(.+)>|(\S+@\S+)/);
     const senderEmail = match ? (match[1] || match[2]) : null;
     if (senderEmail) emails.add(senderEmail.toLowerCase());
-    else console.warn('getNotifTargets: AWS_SES_SENDER vacío o inválido');
+    else console.warn('getNotifTargets: RESEND_FROM vacío o inválido');
   } catch (e) {
     console.warn('Error al extraer senderEmail para auditoría:', e.message);
   }
@@ -611,18 +608,17 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
         && !String(process.env.TWILIO_AUTH_TOKEN).startsWith('PLACEHOLDER');
 
       // DIAGNOSTICO: Ver destinatarios finales
-      console.log('[DIAGNOSTICO SES] Intentando enviar email...', {
+      console.log('[DIAGNOSTICO EMAIL] Intentando enviar email...', {
         empresaId,
         reporteId,
         allTo,
-        sender: process.env.AWS_SES_SENDER,
-        region: process.env.AWS_SES_REGION
+        sender: process.env.RESEND_FROM,
       });
 
       // Email + WhatsApp en paralelo, sin que uno tumbe al otro
       const [emailRes, waRes] = await Promise.allSettled([
         allTo.length > 0
-          ? sendEmail({ to: allTo, subject: template.subject, html: template.html, text: template.text, replyTo: process.env.AWS_SES_REPLY_TO })
+          ? sendEmail({ to: allTo, subject: template.subject, html: template.html, text: template.text, replyTo: process.env.RESEND_REPLY_TO })
           : Promise.resolve({ skipped: true, reason: 'no_recipients' }),
         twilioConfigured
           ? sendWhatsapp({ to: whatsapps, body: waBody })
