@@ -5,7 +5,7 @@
 
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest } = require('firebase-functions/v2/https');
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 
 setGlobalOptions({ region: 'southamerica-west1' });
 const { defineSecret } = require('firebase-functions/params');
@@ -2073,3 +2073,76 @@ exports.validafirmaWebhook = onRequest({ secrets: [VALIDAFIRMA_API_KEY] }, (req,
     }
   });
 });
+
+// ============================================================
+// NOTIFICACIONES POR CORREO (Resend) — eventos que el trabajador debe atender
+// ------------------------------------------------------------
+// El correo llega SOLO al trabajador dueño (empresas/{empresaId}/trabajadores).
+// Contrato/anexo se notifican vía ValidaFirma; finiquito es presencial (DT).
+// ============================================================
+const _MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+async function getTrabajador(empresaId, trabajadorId) {
+  if (!empresaId || !trabajadorId) return null;
+  try {
+    const snap = await db.doc(`empresas/${empresaId}/trabajadores/${trabajadorId}`).get();
+    return snap.exists ? snap.data() : null;
+  } catch { return null; }
+}
+
+// Liquidación creada → avisar al trabajador que puede revisar y dar acuse.
+exports.onRemuneracionCreated = onDocumentCreated(
+  { document: 'empresas/{empresaId}/remuneraciones/{id}', secrets: SES_SECRETS },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const rem = event.data?.data() || {};
+      const trab = await getTrabajador(empresaId, rem.trabajadorId);
+      const to = trab?.email || trab?.portalEmail;
+      if (!to) { console.log('onRemuneracionCreated: trabajador sin email, skip'); return; }
+
+      const periodo = `${_MESES_ES[(Number(rem.mes) || 1) - 1] || ''} ${rem.anio || ''}`.trim();
+      const empresaNombre = await getEmpresaNombre(empresaId);
+      const link = (process.env.APP_URL || 'https://fleetcore.cl') + '/trabajador';
+      const tpl = genericNotification({
+        subject: `Tu liquidación de ${periodo} está disponible`,
+        title: 'Liquidación de sueldo disponible',
+        message: `Hola ${trab.nombre || ''}, tu liquidación de ${periodo} ya está en tu portal FleetCore. Revísala y da tu acuse de recibo ("Recibí conforme") en la sección Documentos: ${link}`,
+        details: { 'Período': periodo, 'Empresa': empresaNombre },
+      });
+      await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
+    } catch (err) {
+      console.error('onRemuneracionCreated error:', err.message);
+    }
+  }
+);
+
+// Vacaciones aprobadas/rechazadas → avisar al trabajador del resultado.
+exports.onVacacionUpdated = onDocumentUpdated(
+  { document: 'empresas/{empresaId}/vacaciones/{id}', secrets: SES_SECRETS },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const before = event.data?.before?.data() || {};
+      const after  = event.data?.after?.data() || {};
+      if (before.estado === after.estado) return;
+      if (!['aprobado', 'rechazado'].includes(after.estado)) return;
+
+      const trab = await getTrabajador(empresaId, after.trabajadorId);
+      const to = trab?.email || trab?.portalEmail;
+      if (!to) { console.log('onVacacionUpdated: trabajador sin email, skip'); return; }
+
+      const aprobado = after.estado === 'aprobado';
+      const link = (process.env.APP_URL || 'https://fleetcore.cl') + '/trabajador';
+      const tpl = genericNotification({
+        subject: `Tu solicitud de vacaciones fue ${aprobado ? 'aprobada' : 'rechazada'}`,
+        title: aprobado ? '✅ Vacaciones aprobadas' : '❌ Vacaciones rechazadas',
+        message: `Hola ${after.trabajadorNombre || trab.nombre || ''}, tu solicitud de vacaciones del ${after.desde} al ${after.hasta} fue ${aprobado ? 'APROBADA' : 'RECHAZADA'}.${after.observaciones ? ` Observaciones: ${after.observaciones}` : ''} Detalle en tu portal: ${link}`,
+        details: { 'Desde': after.desde, 'Hasta': after.hasta, 'Días': after.diasSolicitados, 'Estado': aprobado ? 'Aprobada' : 'Rechazada' },
+      });
+      await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
+    } catch (err) {
+      console.error('onVacacionUpdated error:', err.message);
+    }
+  }
+);
