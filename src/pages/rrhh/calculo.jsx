@@ -1,6 +1,9 @@
-import { IMM_2026, IMM_2024, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
+import { TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
   CAUSALES_CON_INDEMNIZACION, TOPE_ANIOS_INDEMNIZACION, TIPOS_PERIODO,
-  UTM_DEFAULT, TRAMOS_IUT, normalizarItemsPago } from './shared';
+  TRAMOS_IUT, normalizarItemsPago } from './shared';
+// IMM, UTM, UF y jornada máxima legal ya no son constantes: dependen del
+// período que se está liquidando. Ver parametros.js.
+import { paramsDe } from './parametros';
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
@@ -38,6 +41,11 @@ function factorPeriodo(tipoPeriodo) {
   }
 }
 function calcularLiquidacion(rem) {
+  // ── Parámetros legales del período que se está liquidando ──
+  // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
+  // ordinaria máxima. Todo lo que la ley cambia con el tiempo entra por acá.
+  const P = paramsDe({ mes: rem.mes, anio: rem.anio });
+
   // ── Factor 1: tipo de período (mensual / quincenal / semanal / turno) ──
   const fp = factorPeriodo(rem.tipoPeriodo);
 
@@ -96,7 +104,12 @@ function calcularLiquidacion(rem) {
   // tope: un trabajador con sueldo base de $600.000 recibía $213.354 de
   // gratificación cuando le corresponden $150.000. El error inflaba el
   // imponible y con él AFP, salud, cesantía e impuesto de todos.
-  const topeGrat  = IMM_2026 * 4.75 / 12;
+  //
+  // El IMM se resuelve por el período de la liquidación, no por la fecha de
+  // hoy: reabrir en septiembre una liquidación de marzo debe seguir usando el
+  // mínimo de marzo. Antes era la constante IMM_2026, congelada en el valor de
+  // enero, y el reajuste retroactivo de mayo (Ley 21.830) quedaba fuera.
+  const topeGrat  = P.topeGratMensual;
   // Los ítems imponibles del catálogo son remuneración devengada, así que
   // entran a la base de gratificación igual que "Otros Imponibles".
   const baseGrat  = base + bProd + otrosImp + itemsImp;   // remuneración devengada del mes
@@ -182,7 +195,23 @@ function calcularLiquidacion(rem) {
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
     diasTrab, fdias,          // expuestos para auditoría / PDF
-    baseCompleto, gratCompleto: Math.round(IMM_2026 * 4.75 / 12 * fp),
+    baseCompleto, gratCompleto: Math.round(P.topeGratMensual * fp),
+    // Snapshot de los parámetros con que se calculó. Se guarda en el documento
+    // al emitir: una liquidación de agosto no debe recalcularse sola cuando en
+    // enero se actualice la tabla. Mismo criterio que el anticipo recurrente.
+    parametros: {
+      periodo:       P.periodo,
+      imm:           P.imm,
+      immNorma:      P.immNorma,
+      topeGratMensual: P.topeGratMensual,
+      jornadaMaxima: P.jornadaMaxima,
+      jornadaSemanal: horasOrdinariasSemanales(rem, { mes: rem.mes, anio: rem.anio }),
+      utm:           P.utm,
+      uf:            P.uf,
+      utmCargada:    P.utmCargada,
+      ufCargada:     P.ufCargada,
+    },
+    uf: P.uf,   // lo consume calcularRentaTributable para el tope de APV
     tasaAfp, afpResuelta,
     esPensionado,
     cesEmpM: esPensionado ? 0 : Math.round(imponible * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
@@ -240,10 +269,10 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   // ── Gratificación proporcional (Art. 50 CT) ──
   // 25% de lo devengado en el año, tope 4.75 IMM anual. Proporcional a meses.
-  // Usamos IMM_2026 vigente
   // Mismo criterio que la liquidación mensual: 25% de lo devengado CON TOPE de
-  // 4,75 IMM al año, no el tope directo.
-  const gratAnualTope      = IMM_2026 * 4.75;
+  // 4,75 IMM al año, no el tope directo. El IMM se toma al de la fecha de
+  // término, que es el que rige el finiquito.
+  const gratAnualTope      = paramsDe(fin.fechaTermino).topeGratAnual;
   const gratMensualPagable = Math.min(ult * 0.25, gratAnualTope / 12);
   // Si la gratificación ya se paga mes a mes (garantizada), no corresponde
   // volver a pagarla acá: se controla con `fin.gratificacionYaPagada`.
@@ -266,7 +295,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   // Art. 172: la base no puede exceder 90 UF. El comentario anterior lo
   // mencionaba pero el tope no se aplicaba en ninguna parte.
-  const topeIndem          = Math.round(90 * (fin.uf || UF_REFERENCIA));
+  const topeIndem          = Math.round(90 * (fin.uf || paramsDe(fin.fechaTermino).uf));
   const baseIndem          = Math.min(ult, topeIndem);
   const baseTopeada        = ult > topeIndem;
   const indemMonto         = tieneIndemnizacion ? baseIndem * aniosIndemnizacion : 0;
@@ -398,10 +427,10 @@ function calcularIUT(renImponible, utm) {
   const impuesto = Math.max(0, Math.round((renImponible * tramo.tasa) - (tramo.rebaja * utm)));
   return impuesto;
 }
-// Valor de la UF de referencia para el tope de APV en régimen B.
-// El módulo no tenía ninguna constante de UF: revisar contra el valor vigente,
-// o pasarlo por `calc.uf` cuando exista una fuente de indicadores en línea.
-const UF_REFERENCIA = 39500;
+// La UF ya no es una constante del módulo: llega en `calc.uf` desde
+// parametros.js, resuelta por período. Esta función solo la usa de respaldo
+// cuando le pasan un `calc` armado a mano sin período.
+const UF_REFERENCIA = paramsDe(null).uf;
 
 function calcularRentaTributable(calc) {
   // El APV en régimen B rebaja la base del impuesto único, con tope de 50 UF
@@ -412,24 +441,101 @@ function calcularRentaTributable(calc) {
   return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.sisM - calc.cesM - rebajaApv);
 }
 function calcularLiquidacionConIUT(rem, utm) {
+  // Si no llega una UTM explícita se usa la del período liquidado. Antes caía a
+  // UTM_DEFAULT (64.085, un valor de 2024): con una UTM baja el sueldo "vale"
+  // más UTM de las que corresponde y el impuesto sale sobrestimado.
+  const utmPeriodo = utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm;
   const calc     = calcularLiquidacion(rem);
   const rentaTrib= calcularRentaTributable(calc);
-  const iut      = calcularIUT(rentaTrib, utm || UTM_DEFAULT);
+  const iut      = calcularIUT(rentaTrib, utmPeriodo);
   const liquidoFinal = calc.liquido - iut;
-  return { ...calc, rentaTrib, iut, liquidoFinal, utm: utm || UTM_DEFAULT };
+  return {
+    ...calc, rentaTrib, iut, liquidoFinal, utm: utmPeriodo,
+    parametros: { ...calc.parametros, utm: utmPeriodo },
+  };
 }
-function horasOrdinariasSemanales(jornada) {
-  if (!jornada) return 45;
-  if (jornada.includes('45')) return 45;
-  if (jornada.includes('30')) return 30;
-  if (jornada.includes('20')) return 20;
-  if (jornada.includes('7x7'))   return 49; // 7 días × 7 hrs
-  if (jornada.includes('14x14')) return 98; // referencial turno
-  if (jornada.includes('4x3'))   return 28;
+// Horas que declara el contrato, sin considerar el tope legal todavía.
+// Acepta el string de jornada o el contrato completo (para leer la jornada
+// especial del Art. 22, que se guarda en `jornadaHorasSemanales`).
+function horasDeclaradas(entrada) {
+  const c = typeof entrada === 'string' ? { jornada: entrada } : (entrada || {});
+  const j = c.jornada || '';
+
+  // Jornada especial pactada: manda el número que se escribió en el contrato.
+  const especial = parseFloat(c.jornadaHorasSemanales);
+  if (j === 'Otro' && especial > 0) return especial;
+
+  if (!j) return 45;
+  if (j.includes('45')) return 45;
+  if (j.includes('44')) return 44;
+  if (j.includes('42')) return 42;
+  if (j.includes('40')) return 40;
+  if (j.includes('30')) return 30;
+  if (j.includes('20')) return 20;
+  if (j.includes('7x7'))   return 49; // 7 días × 7 hrs
+  if (j.includes('14x14')) return 98; // referencial turno
+  if (j.includes('4x3'))   return 28;
+  if (especial > 0) return especial;
   return 45;
 }
-function horasDiarias(jornada) {
-  return Math.round(horasOrdinariasSemanales(jornada) / 5);
+
+// ¿Es jornada ordinaria completa? Solo a ellas se les aplica el tope de la Ley
+// 21.561. Las parciales (Art. 40 bis) ya están bajo el máximo por definición, y
+// los turnos excepcionales autorizados por la DT promedian sobre el ciclo, no
+// sobre la semana: topearlos acá cambiaría mal el cálculo de sobretiempo.
+function esJornadaCompleta(entrada) {
+  const c = typeof entrada === 'string' ? { jornada: entrada } : (entrada || {});
+  const j = (c.jornada || '').toLowerCase();
+  if (!j) return true;                       // sin dato: se asume completa
+  if (j.includes('parcial')) return false;
+  if (j.includes('turno') || j.includes('x')) return false;
+  if (j === 'otro') return false;            // jornada especial pactada
+  return true;
+}
+
+/**
+ * Jornada ordinaria semanal aplicable, ya topeada por la ley del período.
+ *
+ * Ley 21.561: la rebaja se incorpora a los contratos por el solo ministerio de
+ * la ley. Un contrato que dice "Completa (45 hrs)" tiene tope de 42 desde el
+ * 26/04/2026 aunque nadie haya firmado un anexo — y ese es el divisor correcto
+ * para la hora extra. Por eso se topea acá en vez de exigir editar contratos.
+ */
+function horasOrdinariasSemanales(jornada, periodo) {
+  const declarada = horasDeclaradas(jornada);
+  if (!esJornadaCompleta(jornada)) return declarada;
+  return Math.min(declarada, paramsDe(periodo).jornadaMaxima);
+}
+
+/**
+ * Valor de una hora extraordinaria (Art. 32 CT).
+ *
+ * Fórmula de la Dirección del Trabajo:
+ *   valor hora ordinaria = (sueldo mensual × 7) / (jornada semanal × 30)
+ *   hora extra           = valor hora ordinaria × (1 + recargo)
+ *
+ * El recargo legal mínimo es 50%; se puede pactar uno mayor, nunca menor.
+ * Como el divisor sale de la jornada legal vigente, al bajar la jornada sin
+ * bajar el sueldo el valor de la hora sube solo, que es justamente lo que
+ * ordena la Ley 21.561.
+ */
+function valorHoraExtra(sueldoBase, jornada, periodo, recargo = 0.5) {
+  const base  = parseInt(sueldoBase) || 0;
+  const horas = horasOrdinariasSemanales(jornada, periodo);
+  if (base <= 0 || !horas) return 0;
+  return Math.round((base * 7) / (horas * 30) * (1 + recargo));
+}
+
+/** Valor de la hora ordinaria, sin recargo. Útil para descuentos por atraso. */
+function valorHoraOrdinaria(sueldoBase, jornada, periodo) {
+  const base  = parseInt(sueldoBase) || 0;
+  const horas = horasOrdinariasSemanales(jornada, periodo);
+  if (base <= 0 || !horas) return 0;
+  return Math.round((base * 7) / (horas * 30));
+}
+
+function horasDiarias(jornada, periodo) {
+  return Math.round(horasOrdinariasSemanales(jornada, periodo) / 5);
 }
 function analizarDia(reg, jornadaContrato) {
   const ordinarias = horasDiarias(jornadaContrato);
@@ -687,5 +793,6 @@ function fueReliquidada(liq, liquidaciones) {
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
-  horasOrdinariasSemanales, horasDiarias, analizarDia, resumenSemana, diasDelMes,
+  horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
+  horasDiarias, analizarDia, resumenSemana, diasDelMes,
   generarTXTPrevired, exportarAsistenciaCSV };

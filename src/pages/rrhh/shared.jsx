@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { paramsDe } from './parametros';
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTES GLOBALES RRHH
 // ─────────────────────────────────────────────────────────────
-export const IMM_2026 = 539000;
-export const IMM_2024 = 501787;
+// El Ingreso Mínimo Mensual dejó de vivir acá: cambia por ley varias veces al
+// año y el valor correcto depende del período que se liquida, no de la fecha en
+// que se escribió la constante. La tabla de vigencias está en parametros.js.
+//
+// Estos dos nombres se conservan solo para no romper imports antiguos.
+/** @deprecated usar paramsDe(periodo).imm */
+export const IMM_2026 = paramsDe('2026-05').imm;
+/** @deprecated usar paramsDe(periodo).imm */
+export const IMM_2024 = paramsDe('2024-07').imm;
 
 export const TASAS_AFP = {
   // Tasa total de cargo del trabajador = 10% obligatorio + comisión de la AFP.
@@ -37,7 +45,12 @@ export const TASAS = {
   mutual:      0.0348, // Mutual AT — tasa específica MPF Ingeniería Civil (3.48%)
 };
 
-export const UTM_DEFAULT = 64085;
+// La UTM se reajusta todos los meses: una constante acá siempre va a estar
+// vieja. Esta quedó en 64.085 (valor de 2024) mientras la de sept-2026 es
+// 71.721, y con una UTM baja el sueldo equivale a más UTM de las que
+// corresponde, así que el impuesto único salía sobrestimado.
+/** @deprecated usar paramsDe(periodo).utm */
+export const UTM_DEFAULT = paramsDe(null).utm;
 export const TOPE_ANIOS_INDEMNIZACION = 11;
 export const CAUSALES_CON_INDEMNIZACION = ['161'];
 
@@ -56,7 +69,11 @@ export const AREAS    = [
 export const AFPS     = ['Capital','Cuprum','Habitat','Modelo','PlanVital','ProVida','Uno'];
 export const ISAPRES  = ['Banmédica','Colmena','Cruz Blanca','Esencial','Masvida','Nueva Masvida','Vida Tres'];
 export const TIPOS_CONTRATO = ['Plazo fijo', 'Indefinido', 'Por obra o faena'];
-export const JORNADAS = ['Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
+// Ley 21.561: 44 hrs desde abril 2024, 42 desde abril 2026, 40 desde abril
+// 2028. Las opciones de 44 y 45 se conservan porque hay contratos firmados con
+// esas jornadas — el cálculo las topea al máximo legal del período sin
+// necesidad de anexo, así que no hay que corregir contratos viejos a mano.
+export const JORNADAS = ['Completa (42 hrs)','Completa (44 hrs)','Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
 export const CENTROS_COSTO = ['Obras','Administración Central','Oficina Técnica','Logística'];
 export const TIPOS_PERIODO = ['mensual','quincenal','semanal','turno'];
 export const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
