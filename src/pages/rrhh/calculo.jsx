@@ -64,11 +64,12 @@ function calcularLiquidacion(rem) {
 
   // Bonos variables: no se prorratean por días (ya reflejan lo trabajado)
   const bProd  = parseInt(rem.bonoProduccion) || 0;
-  const hExtra = parseInt(rem.horasExtra) || 0;
+  // Horas extra: `horasExtra` es el TOTAL del período, no un promedio semanal.
+  // Antes se multiplicaba por 4 en período mensual, así que escribir "1" pagaba
+  // cuatro horas. Nadie que anote horas extra de un mes piensa en semanas.
+  const hExtra = parseFloat(rem.horasExtra) || 0;
   const vHE    = parseInt(rem.valorHoraExtra) || 0;
-  const semanasMap = { mensual:4, quincenal:2, semanal:1, turno:2 };
-  const semanas    = semanasMap[rem.tipoPeriodo || 'mensual'] || 4;
-  const montoHE    = hExtra * vHE * semanas;
+  const montoHE    = Math.round(hExtra * vHE);
 
   // No imponibles fijos: proporcionales a días asistidos
   const bColacion  = Math.round((parseInt(rem.bonoColacion) || 0)       * fp * fdias);
@@ -457,26 +458,37 @@ function calcularLiquidacionConIUT(rem, utm) {
 // Horas que declara el contrato, sin considerar el tope legal todavía.
 // Acepta el string de jornada o el contrato completo (para leer la jornada
 // especial del Art. 22, que se guarda en `jornadaHorasSemanales`).
-function horasDeclaradas(entrada) {
+function horasDeclaradas(entrada, periodo) {
   const c = typeof entrada === 'string' ? { jornada: entrada } : (entrada || {});
   const j = c.jornada || '';
-
-  // Jornada especial pactada: manda el número que se escribió en el contrato.
   const especial = parseFloat(c.jornadaHorasSemanales);
-  if (j === 'Otro' && especial > 0) return especial;
 
-  if (!j) return 45;
+  // Jornada especial o turno con promedio pactado: manda el número del contrato.
+  if (especial > 0) return especial;
+
+  if (!j) return paramsDe(periodo).jornadaMaxima;
   if (j.includes('45')) return 45;
   if (j.includes('44')) return 44;
   if (j.includes('42')) return 42;
   if (j.includes('40')) return 40;
   if (j.includes('30')) return 30;
   if (j.includes('20')) return 20;
-  if (j.includes('7x7'))   return 49; // 7 días × 7 hrs
-  if (j.includes('14x14')) return 98; // referencial turno
-  if (j.includes('4x3'))   return 28;
-  if (especial > 0) return especial;
-  return 45;
+
+  // Turnos (7x7, 14x14, 4x3): son jornadas excepcionales del Art. 38, que la DT
+  // autoriza justamente porque su PROMEDIO SEMANAL sobre el ciclo no excede el
+  // máximo legal. El divisor correcto es ese promedio, no las horas de una
+  // semana punta: un 14x14 de turnos de 12 hrs son 168 hrs en 28 días, o sea 42
+  // semanales — no 98, que es lo que decía antes y hundía el valor de la hora
+  // extra a menos de la mitad.
+  //
+  // Si el contrato declara su promedio en `jornadaHorasSemanales` se usa ese
+  // (ya se resolvió arriba). Si no, se cae al máximo legal del período, que es
+  // el supuesto conservador: nunca infla el divisor.
+  if (/x/i.test(j) || j.toLowerCase().includes('turno')) {
+    return paramsDe(periodo).jornadaMaxima;
+  }
+
+  return paramsDe(periodo).jornadaMaxima;
 }
 
 // ¿Es jornada ordinaria completa? Solo a ellas se les aplica el tope de la Ley
@@ -502,7 +514,7 @@ function esJornadaCompleta(entrada) {
  * para la hora extra. Por eso se topea acá en vez de exigir editar contratos.
  */
 function horasOrdinariasSemanales(jornada, periodo) {
-  const declarada = horasDeclaradas(jornada);
+  const declarada = horasDeclaradas(jornada, periodo);
   if (!esJornadaCompleta(jornada)) return declarada;
   return Math.min(declarada, paramsDe(periodo).jornadaMaxima);
 }
@@ -511,22 +523,43 @@ function horasOrdinariasSemanales(jornada, periodo) {
  * Valor de una hora extraordinaria (Art. 32 CT).
  *
  * Fórmula de la Dirección del Trabajo:
- *   valor hora ordinaria = (sueldo mensual × 7) / (jornada semanal × 30)
- *   hora extra           = valor hora ordinaria × (1 + recargo)
+ *   sueldo diario        = sueldo mensual / 30
+ *   sueldo semanal       = sueldo diario × 7
+ *   valor hora ordinaria = sueldo semanal / jornada semanal
+ *                        = (sueldo mensual × 7) / (jornada semanal × 30)
+ *   hora extraordinaria  = valor hora ordinaria × (1 + recargo)
  *
- * El recargo legal mínimo es 50%; se puede pactar uno mayor, nunca menor.
+ * La base es el SUELDO CONVENIDO para la jornada ordinaria (Art. 42 a): el
+ * estipendio fijo. No entran bonos, colación, movilización ni gratificación.
+ *
+ * Piso legal: si no hay sueldo convenido — el caso de las remuneraciones
+ * variables — o si el convenido es inferior al ingreso mínimo, es el ingreso
+ * mínimo el que constituye la base del recargo. En jornada parcial el mínimo
+ * es proporcional a las horas pactadas (Art. 44 inc. 3), así que el piso se
+ * prorratea igual: aplicarlo completo a alguien de 20 hrs lo inflaría.
+ *
+ * El recargo del 50% es un mínimo legal; se puede pactar mayor, nunca menor.
  * Como el divisor sale de la jornada legal vigente, al bajar la jornada sin
  * bajar el sueldo el valor de la hora sube solo, que es justamente lo que
  * ordena la Ley 21.561.
  */
 function valorHoraExtra(sueldoBase, jornada, periodo, recargo = 0.5) {
-  const base  = parseInt(sueldoBase) || 0;
   const horas = horasOrdinariasSemanales(jornada, periodo);
-  if (base <= 0 || !horas) return 0;
+  if (!horas) return 0;
+
+  const P         = paramsDe(periodo);
+  const proporcion = Math.min(1, horas / P.jornadaMaxima);
+  const pisoIMM    = Math.round(P.imm * proporcion);
+  const base       = Math.max(parseInt(sueldoBase) || 0, pisoIMM);
+
   return Math.round((base * 7) / (horas * 30) * (1 + recargo));
 }
 
-/** Valor de la hora ordinaria, sin recargo. Útil para descuentos por atraso. */
+/**
+ * Valor de la hora ordinaria, sin recargo. Útil para descuentos por atraso.
+ * NO lleva el piso del ingreso mínimo: ese es específico del recargo por
+ * sobretiempo del Art. 32 inc. 3 y no se extiende a otros usos.
+ */
 function valorHoraOrdinaria(sueldoBase, jornada, periodo) {
   const base  = parseInt(sueldoBase) || 0;
   const horas = horasOrdinariasSemanales(jornada, periodo);
