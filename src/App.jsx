@@ -394,7 +394,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [postInvite, setPostInvite] = useState(false);
-  const [userRole, setUserRole] = useState('operador');
+  // null = rol aún NO resuelto (todavía no leímos users/{uid}). Nunca uses
+  // 'operador' como default: con dos pestañas y el reload que fuerza el service
+  // worker, un superadmin arrancaba renderizado como operador antes/además de
+  // que llegara el snapshot con su rol real.
+  const [userRole, setUserRole] = useState(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
   const [userModulos, setUserModulos] = useState([]);
   const [userCargo, setUserCargo] = useState('');
   const [userEsSurtidor, setUserEsSurtidor] = useState(false);
@@ -454,6 +459,9 @@ export default function App() {
       }
 
       if (currentUser) {
+        // Rol aún no resuelto para este usuario: fuerza el gate de carga hasta
+        // que el snapshot traiga el rol real.
+        setRoleLoaded(false);
         // Escuchar el documento del usuario en tiempo real para reaccionar al registro inmediato
         unsubUserDoc = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
           if (snap.exists()) {
@@ -474,13 +482,17 @@ export default function App() {
               setNeedsSetup(true);
             }
           } else {
-            setUserRole('operador');
+            // Doc ausente → onboarding (needsSetup). No lo marques como
+            // 'operador': si es una lectura stale de la caché multi-pestaña,
+            // un superadmin quedaría con UI de operador.
+            setUserRole(null);
             setUserModulos([]);
             setUserCargo('');
             setUserEsSurtidor(false);
             setCapacitacionAprobada(false);
             setNeedsSetup(true);
           }
+          setRoleLoaded(true);
           setLoading(false);
         }, (err) => {
           console.error("Error listening to user document:", err);
@@ -498,29 +510,34 @@ export default function App() {
                 checkAndAutoApprove(data);
                 setNeedsSetup(!data.empresaId);
               } else {
+                setUserRole(null);
                 setNeedsSetup(true);
               }
+              setRoleLoaded(true);
               setLoading(false);
             }).catch(() => {
               // Sin acceso real — mantener loading=false sin cambiar needsSetup
+              setRoleLoaded(true);
               setLoading(false);
             });
             return;
           }
-          setUserRole('operador');
+          setUserRole(null);
           setUserModulos([]);
           setUserCargo('');
           setUserEsSurtidor(false);
           setCapacitacionAprobada(false);
           setNeedsSetup(true);
+          setRoleLoaded(true);
           setLoading(false);
         });
       } else {
-        setUserRole('operador');
+        setUserRole(null);
         setUserModulos([]);
         setUserCargo('');
         setCapacitacionAprobada(false);
         setNeedsSetup(false);
+        setRoleLoaded(true);
         setLoading(false);
       }
     });
@@ -533,7 +550,9 @@ export default function App() {
 
   // ── Gating de Módulos / Acceso en App.jsx por URL ───────────────────
   useEffect(() => {
-    if (loading || !user) return;
+    // userRole === null → rol aún no resuelto: no evalúes acceso ni redirijas,
+    // o expulsarías a un superadmin de su módulo durante la lectura.
+    if (loading || !user || userRole === null) return;
 
     const path = location.pathname;
     const match = path.match(/^\/([^\/]+)/);
@@ -638,7 +657,10 @@ export default function App() {
   if (isTrabajadorRoute) return <TrabajadorApp />;
   if (inviteToken) return <InviteAccept token={inviteToken} onAccepted={handleInviteAccepted} />;
 
-  if (loading) {
+  // Mientras el rol no esté resuelto para un usuario autenticado que no está en
+  // onboarding, muestra la carga en vez de renderizar el shell con rol nulo
+  // (evita el "flash de operador" y expulsiones por gating prematuro).
+  if (loading || (user && !needsSetup && !roleLoaded)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-900 to-slate-900 flex items-center justify-center p-4">
         <div className="text-center">
