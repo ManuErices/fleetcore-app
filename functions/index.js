@@ -2146,3 +2146,34 @@ exports.onVacacionUpdated = onDocumentUpdated(
     }
   }
 );
+
+// Permiso aprobado/rechazado → avisar al trabajador del resultado.
+exports.onPermisoUpdated = onDocumentUpdated(
+  { document: 'empresas/{empresaId}/permisos/{id}', secrets: SES_SECRETS },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const before = event.data?.before?.data() || {};
+      const after  = event.data?.after?.data() || {};
+      if (before.estado === after.estado) return;
+      if (!['aprobado', 'rechazado'].includes(after.estado)) return;
+
+      const trab = await getTrabajador(empresaId, after.trabajadorId);
+      const to = trab?.email || trab?.portalEmail;
+      if (!to) { console.log('onPermisoUpdated: trabajador sin email, skip'); return; }
+
+      const aprobado = after.estado === 'aprobado';
+      const tipoLabel = after.tipo === 'sin goce' ? 'permiso sin goce de sueldo' : 'permiso con goce de sueldo';
+      const link = (process.env.APP_URL || 'https://fleetcore.cl') + '/trabajador';
+      const tpl = genericNotification({
+        subject: `Tu solicitud de permiso fue ${aprobado ? 'aprobada' : 'rechazada'}`,
+        title: aprobado ? '✅ Permiso aprobado' : '❌ Permiso rechazado',
+        message: `Hola ${after.trabajadorNombre || trab.nombre || ''}, tu solicitud de ${tipoLabel} del ${after.desde} al ${after.hasta} fue ${aprobado ? 'APROBADA' : 'RECHAZADA'}.${after.observacionesRRHH ? ` Observaciones: ${after.observacionesRRHH}` : ''} Detalle en tu portal: ${link}`,
+        details: { 'Tipo': tipoLabel, 'Desde': after.desde, 'Hasta': after.hasta, 'Días': after.dias, 'Estado': aprobado ? 'Aprobado' : 'Rechazado' },
+      });
+      await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
+    } catch (err) {
+      console.error('onPermisoUpdated error:', err.message);
+    }
+  }
+);

@@ -296,6 +296,32 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || canWriteEmpresa(empresaId);
       }
 
+      // ── PERMISOS ─────────────────────────────────────────
+      // Mismo flujo que vacaciones: el trabajador solicita (nace pendiente y
+      // suyo), puede corregir mientras siga pendiente; la resolución
+      // (aprobado/rechazado) es exclusiva de RRHH.
+      match /permisos/{docId} {
+        allow read: if belongsToEmpresa(empresaId);
+
+        allow create: if isSuperAdmin()
+                      || canWriteEmpresa(empresaId)
+                      || (isTrabajador()
+                          && belongsToEmpresa(empresaId)
+                          && request.resource.data.trabajadorId == miTrabajadorDocId(empresaId)
+                          && request.resource.data.estado == 'pendiente');
+
+        allow update: if isSuperAdmin()
+                      || canWriteEmpresa(empresaId)
+                      || (isTrabajador()
+                          && belongsToEmpresa(empresaId)
+                          && resource.data.trabajadorId == miTrabajadorDocId(empresaId)
+                          && resource.data.estado == 'pendiente'
+                          && request.resource.data.estado == 'pendiente'
+                          && request.resource.data.trabajadorId == resource.data.trabajadorId);
+
+        allow delete: if isSuperAdmin() || canWriteEmpresa(empresaId);
+      }
+
       match /ausencias/{docId} {
         allow read: if belongsToEmpresa(empresaId);
         allow write: if isSuperAdmin() || canWriteEmpresa(empresaId);
