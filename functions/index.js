@@ -575,8 +575,11 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
       // Sumar email del operador receptor / repartidor si existen
       const dataMov = tipo === 'entrada' ? (reporte.datosEntrada || {}) : (reporte.datosEntrega || {});
       const operadorEmail = await lookupEmail(empresaId, dataMov.operadorId || ctrl.repartidorId);
-      const extraEmail = dataMov.extraEmail;
-      const allTo = [...emails, operadorEmail, extraEmail].filter(Boolean);
+      // "Enviar copia": el formulario guarda un ARRAY `extraEmails`. (Antes se
+      // leía `extraEmail` singular, que nunca existía → las copias no llegaban.)
+      const extraEmails = Array.isArray(dataMov.extraEmails) ? dataMov.extraEmails
+        : (dataMov.extraEmail ? [dataMov.extraEmail] : []);
+      const allTo = [...emails, operadorEmail, ...extraEmails].filter(Boolean);
 
       // Resolver labels
       const equipoSurtidorLabel = await lookupLabel(empresaId, 'equipos_surtidores', ctrl.equipoSurtidorId, ['nombre', 'patente']);
