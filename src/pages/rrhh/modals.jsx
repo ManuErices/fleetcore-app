@@ -21,6 +21,7 @@ const {
   calcularLiquidacion, calcularLiquidacionConIUT, calcularFiniquito,
   calcularAntiguedad, labelPeriodo, diasDelMes, analizarDia,
   alertaVencimiento, exportarAsistenciaCSV, horasOrdinariasSemanales,
+  valorHoraExtra,
 } = Calc;
 
 const {
@@ -153,6 +154,11 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     // Datos de pago: el Archivo de Pago lee banco y nroCuenta, pero no había
     // dónde cargarlos desde la interfaz. Solo llegaban por importación.
     banco: '', tipoCuenta: 'Cuenta Corriente', nroCuenta: '',
+    // Anticipo (quincena) pactado al contratar: se paga todos los meses por el
+    // mismo monto salvo excepciones. Vive en el trabajador y no en el contrato
+    // porque no es cláusula contractual — ajustarlo no debe requerir un anexo.
+    // Cada liquidación lo copia como valor inicial y ahí queda editable.
+    anticipoRecurrente: '', glosaAnticipoRecurrente: 'Anticipo quincena',
     esPensionado: false,
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
@@ -813,6 +819,24 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         </div>
 
+        <Divider label="Anticipo recurrente (quincena)" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Monto mensual ($)">
+            <input type="text" className={inp} value={formatCLP(form.anticipoRecurrente)}
+              onChange={e => set('anticipoRecurrente', parseCLP(e.target.value))}
+              placeholder="Ej: 400.000" />
+            <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+              Se precarga en cada liquidación de este trabajador. Si un mes cambia, se edita ahí:
+              esto no altera las liquidaciones ya emitidas.
+            </p>
+          </Field>
+          <Field label="Glosa">
+            <input className={inp} value={form.glosaAnticipoRecurrente || ''}
+              onChange={e => set('glosaAnticipoRecurrente', e.target.value)}
+              placeholder="Ej: Anticipo quincena" />
+          </Field>
+        </div>
+
         <Divider label="Observaciones" />
         <Field label="Observaciones">
           <textarea className={inp} rows={2} value={form.observaciones}
@@ -1197,7 +1221,7 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
   const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
-    cargo: '', jornada: 'Completa (45 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
+    cargo: '', jornada: 'Completa (42 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
     // Jornada personalizada (cuando jornada === 'Otro')
     jornadaHorasSemanales: '', jornadaHoraEntrada: '', jornadaHoraSalida: '',
@@ -1396,7 +1420,9 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
 // ─── LiquidacionModal ─────────────────────────────────────────────────────────
 
 function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
-  const { empresaId } = useEmpresa();
+  // `empresa` alimenta el encabezado del PDF. Faltaba en este destructuring y el
+  // botón de vista previa reventaba con "empresa is not defined" al hacer click.
+  const { empresaId, empresa } = useEmpresa();
   const hoy = new Date();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -1411,6 +1437,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState(null);
   const { itemsCustom } = useItemsPago(empresaId);
 
   useEffect(() => {
@@ -1440,20 +1467,55 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     set('items', itemsForm.filter(i => i.itemId !== itemId));
 
   const handleTrabajador = (tid) => {
-    const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    const contrato   = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    const trabajador = trabajadores?.find(t => t.id === tid);
+    // El anticipo pactado al contratar se copia como valor inicial, no como
+    // referencia: cambiar la base en la ficha no debe alterar liquidaciones ya
+    // emitidas. Acá queda editable para los meses en que varía.
+    const antBase = trabajador?.anticipoRecurrente;
     setForm(f => ({
       ...f, trabajadorId: tid,
       contratoId: contrato?.id || '',
       sueldoBase: contrato?.sueldoBase || '',
       bonoColacion: contrato?.bonoColacion || '',
       bonoMovilizacion: contrato?.bonoMovilizacion || '',
+      anticipo: antBase ? String(antBase) : '0',
+      glosaAnticipo: antBase
+        ? (trabajador?.glosaAnticipoRecurrente || 'Anticipo quincena')
+        : (f.glosaAnticipo || ''),
     }));
   };
 
   const contratoSel   = contratos?.find(c => c.id === form.contratoId);
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
+  // Monto recurrente de referencia, para el pie "Automático desde…" del campo anticipo
+  const anticipoBase  = trabajadorSel?.anticipoRecurrente || '';
+
+  // ── Valor de la hora extra (Art. 32 CT) ──
+  // (sueldo × 7) / (jornada semanal × 30) × 1,5. La jornada sale del contrato
+  // topeada al máximo legal del período: un contrato de 45 hrs divide por 42
+  // desde abril de 2026 sin necesidad de anexo, y la hora vale más.
+  const periodoLiq   = { mes: form.mes, anio: form.anio };
+  const jornadaSem   = contratoSel ? horasOrdinariasSemanales(contratoSel, periodoLiq) : null;
+  const vheSugerido  = contratoSel && form.sueldoBase
+    ? valorHoraExtra(form.sueldoBase, contratoSel, periodoLiq)
+    : 0;
+
+  // Se rellena solo mientras el usuario no lo haya tocado. Si lo editó a mano
+  // (por ejemplo, un recargo pactado sobre el 50% legal) se respeta, y el pie
+  // `Auto` le ofrece volver al valor calculado.
+  const vhePrevio = useRef(null);
+  useEffect(() => {
+    if (!vheSugerido) return;
+    const actual = String(form.valorHoraExtra || '');
+    const sinTocar = actual === '' || actual === '0' || actual === String(vhePrevio.current);
+    if (sinTocar) setForm(f => ({ ...f, valorHoraExtra: String(vheSugerido) }));
+    vhePrevio.current = vheSugerido;
+  }, [vheSugerido]);
   const calc = (contratoSel && form.sueldoBase)
-    ? calcularLiquidacionConIUT({ ...contratoSel, ...form, afp: trabajadorSel?.afp }, UTM_DEFAULT)
+    // Sin segundo argumento: la UTM se resuelve por el mes y año de la
+    // liquidación, no por una constante que envejece.
+    ? calcularLiquidacionConIUT({ ...contratoSel, ...form, afp: trabajadorSel?.afp })
     : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
 
@@ -1463,7 +1525,14 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Se congelan los parámetros legales usados (IMM, UTM, UF, jornada). Una
+      // liquidación emitida no debe cambiar de resultado porque en enero se
+      // actualizó la tabla de parámetros.
+      const payload = {
+        ...form,
+        parametros: calc?.parametros || null,
+        updatedAt: serverTimestamp(),
+      };
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'remuneraciones', editData.id), payload);
       } else {
@@ -1475,6 +1544,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   };
 
   return (
+    <>
     <Modal isOpen={isOpen} onClose={onClose}
       title={editData ? 'Editar Liquidación' : 'Nueva Liquidación'}
       subtitle="Art. 54 CT · Cotizaciones previsionales · IUT Art. 42 N°1 LIR"
@@ -1547,6 +1617,10 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
           </Field>
           <Field label="Valor hora extra ($)">
             <input type="text" className={inp} value={formatCLP(form.valorHoraExtra)} onChange={e => set('valorHoraExtra', parseCLP(e.target.value))} />
+            <Auto valor={form.valorHoraExtra} sugerido={vheSugerido || ''}
+              fuente={`jornada de ${jornadaSem} hrs, recargo 50%`}
+              onRestaurar={() => set('valorHoraExtra', String(vheSugerido))}
+              formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
         </div>
 
@@ -1578,6 +1652,9 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo ($)">
             <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
+            <Auto valor={form.anticipo} sugerido={anticipoBase} fuente="la ficha del trabajador"
+              onRestaurar={() => set('anticipo', String(anticipoBase))}
+              formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
           <Field label="Glosa anticipo">
             <input className={inp} value={form.glosaAnticipo || ''} onChange={e => set('glosaAnticipo', e.target.value)} placeholder="Ej: Anticipo quincena…" />
@@ -1650,7 +1727,10 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 
         <div className="flex justify-between items-center pt-2">
           {calc && (
-            <button onClick={() => generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { empresa })}
+            <button onClick={() => setPdfPreview({
+                url: generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { preview: true, empresa }),
+                filename: `Liquidación — ${labelPeriodo(form)}`,
+              })}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
               📄 Vista previa PDF
             </button>
@@ -1662,6 +1742,14 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         </div>
       </div>
     </Modal>
+
+    {/* Se monta fuera del <Modal> para que no quede atrapado en su capa */}
+    <PdfPreviewModal
+      isOpen={!!pdfPreview}
+      onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }}
+      url={pdfPreview?.url}
+      filename={pdfPreview?.filename} />
+    </>
   );
 }
 
