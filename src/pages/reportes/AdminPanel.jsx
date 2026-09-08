@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
+import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
@@ -1235,6 +1236,7 @@ function MaquinasSection() {
   const [saving, setSaving] = useState(false);
   const [busquedaMaq, setBusquedaMaq] = useState('');
   const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
+  const [detalle, setDetalle] = useState(null); // máquina cuyo detalle se despliega
 
   // Catálogos dinámicos
   const { items: tiposDB,       add: addTipo,        remove: removeTipo,        load: reloadTipos }        = useCatalogo('tipo');
@@ -1306,6 +1308,15 @@ function MaquinasSection() {
     setConfirm(null);
   };
 
+  const DetalleBtn = (row) => (
+    <button onClick={() => setDetalle(row)} className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Ver detalle de la máquina">
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+      </svg>
+    </button>
+  );
+
   const QRBtn = (row) => (
     <button onClick={() => openQR(row)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver QR">
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1339,9 +1350,9 @@ function MaquinasSection() {
           const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
           const matchE = !filtroEmpresaMaq || (r.empresa || '').toUpperCase() === filtroEmpresaMaq.toUpperCase();
           return matchQ && matchE;
-        })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
+        })} onEdit={openEdit} onDelete={setConfirm} extraAction={(row) => <>{DetalleBtn(row)}{QRBtn(row)}</>} emptyText="No hay máquinas registradas"
           columns={[
-            { key: 'code', label: 'Código', render: r => <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg text-xs">{r.code || r.patente || '—'}</span> },
+            { key: 'code', label: 'Código', render: r => <button onClick={() => setDetalle(r)} className="font-mono font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-lg text-xs transition-colors cursor-pointer" title="Ver detalle de la máquina">{r.code || r.patente || '—'}</button> },
             { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-slate-700">{r.patente || '—'}</span> },
             { key: 'type', label: 'Tipo' },
             { key: 'marca', label: 'Marca' },
@@ -1477,6 +1488,9 @@ function MaquinasSection() {
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} subtitulo={qr?.subtitulo} headerLabel={qr?.headerLabel} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
+      {detalle && (
+        <MaquinaDetalleModal machine={detalle} empresaId={empresaId} onClose={() => setDetalle(null)} />
+      )}
     </>
   );
 }
@@ -1931,8 +1945,6 @@ function EmpresasSection() {
 // SECCIÓN: PROYECTOS
 // ─────────────────────────────────────────────────────────────
 
-// Formato código proyecto: siempre "CC-NN" (CC-01, CC-23, etc.)
-
 // Comunas de Chile por región
 const COMUNAS_POR_REGION = {
   'Arica y Parinacota': ['Arica','Camarones','Putre','General Lagos'],
@@ -1952,11 +1964,6 @@ const COMUNAS_POR_REGION = {
   "Aysén": ['Coyhaique','Lago Verde','Aysén','Cisnes','Guaitecas','Cochrane',"O'Higgins",'Tortel','Chile Chico','Río Ibáñez'],
   "Magallanes": ['Punta Arenas','Laguna Blanca','Río Verde','San Gregorio','Cabo de Hornos','Antártica','Porvenir','Primavera','Timaukel','Natales','Torres del Paine'],
 };
-function fmtCodigoProyecto(raw) {
-  const prefix = 'CC-';
-  const nums = raw.replace(/[^0-9]/g, '').slice(0, 2);
-  return prefix + nums;
-}
 function ProyectosSection() {
   const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
@@ -1984,8 +1991,8 @@ function ProyectosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', codigo: 'CC-', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { const cod = row.codigo || 'CC-'; setForm({ name: row.name || '', codigo: cod.startsWith('CC-') ? cod : 'CC-' + cod, mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
     setSaving(true);
@@ -2031,22 +2038,13 @@ function ProyectosSection() {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Código (CC-NN)">
+            <Field label="Código">
               <input
                 className={inputCls}
                 value={form.codigo}
-                onChange={e => {
-                  const raw = e.target.value;
-                  // Si el usuario borra el prefijo, restaurarlo
-                  if (!raw.startsWith('CC-')) {
-                    setForm({ ...form, codigo: fmtCodigoProyecto(raw) });
-                  } else {
-                    const nums = raw.slice(3).replace(/[^0-9]/g, '').slice(0, 2);
-                    setForm({ ...form, codigo: 'CC-' + nums });
-                  }
-                }}
-                placeholder="CC-01"
-                maxLength={5}
+                onChange={e => setForm({ ...form, codigo: e.target.value })}
+                placeholder="Ej: CC-01, NN-23, obra-norte…"
+                maxLength={30}
               />
             </Field>
 

@@ -2014,6 +2014,7 @@ export default function ReporteCombustible() {
           onClose={() => setReporteDetalle(null)}
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
           machineInfo={machines.find(m => m.id === (reporteDetalle.datosEntrega?.machineId || reporteDetalle.datosEntrada?.machineId || reporteDetalle.machineId))}
+          empleados={empleados}
           surtidorInfo={empleados.find(e => e.id === (reporteDetalle.repartidorId || reporteDetalle.surtidorId))}
           operadorInfo={
             empleados.find(e => e.id === (reporteDetalle.datosEntrega?.operadorId || reporteDetalle.datosEntrada?.operadorId || reporteDetalle.operadorId))

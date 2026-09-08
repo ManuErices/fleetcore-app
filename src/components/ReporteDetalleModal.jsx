@@ -6,6 +6,7 @@ export default function ReporteDetalleModal({
   projectName, 
   machineInfo, 
   userRole = 'operador', // 'administrador' o 'operador'
+  empleados = [], // catálogo de empleados para elegir quién registra (admin)
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
@@ -279,22 +280,93 @@ export default function ReporteDetalleModal({
 
         {/* Contenido scrolleable */}
         <div className="p-6 pb-24 overflow-y-auto max-h-[calc(95vh-140px)] space-y-6">
-          
-          {/* Operador y Máquina lado a lado (NO EDITABLES) */}
+
+          {/* Folio del documento físico (editable por admin) */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 border-l-4 border-amber-500">
+            <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Folio
+            </h3>
+            {isEditing ? (
+              <input
+                type="text"
+                className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                value={editedData.folio || ''}
+                onChange={(e) => updateField('folio', e.target.value)}
+                placeholder="Folio del talonario / guía física"
+              />
+            ) : (
+              <DataField label="N° de folio" value={reporte.folio || reporte.folioExterno || '—'} />
+            )}
+          </div>
+
+          {/* Operador y Máquina lado a lado */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Operador */}
+
+            {/* Operador (editable por admin: quién registra) */}
             <div className="bg-white rounded-2xl shadow-lg p-6 border-l-4 border-cyan-500">
               <h3 className="text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
                 <svg className="w-5 h-5 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
                 Operador
-                {isAdmin && <span className="text-xs text-slate-400 font-normal">(No editable)</span>}
               </h3>
               <div className="space-y-3">
-                <DataField label="Nombre" value={reporte.operador} />
-                <DataField label="RUT" value={reporte.rut} />
+                {isEditing ? (
+                  <>
+                    {empleados.length > 0 && (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Elegir empleado</label>
+                        <select
+                          className="w-full px-3 py-2 border-2 border-cyan-200 rounded-lg focus:outline-none focus:border-cyan-500"
+                          value=""
+                          onChange={(e) => {
+                            const emp = empleados.find(x => x.id === e.target.value);
+                            if (!emp) return;
+                            const nombre = emp.nombre || emp.name || emp.displayName || '';
+                            updateField('operador', nombre);
+                            updateField('rut', emp.rut || '');
+                          }}
+                        >
+                          <option value="">— Seleccionar de la lista —</option>
+                          {empleados
+                            .slice()
+                            .sort((a, b) => (a.nombre || a.name || '').localeCompare(b.nombre || b.name || ''))
+                            .map(emp => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.nombre || emp.name || emp.displayName || '(sin nombre)'}{emp.rut ? ` · ${emp.rut}` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Nombre</label>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border-2 border-cyan-200 rounded-lg focus:outline-none focus:border-cyan-500"
+                        value={editedData.operador || ''}
+                        onChange={(e) => updateField('operador', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">RUT</label>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border-2 border-cyan-200 rounded-lg focus:outline-none focus:border-cyan-500"
+                        value={editedData.rut || ''}
+                        onChange={(e) => updateField('rut', e.target.value)}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <DataField label="Nombre" value={reporte.operador} />
+                    <DataField label="RUT" value={reporte.rut} />
+                  </>
+                )}
               </div>
             </div>
 
