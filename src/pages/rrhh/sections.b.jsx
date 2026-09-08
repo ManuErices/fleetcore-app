@@ -6,13 +6,14 @@ import * as Shared from './shared';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
+import ArchivoPagoPanel from './ArchivoPagoPanel';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA, PLAN_CUENTAS_DEFAULT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
   mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV } = Shared;
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, liquidacionDe, remDe, calcularAntiguedad, calcularFiniquito,
+  calcularLiquidacion, liquidacionDe, remDe, liquidacionesVigentes, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, exportarAsistenciaCSV } = Calc;
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
@@ -338,7 +339,7 @@ function ImpuestosSection() {
     .map(t => {
       const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
         || contratos.find(c => c.trabajadorId === t.id);
-      const liqs = liquidaciones.filter(l => l.trabajadorId === t.id && l.anio === anio);
+      const liqs = liquidacionesVigentes(liquidaciones).filter(l => l.trabajadorId === t.id && l.anio === anio);
       if (!contrato || liqs.length === 0) return null;
 
       let totalImp = 0, totalNoImp = 0, totalAfp = 0, totalSalud = 0, totalCes = 0, totalIUT = 0, totalLiq = 0, maxMensual = 0;
@@ -2523,7 +2524,7 @@ function ReportesSection() {
 
   // ── Datos por mes ──
   const dataPorMes = serie.map(({ mes, anio, label }) => {
-    const liqMes = liquidaciones.filter(l =>
+    const liqMes = liquidacionesVigentes(liquidaciones).filter(l =>
       l.mes === String(mes).padStart(2, '0') &&
       l.anio === String(anio) &&
       idsTrab.has(l.trabajadorId)
@@ -2592,7 +2593,7 @@ function ReportesSection() {
   // ── Costo por empresa ──
   const costoEmpresa = EMPRESAS.map(emp => {
     const trabEmp = trabajadores.filter(t => t.empresa === emp && t.estado === 'activo');
-    const liqEmp = liquidaciones.filter(l => {
+    const liqEmp = liquidacionesVigentes(liquidaciones).filter(l => {
       const t = trabajadores.find(t => t.id === l.trabajadorId);
       const m = dataPorMes.at(-1);
       return t?.empresa === emp && l.mes === String(m?.mes || '').padStart(2, '0') && l.anio === String(m?.anio || '');
@@ -3163,8 +3164,13 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Liquidaciones del período seleccionado
-  const liqPeriodo = liquidaciones.filter(l =>
+  // Liquidaciones del período seleccionado.
+  //
+  // `liquidacionesVigentes` deja fuera las que fueron reemplazadas por una
+  // reliquidación. Esta pantalla alimenta Previred, los asientos contables y
+  // el archivo de pago: si contara las dos, declararía dos veces las
+  // cotizaciones del mismo mes y duplicaría el costo de la mano de obra.
+  const liqPeriodo = liquidacionesVigentes(liquidaciones).filter(l =>
     l.mes === filtroMes &&
     l.anio === filtroAnio &&
     (!filtroEmpresa || trabajadores.find(t => t.id === l.trabajadorId)?.empresa === filtroEmpresa)
@@ -3494,74 +3500,14 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
               ARCHIVO DE PAGO
           ════════════════════════════════════ */}
           {tabInner === 'pago' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Archivo TEF — {periodo}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Formato compatible con portales bancarios chilenos (CSV)</p>
-                </div>
-                <button onClick={() => generarArchivoPago(liqEnriquecidas, periodo)} disabled={liqEnriquecidas.length === 0}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold text-sm rounded-xl hover:opacity-90 shadow-sm disabled:opacity-40">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-                  Descargar archivo pago
-                </button>
-              </div>
-
-              {/* Info campos bancarios */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <p className="text-xs font-black text-amber-800 mb-1.5">⚠ Datos bancarios requeridos por trabajador</p>
-                <p className="text-xs text-amber-700">El archivo incluye los campos: RUT · Nombre · Banco · Tipo cuenta · N° cuenta · Monto · Glosa. Para que el archivo esté completo, cada trabajador debe tener registrados banco, tipo de cuenta y número de cuenta en su ficha (campo editable en Trabajadores).</p>
-              </div>
-
-              {/* Tabla preview pagos */}
-              {liqEnriquecidas.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-400 bg-slate-50 rounded-2xl">
-                  <span className="text-4xl mb-3">🏦</span>
-                  <p className="font-semibold">Sin liquidaciones para {periodo}</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-100">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ background: "#1e1b4b" }}>
-                        {['Trabajador', 'RUT', 'Banco', 'N° Cuenta', 'Monto a pagar', 'Estado'].map(h => (
-                          <th key={h} className="px-3 py-2.5 text-[10px] font-black text-slate-300 uppercase tracking-widest text-left">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {liqEnriquecidas.map(({ trabajador, contrato, liq }, i) => {
-                        const c = liquidacionDe(trabajador, contrato, liq);
-                        const iut = calcularIUT(calcularRentaTributable(c), utm);
-                        const monto = Math.max(0, c.liquido - iut);
-                        const tieneBanco = !!trabajador?.banco && !!trabajador?.nroCuenta;
-                        return (
-                          <tr key={i} className={`hover:bg-slate-50 ${!tieneBanco ? 'bg-amber-50/30' : ''}`}>
-                            <td className="px-3 py-2.5 font-bold text-slate-800">{trabajador?.nombre} {trabajador?.apellidoPaterno}</td>
-                            <td className="px-3 py-2.5 font-mono text-slate-500 text-xs">{trabajador?.rut || '—'}</td>
-                            <td className="px-3 py-2.5 text-slate-500 text-xs">{trabajador?.banco || <span className="text-amber-500 font-bold">Sin datos</span>}</td>
-                            <td className="px-3 py-2.5 font-mono text-slate-500 text-xs">{trabajador?.nroCuenta || '—'}</td>
-                            <td className="px-3 py-2.5 font-black text-emerald-600">{fmt(monto)}</td>
-                            <td className="px-3 py-2.5">
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${liq.estado === 'pagado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {liq.estado === 'pagado' ? 'Pagado' : 'Pendiente'}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{ background: "#1e1b4b" }}>
-                        <td colSpan={4} className="px-3 py-2.5 text-right text-xs font-black text-white">TOTAL A PAGAR</td>
-                        <td className="px-3 py-2.5 font-black text-emerald-300">{fmt(totalesPeriodo.liquido)}</td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </div>
+            <ArchivoPagoPanel
+              liqEnriquecidas={liqEnriquecidas}
+              trabajadores={trabajadores}
+              mes={filtroMes}
+              anio={filtroAnio}
+              utm={utm}
+              onSaved={load}
+            />
           )}
 
           {/* ════════════════════════════════════

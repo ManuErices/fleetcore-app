@@ -5,6 +5,7 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy,
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getAuth } from 'firebase/auth';
 import * as Shared from './shared';
+import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 
@@ -13,6 +14,7 @@ const {
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, IMM_2024,
   TASAS, TASAS_AFP, TIPOS_ANEXO, ESTADOS_DIA, UTM_DEFAULT, COLORES_AREA,
   REGIONES_COMUNAS, REGIONES, PdfPreviewModal,
+  BANCOS_CHILE, TIPOS_CUENTA_BANCO,
 } = Shared;
 
 const {
@@ -785,14 +787,23 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         <Divider label="Datos de pago" />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Field label="Banco">
-            <input className={inp} value={form.banco || ''}
-              onChange={e => set('banco', e.target.value.toUpperCase())}
-              placeholder="Ej: BANCOESTADO" />
+            {/* Antes era texto libre. La nómina bancaria exige el código de
+                banco de tres dígitos, y un nombre escrito a mano no se puede
+                mapear: quien tuviera "BCO ESTADO" quedaba fuera del archivo.
+                Un valor heredado que no esté en la tabla se conserva como
+                opción para no perderlo en silencio. */}
+            <select className={inp} value={form.banco || ''} onChange={e => set('banco', e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {BANCOS_CHILE.map(b => <option key={b.codigo} value={b.nombre}>{b.nombre}</option>)}
+              {form.banco && !BANCOS_CHILE.some(b => b.nombre === form.banco) && (
+                <option value={form.banco}>{form.banco} (sin código — revisar)</option>
+              )}
+            </select>
           </Field>
           <Field label="Tipo de cuenta">
             <select className={inp} value={form.tipoCuenta || ''} onChange={e => set('tipoCuenta', e.target.value)}>
               <option value="">Seleccionar…</option>
-              {['Cuenta Corriente','Cuenta Vista','Cuenta RUT','Cuenta de Ahorro'].map(t => <option key={t}>{t}</option>)}
+              {Object.keys(TIPOS_CUENTA_BANCO).map(t => <option key={t}>{t}</option>)}
             </select>
           </Field>
           <Field label="N° de cuenta">
@@ -1395,16 +1406,38 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     bonoColacion: '', bonoMovilizacion: '', viaticos: '0',
     otrosImponibles: '0', otrosNoImponibles: '0',
     descuentoAdicional: '0', anticipo: '0',
+    items: [],
     estado: 'pendiente', observaciones: '',
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const { itemsCustom } = useItemsPago(empresaId);
 
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    // `items` puede no venir en liquidaciones anteriores al catálogo: se
+    // normaliza acá para que el resto del modal no tenga que preguntarlo.
+    const base = editData ? { ...empty, ...editData } : empty;
+    setForm({ ...base, items: Array.isArray(base.items) ? base.items : [] });
   }, [editData, isOpen]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // ── Ítems personalizados de la liquidación ──
+  // Se guarda el nombre y el tipo con que se cargó, no una referencia al
+  // catálogo: renombrar el ítem después no debe alterar este documento.
+  const itemsForm        = Array.isArray(form.items) ? form.items : [];
+  const idsUsados        = new Set(itemsForm.map(i => i.itemId));
+  const itemsDisponibles = itemsCustom.filter(i => !idsUsados.has(i.id));
+
+  const agregarItem = (catalogoId) => {
+    const cat = itemsCustom.find(i => i.id === catalogoId);
+    if (!cat) return;
+    set('items', [...itemsForm, snapshotItem(cat, 0)]);
+  };
+  const setMontoItem = (itemId, monto) =>
+    set('items', itemsForm.map(i => i.itemId === itemId ? { ...i, monto: Number(monto) || 0 } : i));
+  const quitarItem = (itemId) =>
+    set('items', itemsForm.filter(i => i.itemId !== itemId));
 
   const handleTrabajador = (tid) => {
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
@@ -1550,6 +1583,43 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
             <input className={inp} value={form.glosaAnticipo || ''} onChange={e => set('glosaAnticipo', e.target.value)} placeholder="Ej: Anticipo quincena…" />
           </Field>
         </div>
+
+        {(itemsForm.length > 0 || itemsCustom.length > 0) && (
+          <>
+            <Divider label="Ítems de la empresa" />
+            <div className="space-y-2">
+              {itemsForm.map(it => {
+                const c = colorDe(it.tipo);
+                return (
+                  <div key={it.itemId} className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-black whitespace-nowrap"
+                      style={{ background: c.bg, color: c.text }}>
+                      {grupoDe(it.tipo)}
+                    </span>
+                    <span className="flex-1 text-sm font-bold text-slate-700 truncate">{it.nombre}</span>
+                    <input type="text" className={inp + ' max-w-[160px]'}
+                      value={formatCLP(it.monto)}
+                      onChange={e => setMontoItem(it.itemId, parseCLP(e.target.value))} />
+                    <button onClick={() => quitarItem(it.itemId)} title="Quitar ítem"
+                      className="w-8 h-8 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                );
+              })}
+
+              {itemsDisponibles.length > 0 && (
+                <select className={inp} value="" onChange={e => agregarItem(e.target.value)}>
+                  <option value="">+ Agregar ítem…</option>
+                  {itemsDisponibles.map(i => (
+                    <option key={i.id} value={i.id}>{i.nombre} — {grupoDe(i.tipo)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </>
+        )}
 
         {calc && (
           <>

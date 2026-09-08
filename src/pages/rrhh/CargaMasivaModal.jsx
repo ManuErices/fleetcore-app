@@ -17,35 +17,21 @@ import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { Modal, inp, MESES, UTM_DEFAULT } from './shared';
 import { liquidacionDe, calcularIUT, calcularRentaTributable } from './calculo';
+import { useItemsPago, ITEM_DIAS, COLOR_GRUPO, grupoDe, patchItem } from './itemsPago';
 
-// ─── Catálogo de ítems ────────────────────────────────────────────────────────
-// Cada ítem apunta al campo que `calcularLiquidacion` ya consume. No se inventan
-// campos nuevos: si aparece uno acá es porque el cálculo lo sabe usar.
-export const ITEMS_PAGO = [
-  { id: 'horasExtra',        label: 'Horas Extra',            campo: 'horasExtra',         grupo: 'Imponible',    unidad: 'horas', auxiliar: { campo: 'valorHoraExtra', label: 'Valor hora', unidad: '$' } },
-  { id: 'bonoProduccion',    label: 'Bono de Producción',     campo: 'bonoProduccion',     grupo: 'Imponible',    unidad: '$' },
-  { id: 'otrosImponibles',   label: 'Otros Imponibles',       campo: 'otrosImponibles',    grupo: 'Imponible',    unidad: '$' },
-  { id: 'bonoColacion',      label: 'Colación',               campo: 'bonoColacion',       grupo: 'No imponible', unidad: '$' },
-  { id: 'bonoMovilizacion',  label: 'Movilización',           campo: 'bonoMovilizacion',   grupo: 'No imponible', unidad: '$' },
-  { id: 'viaticos',          label: 'Viáticos',               campo: 'viaticos',           grupo: 'No imponible', unidad: '$' },
-  { id: 'otrosNoImponibles', label: 'Otros No Imponibles',    campo: 'otrosNoImponibles',  grupo: 'No imponible', unidad: '$' },
-  { id: 'anticipo',          label: 'Anticipo',               campo: 'anticipo',           grupo: 'Descuento',    unidad: '$' },
-  { id: 'descuentoAdicional',label: 'Descuento Adicional',    campo: 'descuentoAdicional', grupo: 'Descuento',    unidad: '$' },
-  { id: 'diasTrabajados',    label: 'Días Trabajados',        campo: 'diasTrabajados',     grupo: 'Base',         unidad: 'días' },
-];
-
-const COLOR_GRUPO = {
-  'Imponible':    { bg: '#f3f0ff', text: '#6d28d9' },
-  'No imponible': { bg: '#ecfdf5', text: '#047857' },
-  'Descuento':    { bg: '#fef2f2', text: '#b91c1c' },
-  'Base':         { bg: '#f1f5f9', text: '#475569' },
-};
+// El catálogo ya no vive acá: los ítems fijos y los que crea la empresa se
+// resuelven en `itemsPago.js`, que es el único lugar que sabe si un ítem
+// escribe en su campo propio o en el arreglo `items` de la liquidación.
 
 const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 const soloNum = v => String(v ?? '').replace(/[^\d]/g, '');
 
 export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contratos, liquidaciones, mes, anio, onSaved }) {
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
+
+  const { items: itemsCatalogo } = useItemsPago(empresaId);
+  // Días trabajados va al final: no es un haber, es la base del prorrateo.
+  const ITEMS_PAGO = useMemo(() => [...itemsCatalogo, ITEM_DIAS], [itemsCatalogo]);
 
   const [itemId, setItemId]   = useState('horasExtra');
   const [valores, setValores] = useState({});   // { trabajadorId: valor }
@@ -62,6 +48,7 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
   const [busqueda, setBusqueda]   = useState('');
 
   const item = ITEMS_PAGO.find(i => i.id === itemId) || ITEMS_PAGO[0];
+  const grupo = grupoDe(item.tipo);
 
   const activos = useMemo(
     () => (trabajadores || []).filter(t => t.estado === 'activo'),
@@ -133,8 +120,7 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
       bonoMovilizacion: fila._contrato?.bonoMovilizacion || 0,
       estado: 'borrador',
     };
-    const extra = { [item.campo]: Number(soloNum(valores[fila.id])) || 0 };
-    if (item.auxiliar) extra[item.auxiliar.campo] = Number(soloNum(aux[fila.id])) || 0;
+    const extra = patchItem(base, item, soloNum(valores[fila.id]), soloNum(aux[fila.id]));
     return { ...base, ...extra };
   }, [item, valores, aux, mes, anio]);
 
@@ -154,8 +140,10 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
       let creadas = 0, actualizadas = 0;
 
       conValor.forEach(fila => {
-        const extra = { [item.campo]: Number(soloNum(valores[fila.id])) || 0 };
-        if (item.auxiliar) extra[item.auxiliar.campo] = Number(soloNum(aux[fila.id])) || 0;
+        // El patch de un ítem personalizado reescribe el arreglo `items`
+        // completo, así que tiene que partir del documento vigente para no
+        // borrar los otros ítems ya cargados en el período.
+        const extra = patchItem(fila._liq, item, soloNum(valores[fila.id]), soloNum(aux[fila.id]));
 
         if (fila._liq) {
           // Ya existe la liquidación del período: se toca SOLO este campo,
@@ -186,7 +174,7 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
 
   const cerrar = () => { limpiar(); setResultado(null); setPreview(null); onClose?.(); };
 
-  const g = COLOR_GRUPO[item.grupo] || COLOR_GRUPO.Base;
+  const g = COLOR_GRUPO[grupo] || COLOR_GRUPO.Base;
 
   return (
     <Modal isOpen={isOpen} onClose={cerrar}
@@ -225,7 +213,7 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Ítem de pago</p>
             <div className="flex flex-wrap gap-1.5">
               {ITEMS_PAGO.map(i => {
-                const c = COLOR_GRUPO[i.grupo];
+                const c = COLOR_GRUPO[grupoDe(i.tipo)] || COLOR_GRUPO.Base;
                 const on = i.id === itemId;
                 return (
                   <button key={i.id} onClick={() => { setItemId(i.id); limpiar(); }}
@@ -239,8 +227,10 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
               })}
             </div>
             <p className="text-[11px] text-slate-400 mt-1.5">
-              <span className="font-bold" style={{ color: g.text }}>{item.grupo}</span>
-              {' · se guarda en '}<span className="font-mono">{item.campo}</span>
+              <span className="font-bold" style={{ color: g.text }}>{grupo}</span>
+              {item.fijo
+                ? <>{' · se guarda en '}<span className="font-mono">{item.campo}</span></>
+                : <>{' · ítem de la empresa'}{item.prorratea ? ' · se prorratea por días trabajados' : ''}</>}
             </p>
           </div>
 
@@ -410,6 +400,10 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
                         ['Colación', preview.calc.bColacion],
                         ['Movilización', preview.calc.bMovil],
                         ['Viáticos', preview.calc.viaticos],
+                        // Los ítems de la empresa se muestran con su nombre real
+                        ...(preview.calc.itemsDetalle || [])
+                          .filter(i => i.tipo !== 'descuento')
+                          .map(i => [i.nombre, i.montoCalc]),
                       ].filter(([, v]) => v > 0).map(([l, v]) => (
                         <tr key={l}><td className="px-2 py-1 border-b border-slate-50 text-slate-600">{l}</td>
                           <td className="px-2 py-1 border-b border-slate-50 text-right font-mono font-semibold">{fmt(v)}</td></tr>
@@ -434,13 +428,16 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
                         ['Impuesto', preview.iut],
                         ['Anticipo', preview.calc.anticipo],
                         ['Otros descuentos', preview.calc.descAdicional],
+                        ...(preview.calc.itemsDetalle || [])
+                          .filter(i => i.tipo === 'descuento')
+                          .map(i => [i.nombre, i.montoCalc]),
                       ].filter(([, v]) => v > 0).map(([l, v]) => (
                         <tr key={l}><td className="px-2 py-1 border-b border-slate-50 text-slate-600">{l}</td>
                           <td className="px-2 py-1 border-b border-slate-50 text-right font-mono font-semibold">{fmt(v)}</td></tr>
                       ))}
                       <tr style={{ background: '#f3f0ff' }}>
                         <td className="px-2 py-1 font-black text-slate-700">TOTAL</td>
-                        <td className="px-2 py-1 text-right font-mono font-black">{fmt(preview.calc.totalDescuentos + preview.iut + preview.calc.descAdicional + preview.calc.anticipo)}</td>
+                        <td className="px-2 py-1 text-right font-mono font-black">{fmt(preview.calc.totalDescuentos + preview.iut + preview.calc.descAdicional + preview.calc.anticipo + (preview.calc.itemsDesc || 0))}</td>
                       </tr>
                     </tbody>
                   </table>

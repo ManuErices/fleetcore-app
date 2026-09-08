@@ -361,6 +361,15 @@ service cloud.firestore {
       match /combustiblePrecioMensual/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /actividades_disponibles/{docId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /bandas_salariales/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Catálogo de ítems de pago (bonos y descuentos con nombre propio).
+      // Solo define nombres y clasificación: los montos viven dentro de cada
+      // liquidación, que ya está protegida por su propia regla.
+      match /items_pago/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Anticipos de remuneración y nóminas bancarias emitidas.
+      // `nominas_pago` es el registro de lo efectivamente transferido: se crea
+      // al generar el archivo y no debería editarse después.
+      match /anticipos/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /nominas_pago/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /catalogo_maquinas/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /costos_fijos/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /empresas_combustible/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }

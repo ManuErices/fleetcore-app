@@ -121,6 +121,119 @@ export const ESTADOS_DIA = {
   permiso:    { label:'Permiso',     color:'#64748b', bg:'#f1f5f9' },
 };
 
+// ── Ítems de pago personalizados ─────────────────────────────────────────────
+// Clasificación de un haber/descuento con nombre libre. Es la fuente única de
+// verdad: la usan el motor de cálculo, la carga masiva, el catálogo y el PDF.
+// Los tres tipos son los únicos que el cálculo sabe tratar — no agregar un
+// cuarto sin tocar `calcularLiquidacion`.
+export const TIPOS_ITEM_PAGO = {
+  imponible:   { id: 'imponible',   label: 'Haber imponible',    grupo: 'Imponible',    bg: '#f3f0ff', text: '#6d28d9' },
+  noImponible: { id: 'noImponible', label: 'Haber no imponible', grupo: 'No imponible', bg: '#ecfdf5', text: '#047857' },
+  descuento:   { id: 'descuento',   label: 'Descuento',          grupo: 'Descuento',    bg: '#fef2f2', text: '#b91c1c' },
+};
+
+/**
+ * Normaliza el arreglo `items` de una liquidación.
+ *
+ * El nombre y el tipo viajan CONGELADOS dentro de la liquidación, no se leen
+ * del catálogo al calcular: si mañana alguien renombra "Bono Nuevo Cobre" o lo
+ * pasa de imponible a no imponible, las liquidaciones ya emitidas no cambian.
+ * `itemId` queda solo para poder agrupar en reportes.
+ */
+export function normalizarItemsPago(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map(it => ({
+      itemId:    it?.itemId || it?.id || '',
+      nombre:    String(it?.nombre || '').trim() || 'Ítem sin nombre',
+      tipo:      TIPOS_ITEM_PAGO[it?.tipo] ? it.tipo : 'imponible',
+      monto:     Math.max(0, Math.round(Number(it?.monto) || 0)),
+      prorratea: it?.prorratea === true,
+    }))
+    .filter(it => it.monto > 0);
+}
+
+// ── Bancos y cuentas — formato Pago Fácil del Banco de Chile ─────────────────
+// Códigos tomados de la hoja "Tablas" de la plantilla oficial. El código de
+// banco es obligatorio en la nómina, así que el banco del trabajador se elige
+// de esta lista y no se escribe a mano: un nombre libre no se puede mapear.
+export const BANCOS_CHILE = [
+  { codigo: '001', nombre: 'Banco de Chile' },
+  { codigo: '009', nombre: 'Banco Internacional' },
+  { codigo: '012', nombre: 'Banco Estado' },
+  { codigo: '014', nombre: 'ScotiaBank' },
+  { codigo: '016', nombre: 'Banco de Credito e Inversiones' },
+  { codigo: '028', nombre: 'Banco Bice' },
+  { codigo: '031', nombre: 'HSBC' },
+  { codigo: '037', nombre: 'Banco Santander' },
+  { codigo: '039', nombre: 'Banco Itau' },
+  { codigo: '041', nombre: 'JP Morgan Chase Bank N.A.' },
+  { codigo: '049', nombre: 'Banco Security' },
+  { codigo: '051', nombre: 'Banco Falabella' },
+  { codigo: '053', nombre: 'Banco Ripley' },
+  { codigo: '055', nombre: 'Banco Consorcio' },
+  { codigo: '059', nombre: 'Banco BTG Pactual' },
+  { codigo: '062', nombre: 'Tanner' },
+  { codigo: '672', nombre: 'Coopeuch' },
+  { codigo: '697', nombre: 'Inversiones La Polar' },
+  { codigo: '729', nombre: 'Prepago los heroes' },
+  { codigo: '730', nombre: 'Tenpo Prepago' },
+  { codigo: '732', nombre: 'Caja Los Andes' },
+  { codigo: '738', nombre: 'Global66' },
+  { codigo: '741', nombre: 'CopecPay' },
+  { codigo: '743', nombre: 'Prex' },
+  { codigo: '746', nombre: 'Fintual' },
+  { codigo: '747', nombre: 'Metromuv' },
+  { codigo: '875', nombre: 'Mercado Pago' },
+];
+
+// Los tres códigos que acepta el archivo. "Cuenta RUT" no es un tipo aparte:
+// es una cuenta vista de BancoEstado, y viaja como JUV.
+export const TIPOS_CUENTA_BANCO = {
+  'Cuenta Corriente': 'CTD',
+  'Cuenta Vista':     'JUV',
+  'Cuenta RUT':       'JUV',
+  'Cuenta de Ahorro': 'AHB',
+};
+
+const _norm = (s) => String(s || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * Resuelve el código de banco a partir de lo que traiga la ficha.
+ * Acepta el código directo, el nombre exacto, o un nombre libre heredado
+ * ("BANCOESTADO", "BCI") — de ahí los alias.
+ */
+export function codigoBanco(valor) {
+  if (!valor) return '';
+  const v = String(valor).trim();
+  if (/^\d{3}$/.test(v) && BANCOS_CHILE.some(b => b.codigo === v)) return v;
+  const n = _norm(v);
+  const exacto = BANCOS_CHILE.find(b => _norm(b.nombre) === n);
+  if (exacto) return exacto.codigo;
+  const ALIAS = {
+    BANCOESTADO: '012', ESTADO: '012', BANCODELESTADO: '012',
+    BCI: '016', CREDITOEINVERSIONES: '016',
+    CHILE: '001', BANCOCHILE: '001', EDWARDS: '001', BANCOEDWARDS: '001',
+    SANTANDER: '037', ITAU: '039', SCOTIABANK: '014', BICE: '028',
+    SECURITY: '049', FALABELLA: '051', RIPLEY: '053', CONSORCIO: '055',
+    COOPEUCH: '672', TENPO: '730', MERCADOPAGO: '875', PREX: '743',
+    LOSANDES: '732', CAJALOSANDES: '732', GLOBAL66: '738', FINTUAL: '746',
+  };
+  return ALIAS[n] || '';
+}
+
+export const nombreBanco = (codigo) =>
+  BANCOS_CHILE.find(b => b.codigo === codigo)?.nombre || '';
+
+export function codigoTipoCuenta(valor) {
+  if (!valor) return '';
+  const v = String(valor).trim().toUpperCase();
+  if (['CTD', 'AHB', 'JUV'].includes(v)) return v;
+  return TIPOS_CUENTA_BANCO[String(valor).trim()] || '';
+}
+
 export const inp = 'w-full px-3.5 py-2.5 bg-white/80 border border-slate-200/80 rounded-xl focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 text-slate-800 text-sm transition-all placeholder:text-slate-300 shadow-sm';
 
 // ─────────────────────────────────────────────────────────────
