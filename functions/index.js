@@ -575,8 +575,11 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
       // Sumar email del operador receptor / repartidor si existen
       const dataMov = tipo === 'entrada' ? (reporte.datosEntrada || {}) : (reporte.datosEntrega || {});
       const operadorEmail = await lookupEmail(empresaId, dataMov.operadorId || ctrl.repartidorId);
-      const extraEmail = dataMov.extraEmail;
-      const allTo = [...emails, operadorEmail, extraEmail].filter(Boolean);
+      // "Enviar copia": el formulario guarda un ARRAY `extraEmails`. (Antes se
+      // leía `extraEmail` singular, que nunca existía → las copias no llegaban.)
+      const extraEmails = Array.isArray(dataMov.extraEmails) ? dataMov.extraEmails
+        : (dataMov.extraEmail ? [dataMov.extraEmail] : []);
+      const allTo = [...emails, operadorEmail, ...extraEmails].filter(Boolean);
 
       // Resolver labels
       const equipoSurtidorLabel = await lookupLabel(empresaId, 'equipos_surtidores', ctrl.equipoSurtidorId, ['nombre', 'patente']);
@@ -2143,6 +2146,37 @@ exports.onVacacionUpdated = onDocumentUpdated(
       await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
     } catch (err) {
       console.error('onVacacionUpdated error:', err.message);
+    }
+  }
+);
+
+// Permiso aprobado/rechazado → avisar al trabajador del resultado.
+exports.onPermisoUpdated = onDocumentUpdated(
+  { document: 'empresas/{empresaId}/permisos/{id}', secrets: SES_SECRETS },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const before = event.data?.before?.data() || {};
+      const after  = event.data?.after?.data() || {};
+      if (before.estado === after.estado) return;
+      if (!['aprobado', 'rechazado'].includes(after.estado)) return;
+
+      const trab = await getTrabajador(empresaId, after.trabajadorId);
+      const to = trab?.email || trab?.portalEmail;
+      if (!to) { console.log('onPermisoUpdated: trabajador sin email, skip'); return; }
+
+      const aprobado = after.estado === 'aprobado';
+      const tipoLabel = after.tipo === 'sin goce' ? 'permiso sin goce de sueldo' : 'permiso con goce de sueldo';
+      const link = (process.env.APP_URL || 'https://fleetcore.cl') + '/trabajador';
+      const tpl = genericNotification({
+        subject: `Tu solicitud de permiso fue ${aprobado ? 'aprobada' : 'rechazada'}`,
+        title: aprobado ? '✅ Permiso aprobado' : '❌ Permiso rechazado',
+        message: `Hola ${after.trabajadorNombre || trab.nombre || ''}, tu solicitud de ${tipoLabel} del ${after.desde} al ${after.hasta} fue ${aprobado ? 'APROBADA' : 'RECHAZADA'}.${after.observacionesRRHH ? ` Observaciones: ${after.observacionesRRHH}` : ''} Detalle en tu portal: ${link}`,
+        details: { 'Tipo': tipoLabel, 'Desde': after.desde, 'Hasta': after.hasta, 'Días': after.dias, 'Estado': aprobado ? 'Aprobado' : 'Rechazado' },
+      });
+      await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
+    } catch (err) {
+      console.error('onPermisoUpdated error:', err.message);
     }
   }
 );

@@ -79,6 +79,7 @@ export default function AsistenciaSection() {
   const [asignaciones, setAsignaciones] = useState([]);
   const [vacaciones, setVacaciones] = useState([]);
   const [showVacacionModal, setShowVacacionModal] = useState(false);
+  const [permisos, setPermisos] = useState([]);
   const [ausencias, setAusencias] = useState([]);
   const [showAusenciaModal, setShowAusenciaModal] = useState(false);
   const [editingAusencia, setEditingAusencia] = useState(null);
@@ -302,6 +303,19 @@ export default function AsistenciaSection() {
     return () => unsub();
   }, [empresaId]);
 
+  // Real-time Permisos loading (solicitudes del trabajador)
+  useEffect(() => {
+    if (!empresaId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'empresas', empresaId, 'permisos'), orderBy('createdAt', 'desc')),
+      snap => {
+        setPermisos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      err => console.error('Error loading permisos:', err)
+    );
+    return () => unsub();
+  }, [empresaId]);
+
   // Real-time Ausencias loading
   useEffect(() => {
     if (!empresaId) return;
@@ -379,6 +393,29 @@ export default function AsistenciaSection() {
       console.error('Error al rechazar vacaciones:', e);
       alert('Error al rechazar la solicitud: ' + e.message);
     }
+  };
+
+  const handleAprobarPermiso = async (permiso) => {
+    if (!empresaId) return;
+    if (!confirm(`¿Aprobar el permiso de ${permiso.trabajadorNombre}?`)) return;
+    try {
+      await updateDoc(doc(db, 'empresas', empresaId, 'permisos', permiso.id), {
+        estado: 'aprobado', updatedAt: serverTimestamp(),
+      });
+      alert('Permiso aprobado.');
+    } catch (e) { alert('Error al aprobar el permiso: ' + e.message); }
+  };
+
+  const handleRechazarPermiso = async (permiso) => {
+    if (!empresaId) return;
+    const motivo = prompt(`Rechazar permiso de ${permiso.trabajadorNombre}. Motivo (opcional, se le enviará al trabajador):`, '');
+    if (motivo === null) return; // canceló
+    try {
+      await updateDoc(doc(db, 'empresas', empresaId, 'permisos', permiso.id), {
+        estado: 'rechazado', observacionesRRHH: motivo || '', updatedAt: serverTimestamp(),
+      });
+      alert('Permiso rechazado.');
+    } catch (e) { alert('Error al rechazar el permiso: ' + e.message); }
   };
 
   const handleDeleteAusencia = async (ausencia) => {
@@ -810,6 +847,15 @@ export default function AsistenciaSection() {
               icon: (active) => (
                 <svg className={`w-4 h-4 mr-2 ${active ? 'text-purple-600' : 'text-slate-400 group-hover:text-slate-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+              )
+            },
+            {
+              id: 'permisos',
+              label: 'Permisos',
+              icon: (active) => (
+                <svg className={`w-4 h-4 mr-2 ${active ? 'text-purple-600' : 'text-slate-400 group-hover:text-slate-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               )
             },
@@ -1520,6 +1566,14 @@ export default function AsistenciaSection() {
           onSolicitar={() => setShowVacacionModal(true)}
           onAprobar={handleAprobarVacacion}
           onRechazar={handleRechazarVacacion}
+        />
+      )}
+
+      {activeTab === 'permisos' && (
+        <PermisosTabContent
+          permisos={permisos}
+          onAprobar={handleAprobarPermiso}
+          onRechazar={handleRechazarPermiso}
         />
       )}
 
@@ -2460,6 +2514,111 @@ function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, onSave }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+function PermisosTabContent({ permisos, onAprobar, onRechazar }) {
+  const [filtroEstado, setFiltroEstado] = useState('todos');
+  const [busqueda, setBusqueda] = useState('');
+
+  const pendientes = permisos.filter(p => p.estado === 'pendiente').length;
+  const aprobados = permisos.filter(p => p.estado === 'aprobado').length;
+
+  const filtrados = permisos.filter(p => {
+    const q = busqueda.toLowerCase();
+    const matchSearch = !busqueda || (p.trabajadorNombre || '').toLowerCase().includes(q);
+    const matchEstado = filtroEstado === 'todos' || p.estado === filtroEstado;
+    return matchSearch && matchEstado;
+  });
+
+  const tipoLabel = (t) => t === 'sin goce' ? 'Sin goce' : 'Con goce';
+  const badge = {
+    pendiente: 'bg-amber-100 text-amber-700 border-amber-200',
+    aprobado: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    rechazado: 'bg-rose-100 text-rose-700 border-rose-200',
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 p-5 text-white shadow-md">
+          <p className="text-[10px] font-black uppercase tracking-widest text-amber-100/80">Pendientes</p>
+          <h4 className="text-3xl font-black mt-2">{pendientes}</h4>
+        </div>
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 p-5 text-white shadow-md">
+          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-100/80">Aprobados</p>
+          <h4 className="text-3xl font-black mt-2">{aprobados}</h4>
+        </div>
+        <div className="rounded-2xl bg-gradient-to-br from-slate-500 to-slate-700 p-5 text-white shadow-md">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-200/80">Total solicitudes</p>
+          <h4 className="text-3xl font-black mt-2">{permisos.length}</h4>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="bg-slate-50/50 border border-slate-200/60 rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+          <input className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-purple-400 bg-white" placeholder="Buscar por trabajador..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        </div>
+        <select className="w-full sm:w-44 px-3 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-purple-400 bg-white" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+          <option value="todos">Todos los Estados</option>
+          <option value="pendiente">Pendientes</option>
+          <option value="aprobado">Aprobados</option>
+          <option value="rechazado">Rechazados</option>
+        </select>
+      </div>
+
+      {/* Tabla */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px]">
+            <thead>
+              <tr style={{ background: '#1e1b4b' }}>
+                {['Trabajador', 'Tipo', 'Desde', 'Hasta', 'Días', 'Motivo', 'Estado', 'Acciones'].map(h => (
+                  <th key={h} className="px-4 py-3.5 text-left text-[11px] font-black text-slate-300 uppercase tracking-widest">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtrados.map(p => {
+                const ini = p.trabajadorNombre ? `${p.trabajadorNombre[0]}`.toUpperCase() : 'P';
+                return (
+                  <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs">{ini}</div>
+                        <span className="font-bold text-slate-800 text-sm">{p.trabajadorNombre}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5"><span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${p.tipo === 'sin goce' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{tipoLabel(p.tipo)}</span></td>
+                    <td className="px-4 py-3.5 font-semibold text-slate-600 text-xs">{p.desde}</td>
+                    <td className="px-4 py-3.5 font-semibold text-slate-600 text-xs">{p.hasta}</td>
+                    <td className="px-4 py-3.5 font-bold text-slate-700 text-sm">{p.dias}</td>
+                    <td className="px-4 py-3.5 text-[11px] text-slate-500 max-w-[200px] truncate" title={p.motivo || ''}>{p.motivo || '—'}</td>
+                    <td className="px-4 py-3.5"><span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${badge[p.estado] || badge.pendiente}`}>{p.estado || 'pendiente'}</span></td>
+                    <td className="px-4 py-3.5">
+                      {p.estado === 'pendiente' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => onAprobar(p)} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[11px] rounded-lg transition-all">Aprobar</button>
+                          <button onClick={() => onRechazar(p)} className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[11px] rounded-lg transition-all">Rechazar</button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">Sin acciones</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtrados.length === 0 && (
+                <tr><td colSpan={8} className="text-center py-8 text-xs font-semibold text-slate-400 bg-slate-50/30">No hay solicitudes de permiso.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 

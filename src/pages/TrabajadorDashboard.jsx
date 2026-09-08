@@ -106,6 +106,15 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
   const [vacFeedback, setVacFeedback] = useState(null);
   const [solicitudesVacaciones, setSolicitudesVacaciones] = useState([]);
 
+  // Estados de permisos
+  const [permTipo, setPermTipo] = useState('con goce');
+  const [permDesde, setPermDesde] = useState('');
+  const [permHasta, setPermHasta] = useState('');
+  const [permMotivo, setPermMotivo] = useState('');
+  const [permEnviando, setPermEnviando] = useState(false);
+  const [permFeedback, setPermFeedback] = useState(null);
+  const [misPermisos, setMisPermisos] = useState([]);
+
   // Escucha en tiempo real las solicitudes de vacaciones del trabajador
   useEffect(() => {
     if (!empresaId || !trabajadorInfo?.id || tab !== 'vacaciones') return;
@@ -121,6 +130,51 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
     });
     return unsub;
   }, [empresaId, trabajadorInfo?.id, tab]);
+
+  // Escucha las solicitudes de permiso del trabajador (sin orderBy → sin índice compuesto)
+  useEffect(() => {
+    if (!empresaId || !trabajadorInfo?.id || tab !== 'vacaciones') return;
+    const q = query(
+      collection(db, 'empresas', empresaId, 'permisos'),
+      where('trabajadorId', '==', trabajadorInfo.id),
+    );
+    const unsub = onSnapshot(q, snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(b.desde || '').localeCompare(String(a.desde || '')));
+      setMisPermisos(rows);
+    }, err => console.error('Error al escuchar permisos:', err));
+    return unsub;
+  }, [empresaId, trabajadorInfo?.id, tab]);
+
+  async function solicitarPermiso(e) {
+    e.preventDefault();
+    setPermFeedback(null);
+    if (!permDesde || !permHasta) { setPermFeedback({ tipo: 'err', msg: 'Debe especificar ambas fechas.' }); return; }
+    const dias = calcularDiasHabiles(permDesde, permHasta);
+    if (dias <= 0) { setPermFeedback({ tipo: 'err', msg: 'Rango de fechas inválido o sin días hábiles.' }); return; }
+    if (!permMotivo.trim()) { setPermFeedback({ tipo: 'err', msg: 'Indica el motivo del permiso.' }); return; }
+    setPermEnviando(true);
+    try {
+      await addDoc(collection(db, 'empresas', empresaId, 'permisos'), {
+        trabajadorId: trabajadorInfo.id,
+        trabajadorNombre: `${trabajadorInfo.nombre} ${trabajadorInfo.apellidoPaterno || ''} ${trabajadorInfo.apellidoMaterno || ''}`.trim(),
+        tipo: permTipo,
+        desde: permDesde,
+        hasta: permHasta,
+        dias,
+        motivo: permMotivo.trim(),
+        estado: 'pendiente',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setPermFeedback({ tipo: 'ok', msg: '✓ Solicitud de permiso enviada.' });
+      setPermDesde(''); setPermHasta(''); setPermMotivo('');
+    } catch (err) {
+      setPermFeedback({ tipo: 'err', msg: 'Error al enviar la solicitud: ' + err.message });
+    } finally {
+      setPermEnviando(false);
+    }
+  }
 
   async function solicitarVacacion(e) {
     e.preventDefault();
@@ -1516,6 +1570,71 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                                 </div>
                               </div>
                               <span style={badgeStyle}>{v.estado}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── PERMISOS ── */}
+                  <div className="mes-header" style={{ marginTop: 28 }}>
+                    <span className="mes-title">Mis Permisos</span>
+                  </div>
+
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '18px', marginBottom: '20px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: '16px' }}>Solicitar Permiso</div>
+                    <form onSubmit={solicitarPermiso} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '6px' }}>Tipo</label>
+                        <select className="pass-input" style={{ padding: '10px 12px', fontSize: '13px' }} value={permTipo} onChange={e => { setPermTipo(e.target.value); setPermFeedback(null); }}>
+                          <option value="con goce">Permiso con goce de sueldo</option>
+                          <option value="sin goce">Permiso sin goce de sueldo</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '6px' }}>Desde</label>
+                          <input type="date" className="pass-input" style={{ padding: '10px 12px', fontSize: '13px' }} value={permDesde} onChange={e => { setPermDesde(e.target.value); setPermFeedback(null); }} />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '6px' }}>Hasta</label>
+                          <input type="date" className="pass-input" style={{ padding: '10px 12px', fontSize: '13px' }} value={permHasta} onChange={e => { setPermHasta(e.target.value); setPermFeedback(null); }} />
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '6px' }}>Motivo</label>
+                        <input type="text" className="pass-input" style={{ padding: '10px 12px', fontSize: '13px' }} placeholder="Ej: trámite médico, asunto personal…" value={permMotivo} onChange={e => { setPermMotivo(e.target.value); setPermFeedback(null); }} />
+                      </div>
+                      {permFeedback && (
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: permFeedback.tipo === 'ok' ? 'var(--green, #059669)' : 'var(--red, #dc2626)' }}>{permFeedback.msg}</div>
+                      )}
+                      <button type="submit" disabled={permEnviando} className="pass-submit" style={{ opacity: permEnviando ? 0.6 : 1 }}>
+                        {permEnviando ? 'Enviando…' : 'Enviar solicitud'}
+                      </button>
+                    </form>
+                  </div>
+
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '18px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: '14px' }}>Historial de Permisos</div>
+                    {misPermisos.length === 0 ? (
+                      <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>Aún no has solicitado permisos.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {misPermisos.map(p => {
+                          const color = p.estado === 'aprobado' ? '#059669' : p.estado === 'rechazado' ? '#dc2626' : '#d97706';
+                          return (
+                            <div key={p.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', paddingBottom: '10px', borderBottom: '1px solid var(--border)' }}>
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
+                                  {p.tipo === 'sin goce' ? 'Sin goce' : 'Con goce'} · del {fmtFechaString(p.desde)} al {fmtFechaString(p.hasta)}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>
+                                  {p.dias} {p.dias === 1 ? 'día hábil' : 'días hábiles'}{p.motivo && ` • "${p.motivo}"`}
+                                  {p.estado === 'rechazado' && p.observacionesRRHH && ` • Motivo: ${p.observacionesRRHH}`}
+                                </div>
+                              </div>
+                              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'capitalize', color }}>{p.estado}</span>
                             </div>
                           );
                         })}
