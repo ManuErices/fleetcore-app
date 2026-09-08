@@ -65,6 +65,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
   const [formData, setFormData] = useState({
     fecha: isoToday(),
     numeroReporte: '',
+    folio: '',
     machineId: '',
     operador: '',
     rut: '',
@@ -561,6 +562,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     setFormData({
       fecha: isoToday(),
       numeroReporte: '', // se genera al escanear la siguiente máquina
+      folio: '',
       machineId: '',
       operador: userNombre,
       rut: userRut,
@@ -756,6 +758,15 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
                   onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
                   max={isoToday()}
                   required
+                />
+
+                {/* Folio del documento físico (igual que en combustible) */}
+                <InputField
+                  label="Folio (guía / documento físico)"
+                  type="text"
+                  value={formData.folio}
+                  onChange={(e) => setFormData({ ...formData, folio: e.target.value })}
+                  placeholder="Opcional — folio del talonario/guía"
                 />
               </div>
             </Section>
@@ -1159,6 +1170,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       {showQRScanner && (
         <QRScannerModal
           onScan={handleQRScan}
+          machines={machines}
           onClose={() => {
             setShowQRScanner(false);
             setQrError('');
@@ -1195,7 +1207,7 @@ function InputField({ label, ...props }) {
 }
 
 // Componente QR Scanner Modal
-function QRScannerModal({ onScan, onClose, error }) {
+function QRScannerModal({ onScan, onClose, error, machines = [] }) {
   const [manualInput, setManualInput] = useState('');
   const [scanning, setScanning] = useState(true);
   const videoRef = React.useRef(null);
@@ -1371,6 +1383,34 @@ function QRScannerModal({ onScan, onClose, error }) {
               </button>
             </div>
           </div>
+
+          {/* Desplegable: elegir máquina por código sin escanear ni tipear */}
+          {machines.length > 0 && (
+            <div>
+              <div className="text-[10px] sm:text-xs font-bold text-slate-600 mb-2 text-center">
+                O elige la máquina de la lista:
+              </div>
+              <select
+                value=""
+                onChange={(e) => { if (e.target.value) onScan(e.target.value); }}
+                className="input-modern w-full text-sm sm:text-base"
+              >
+                <option value="">— Seleccionar máquina por código —</option>
+                {machines
+                  .slice()
+                  .sort((a, b) => (a.code || a.patente || '').localeCompare(b.code || b.patente || ''))
+                  .map(m => {
+                    const cod = m.code || m.patente || m.qrCode || '';
+                    const desc = [m.type, m.marca, m.modelo].filter(Boolean).join(' ');
+                    return (
+                      <option key={m.id} value={cod}>
+                        {cod}{desc ? ` · ${desc}` : ''}
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border-2 border-red-200 rounded-lg sm:rounded-xl p-3">
