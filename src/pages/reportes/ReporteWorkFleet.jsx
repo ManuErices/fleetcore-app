@@ -8,6 +8,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
+import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
 import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
 
 // Estandariza nombres propios (operadores, obras) a Capitalización de Título:
@@ -103,6 +104,7 @@ export default function ReporteWorkFleet() {
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   const [reporteDetalle, setReporteDetalle] = useState(null);
+  const [maquinaDetalle, setMaquinaDetalle] = useState(null); // máquina cuyo detalle se despliega
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
   const [currentUser, setCurrentUser] = useState(null); // Usuario actual
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
@@ -899,7 +901,95 @@ export default function ReporteWorkFleet() {
     ws['!cols'] = columnWidths;
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Reportes WorkFleet');
+
+    // ── Hoja(s) "CONTROL DE MAQUINARIA": una por máquina (como el cliente) ──
+    // Si el filtro trae una sola máquina, sale una hoja; si trae varias, una
+    // hoja por cada una. La hoja de datos plana va al final.
+    const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const periodoDe = (grupo) => {
+      const fechas = grupo.map(r => r.fecha).filter(Boolean).sort();
+      const f = fechas[fechas.length - 1] || '';
+      const m = /^(\d{4})-(\d{2})/.exec(f);
+      return m ? `${MESES[parseInt(m[2], 10) - 1]}.-${m[1].slice(2)}` : '';
+    };
+
+    // Nombres de pestaña: máx 31 chars, sin caracteres inválidos, únicos.
+    const nombresUsados = new Set();
+    const nombreHoja = (base) => {
+      let n = String(base || 'Maquina').replace(/[[\]:*?/\\]/g, ' ').slice(0, 28).trim() || 'Maquina';
+      let final = n, i = 2;
+      while (nombresUsados.has(final.toLowerCase())) final = `${n} ${i++}`.slice(0, 31);
+      nombresUsados.add(final.toLowerCase());
+      return final;
+    };
+
+    // Agrupar los reportes filtrados por máquina
+    const grupos = {};
+    reportesFiltrados.forEach(r => {
+      const k = r.machineId || r.machinePatente || 'sin-maquina';
+      (grupos[k] = grupos[k] || []).push(r);
+    });
+
+    Object.values(grupos).forEach(grupoRaw => {
+      const grupo = [...grupoRaw].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+      const first = grupo[0];
+      const maquina = first.machineName
+        || [first.machineType, first.machineMarca, first.machineModelo].filter(Boolean).join(' ')
+        || first.machineCode || first.machinePatente || 'Máquina';
+
+      const aoa = [];
+      aoa.push(['', 'MPF INGENIERIA CIVIL SPA', '', '', '', '', '', '', 'CENTRO DE COSTO']);
+      aoa.push(['', 'CONTROL DE MAQUINARIA', '', '', '', '', '', '', first.projectCode || '']);
+      aoa.push(['', (first.machineType || '').toUpperCase(), '', '', '', '', '', '', titleCase(first.projectName)]);
+      aoa.push([]);
+      aoa.push(['MAQUINA', ':', maquina]);
+      aoa.push(['PATENTE', ':', first.machinePatente || first.machineCode || '']);
+      aoa.push(['PROVEEDOR', ':', first.machineEmpresa || first.machinePropietario || '']);
+      aoa.push(['PERIODO', ':', periodoDe(grupo)]);
+      aoa.push([]);
+      aoa.push(['Fecha', 'Folio', 'Empleado', 'Horómetro Inicial', 'Horómetro Final', 'Actividad', 'Diésel Lts.', 'Actividades Realizadas', 'Obs. Maquina']);
+
+      let totalHoras = 0, totalDiesel = 0;
+      grupo.forEach(r => {
+        const hi = parseFloat(r.horometroInicial) || 0;
+        const hf = parseFloat(r.horometroFinal) || 0;
+        const horas = Math.max(0, hf - hi);
+        const diesel = parseFloat(r.cargaCombustible) || 0;
+        totalHoras += horas;
+        totalDiesel += diesel;
+        const actividades = r.observaciones
+          || (r.actividadesEfectivas || []).map(a => a.actividad).filter(Boolean).join('; ');
+        aoa.push([
+          r.fecha,
+          r.folio || r.folioExterno || r.numeroReporte || '',
+          titleCase(r.operador),
+          hi || '',
+          hf || '',
+          horas,
+          diesel,
+          actividades || '',
+          r.observacionesMaquina || r.obsMaquina || '',
+        ]);
+      });
+      aoa.push([]);
+      aoa.push(['', '', 'TOTAL HORÓMETRO', '', '', totalHoras, totalDiesel, '', '']);
+
+      const wsCtrl = XLSX.utils.aoa_to_sheet(aoa);
+      wsCtrl['!merges'] = [
+        { s: { r: 0, c: 1 }, e: { r: 0, c: 7 } },
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 7 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 7 } },
+      ];
+      wsCtrl['!cols'] = [
+        { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 12 },
+        { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 20 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsCtrl, nombreHoja(first.machinePatente || first.machineCode || maquina));
+    });
+
+    // Hoja de datos plana (todos los registros) al final
+    XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+
     XLSX.writeFile(wb, `Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
@@ -931,9 +1021,9 @@ export default function ReporteWorkFleet() {
       return [
         titleCase(r.projectName) || '',
         r.fecha,
-        r.machinePatente || '',
         maquinaDesc,
-        r.numeroReporte,
+        r.machinePatente || '',
+        r.folio || r.folioExterno || '—',
         titleCase(r.operador),
         r.rut,
         r.horometroInicial || '0',
@@ -950,9 +1040,9 @@ export default function ReporteWorkFleet() {
       head: [[
         'Obra',
         'Fecha',
-        'Patente',
         'Máquina',
-        'N° Reporte',
+        'Patente',
+        'Folio',
         'Operador',
         'RUT',
         'H.Ini',
@@ -970,9 +1060,9 @@ export default function ReporteWorkFleet() {
       columnStyles: {
         0: { cellWidth: 23 },
         1: { cellWidth: 18 },
-        2: { cellWidth: 16 },
-        3: { cellWidth: 24 },
-        4: { cellWidth: 20 },
+        2: { cellWidth: 24 }, // Máquina
+        3: { cellWidth: 16 }, // Patente
+        4: { cellWidth: 18 }, // Folio
         5: { cellWidth: 28 },
         6: { cellWidth: 20 },
         7: { cellWidth: 12 },
@@ -1323,7 +1413,21 @@ export default function ReporteWorkFleet() {
                       <td className="px-3 py-3 text-sm text-slate-700">{reporte.folio || reporte.folioExterno || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.projectName || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.fecha}</td>
-                      <td className="px-3 py-3 text-sm font-semibold text-indigo-600">{reporte.machinePatente || '-'}</td>
+                      <td className="px-3 py-3 text-sm font-semibold">
+                        {(() => {
+                          const maq = machines.find(m => m.id === reporte.machineId);
+                          if (!maq) return <span className="text-indigo-600">{reporte.machinePatente || '-'}</span>;
+                          return (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setMaquinaDetalle(maq); }}
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                              title="Ver información del vehículo"
+                            >
+                              {reporte.machinePatente || maq.code || '-'}
+                            </button>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.operador}</td>
                       <td className="px-3 py-3 text-sm text-slate-600">{reporte.rut}</td>
                       <td className="px-1 py-3 text-sm text-slate-900 text-center">{reporte.horometroInicial || '0'}</td>
@@ -1703,6 +1807,11 @@ export default function ReporteWorkFleet() {
           </div>
         );
       })()}
+      {/* Detalle de la máquina (clic en la patente) */}
+      {maquinaDetalle && (
+        <MaquinaDetalleModal machine={maquinaDetalle} empresaId={empresaId} onClose={() => setMaquinaDetalle(null)} />
+      )}
+
       {/* Modal de Detalle del Reporte */}
       {reporteDetalle && (
         <ReporteDetalleModal
