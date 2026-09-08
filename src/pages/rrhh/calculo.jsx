@@ -1,6 +1,6 @@
 import { IMM_2026, IMM_2024, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
   CAUSALES_CON_INDEMNIZACION, TOPE_ANIOS_INDEMNIZACION, TIPOS_PERIODO,
-  UTM_DEFAULT, TRAMOS_IUT } from './shared';
+  UTM_DEFAULT, TRAMOS_IUT, normalizarItemsPago } from './shared';
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
@@ -69,6 +69,26 @@ function calcularLiquidacion(rem) {
   const otrosImp   = parseInt(rem.otrosImponibles) || 0;
   const otrosNoImp = parseInt(rem.otrosNoImponibles) || 0;
 
+  // ── Ítems de pago personalizados ──
+  // Bonos y descuentos con nombre libre que la empresa define en su catálogo
+  // (`empresas/{id}/items_pago`). Viven en `rem.items` con su nombre y tipo ya
+  // congelados, y se suman al bucket que les corresponde. No inventan reglas:
+  // un ítem imponible se comporta exactamente igual que "Otros Imponibles".
+  //
+  // `prorratea` es opt-in por ítem: un bono fijo mensual (responsabilidad,
+  // zona) se reduce por días no trabajados; uno variable ya viene calculado
+  // sobre lo efectivamente ganado y no debe tocarse.
+  const itemsDetalle = normalizarItemsPago(rem.items).map(it => ({
+    ...it,
+    montoCalc: it.prorratea ? Math.round(it.monto * fp * fdias) : it.monto,
+  }));
+  const sumaItems = (tipo) => itemsDetalle
+    .filter(i => i.tipo === tipo)
+    .reduce((s, i) => s + i.montoCalc, 0);
+  const itemsImp   = sumaItems('imponible');
+  const itemsNoImp = sumaItems('noImponible');
+  const itemsDesc  = sumaItems('descuento');
+
   // Gratificación legal (Art. 50 CT): 25% de lo devengado por el trabajador,
   // CON TOPE de 4,75 ingresos mínimos mensuales al año (4,75 × IMM ÷ 12 al mes).
   //
@@ -77,13 +97,15 @@ function calcularLiquidacion(rem) {
   // gratificación cuando le corresponden $150.000. El error inflaba el
   // imponible y con él AFP, salud, cesantía e impuesto de todos.
   const topeGrat  = IMM_2026 * 4.75 / 12;
-  const baseGrat  = base + bProd + otrosImp;   // remuneración devengada del mes
+  // Los ítems imponibles del catálogo son remuneración devengada, así que
+  // entran a la base de gratificación igual que "Otros Imponibles".
+  const baseGrat  = base + bProd + otrosImp + itemsImp;   // remuneración devengada del mes
   const gratMensual = Math.round(Math.min(baseGrat * 0.25, topeGrat * fp * fdias));
 
   // ── Base imponible previsional ──
-  const imponible   = base + bProd + montoHE + otrosImp + gratMensual;
+  const imponible   = base + bProd + montoHE + otrosImp + itemsImp + gratMensual;
   // ── No imponible ──
-  const noImponible = bColacion + bMovil + viaticos + otrosNoImp;
+  const noImponible = bColacion + bMovil + viaticos + otrosNoImp + itemsNoImp;
 
   // ── Descuentos legales (cargo trabajador) ──
   // rem.afp viene de la FICHA del trabajador, no del contrato ni de la liquidación.
@@ -124,16 +146,41 @@ function calcularLiquidacion(rem) {
 
   // ── Descuentos manuales ──
   const descAdicional = parseInt(rem.descuentoAdicional) || 0;
-  const anticipo      = parseInt(rem.anticipo) || 0;
 
-  const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo;
+  // Anticipos: si el período tiene anticipos registrados en su colección, esos
+  // mandan y el campo manual se ignora. Sumar ambos descontaría dos veces el
+  // mismo dinero en cuanto alguien migre un anticipo antiguo al nuevo proceso.
+  // `anticiposRegistrados` lo inyecta remDe(); undefined = no hay registro y
+  // se respeta lo que se haya escrito a mano.
+  const anticipoRegistrado = rem.anticiposRegistrados;
+  const anticipo = (anticipoRegistrado !== undefined && anticipoRegistrado !== null)
+    ? Math.max(0, Math.round(anticipoRegistrado))
+    : (parseInt(rem.anticipo) || 0);
+
+  // ── Pago ya efectuado del mismo período (reliquidación) ──
+  //
+  // Una reliquidación recalcula el MES COMPLETO, no el diferencial. Tiene que
+  // ser así porque el impuesto único es progresivo: calcularlo sobre un
+  // diferencial aislado lo dejaría en un tramo más bajo del que corresponde.
+  // Lo ya transferido entra entonces como un descuento, y lo que queda es
+  // exactamente la diferencia por pagar.
+  //
+  // Se resta ANTES del IUT sin alterar el impuesto: la renta tributable se
+  // calcula desde el imponible, no desde el líquido, así que el resultado es
+  // idéntico a restarlo después y el PDF puede mostrarlo como una línea más.
+  const pagoAnterior = Math.max(0, parseInt(rem.pagoAnterior) || 0);
+
+  const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior;
 
   return {
     base, bProd, montoHE, bColacion, bMovil, viaticos, otrosImp, otrosNoImp, gratMensual,
     imponible, noImponible,
+    itemsDetalle, itemsImp, itemsNoImp, itemsDesc,
     afpM, salM, sisM, cesM, apvM, apvRegimen, apvInstitucion: rem.apvInstitucion || '',
     totalDescuentos,
-    descAdicional, anticipo, liquido,
+    descAdicional, anticipo, pagoAnterior, liquido,
+    esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
+    anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
     diasTrab, fdias,          // expuestos para auditoría / PDF
     baseCompleto, gratCompleto: Math.round(IMM_2026 * 4.75 / 12 * fp),
     tasaAfp, afpResuelta,
@@ -581,10 +628,16 @@ function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
  *
  * Usar SIEMPRE este helper en vez de armar el objeto a mano.
  */
-function remDe(trabajador, contrato, liq) {
+function remDe(trabajador, contrato, liq, extras) {
   return {
     ...(contrato || {}),
     ...(liq || {}),
+    // Suma de los anticipos del período tomada de la colección `anticipos`.
+    // Se pasa como extra y no dentro de `liq` para que el documento de la
+    // liquidación no guarde una copia que quede desactualizada.
+    ...(extras?.anticiposRegistrados !== undefined
+      ? { anticiposRegistrados: extras.anticiposRegistrados }
+      : {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
@@ -597,12 +650,42 @@ function remDe(trabajador, contrato, liq) {
 }
 
 /** Atajo: calcula la liquidación resolviendo la AFP desde la ficha. */
-function liquidacionDe(trabajador, contrato, liq) {
-  return calcularLiquidacion(remDe(trabajador, contrato, liq));
+function liquidacionDe(trabajador, contrato, liq, extras) {
+  return calcularLiquidacion(remDe(trabajador, contrato, liq, extras));
+}
+
+/**
+ * Deja fuera las liquidaciones que fueron reemplazadas por una reliquidación.
+ *
+ * Una reliquidación contiene el mes completo recalculado, así que sumarla a la
+ * original duplicaría el costo del período: el libro de remuneraciones, el
+ * Previred, los asientos y el F29 verían dos meses de sueldo donde hay uno.
+ * La original no se borra — sigue siendo el registro de lo que se transfirió
+ * el día del pago — pero deja de contar para los totales.
+ *
+ * Si una liquidación se reliquidó más de una vez, solo sobrevive la última.
+ *
+ * USAR SIEMPRE antes de totalizar un período. Para listar documentos uno a
+ * uno (una tabla, un historial) se usa la lista completa.
+ */
+function liquidacionesVigentes(liquidaciones) {
+  const lista = liquidaciones || [];
+  const reemplazadas = new Set();
+
+  lista.forEach(l => {
+    if (l?.liquidacionOriginalId) reemplazadas.add(l.liquidacionOriginalId);
+  });
+
+  return lista.filter(l => !reemplazadas.has(l.id));
+}
+
+/** ¿Este documento ya fue reemplazado por una reliquidación? */
+function fueReliquidada(liq, liquidaciones) {
+  return (liquidaciones || []).some(l => l?.liquidacionOriginalId === liq?.id);
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  calcularLiquidacion, remDe, liquidacionDe, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
+  calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDiarias, analizarDia, resumenSemana, diasDelMes,
   generarTXTPrevired, exportarAsistenciaCSV };

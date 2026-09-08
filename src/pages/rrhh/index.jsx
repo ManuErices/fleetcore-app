@@ -10,6 +10,7 @@ import { AnexosSection, ImpuestosSection,
   OrganizacionSection, ReportesSection, ContabilidadSection,
   PreviredAvanzadoSection, ArchivoPagoSection } from './sections.b';
 import AsistenciaSection from './AsistenciaSection';
+import AnticiposSection from './AnticiposSection';
 import TrabajadorPerfil from './TrabajadorPerfil';
 
 // ── Nav groups (shared with AppShellLayout) ──────────────────────────────────
@@ -29,6 +30,7 @@ export const NAV_GROUPS = [
     label: 'Remuneraciones',
     tabs: [
       { id: 'remuneraciones', label: 'Remuneraciones', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+      { id: 'anticipos',      label: 'Anticipos',      icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
       { id: 'finiquitos',     label: 'Finiquitos',     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
       { id: 'asistencia',     label: 'Asistencia',     icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
     ],
@@ -143,6 +145,7 @@ export default function RRHH() {
           <Route path="contratos"         element={<ContratosSection />} />
           <Route path="anexos"            element={<AnexosSection />} />
           <Route path="remuneraciones"    element={<RemuneracionesSection />} />
+          <Route path="anticipos"         element={<AnticiposSection />} />
           <Route path="finiquitos"        element={<FiniquitosSection />} />
           <Route path="asistencia"        element={<AsistenciaSection />} />
           <Route path="previred_avanzado" element={<PreviredAvanzadoSection />} />

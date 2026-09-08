@@ -234,8 +234,10 @@ ${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
   if (!win) alert('Permite ventanas emergentes para descargar el contrato.');
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null } = {}) {
-  const calc     = liquidacionDe(trabajador, contrato, rem);
+function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null, anticiposRegistrados } = {}) {
+  // `anticiposRegistrados` viene de la colección de anticipos del período. Sin
+  // él, el PDF mostraría un líquido distinto al que se transfirió.
+  const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados });
   const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
   const nombre   = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
@@ -258,7 +260,13 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   const salud        = esIsapre
     ? `${trabajador?.isapre || 'Isapre'}${trabajador?.planIsapre ? ` (${trabajador.planIsapre})` : ''}`
     : 'Fonasa';
-  const otrosDesc    = (calc.descAdicional || 0) + (calc.anticipo || 0);
+  // Los ítems del catálogo de la empresa se imprimen con su nombre propio en
+  // el bloque que les toca, en vez de quedar sumados dentro de "Otros".
+  const itemsCalc    = calc.itemsDetalle || [];
+  const itemsPorTipo = (tipo) => itemsCalc
+    .filter(i => i.tipo === tipo && i.montoCalc > 0)
+    .map(i => [i.nombre, i.montoCalc]);
+  const otrosDesc    = (calc.descAdicional || 0) + (calc.anticipo || 0) + (calc.itemsDesc || 0) + (calc.pagoAnterior || 0);
 
   // Datos del emisor: vienen del documento de la empresa. Antes se leían de
   // `rem.rutEmpresa` / `rem.direccionEmpresa`, que nadie llenaba, y el PDF
@@ -284,6 +292,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
     ['Gratificación Mensual',  calc.gratMensual],
     ['Horas Extra',            calc.montoHE],
     ['Bono de Producción',     calc.bProd],
+    ...itemsPorTipo('imponible'),
     ['Otros Imponibles',       calc.otrosImp],
   ].filter(([, v]) => v > 0);
 
@@ -291,6 +300,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
     ['Colación',           calc.bColacion],
     ['Movilización',       calc.bMovil],
     ['Viáticos',           calc.viaticos],
+    ...itemsPorTipo('noImponible'),
     ['Otros No Imponibles', calc.otrosNoImp],
   ].filter(([, v]) => v > 0);
 
@@ -306,6 +316,12 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
 
   const otros = [
     ['Anticipo',              calc.anticipo],
+    // En una reliquidación, lo ya transferido se muestra como descuento: sin
+    // esta línea el trabajador vería un líquido chico sin explicación.
+    ...(calc.pagoAnterior > 0
+      ? [['Liquidación ya pagada del período', calc.pagoAnterior]]
+      : []),
+    ...itemsPorTipo('descuento'),
     ['Descuentos Adicionales', calc.descAdicional],
   ].filter(([, v]) => v > 0);
 
@@ -1309,12 +1325,12 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
   // Acumular totales
   let totalImponible=0, totalNoImp=0, totalAfp=0, totalSalud=0, totalSis=0,
       totalCesTrab=0, totalCesEmp=0, totalIUT=0, totalAnticipo=0, totalLiquido=0,
-      totalGrat=0, totalHE=0;
+      totalGrat=0, totalHE=0, totalApv=0, totalDescOtros=0, totalPagoPrevio=0;
 
   liqEnriquecidas.forEach(({ trabajador, contrato, liq }) => {
     const c = liquidacionDe(trabajador, contrato, liq);
     const iut = calcularIUT(calcularRentaTributable(c), utm);
-    totalImponible  += c.base + c.bProd + c.montoHE + c.otrosImp;
+    totalImponible  += c.base + c.bProd + c.montoHE + c.otrosImp + (c.itemsImp || 0);
     totalGrat       += c.gratMensual;
     totalHE         += c.montoHE;
     totalNoImp      += c.noImponible;
@@ -1325,6 +1341,15 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     totalCesEmp     += c.cesEmpM || 0;
     totalIUT        += iut;
     totalAnticipo   += c.anticipo;
+    // APV y descuentos por cuenta del trabajador rebajan el líquido, así que
+    // necesitan su propia contrapartida en el haber. Sin ellas el comprobante
+    // no cuadraba cada vez que alguien tenía APV o un descuento adicional.
+    totalApv        += c.apvM || 0;
+    totalDescOtros  += (c.descAdicional || 0) + (c.itemsDesc || 0);
+    // En una reliquidación el mes completo va al debe, pero solo la diferencia
+    // sale de caja: lo ya transferido se cierra contra la cuenta de
+    // remuneraciones por pagar del pago original.
+    totalPagoPrevio += c.pagoAnterior || 0;
     totalLiquido    += c.liquido - iut;
   });
 
@@ -1344,13 +1369,23 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     { lado:'D', cuenta:'4120001', glosa:'Aporte empleador SIS',                          monto: totalSis       },
     { lado:'D', cuenta:'4120002', glosa:'Seguro cesantía empleador',                     monto: totalCesEmp    },
     // ── HABER ──
-    { lado:'H', cuenta:'2110001', glosa:'Remuneraciones líquidas por pagar',             monto: totalRemXPagar },
+    // Cuando una reliquidación arroja menos que lo ya transferido, el neto del
+    // período es negativo: no hay nada que pagar, hay algo que cobrarle al
+    // trabajador. Va al debe como cuenta por cobrar, porque un monto negativo
+    // en el haber quedaba filtrado y el comprobante descuadraba justo en esa
+    // diferencia.
+    ...(totalRemXPagar >= 0
+      ? [{ lado:'H', cuenta:'2110001', glosa:'Remuneraciones líquidas por pagar', monto: totalRemXPagar }]
+      : [{ lado:'D', cuenta:'1140001', glosa:'Cuentas por cobrar al personal — pago en exceso', monto: -totalRemXPagar }]),
     { lado:'H', cuenta:'2110002', glosa:'Cotización AFP trabajadores por enterar',        monto: totalAfp       },
     { lado:'H', cuenta:'2110003', glosa:'Cotización salud por enterar',                  monto: totalSalud     },
     { lado:'H', cuenta:'2110004', glosa:'SIS por enterar',                               monto: totalSis       },
     { lado:'H', cuenta:'2110005', glosa:'Cesantía trabajador + empleador',               monto: totalCesTrab + totalCesEmp },
     ...(totalIUT > 0 ? [{ lado:'H', cuenta:'2110006', glosa:'IUT 2ª Cat. retenido',    monto: totalIUT       }] : []),
     ...(totalAnticipo > 0 ? [{ lado:'H', cuenta:'2110007', glosa:'Anticipos a recuperar', monto: totalAnticipo }] : []),
+    ...(totalApv > 0 ? [{ lado:'H', cuenta:'2110008', glosa:'APV por enterar', monto: totalApv }] : []),
+    ...(totalDescOtros > 0 ? [{ lado:'H', cuenta:'2110009', glosa:'Descuentos por cuenta del trabajador', monto: totalDescOtros }] : []),
+    ...(totalPagoPrevio > 0 ? [{ lado:'H', cuenta:'2110001', glosa:'Liquidaciones del período ya transferidas', monto: totalPagoPrevio }] : []),
   ].filter(a => a.monto > 0);
 }
 function validarRutPrevired(rut) {
@@ -1422,7 +1457,12 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
       const c      = liquidacionDe(trabajador, contrato, liq);
       const rut    = (trabajador?.rut||'').replace(/\./g,'').toUpperCase();
       const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
-      const monto  = Math.max(0, c.liquido);
+      // El líquido a transferir es DESPUÉS del impuesto único. Antes se
+      // exportaba `c.liquido` sin restar el IUT, así que a todo trabajador
+      // afecto a impuesto se le transfería de más — y la pantalla mostraba
+      // el monto correcto mientras el archivo llevaba otro.
+      const iut    = calcularIUT(calcularRentaTributable(c), UTM_DEFAULT);
+      const monto  = Math.max(0, c.liquido - iut);
       return [
         rut,
         nombre,

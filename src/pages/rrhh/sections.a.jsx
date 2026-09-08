@@ -11,6 +11,10 @@ import * as PDFs from './pdfs';
 import * as Modals from './modals';
 import ImportarNominaModal from './ImportarNominaModal';
 import CargaMasivaModal from './CargaMasivaModal';
+import ItemsPagoModal from './ItemsPagoModal';
+import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
+import ReliquidacionModal from './ReliquidacionModal';
+import { fueReliquidada, liquidacionesVigentes } from './calculo';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
@@ -76,7 +80,9 @@ function DashboardSection() {
 
   // Nómina mes de referencia
   const [anioRef, mesNumRef] = mesRef.split('-');
-  const remMes = remuneraciones.filter(r => r.anio === anioRef && r.mes === mesNumRef);
+  // Solo las vigentes: una liquidación reemplazada por una reliquidación ya no
+  // cuenta para la masa salarial ni el costo del mes.
+  const remMes = liquidacionesVigentes(remuneraciones).filter(r => r.anio === anioRef && r.mes === mesNumRef);
   const masaSalarialBruta = remMes.reduce((s, r) => {
     const c = contratos.find(c => c.id === r.contratoId);
     if (!c) return s;
@@ -1098,6 +1104,17 @@ function RemuneracionesSection() {
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [busqueda, setBusqueda] = useState('');
   const [cargaMasiva, setCargaMasiva] = useState(false);
+  const [itemsPago, setItemsPago] = useState(false);
+  const { anticipos } = useAnticipos(empresaId);
+  const [reliq, setReliq] = useState(null);   // { original } | { editData }
+
+  // Suma de anticipos del período de un trabajador, o undefined si no tiene
+  // ninguno registrado — en ese caso el motor respeta el campo manual legado.
+  const anticiposDelPeriodo = useCallback((trabajadorId, mes, anio) =>
+    anticiposDe(anticipos, trabajadorId, mes, anio).length
+      ? totalAnticipos(anticipos, trabajadorId, mes, anio)
+      : undefined,
+    [anticipos]);
   const [pagina, setPagina] = useState(1);
   const POR_PAGINA = 10;
 
@@ -1193,8 +1210,17 @@ function RemuneracionesSection() {
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
     const contrato = contratos.find(c => c.id === l.contratoId);
-    const calc = contrato ? liquidacionDe(trabajador, contrato, l) : null;
-    return { ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc };
+    const anticipoReg = anticiposDelPeriodo(l.trabajadorId, l.mes, l.anio);
+    const calc = contrato
+      ? liquidacionDe(trabajador, contrato, l, { anticiposRegistrados: anticipoReg })
+      : null;
+    return {
+      ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc, _anticipoReg: anticipoReg,
+      // Una liquidación reemplazada sigue en la tabla como registro de lo que
+      // se transfirió, pero marcada: ya no es la cifra vigente del mes.
+      _reemplazada: fueReliquidada(l, liquidaciones),
+      _esReliq: l.tipo === 'reliquidacion',
+    };
   });
 
   const filtradas = enriquecidas.filter(l => {
@@ -1321,6 +1347,13 @@ function RemuneracionesSection() {
               <p className="text-xs text-white/70 mt-0.5">Art. 54 CT · Previred · Cotizaciones previsionales</p>
             </div>
           </div>
+          <button onClick={() => setItemsPago(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 font-bold text-sm rounded-xl transition-all active:scale-95"
+            style={{ background: "rgba(255,255,255,0.06)", color: "#c4b5fd", border: "1px solid rgba(255,255,255,0.12)" }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
+            Ítems de pago
+          </button>
           <button onClick={() => setCargaMasiva(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 font-bold text-sm rounded-xl transition-all active:scale-95"
             style={{ background: "rgba(255,255,255,0.06)", color: "#c4b5fd", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -1429,21 +1462,51 @@ function RemuneracionesSection() {
                         })() : <span>—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado === 'pagado' ? 'bg-emerald-100 text-emerald-700' :
-                          row.estado === 'borrador' ? 'bg-slate-100 text-slate-500' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                          {row.estado === 'pagado' ? 'Pagado' : row.estado === 'borrador' ? 'Borrador' : 'Pendiente'}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${row.estado === 'pagado' ? 'bg-emerald-100 text-emerald-700' :
+                            row.estado === 'borrador' ? 'bg-slate-100 text-slate-500' :
+                              'bg-amber-100 text-amber-700'
+                            }`}>
+                            {row.estado === 'pagado' ? 'Pagado' : row.estado === 'borrador' ? 'Borrador' : 'Pendiente'}
+                          </span>
+                          {row._reemplazada && (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-400"
+                              title="Reemplazada por una reliquidación: no cuenta en los totales del mes">
+                              Reliquidada
+                            </span>
+                          )}
+                          {row._esReliq && (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-violet-100 text-violet-700">
+                              Reliquidación
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
+                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa, anticiposRegistrados: row._anticipoReg })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </button>
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                           </button>
+                          {/* Reliquidar: solo sobre un mes ya pagado que no
+                              haya sido reliquidado antes. Una reliquidación no
+                              se reliquida — se corrige encima de ella. */}
+                          {row.estado === 'pagado' && !row._reemplazada && !row._esReliq && (
+                            <button onClick={() => setReliq({ original: row })}
+                              className="p-1.5 bg-violet-50 hover:bg-violet-100 text-violet-600 rounded-lg transition-colors"
+                              title="Reliquidar este período">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            </button>
+                          )}
+                          {row._esReliq && row.estado !== 'pagado' && (
+                            <button onClick={() => setReliq({ editData: row })}
+                              className="p-1.5 bg-violet-50 hover:bg-violet-100 text-violet-600 rounded-lg transition-colors"
+                              title="Editar reliquidación">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            </button>
+                          )}
                           <button onClick={() => setConfirm(row)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors" title="Eliminar">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
@@ -1472,6 +1535,17 @@ function RemuneracionesSection() {
       </div>
 
       <LiquidacionModal isOpen={modal} onClose={() => setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} onSaved={load} />
+      <ItemsPagoModal isOpen={itemsPago} onClose={() => setItemsPago(false)} />
+      <ReliquidacionModal
+        isOpen={!!reliq}
+        onClose={() => setReliq(null)}
+        original={reliq?.original}
+        editData={reliq?.editData}
+        trabajador={(reliq?.original || reliq?.editData)?._trabajador}
+        contrato={(reliq?.original || reliq?.editData)?._contrato}
+        anticiposRegistrados={(reliq?.original || reliq?.editData)?._anticipoReg}
+        onSaved={load}
+      />
       <CargaMasivaModal
         isOpen={cargaMasiva}
         onClose={() => setCargaMasiva(false)}
