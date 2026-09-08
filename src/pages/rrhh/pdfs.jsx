@@ -1,7 +1,9 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
 import { calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
 
-function generarPDFContrato(contrato, trabajador, { preview = false } = {}) {
+function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml = false, empresa = null } = {}) {
+  const rutEmpleador = empresa?.rut || contrato.rutEmpresa || '_______________';
+  const nombreEmpleador = empresa?.nombre || contrato.empresa || 'La Empresa';
   const fmt = (n) => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
   const fmtFecha = (f) => {
     if (!f) return '_______________';
@@ -206,9 +208,9 @@ function generarPDFContrato(contrato, trabajador, { preview = false } = {}) {
   <div class="firmantes">
     <div class="firma-box">
       <div class="firma-linea"></div>
-      <div class="firma-nombre">${contrato.empresa || 'MPF Ingeniería Civil'}</div>
+      <div class="firma-nombre">${nombreEmpleador}</div>
       <div class="firma-cargo">Empleador / Representante Legal</div>
-      <div style="font-size:9pt;color:#666;margin-top:4px">RUT: _______________</div>
+      <div style="font-size:9pt;color:#666;margin-top:4px">RUT: ${rutEmpleador}</div>
     </div>
     <div class="firma-box">
       <div class="firma-linea"></div>
@@ -223,10 +225,11 @@ function generarPDFContrato(contrato, trabajador, { preview = false } = {}) {
   </div>
 
 </div>
-${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
+${preview || returnHtml ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body>
 </html>`;
 
+  if (returnHtml) return html;
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   if (preview) return url;
@@ -779,7 +782,7 @@ ${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
   if(!win) alert('Habilita ventanas emergentes para descargar el finiquito.');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
-function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo, { preview = false } = {}) {
+function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo, { preview = false, returnHtml = false } = {}) {
   const fmtFecha = (f) => {
     if (!f) return '_______________';
     const [y,m,d] = f.split('-');
@@ -924,9 +927,10 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo, { preview = fals
     Art. 11 CT: Las modificaciones al contrato de trabajo se consignarán por escrito y serán firmadas por ambas partes en dos ejemplares del mismo tenor.
   </div>
 </div>
-${preview ? '' : '<script>window.onload=function(){window.print();}</script>'}
+${preview || returnHtml ? '' : '<script>window.onload=function(){window.print();}</script>'}
 </body></html>`;
 
+  if (returnHtml) return html;
   const blob = new Blob([html],{type:'text/html;charset=utf-8'});
   const url  = URL.createObjectURL(blob);
   if (preview) return url;

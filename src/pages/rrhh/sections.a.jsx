@@ -1145,6 +1145,22 @@ function RemuneracionesSection() {
     setConfirm(null);
   };
 
+  // Acuse de recibo desde el panel admin (p.ej. entrega en papel firmada).
+  const [acuseBusy, setAcuseBusy] = useState(null);
+  const marcarAcuse = async (row) => {
+    if (row.acuseRecibo?.aceptado) return;
+    if (!window.confirm('¿Marcar esta liquidación como recibida conforme por el trabajador?')) return;
+    setAcuseBusy(row.id);
+    try {
+      const u = getAuth().currentUser;
+      const acuse = await registrarAcuseRecibo(empresaId, row, {
+        origen: 'admin', uid: u?.uid, nombre: u?.displayName || u?.email || 'Admin',
+      });
+      if (acuse) setLiquidaciones(prev => prev.map(l => l.id === row.id ? { ...l, acuseRecibo: acuse } : l));
+    } catch (e) { alert('No se pudo registrar el acuse: ' + e.message); }
+    finally { setAcuseBusy(null); }
+  };
+
   // ── Generación masiva de nómina ──
   const generarNominaMasiva = async () => {
     if (!filtroMes || !filtroAnio) { alert('Selecciona mes y año antes de generar la nómina.'); return; }
@@ -1768,9 +1784,17 @@ function FiniquitosSection() {
                       <td className="px-4 py-3 text-sm font-bold text-purple-700">{c && c.tieneIndemnizacion ? `$${c.indemMonto.toLocaleString('es-CL')}` : <span className="text-slate-400 font-normal">—</span>}</td>
                       <td className="px-4 py-3"><span className="font-black text-emerald-600 text-sm">{c ? `$${c.totalFiniquito.toLocaleString('es-CL')}` : '—'}</span></td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${estadoFirmaBadge[row.estadoFirma || 'pendiente']}`}>
-                          {row.estadoFirma || 'pendiente'}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${estadoFirmaBadge[row.estadoFirma || 'pendiente']}`}>
+                            {row.estadoFirma || 'pendiente'}
+                          </span>
+                          {row.evidenciaFirma?.url && (
+                            <a href={row.evidenciaFirma.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline" title={`Evidencia ${row.evidenciaFirma.tipo === 'dt' ? 'DT' : 'notaría'}`}>
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                              Evidencia
+                            </a>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { signOut, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, addDoc, serverTimestamp, onSnapshot, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { registrarAcuseRecibo, fechaAcuse } from './rrhh/acuse';
+import { esFirmadoCompleto } from './rrhh/firma';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -70,6 +72,9 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
   const [tab, setTab] = useState('home'); // home | asistencia | docs | cuenta
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [loadingLiqs, setLoadingLiqs] = useState(false);
+  const [acuseBusy, setAcuseBusy] = useState(null); // id de la liquidación en proceso de acuse
+  const [contratosTrab, setContratosTrab] = useState([]);
+  const [loadingContratos, setLoadingContratos] = useState(false);
 
   // Estados cambio de contraseña
   const [passForm, setPassForm] = useState({ actual: '', nueva: '', confirma: '' });
@@ -192,23 +197,72 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
     return unsub;
   }, [empresaId, user.uid, anio, mes, diaKey]);
 
-  // Cargar liquidaciones del trabajador
-  // trabajadorId en remuneraciones = id del documento Firestore, NO el uid de Auth
+  // Cargar liquidaciones + contratos del trabajador
+  // trabajadorId en remuneraciones/contratos = id del documento Firestore, NO el uid de Auth.
+  // Nota: se consulta SOLO con where('trabajadorId','==',…) y se ordena en el
+  // cliente. Combinar where + orderBy('anio') exigiría un índice compuesto que
+  // no existe, y la query fallaba en silencio (por eso no aparecían las liquidaciones).
   useEffect(() => {
     if (tab !== 'docs') return;
     const firestoreId = trabajadorInfo?.id;
-    if (!firestoreId || !empresaId) { setLoadingLiqs(false); return; }
+    if (!firestoreId || !empresaId) { setLoadingLiqs(false); setLoadingContratos(false); return; }
+
     setLoadingLiqs(true);
-    const q = query(
+    getDocs(query(
       collection(db, 'empresas', empresaId, 'remuneraciones'),
       where('trabajadorId', '==', firestoreId),
-      orderBy('anio', 'desc'),
-      limit(12)
-    );
-    getDocs(q).then(snap => {
-      setLiquidaciones(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }).catch(() => { }).finally(() => setLoadingLiqs(false));
+    )).then(snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => `${b.anio}-${String(b.mes).padStart(2, '0')}`.localeCompare(`${a.anio}-${String(a.mes).padStart(2, '0')}`))
+        .slice(0, 12);
+      setLiquidaciones(rows);
+    }).catch(e => { console.error('[portal] error cargando liquidaciones:', e); setLiquidaciones([]); })
+      .finally(() => setLoadingLiqs(false));
+
+    setLoadingContratos(true);
+    getDocs(query(
+      collection(db, 'empresas', empresaId, 'contratos'),
+      where('trabajadorId', '==', firestoreId),
+    )).then(snap => {
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Vigente primero, luego por fecha de inicio descendente.
+      rows.sort((a, b) => (a.estado === 'vigente' ? -1 : 1) - (b.estado === 'vigente' ? -1 : 1)
+        || String(b.fechaInicio || '').localeCompare(String(a.fechaInicio || '')));
+      setContratosTrab(rows);
+    }).catch(e => { console.error('[portal] error cargando contratos:', e); setContratosTrab([]); })
+      .finally(() => setLoadingContratos(false));
   }, [tab, trabajadorInfo?.id, empresaId]);
+
+  // Acuse de recibo de una liquidación (el trabajador confirma que la recibió)
+  const handleAcuseLiquidacion = useCallback(async (liq) => {
+    if (!empresaId || !liq?.id || liq.acuseRecibo?.aceptado) return;
+    setAcuseBusy(liq.id);
+    try {
+      const nombre = `${trabajadorInfo?.nombre || ''} ${trabajadorInfo?.apellidoPaterno || ''} ${trabajadorInfo?.apellidoMaterno || ''}`.trim();
+      const acuse = await registrarAcuseRecibo(empresaId, liq, { origen: 'trabajador', uid: user?.uid, nombre });
+      if (acuse) {
+        setLiquidaciones(prev => prev.map(l => l.id === liq.id ? { ...l, acuseRecibo: acuse } : l));
+      }
+    } catch (e) {
+      setFeedback({ tipo: 'err', msg: 'No se pudo registrar el acuse. Reintenta.' });
+      console.error('acuse liquidacion', e);
+    } finally {
+      setAcuseBusy(null);
+    }
+  }, [empresaId, trabajadorInfo, user?.uid]);
+
+  // Busca el enlace de firma de ESTE trabajador dentro del proceso ValidaFirma.
+  const urlFirmaTrabajador = useCallback((firma) => {
+    if (!firma?.firmantesUrls?.length) return null;
+    const email = (trabajadorInfo?.email || '').toLowerCase().trim();
+    const rut = (trabajadorInfo?.rut || '').replace(/[.\-\s]/g, '').toLowerCase();
+    const match = firma.firmantesUrls.find(f => {
+      const fe = (f.email || '').toLowerCase().trim();
+      const fr = (f.rut || '').replace(/[.\-\s]/g, '').toLowerCase();
+      return (email && fe === email) || (rut && fr === rut);
+    }) || (firma.firmantesUrls.length === 1 ? firma.firmantesUrls[0] : null);
+    return match?.url_firma || match?.url || match?.link || null;
+  }, [trabajadorInfo?.email, trabajadorInfo?.rut]);
 
   // Obtener GPS en background (no bloqueante)
   function obtenerGPS() {
@@ -1068,6 +1122,55 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                 <span className="mes-title">Mis documentos</span>
               </div>
 
+              {/* ── Contratos para firmar ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 10 }}>Contratos</div>
+                {loadingContratos ? (
+                  <div className="liq-empty">Cargando...</div>
+                ) : contratosTrab.length === 0 ? (
+                  <div className="liq-empty">No hay contratos disponibles</div>
+                ) : (
+                  <div className="liq-list">
+                    {contratosTrab.map(c => {
+                      const firma = c.firma;
+                      const firmado = esFirmadoCompleto(firma?.estado);
+                      const url = !firmado ? urlFirmaTrabajador(firma) : null;
+                      return (
+                        <div key={c.id} className="liq-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <div className="liq-periodo">Contrato de trabajo</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
+                                {c.tipoContrato || ''} · desde {c.fechaInicio || '—'}
+                              </div>
+                            </div>
+                          </div>
+                          {firmado ? (
+                            <div style={{ fontSize: 11, color: 'var(--green, #059669)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+                              Firmado
+                            </div>
+                          ) : url ? (
+                            <a href={url} target="_blank" rel="noreferrer"
+                              style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, padding: '8px 16px', borderRadius: 10, background: 'var(--accent, #7c3aed)', color: '#fff', textDecoration: 'none' }}>
+                              Firmar ahora →
+                            </a>
+                          ) : firma?.procesoId ? (
+                            <div style={{ fontSize: 11, color: 'var(--amber, #d97706)', fontWeight: 700 }}>
+                              Firma en curso · revisa tu correo/SMS
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600 }}>
+                              Pendiente — RRHH aún no habilita la firma
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <div style={{ marginBottom: 8 }}>
                 <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 10 }}>Liquidaciones</div>
                 {loadingLiqs ? (
@@ -1077,16 +1180,37 @@ export default function TrabajadorDashboard({ user, trabajador, empresaId }) {
                 ) : (
                   <div className="liq-list">
                     {liquidaciones.map(l => (
-                      <div key={l.id} className="liq-card">
-                        <div>
-                          <div className="liq-periodo">{MESES[(l.mes || 1) - 1]} {l.anio}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
-                            {l.empresa || trabajadorInfo?.empresa || ''}
+                      <div key={l.id} className="liq-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <div className="liq-periodo">{MESES[(l.mes || 1) - 1]} {l.anio}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: 'var(--mono)' }}>
+                              {l.empresa || trabajadorInfo?.empresa || ''}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div className="liq-monto">${(l._calc?.liquido || 0).toLocaleString('es-CL')}</div>
                           </div>
                         </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div className="liq-monto">${(l._calc?.liquido || 0).toLocaleString('es-CL')}</div>
-                        </div>
+                        {l.acuseRecibo?.aceptado ? (
+                          <div style={{ fontSize: 11, color: 'var(--green, #059669)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5" /></svg>
+                            Recibida conforme {fechaAcuse(l.acuseRecibo) && `· ${fechaAcuse(l.acuseRecibo)}`}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleAcuseLiquidacion(l)}
+                            disabled={acuseBusy === l.id}
+                            style={{
+                              alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, padding: '7px 14px',
+                              borderRadius: 10, border: '1.5px solid var(--accent, #7c3aed)',
+                              color: 'var(--accent, #7c3aed)', background: 'transparent',
+                              cursor: acuseBusy === l.id ? 'default' : 'pointer', opacity: acuseBusy === l.id ? 0.6 : 1,
+                            }}
+                          >
+                            {acuseBusy === l.id ? 'Registrando…' : 'Recibí conforme'}
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>

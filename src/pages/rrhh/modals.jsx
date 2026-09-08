@@ -3,6 +3,7 @@ import { db, storage } from '../../lib/firebase';
 import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { getAuth } from 'firebase/auth';
 import * as Shared from './shared';
 import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
@@ -1701,9 +1702,49 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     pagoAvisoPrevio: 'no', anticipoPendiente: '0', otrosDescuentos: '0',
     gratificacionYaPagada: 'si',
     estadoFirma: 'pendiente', observaciones: '',
+    evidenciaFirma: null, evidenciaTipo: 'notaria',
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [subiendoEvidencia, setSubiendoEvidencia] = useState(null); // 0-100 mientras sube
+  const [evidenciaError, setEvidenciaError] = useState('');
+
+  // Sube la foto/escaneo del finiquito firmado ante notario/DT a Storage.
+  // Requiere que el finiquito ya exista (necesitamos su id para la ruta).
+  const handleEvidencia = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEvidenciaError('');
+    if (!editData?.id) { setEvidenciaError('Guarda el finiquito primero; luego podrás adjuntar la evidencia firmada.'); e.target.value = ''; return; }
+    if (!(file.type.startsWith('image/') || file.type === 'application/pdf')) { setEvidenciaError('Solo se permite imagen (foto) o PDF.'); e.target.value = ''; return; }
+    if (file.size > 10 * 1024 * 1024) { setEvidenciaError('El archivo supera los 10 MB.'); e.target.value = ''; return; }
+
+    const ruta = `empresas/${empresaId}/finiquitos/${editData.id}/${Date.now()}_${file.name}`;
+    const task = uploadBytesResumable(ref(storage, ruta), file);
+    setSubiendoEvidencia(0);
+    task.on('state_changed',
+      snap => setSubiendoEvidencia(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+      err  => { setEvidenciaError('Error al subir: ' + err.message); setSubiendoEvidencia(null); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        const u = getAuth().currentUser;
+        set('evidenciaFirma', {
+          url, ruta, nombreArchivo: file.name,
+          tipo: form.evidenciaTipo || 'notaria',
+          fecha: new Date().toISOString(),
+          subidoPor: u?.displayName || u?.email || null,
+        });
+        setSubiendoEvidencia(null);
+      }
+    );
+  };
+
+  const eliminarEvidencia = async () => {
+    if (!window.confirm('¿Eliminar la evidencia adjunta?')) return;
+    const rutaPrev = form.evidenciaFirma?.ruta;
+    set('evidenciaFirma', null);
+    if (rutaPrev) { try { await deleteObject(ref(storage, rutaPrev)); } catch { /* archivo ya no existe */ } }
+  };
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
@@ -2005,6 +2046,44 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
           <Field label="Observaciones">
             <input className={inp} value={form.observaciones} onChange={e => set('observaciones', e.target.value)} />
           </Field>
+        </div>
+
+        {/* Evidencia del finiquito firmado ante notario / DT (no va por firma
+            electrónica: los finiquitos se ratifican presencialmente). */}
+        <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Evidencia documento firmado</p>
+            <select className="px-2 py-1 border-2 border-slate-200 rounded-lg text-xs bg-white"
+              value={form.evidenciaFirma?.tipo || form.evidenciaTipo || 'notaria'}
+              onChange={e => {
+                if (form.evidenciaFirma) set('evidenciaFirma', { ...form.evidenciaFirma, tipo: e.target.value });
+                else set('evidenciaTipo', e.target.value);
+              }}>
+              <option value="notaria">Ante notario</option>
+              <option value="dt">En Dirección del Trabajo</option>
+            </select>
+          </div>
+
+          {form.evidenciaFirma?.url ? (
+            <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+              <a href={form.evidenciaFirma.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm font-bold text-emerald-700 hover:underline truncate">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="truncate">{form.evidenciaFirma.nombreArchivo || 'Documento adjunto'}</span>
+              </a>
+              <button type="button" onClick={eliminarEvidencia} className="text-xs font-bold text-red-500 hover:underline flex-shrink-0">Quitar</button>
+            </div>
+          ) : subiendoEvidencia !== null ? (
+            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div className="bg-violet-500 h-2 transition-all" style={{ width: `${subiendoEvidencia}%` }} />
+            </div>
+          ) : (
+            <label className={`flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed rounded-xl text-sm font-bold cursor-pointer transition-colors ${editData?.id ? 'border-violet-300 text-violet-600 hover:bg-violet-50' : 'border-slate-200 text-slate-400 cursor-not-allowed'}`}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+              {editData?.id ? 'Subir foto o PDF del finiquito firmado' : 'Guarda el finiquito para adjuntar evidencia'}
+              <input type="file" accept="image/*,application/pdf" className="hidden" disabled={!editData?.id} onChange={handleEvidencia} />
+            </label>
+          )}
+          {evidenciaError && <p className="text-xs text-red-500">{evidenciaError}</p>}
         </div>
 
         <div className="flex justify-between items-center pt-2">
