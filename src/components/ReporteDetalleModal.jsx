@@ -7,13 +7,15 @@ export default function ReporteDetalleModal({
   machineInfo, 
   userRole = 'operador', // 'administrador' o 'operador'
   empleados = [], // catálogo de empleados para elegir quién registra (admin)
+  machines = [], // catálogo de máquinas para poder cambiar la máquina (admin)
+  iniciarEnEdicion = false, // abrir el modal directamente en modo edición
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
 }) {
   if (!reporte) return null;
 
   const isAdmin = userRole === 'administrador';
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(iniciarEnEdicion && isAdmin);
   const [editedData, setEditedData] = useState({ ...reporte });
   const [showSignModal, setShowSignModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -370,21 +372,70 @@ export default function ReporteDetalleModal({
               </div>
             </div>
 
-            {/* Máquina */}
+            {/* Máquina (editable por admin) */}
             <div className="bg-white rounded-2xl shadow-lg p-6 border-l-4 border-emerald-500">
               <h3 className="text-lg font-black text-slate-900 mb-4 flex items-center gap-2">
                 <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
                 </svg>
                 Máquina
-                {isAdmin && <span className="text-xs text-slate-400 font-normal">(No editable)</span>}
               </h3>
-              <div className="space-y-3">
-                <DataField label="Patente" value={machineInfo?.patente || '-'} />
-                <DataField label="Código" value={machineInfo?.code || '-'} />
-                <DataField label="Nombre" value={machineInfo?.name || [machineInfo?.marca, machineInfo?.modelo].filter(Boolean).join(' ') || '-'} />
-                <DataField label="Tipo" value={machineInfo?.type || '-'} />
-              </div>
+              {isEditing ? (
+                (() => {
+                  const selMachine = machines.find(m => m.id === editedData.machineId);
+                  return (
+                    <div className="space-y-3">
+                      {machines.length > 0 ? (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">Cambiar máquina</label>
+                          <select
+                            className="w-full px-3 py-2 border-2 border-emerald-200 rounded-lg focus:outline-none focus:border-emerald-500"
+                            value={editedData.machineId || ''}
+                            onChange={(e) => {
+                              const m = machines.find(x => x.id === e.target.value);
+                              updateField('machineId', e.target.value);
+                              updateField('machinePatente', m?.patente || '');
+                              updateField('machineCode', m?.code || '');
+                              updateField('machineName', m?.name || '');
+                              updateField('machineType', m?.type || '');
+                              updateField('machineMarca', m?.marca || '');
+                              updateField('machineModelo', m?.modelo || '');
+                            }}
+                          >
+                            <option value="">— Seleccionar máquina —</option>
+                            {machines
+                              .slice()
+                              .sort((a, b) => (a.code || a.patente || '').localeCompare(b.code || b.patente || ''))
+                              .map(m => {
+                                const desc = [m.type, m.marca, m.modelo].filter(Boolean).join(' ');
+                                return (
+                                  <option key={m.id} value={m.id}>
+                                    {(m.code || m.patente || 'Máquina')}{desc ? ` · ${desc}` : ''}
+                                  </option>
+                                );
+                              })}
+                          </select>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-600">No hay catálogo de máquinas disponible para cambiar.</p>
+                      )}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <DataField label="Patente" value={selMachine?.patente || editedData.machinePatente || '-'} />
+                        <DataField label="Código" value={selMachine?.code || editedData.machineCode || '-'} />
+                        <DataField label="Tipo" value={selMachine?.type || editedData.machineType || '-'} />
+                        <DataField label="Marca/Modelo" value={[selMachine?.marca, selMachine?.modelo].filter(Boolean).join(' ') || '-'} />
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <DataField label="Patente" value={machineInfo?.patente || '-'} />
+                  <DataField label="Código" value={machineInfo?.code || '-'} />
+                  <DataField label="Nombre" value={machineInfo?.name || [machineInfo?.marca, machineInfo?.modelo].filter(Boolean).join(' ') || '-'} />
+                  <DataField label="Tipo" value={machineInfo?.type || '-'} />
+                </div>
+              )}
             </div>
           </div>
 
@@ -914,7 +965,7 @@ export default function ReporteDetalleModal({
 function DataField({ label, value, badge }) {
   return (
     <div>
-      <div className="text-xs font-semibold text-slate-500 mb-1">{label}</div>
+      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">{label}</div>
       <div className="flex items-center gap-2">
         {badge ? (
           <span className={`px-3 py-1 rounded-full text-sm font-bold ${
@@ -926,7 +977,7 @@ function DataField({ label, value, badge }) {
             {value}
           </span>
         ) : (
-          <span className="text-sm font-bold text-slate-900">{value || '-'}</span>
+          <span className="block w-full text-sm font-bold text-slate-800 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">{value || '—'}</span>
         )}
       </div>
     </div>
