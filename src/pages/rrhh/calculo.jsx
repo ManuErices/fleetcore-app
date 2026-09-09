@@ -3,7 +3,7 @@ import { TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
   TRAMOS_IUT, normalizarItemsPago } from './shared';
 // IMM, UTM, UF y jornada máxima legal ya no son constantes: dependen del
 // período que se está liquidando. Ver parametros.js.
-import { paramsDe } from './parametros';
+import { paramsDe, montoAsignacionFamiliar, tramoSugerido } from './parametros';
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
@@ -55,7 +55,63 @@ function calcularLiquidacion(rem) {
   // Los bonos variables (producción, HE) NO se prorratean — corresponden
   // a lo efectivamente ganado. Colación y movilización sí se prorratean
   // porque son un apoyo al asistir al trabajo (criterio DT y Talana).
-  const diasTrab   = parseInt(rem.diasTrabajados) >= 0 ? parseInt(rem.diasTrabajados) : 30;
+  //
+  // ── Licencias médicas ──
+  //
+  // Modelo: la empresa NO paga los días de reposo. El subsidio lo paga la
+  // isapre, Fonasa o la CCAF directo al trabajador, y esa misma entidad entera
+  // las cotizaciones de pensiones y salud por todo el período de reposo. Por
+  // eso los días de licencia salen de la base imponible del empleador: si se
+  // cotizara por ellos se pagaría dos veces la misma cotización.
+  //
+  // Carencia: si la licencia dura 10 días o menos, los tres primeros no dan
+  // derecho a subsidio y el empleador tampoco está obligado a pagarlos — el
+  // trabajador simplemente los pierde. Si dura 11 o más, el subsidio corre
+  // desde el primer día. Las cotizaciones sí se pagan por los días de carencia,
+  // y las paga la entidad de subsidio, no la empresa.
+  //
+  // `pagarCarencia` permite que la empresa cubra esos días por decisión propia
+  // o por convenio colectivo; entonces cuentan como trabajados y sí cotizan.
+  //
+  // La fuente puede ser la colección `licencias` (inyectada por remDe como
+  // `licenciasRegistradas`) o el campo manual de la liquidación, igual que
+  // los anticipos. Si hay registro, ese manda.
+  const licRegistradas = rem.licenciasRegistradas;
+  const licencias = Array.isArray(licRegistradas)
+    ? licRegistradas
+    : (parseInt(rem.diasLicencia) > 0
+        ? [{ dias: parseInt(rem.diasLicencia), diasEnPeriodo: parseInt(rem.diasLicencia),
+             tipo: rem.tipoLicencia || 'comun' }]
+        : []);
+
+  const detalleLic = licencias.map(l => {
+    // `dias` es la duración de esta licencia y `diasParaCarencia` la de toda la
+    // cadena continua por el mismo cuadro clínico, que es lo que la ley manda
+    // sumar para decidir si aplica carencia. `diasEnPeriodo` es cuántos de esos
+    // días caen en este mes, que es lo que efectivamente se descuenta.
+    // Una licencia de 12 días a caballo entre dos meses no tiene carencia en
+    // ninguno de los dos, porque depende del total, no del trozo.
+    const total     = parseInt(l.dias) || 0;
+    const paraCar   = parseInt(l.diasParaCarencia ?? l.dias) || 0;
+    const enPeriodo = parseInt(l.diasEnPeriodo ?? l.dias) || 0;
+    // Sin carencia en accidente del trabajo ni licencia maternal.
+    const aplicaCarencia = paraCar > 0 && paraCar <= 10
+      && !['maternal', 'accidente', 'profesional'].includes(String(l.tipo || 'comun'));
+    return { ...l, dias: total, diasParaCarencia: paraCar, diasEnPeriodo: enPeriodo,
+             diasCarencia: aplicaCarencia ? Math.min(3, enPeriodo) : 0 };
+  });
+
+  const diasLicencia = detalleLic.reduce((s, l) => s + l.diasEnPeriodo, 0);
+  const diasCarencia = detalleLic.reduce((s, l) => s + l.diasCarencia, 0);
+  const pagarCarencia = rem.pagarCarencia === true;
+  // Días que la empresa efectivamente no paga
+  const diasLicNoPagados = pagarCarencia ? diasLicencia - diasCarencia : diasLicencia;
+
+  const diasBase   = parseInt(rem.diasTrabajados) >= 0 ? parseInt(rem.diasTrabajados) : 30;
+  // Si la liquidación ya trae los días trabajados netos (el modal los calcula
+  // al registrar la licencia) no se descuenta de nuevo. El tope evita el doble
+  // descuento cuando alguien baja los días a mano Y registra la licencia.
+  const diasTrab   = Math.max(0, Math.min(diasBase, 30 - diasLicNoPagados));
   const fdias      = diasTrab / 30; // factor días: 1.0 cuando trabaja el mes completo
 
   // Sueldo base prorrateable
@@ -116,10 +172,35 @@ function calcularLiquidacion(rem) {
   const baseGrat  = base + bProd + otrosImp + itemsImp;   // remuneración devengada del mes
   const gratMensual = Math.round(Math.min(baseGrat * 0.25, topeGrat * fp * fdias));
 
+  // ── Asignación familiar (DFL 150) ──
+  //
+  // No constituye remuneración: no es imponible, no tributa, y el empleador la
+  // paga junto al sueldo para después descontarla de las cotizaciones que
+  // entera en la caja de compensación o el IPS. Por eso entra al líquido pero
+  // NO a `imponible` ni a la renta tributable.
+  //
+  // El tramo y las cargas ya se registraban en la ficha para el TXT de
+  // Previred (posiciones 14, 18 y 19), pero nunca se pagaban en la liquidación.
+  //
+  // Las cargas con invalidez acreditada valen el doble en todos los tramos.
+  // Las maternales usan la misma escala que las simples.
+  // No se prorratean por días trabajados: se devengan por mes completo.
+  const tramoAF     = rem.tramoAsignacion || '';
+  const montoPorAF  = montoAsignacionFamiliar(tramoAF, { mes: rem.mes, anio: rem.anio });
+  const cargasSimp  = parseInt(rem.cargas)           || 0;
+  const cargasMat   = parseInt(rem.cargasMaternales) || 0;
+  const cargasInv   = parseInt(rem.cargasInvalidez)  || 0;
+  const cargasEquiv = cargasSimp + cargasMat + (cargasInv * 2);
+  // Durante el reposo la asignación familiar la paga la entidad de subsidio,
+  // no el empleador. Se prorratea solo por días de licencia — no por otras
+  // ausencias, donde el empleador la sigue debiendo por mes completo.
+  const fAsig = diasLicencia > 0 ? Math.max(0, 30 - diasLicencia) / 30 : 1;
+  const asigFamiliar = Math.round(montoPorAF * cargasEquiv * fAsig);
+
   // ── Base imponible previsional ──
   const imponible   = base + bProd + montoHE + otrosImp + itemsImp + gratMensual;
   // ── No imponible ──
-  const noImponible = bColacion + bMovil + viaticos + otrosNoImp + itemsNoImp;
+  const noImponible = bColacion + bMovil + viaticos + otrosNoImp + itemsNoImp + asigFamiliar;
 
   // ── Descuentos legales (cargo trabajador) ──
   // rem.afp viene de la FICHA del trabajador, no del contrato ni de la liquidación.
@@ -188,6 +269,7 @@ function calcularLiquidacion(rem) {
 
   return {
     base, bProd, montoHE, bColacion, bMovil, viaticos, otrosImp, otrosNoImp, gratMensual,
+    asigFamiliar, tramoAF, montoPorAF, cargasSimp, cargasMat, cargasInv, cargasEquiv,
     imponible, noImponible,
     itemsDetalle, itemsImp, itemsNoImp, itemsDesc,
     afpM, salM, sisM, cesM, apvM, apvRegimen, apvInstitucion: rem.apvInstitucion || '',
@@ -196,6 +278,7 @@ function calcularLiquidacion(rem) {
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
     diasTrab, fdias,          // expuestos para auditoría / PDF
+    diasLicencia, diasCarencia, diasLicNoPagados, pagarCarencia, detalleLic,
     baseCompleto, gratCompleto: Math.round(P.topeGratMensual * fp),
     // Snapshot de los parámetros con que se calculó. Se guarda en el documento
     // al emitir: una liquidación de agosto no debe recalcularse sola cuando en
@@ -217,6 +300,13 @@ function calcularLiquidacion(rem) {
     esPensionado,
     cesEmpM: esPensionado ? 0 : Math.round(imponible * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
     sisEmpM: esPensionado ? 0 : Math.round(imponible * TASAS.sis),
+    // Aporte del empleador Ley 16.744 (accidentes del trabajo y Ley SANNA).
+    // La tasa es PROPIA DE CADA EMPRESA: cotización básica más la adicional
+    // diferenciada según su siniestralidad. `TASAS.mutual` está fijada a la de
+    // MPF, así que se acepta `rem.tasaMutual` para que la empresa la configure
+    // sin editar código. Es columna obligatoria del LRE (cód. 4152).
+    tasaMutual: Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual,
+    mutualM: Math.round(imponible * (Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual)),
   };
 }
 function calcularAntiguedad(fechaIngreso, fechaTermino) {
@@ -656,7 +746,10 @@ function generarTXTPrevired(liquidaciones, mes, anio) {
     const codAfp       = COD_AFP[trab.afp] || '05';
     const codJornada   = COD_JORNADA[contrato.jornada] || '07';
     const diasTrab     = calc.diasTrab ?? 30;
-    const diasLic      = 0;
+    // Previred exige declarar los días de reposo: son los días por los que el
+    // empleador NO cotiza, porque los cotiza la entidad pagadora del subsidio.
+    // Antes iba fijo en 0 y el archivo quedaba descuadrado con la realidad.
+    const diasLic      = calc.diasLicencia ?? 0;
 
     const rentaImp     = Math.round(calc.imponible || 0);
     const cotAfp       = Math.round(calc.afpM || 0);
@@ -777,6 +870,12 @@ function remDe(trabajador, contrato, liq, extras) {
     ...(extras?.anticiposRegistrados !== undefined
       ? { anticiposRegistrados: extras.anticiposRegistrados }
       : {}),
+    // Licencias del período tomadas de la colección `licencias`. Mismo criterio
+    // que los anticipos: si hay registro manda sobre el campo manual, y no se
+    // copia al documento de la liquidación para que no quede desactualizado.
+    ...(extras?.licenciasRegistradas !== undefined
+      ? { licenciasRegistradas: extras.licenciasRegistradas }
+      : {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
@@ -785,6 +884,13 @@ function remDe(trabajador, contrato, liq, extras) {
     prevision:    trabajador?.prevision    ?? contrato?.prevision,
     isapre:       trabajador?.isapre       ?? contrato?.isapre,
     planIsapre:   trabajador?.planIsapre   ?? contrato?.planIsapre,
+    // Asignación familiar: el tramo y las cargas viven en la FICHA, igual que
+    // la AFP. La liquidación puede sobrescribirlos si un mes hubo un cambio
+    // (una carga que dejó de serlo, un cambio de tramo a mitad de período).
+    tramoAsignacion:  liq?.tramoAsignacion  ?? trabajador?.tramoAsignacion,
+    cargas:           liq?.cargas           ?? trabajador?.cargas,
+    cargasMaternales: liq?.cargasMaternales ?? trabajador?.cargasMaternales,
+    cargasInvalidez:  liq?.cargasInvalidez  ?? trabajador?.cargasInvalidez,
   };
 }
 
@@ -827,5 +933,6 @@ export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
+  tramoSugerido, montoAsignacionFamiliar,
   horasDiarias, analizarDia, resumenSemana, diasDelMes,
   generarTXTPrevired, exportarAsistenciaCSV };

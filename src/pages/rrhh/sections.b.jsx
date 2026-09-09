@@ -7,10 +7,13 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
 import ArchivoPagoPanel from './ArchivoPagoPanel';
+import { paramsDe } from './parametros';
+import OrganigramaVertical, { generarPDFOrganigrama } from './OrganigramaVertical';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA, PLAN_CUENTAS_DEFAULT,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
+  SelectorTrabajadorModal,
   mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV } = Shared;
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, liquidacionDe, remDe, liquidacionesVigentes, calcularAntiguedad, calcularFiniquito,
@@ -34,6 +37,7 @@ function AnexosSection() {
   const [modal, setModal] = useState(false);
   const [editData, setEditData] = useState(null);
   const [historial, setHistorial] = useState(null); // trabajador abierto
+  const [selector, setSelector] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [filtroTipo, setFiltroTipo] = useState('');
@@ -114,28 +118,40 @@ function AnexosSection() {
         ))}
       </div>
 
-      {/* Accesos rápidos a historial por trabajador */}
+      {/* Historial por trabajador.
+          Antes era una lista de chips con los primeros doce: con 60 personas,
+          la que buscabas casi nunca estaba ahí y no había forma de llegar al
+          resto. Ahora abre un selector con buscador sobre todos. */}
       <div className="rounded-2xl p-5 mb-5" style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-        <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Historial por trabajador</p>
-        <div className="flex flex-wrap gap-2">
-          {trabajadoresConHistorial.slice(0, 12).map(t => {
-            const nAnexos = anexos.filter(a => a.trabajadorId === t.id && a.estado !== 'anulado').length;
-            return (
-              <button key={t.id} onClick={() => setHistorial(t)}
-                className="flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-purple-50 border border-slate-200 hover:border-purple-200 rounded-xl text-sm font-bold text-slate-700 hover:text-purple-700 transition-all">
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-white font-black text-[10px] flex-shrink-0">
-                  {t.nombre?.[0] || ''}{t.apellidoPaterno?.[0] || ''}
-                </div>
-                {t.nombre} {t.apellidoPaterno}
-                {nAnexos > 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">{nAnexos}</span>}
-              </button>
-            );
-          })}
-          {trabajadoresConHistorial.length === 0 && (
-            <p className="text-sm text-slate-400">Sin trabajadores con contratos registrados</p>
-          )}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Historial por trabajador</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Contratos y anexos de una persona, en orden cronológico.
+            </p>
+          </div>
+          <button onClick={() => setSelector(true)} disabled={trabajadoresConHistorial.length === 0}
+            className="px-4 py-2.5 rounded-xl text-sm font-bold bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40 transition-colors">
+            Buscar trabajador ({trabajadoresConHistorial.length})
+          </button>
         </div>
+        {trabajadoresConHistorial.length === 0 && (
+          <p className="text-sm text-slate-400 mt-3">Sin trabajadores con contratos registrados</p>
+        )}
       </div>
+
+      <SelectorTrabajadorModal
+        isOpen={selector} onClose={() => setSelector(false)}
+        trabajadores={trabajadoresConHistorial}
+        titulo="Historial por trabajador"
+        subtitulo="Contratos y anexos de la persona"
+        onSelect={setHistorial}
+        meta={t => {
+          const n = anexos.filter(a => a.trabajadorId === t.id && a.estado !== 'anulado').length;
+          return n > 0
+            ? <span className="bg-indigo-100 text-indigo-700 text-[10px] font-black px-2 py-0.5 rounded-full">{n} anexo{n === 1 ? '' : 's'}</span>
+            : <span className="text-[10px] font-bold text-slate-300">sin anexos</span>;
+        }} />
 
       {/* Tabla anexos */}
       <div className="rounded-2xl overflow-hidden" style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.05), 0 8px 24px rgba(124,58,237,0.04)" }}>
@@ -277,7 +293,7 @@ function AnexosSection() {
 
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)" }}>
               <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
@@ -558,7 +574,7 @@ function ImpuestosSection() {
       {/* ── Modal tabla tramos ── */}
       {modalTramos && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setModalTramos(false)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setModalTramos(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
             <div className="px-5 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)" }}>
               <div>
@@ -834,7 +850,7 @@ function OldAsistenciaSection() {
 
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.15)' }}>
@@ -1226,8 +1242,12 @@ function OldAsistenciaSection() {
 //   • PROYECTADO → calculado desde el contrato vigente cuando no hay liquidación
 // Se distinguen visualmente para no confundir un dato pagado con una estimación.
 function Organigrama({ trabajadores, contratos, liquidaciones = [], filtroEmpresa }) {
+  const { empresa } = useEmpresa();
   const [expandidos, setExpandidos] = useState({});
   const [verSueldos, setVerSueldos] = useState(true);
+  // 'lista' recorre una rama cómodamente; 'arbol' muestra la forma de la
+  // organización — cuántos niveles hay y dónde el tramo de control se ensancha.
+  const [vista, setVista] = useState('arbol');
 
   const activos = trabajadores.filter(t =>
     t.estado === 'activo' && (!filtroEmpresa || t.empresa === filtroEmpresa)
@@ -1415,13 +1435,29 @@ function Organigrama({ trabajadores, contratos, liquidaciones = [], filtroEmpres
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex rounded-lg overflow-hidden border border-slate-200">
+            {[['arbol', 'Organigrama'], ['lista', 'Lista']].map(([id, label]) => (
+              <button key={id} onClick={() => setVista(id)}
+                className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                  vista === id ? 'bg-violet-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
           <button onClick={() => setVerSueldos(v => !v)}
             className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
             {verSueldos ? 'Ocultar sueldos' : 'Mostrar sueldos'}
           </button>
-          <button onClick={() => setExpandidos({})}
-            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
-            Expandir todo
+          {vista === 'lista' && (
+            <button onClick={() => setExpandidos({})}
+              className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+              Expandir todo
+            </button>
+          )}
+          <button onClick={() => generarPDFOrganigrama(activos, {
+              empresa, datosDe, colores: COLORES_AREA, verSueldos })}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:opacity-90 shadow-sm">
+            Descargar PDF
           </button>
         </div>
       </div>
@@ -1442,11 +1478,19 @@ function Organigrama({ trabajadores, contratos, liquidaciones = [], filtroEmpres
       )}
 
       {/* Árbol */}
-      <div>
-        {raices.map(t => (
-          <Nodo key={t.id} t={t} nivel={0} vistos={new Set()} />
-        ))}
-      </div>
+      {vista === 'arbol' ? (
+        <OrganigramaVertical
+          activos={activos}
+          datosDe={datosDe}
+          colores={COLORES_AREA}
+          verSueldos={verSueldos} />
+      ) : (
+        <div>
+          {raices.map(t => (
+            <Nodo key={t.id} t={t} nivel={0} vistos={new Set()} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1528,7 +1572,121 @@ function OrganigramaPorArea({ trabajadores, contratos, filtroEmpresa }) {
   );
 }
 
-function BandasSection({ trabajadores, contratos, bandas, onReload }) {
+/**
+ * Detalle de una banda salarial, al estilo del de centros de costo.
+ *
+ * La fila de la tabla resume; acá está lo que hace falta para decidir: quién
+ * la ocupa, cuánto gana cada uno, y cómo se compara contra la política si
+ * alguien la definió.
+ */
+function BandaDetalleModal({ banda, onClose }) {
+  // `fmt` está declarado dentro de cada sección, no a nivel de módulo, así que
+  // este componente —que vive fuera de ellas— necesita el suyo.
+  const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
+
+  if (!banda) return null;
+
+  const ocupantes = [...(banda._dentro || [])].sort((a, b) => b._sueldo - a._sueldo);
+  const rango = (banda._max || 0) - (banda._min || 0);
+
+  // Posición de cada persona dentro del rango observado. Con un solo ocupante
+  // el rango es un punto: se dibuja al centro en vez de dividir por cero.
+  const posDe = (v) => rango > 0 ? ((v - banda._min) / rango) * 100 : 50;
+
+  return (
+    <Modal isOpen onClose={onClose}
+      title={banda.cargo || 'Banda salarial'}
+      subtitle={`${banda.area || 'Sin área'}${banda.nivel ? ` · Nivel ${banda.nivel}` : ''}`}
+      maxWidth="max-w-2xl">
+      <div className="space-y-5">
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            ['Más bajo',  banda._min != null ? fmt(banda._min) : '—', 'text-slate-700'],
+            ['Promedio',  banda._promedio != null ? fmt(banda._promedio) : '—', 'text-violet-700'],
+            ['Más alto',  banda._max != null ? fmt(banda._max) : '—', 'text-slate-700'],
+            ['Amplitud',  fmt(banda._amplitud || 0), 'text-slate-500'],
+          ].map(([l, v, c]) => (
+            <div key={l} className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{l}</p>
+              <p className={`text-sm font-black ${c} mt-0.5`}>{v}</p>
+            </div>
+          ))}
+        </div>
+
+        {banda._tienePolitica ? (
+          <div className="rounded-xl border border-violet-100 bg-violet-50/50 px-4 py-3">
+            <p className="text-xs font-bold text-violet-900">
+              Banda definida: {fmt(banda.sueldoMin)} — {fmt(banda.sueldoMax)}
+            </p>
+            <p className="text-[11px] text-violet-700 mt-1 leading-snug">
+              {banda._bajoMin.length + banda._sobreMax.length === 0
+                ? 'Todos los ocupantes están dentro del rango definido.'
+                : `${banda._bajoMin.length} bajo el mínimo y ${banda._sobreMax.length} sobre el máximo.`}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <p className="text-[11px] text-slate-500 leading-snug">
+              Esta banda no tiene rango definido, así que no hay contra qué comparar.
+              El rango de arriba es lo que gana la gente hoy, no una política.
+              Edita la banda para fijar mínimo y máximo y activar las alertas.
+            </p>
+          </div>
+        )}
+
+        <div>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+            Ocupantes ({ocupantes.length})
+          </p>
+          {ocupantes.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Sin personal en esta banda</p>
+          ) : (
+            <div className="rounded-xl border border-slate-100 divide-y divide-slate-50">
+              {ocupantes.map(t => {
+                const bajo  = banda._bajoMin.some(x => x.id === t.id);
+                const sobre = banda._sobreMax.some(x => x.id === t.id);
+                return (
+                  <div key={t.id} className="px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-white font-black text-[10px] flex-shrink-0">
+                        {(t.nombre?.[0] || '')}{(t.apellidoPaterno?.[0] || '')}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-slate-800 truncate">{t.nombre} {t.apellidoPaterno}</p>
+                        <p className="text-[11px] text-slate-400 truncate">{t.cargo || 'Sin cargo'}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-black text-slate-800">{fmt(t._sueldo)}</p>
+                        {bajo  && <p className="text-[10px] font-black text-amber-600">bajo el mínimo</p>}
+                        {sobre && <p className="text-[10px] font-black text-red-500">sobre el máximo</p>}
+                      </div>
+                    </div>
+                    <div className="mt-1.5 h-1 rounded-full bg-slate-100 relative">
+                      <span className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-violet-500"
+                        style={{ left: `${posDe(t._sueldo)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {banda._sinAsignar > 0 && (
+          <p className="text-[11px] text-slate-400 leading-snug">
+            {banda._sinAsignar} {banda._sinAsignar === 1 ? 'persona entra' : 'personas entran'} por
+            coincidencia de cargo y no por asignación explícita en su ficha. Asignarles la banda
+            deja el dato firme y evita que se muevan solas si cambia el nombre del cargo.
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function BandasSection({ trabajadores, contratos, liquidaciones = [], bandas, onReload }) {
+  const [detalleBanda, setDetalleBanda] = useState(null);
   const { empresaId } = useEmpresa();
   const [form, setForm] = useState({ nivel: '', cargo: '', sueldoMin: '', sueldoMax: '', area: '' });
   const [saving, setSaving] = useState(false);
@@ -1575,10 +1733,34 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
   };
 
   // Sueldo base vigente de un trabajador
-  const sueldoDe = (t) => {
-    const c = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
+  // Líquido efectivo del trabajador, tomado de su última liquidación vigente.
+  //
+  // Antes esto devolvía el sueldo BASE del contrato, que para comparar bandas
+  // dice poco: dos personas con el mismo base pueden llevarse muy distinto
+  // según gratificación, colación, movilización o su AFP. Lo que importa para
+  // una banda salarial es lo que efectivamente recibe la persona.
+  //
+  // El anticipo se suma de vuelta: es la misma plata pagada antes, no un
+  // ingreso menor. Descontarlo haría que quien pide quincena apareciera en un
+  // tramo más bajo que un par que gana exactamente lo mismo.
+  const liquidoDe = (t) => {
+    const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
       || contratos.find(c => c.trabajadorId === t.id);
-    return parseInt(c?.sueldoBase) || 0;
+    if (!contrato) return 0;
+
+    const suyas = liquidacionesVigentes(
+      liquidaciones.filter(l => l.trabajadorId === t.id)
+    ).sort((a, b) => `${b.anio}${b.mes}`.localeCompare(`${a.anio}${a.mes}`));
+
+    const ultima = suyas[0];
+    // Sin liquidaciones todavía: se estima desde el contrato, para que un
+    // recién contratado no desaparezca de su banda.
+    const liq = ultima || { mes: String(new Date().getMonth() + 1).padStart(2, '0'),
+                            anio: String(new Date().getFullYear()) };
+
+    const calc = liquidacionDe(t, contrato, liq);
+    const iut  = calcularIUT(calcularRentaTributable(calc), paramsDe({ mes: liq.mes, anio: liq.anio }).utm);
+    return Math.max(0, Math.round(calc.liquido - iut + (calc.anticipo || 0)));
   };
 
   // Ocupantes de cada banda.
@@ -1602,29 +1784,42 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
     );
 
     const ocupantes = [...porAsignacion, ...porCargo]
-      .map(t => ({ ...t, _sueldo: sueldoDe(t) }))
+      .map(t => ({ ...t, _sueldo: liquidoDe(t) }))
       .filter(t => t._sueldo > 0);
 
+    // Rango REAL: lo que gana la gente que ocupa la banda hoy. Se deriva de los
+    // ocupantes y no se guarda, igual que el resto de los estados calculados
+    // del sistema. `sueldoMin`/`sueldoMax` siguen existiendo aparte como la
+    // política definida, contra la cual se compara.
     const sueldos  = ocupantes.map(t => t._sueldo);
+    const minReal  = sueldos.length ? Math.min(...sueldos) : null;
+    const maxReal  = sueldos.length ? Math.max(...sueldos) : null;
     const promedio = sueldos.length
       ? Math.round(sueldos.reduce((s, n) => s + n, 0) / sueldos.length)
       : null;
 
-    // Quiénes están pagados fuera del rango definido
-    const bajoMin  = ocupantes.filter(t => t._sueldo < b.sueldoMin);
-    const sobreMax = ocupantes.filter(t => t._sueldo > b.sueldoMax);
+    // La política solo aplica si alguien la definió. Con la banda en 0—0, todo
+    // el mundo quedaba marcado "sobre el máximo" y la alerta no decía nada.
+    const tienePolitica = (b.sueldoMin > 0 || b.sueldoMax > 0);
+    const bajoMin  = tienePolitica && b.sueldoMin > 0 ? ocupantes.filter(t => t._sueldo < b.sueldoMin) : [];
+    const sobreMax = tienePolitica && b.sueldoMax > 0 ? ocupantes.filter(t => t._sueldo > b.sueldoMax) : [];
 
-    // Posición del promedio dentro del rango, en porcentaje (0 = mín, 100 = máx)
-    const amplitud = (b.sueldoMax || 0) - (b.sueldoMin || 0);
-    const posPromedio = promedio != null && amplitud > 0
-      ? Math.min(100, Math.max(0, ((promedio - b.sueldoMin) / amplitud) * 100))
-      : null;
+    // Posición del promedio dentro del rango real (0 = el más bajo, 100 = el
+    // más alto). Con un solo ocupante el rango es un punto: va al centro.
+    const amplitud = (maxReal || 0) - (minReal || 0);
+    const posPromedio = promedio == null ? null
+      : amplitud > 0 ? Math.min(100, Math.max(0, ((promedio - minReal) / amplitud) * 100))
+      : 50;
 
     return {
       ...b,
       _dentro: ocupantes,
+      _min: minReal,
+      _max: maxReal,
+      _amplitud: amplitud,
       _promedio: promedio,
       _posPromedio: posPromedio,
+      _tienePolitica: tienePolitica,
       _bajoMin: bajoMin,
       _sobreMax: sobreMax,
       _sinAsignar: porCargo.length,
@@ -1688,9 +1883,9 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {bandasConPersonal.map(b => {
-                const rango = b.sueldoMax - b.sueldoMin;
                 return (
-                  <tr key={b.id} className="transition-colors hover:bg-slate-50/60">
+                  <tr key={b.id} onClick={() => setDetalleBanda(b)}
+                    className="transition-colors hover:bg-violet-50/60 cursor-pointer">
                     <td className="px-4 py-3">
                       <span className="text-xs font-black px-2 py-1 rounded-lg bg-violet-100 text-violet-700">{b.nivel}</span>
                     </td>
@@ -1699,7 +1894,9 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
                     <td className="px-4 py-3 min-w-[240px]">
                       <div>
                         <div className="flex items-baseline justify-between gap-2">
-                          <p className="text-sm font-bold text-slate-700">{fmt(b.sueldoMin)} — {fmt(b.sueldoMax)}</p>
+                          <p className="text-sm font-bold text-slate-700">
+                            {b._min != null ? `${fmt(b._min)} — ${fmt(b._max)}` : '—'}
+                          </p>
                           {b._promedio != null && (
                             <span className="text-[11px] font-black text-violet-700 whitespace-nowrap">
                               prom. {fmt(b._promedio)}
@@ -1711,9 +1908,9 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
                         <div className="relative mt-2.5 mb-1">
                           <div className="w-full h-1.5 rounded-full bg-gradient-to-r from-violet-200 via-violet-400 to-indigo-500" />
 
-                          {/* Punto medio teórico de la banda, como referencia */}
+                          {/* Punto medio del rango real, como referencia */}
                           <span className="absolute top-1/2 -translate-y-1/2 w-px h-3 bg-slate-300"
-                            style={{ left: '50%' }} title="Punto medio de la banda" aria-hidden />
+                            style={{ left: '50%' }} title="Punto medio entre el más bajo y el más alto" aria-hidden />
 
                           {/* Promedio real de quienes ocupan la banda */}
                           {b._posPromedio != null && (
@@ -1725,17 +1922,27 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
                                 background: b._posPromedio < 33 ? '#f59e0b'
                                   : b._posPromedio > 80 ? '#ef4444' : '#059669',
                               }}
-                              title={`Promedio real: ${fmt(b._promedio)} (${Math.round(b._posPromedio)}% del rango)`}
+                              title={`Promedio de la banda: ${fmt(b._promedio)} (${Math.round(b._posPromedio)}% del rango)`}
                             />
                           )}
                         </div>
 
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-[10px] text-slate-400">Amplitud: {fmt(rango)}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {b._dentro.length > 0 ? `Amplitud: ${fmt(b._amplitud)}` : ''}
+                          </p>
                           {b._promedio == null && b._dentro.length === 0 && (
                             <p className="text-[10px] text-slate-300 italic">sin ocupantes</p>
                           )}
                         </div>
+
+                        {/* La política definida, cuando existe. Es la referencia
+                            contra la que se comparan los líquidos reales. */}
+                        {b._tienePolitica && (
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            Banda definida: {fmt(b.sueldoMin)} — {fmt(b.sueldoMax)}
+                          </p>
+                        )}
 
                         {/* Gente pagada fuera del rango: es el dato accionable */}
                         {(b._bajoMin.length > 0 || b._sobreMax.length > 0) && (
@@ -1778,7 +1985,9 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    {/* stopPropagation: sin esto, editar o eliminar abriría
+                        además el detalle de la fila. */}
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <button onClick={() => handleEdit(b)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -1796,10 +2005,12 @@ function BandasSection({ trabajadores, contratos, bandas, onReload }) {
         </div>
       )}
 
+      <BandaDetalleModal banda={detalleBanda} onClose={() => setDetalleBanda(null)} />
+
       {/* Confirm delete */}
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="text-base font-black text-slate-900 text-center">¿Eliminar banda?</h3>
             <p className="text-sm text-slate-500 text-center mt-1 mb-5">Se eliminará la banda <strong>{confirm.nivel} — {confirm.cargo}</strong>.</p>
@@ -2342,7 +2553,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
       {/* Confirm delete */}
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="text-base font-black text-slate-900 text-center">¿Eliminar centro de costo?</h3>
             <p className="text-sm text-slate-500 text-center mt-1 mb-5">Se eliminará <strong>{confirm.nombre}</strong>.</p>
@@ -2458,6 +2669,7 @@ function OrganizacionSection() {
             <BandasSection
               trabajadores={trabajadores}
               contratos={contratos}
+              liquidaciones={liquidaciones}
               bandas={bandas}
               onReload={load}
             />
@@ -3130,6 +3342,8 @@ function ReportesSection() {
 }
 
 function ContabilidadSection({ initialTab = 'asientos' }) {
+  const [selPrevired, setSelPrevired]       = useState(false);
+  const [detallePrevired, setDetallePrevired] = useState(null);
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos, setContratos] = useState([]);
@@ -3454,7 +3668,16 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
               {/* Preview columnas Previred */}
               {liqEnriquecidas.length > 0 && (
                 <div>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Preview nómina Previred</p>
+                  <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Preview nómina Previred</p>
+                    {/* La tabla muestra ocho de sesenta. Para revisar a alguien
+                        puntual antes de declarar había que descargar el archivo
+                        y buscarlo ahí; ahora se abre su línea completa. */}
+                    <button onClick={() => setSelPrevired(true)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+                      Buscar trabajador ({liqEnriquecidas.length})
+                    </button>
+                  </div>
                   <div className="overflow-x-auto rounded-xl border border-slate-100">
                     <table className="w-full text-xs min-w-[900px]">
                       <thead>
@@ -3491,6 +3714,49 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                       </tbody>
                     </table>
                   </div>
+
+                  <SelectorTrabajadorModal
+                    isOpen={selPrevired} onClose={() => setSelPrevired(false)}
+                    trabajadores={liqEnriquecidas.map(x => x.trabajador).filter(Boolean)}
+                    titulo="Línea Previred del trabajador"
+                    subtitulo={`${MESES[parseInt(filtroMes) - 1] || filtroMes} ${filtroAnio}`}
+                    onSelect={setDetallePrevired}
+                    meta={t => <span className="text-[10px] font-bold text-slate-400">{t.afp || 'sin AFP'}</span>} />
+
+                  {detallePrevired && (() => {
+                    const fila = liqEnriquecidas.find(x => x.trabajador?.id === detallePrevired.id);
+                    if (!fila) return null;
+                    const c = liquidacionDe(fila.trabajador, fila.contrato, fila.liq);
+                    const filas = [
+                      ['RUT', fila.trabajador?.rut || '—'],
+                      ['AFP', fila.trabajador?.afp || '—'],
+                      ['Cotización AFP', fmt(c.afpM)],
+                      ['Salud', fila.trabajador?.prevision || 'Fonasa'],
+                      ['Cotización salud', fmt(c.salM)],
+                      ['SIS (empleador)', fmt(c.sisM)],
+                      ['Cesantía trabajador', fmt(c.cesM)],
+                      ['Cesantía empleador', fmt(c.cesEmpM || 0)],
+                      ['Mutual Ley 16.744', fmt(c.mutualM || 0)],
+                      ['Renta imponible', fmt(c.imponible)],
+                      ['Días trabajados', c.diasTrab ?? 30],
+                      ['Días de licencia', c.diasLicencia || 0],
+                    ];
+                    return (
+                      <Modal isOpen onClose={() => setDetallePrevired(null)}
+                        title={`${detallePrevired.nombre} ${detallePrevired.apellidoPaterno}`}
+                        subtitle={`Previred · ${MESES[parseInt(filtroMes) - 1] || filtroMes} ${filtroAnio}`}
+                        maxWidth="max-w-lg">
+                        <div className="rounded-xl border border-slate-100 divide-y divide-slate-50">
+                          {filas.map(([k, v]) => (
+                            <div key={k} className="flex items-center justify-between px-4 py-2.5">
+                              <span className="text-xs font-semibold text-slate-500">{k}</span>
+                              <span className="text-sm font-black text-slate-800">{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </Modal>
+                    );
+                  })()}
                 </div>
               )}
             </div>

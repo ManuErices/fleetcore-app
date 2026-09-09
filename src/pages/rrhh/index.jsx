@@ -11,6 +11,8 @@ import { AnexosSection, ImpuestosSection,
   PreviredAvanzadoSection, ArchivoPagoSection } from './sections.b';
 import AsistenciaSection from './AsistenciaSection';
 import AnticiposSection from './AnticiposSection';
+import LicenciasSection from './LicenciasSection';
+import LRESection from './LRESection';
 import TrabajadorPerfil from './TrabajadorPerfil';
 
 // ── Nav groups (shared with AppShellLayout) ──────────────────────────────────
@@ -33,6 +35,7 @@ export const NAV_GROUPS = [
       { id: 'anticipos',      label: 'Anticipos',      icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
       { id: 'finiquitos',     label: 'Finiquitos',     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
       { id: 'asistencia',     label: 'Asistencia',     icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+      { id: 'licencias',      label: 'Licencias',      icon: 'M9 12h6m-3-3v6m5 5H7a2 2 0 01-2-2V7a2 2 0 012-2h2.586a1 1 0 00.707-.293l1.414-1.414A1 1 0 0112.414 3h-.828a1 1 0 01.707.293l1.414 1.414A1 1 0 0014.414 5H17a2 2 0 012 2v12a2 2 0 01-2 2z' },
     ],
   },
   {
@@ -40,6 +43,7 @@ export const NAV_GROUPS = [
     tabs: [
       { id: 'previred_avanzado', label: 'Previred Avanzado', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
       { id: 'archivo_pago',      label: 'Archivo de Pago',  icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4' },
+      { id: 'lre',               label: 'Libro Remuneraciones', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
       { id: 'impuestos',         label: 'Impuestos',        icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
     ],
   },
@@ -148,8 +152,10 @@ export default function RRHH() {
           <Route path="anticipos"         element={<AnticiposSection />} />
           <Route path="finiquitos"        element={<FiniquitosSection />} />
           <Route path="asistencia"        element={<AsistenciaSection />} />
+          <Route path="licencias"         element={<LicenciasSection />} />
           <Route path="previred_avanzado" element={<PreviredAvanzadoSection />} />
           <Route path="archivo_pago"      element={<ArchivoPagoSection />} />
+          <Route path="lre"               element={<LRESection />} />
           <Route path="impuestos"         element={<ImpuestosSection />} />
           <Route path="reportes"          element={<ReportesSection />} />
           <Route path="contabilidad"      element={<ContabilidadSection />} />
