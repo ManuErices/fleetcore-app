@@ -1207,17 +1207,70 @@ function InputField({ label, ...props }) {
 }
 
 // Componente QR Scanner Modal
+const MAQUINAS_RECIENTES_KEY = 'wf_maquinas_recientes';
 function QRScannerModal({ onScan, onClose, error, machines = [] }) {
-  const [manualInput, setManualInput] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  const [foco, setFoco] = useState(false);
   const [scanning, setScanning] = useState(true);
+  const [recientes, setRecientes] = useState([]);
   const videoRef = React.useRef(null);
   const streamRef = React.useRef(null);
+
+  // Bloquear el scroll del fondo mientras el modal está abierto (evita que el
+  // scroll dentro del modal mueva la página que está detrás).
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Cargar máquinas usadas recientemente (para sugerirlas)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MAQUINAS_RECIENTES_KEY);
+      if (raw) setRecientes(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  const codigoDe = (m) => m.code || m.patente || m.qrCode || '';
+  const registrarReciente = (cod) => {
+    if (!cod) return;
+    try {
+      const next = [cod, ...recientes.filter(c => c.toUpperCase() !== cod.toUpperCase())].slice(0, 5);
+      setRecientes(next);
+      localStorage.setItem(MAQUINAS_RECIENTES_KEY, JSON.stringify(next));
+    } catch { /* ignore */ }
+  };
+
+  // Sugerencias: si no hay texto, las últimas usadas + relleno (máx 5); si hay
+  // texto, filtra por código/patente/tipo/marca/modelo/nombre (máx 8).
+  const q = busqueda.trim().toLowerCase();
+  const incluye = (s) => (s || '').toLowerCase().includes(q);
+  let sugerencias;
+  if (!q) {
+    const recientesMaq = recientes
+      .map(c => machines.find(m => codigoDe(m).toUpperCase() === c.toUpperCase()))
+      .filter(Boolean);
+    const resto = machines.filter(m => !recientesMaq.includes(m));
+    sugerencias = [...recientesMaq, ...resto].slice(0, 5);
+  } else {
+    sugerencias = machines.filter(m =>
+      incluye(m.code) || incluye(m.patente) || incluye(m.type) ||
+      incluye(m.marca) || incluye(m.modelo) || incluye(m.name)
+    ).slice(0, 8);
+  }
+
+  const seleccionarMaquina = (m) => {
+    const cod = codigoDe(m);
+    registrarReciente(cod);
+    onScan(cod);
+  };
 
   useEffect(() => {
     if (scanning) {
       startCamera();
     }
-    
+
     return () => {
       stopCamera();
     };
@@ -1298,16 +1351,19 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
   };
 
   const handleManualSubmit = () => {
-    if (manualInput.trim()) {
-      onScan(manualInput.trim());
-      setManualInput('');
-    }
+    const val = busqueda.trim();
+    if (!val) return;
+    // Si el texto calza exactamente con una máquina, la registramos como reciente.
+    const exacta = machines.find(m => codigoDe(m).toUpperCase() === val.toUpperCase());
+    if (exacta) registrarReciente(codigoDe(exacta));
+    onScan(val);
+    setBusqueda('');
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-3 sm:p-4">
-      <div className="max-w-md w-full bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden">
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-3 sm:p-4 flex items-center justify-between">
+      <div className="max-w-md w-full bg-white rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-3 sm:p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 sm:gap-3">
             <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
@@ -1324,7 +1380,7 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
           </button>
         </div>
 
-        <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+        <div className="p-3 sm:p-4 space-y-3 sm:space-y-4 overflow-y-auto">
           {scanning && (
             <div className="relative aspect-square rounded-lg sm:rounded-xl overflow-hidden bg-slate-900">
               <video
@@ -1361,56 +1417,66 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
             </ul>
           </div>
 
+          {/* Buscador con autocompletado: escribe el código o elige de las sugerencias */}
           <div>
             <div className="text-[10px] sm:text-xs font-bold text-slate-600 mb-2 text-center">
-              O ingresa el código manualmente:
+              O busca la máquina por código o nombre:
             </div>
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleManualSubmit()}
-                placeholder="Ej: ex-01, TSBS36, bcdf12..."
-                className="input-modern flex-1 text-sm sm:text-base"
-              />
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                </svg>
+                <input
+                  type="text"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  onFocus={() => setFoco(true)}
+                  onBlur={() => setTimeout(() => setFoco(false), 150)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
+                  placeholder="Ej: EX-01, TSBS36, Excavadora..."
+                  className="input-modern w-full pl-9 text-sm sm:text-base"
+                />
+              </div>
               <button
                 onClick={handleManualSubmit}
-                disabled={!manualInput.trim()}
+                disabled={!busqueda.trim()}
                 className="px-3 sm:px-4 py-2 bg-purple-600 text-white font-bold text-sm sm:text-base rounded-lg sm:rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Usar el código escrito"
               >
                 ✓
               </button>
             </div>
-          </div>
 
-          {/* Desplegable: elegir máquina por código sin escanear ni tipear */}
-          {machines.length > 0 && (
-            <div>
-              <div className="text-[10px] sm:text-xs font-bold text-slate-600 mb-2 text-center">
-                O elige la máquina de la lista:
+            {/* Sugerencias (últimas usadas si no hay texto) */}
+            {(foco || q) && sugerencias.length > 0 && (
+              <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                {!q && recientes.length > 0 && (
+                  <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-wide">Recientes / sugeridas</div>
+                )}
+                {sugerencias.map(m => {
+                  const cod = codigoDe(m);
+                  const desc = [m.type, m.marca, m.modelo].filter(Boolean).join(' ');
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); seleccionarMaquina(m); }}
+                      className="w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors flex items-center justify-between gap-2"
+                    >
+                      <span className="font-mono font-bold text-purple-700 text-sm shrink-0">{cod || '—'}</span>
+                      {desc && <span className="text-xs text-slate-500 truncate">{desc}</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <select
-                value=""
-                onChange={(e) => { if (e.target.value) onScan(e.target.value); }}
-                className="input-modern w-full text-sm sm:text-base"
-              >
-                <option value="">— Seleccionar máquina por código —</option>
-                {machines
-                  .slice()
-                  .sort((a, b) => (a.code || a.patente || '').localeCompare(b.code || b.patente || ''))
-                  .map(m => {
-                    const cod = m.code || m.patente || m.qrCode || '';
-                    const desc = [m.type, m.marca, m.modelo].filter(Boolean).join(' ');
-                    return (
-                      <option key={m.id} value={cod}>
-                        {cod}{desc ? ` · ${desc}` : ''}
-                      </option>
-                    );
-                  })}
-              </select>
-            </div>
-          )}
+            )}
+            {(foco || q) && q && sugerencias.length === 0 && (
+              <div className="mt-2 text-xs text-slate-400 text-center py-2">
+                Sin coincidencias — pulsa ✓ para usar “{busqueda.trim()}” tal cual.
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="bg-red-50 border-2 border-red-200 rounded-lg sm:rounded-xl p-3">
