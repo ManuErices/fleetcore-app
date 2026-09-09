@@ -50,7 +50,7 @@ function Modal({ isOpen, onClose, title, subtitle, children, maxWidth = 'max-w-2
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-10 overflow-y-auto">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${maxWidth} mb-10`}
         style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.04)' }}>
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between"
@@ -825,8 +825,8 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
               onChange={e => set('anticipoRecurrente', parseCLP(e.target.value))}
               placeholder="Ej: 400.000" />
             <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-              Se precarga en cada liquidación de este trabajador. Si un mes cambia, se edita ahí:
-              esto no altera las liquidaciones ya emitidas.
+              Es el monto acordado, no un anticipo. Para que se pague y se descuente hay que
+              generarlo cada mes desde Anticipos, con un clic para toda la empresa.
             </p>
           </Field>
           <Field label="Glosa">
@@ -1022,7 +1022,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-end">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative h-full w-full max-w-md bg-white shadow-2xl overflow-y-auto flex flex-col"
         style={{ boxShadow: '-8px 0 40px rgba(0,0,0,0.15)' }}>
 
@@ -1424,7 +1424,7 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
 
 // ─── LiquidacionModal ─────────────────────────────────────────────────────────
 
-function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
+function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, anticiposRegistrados, licenciasRegistradas, onSaved }) {
   // `empresa` alimenta el encabezado del PDF. Faltaba en este destructuring y el
   // botón de vista previa reventaba con "empresa is not defined" al hacer click.
   const { empresaId, empresa } = useEmpresa();
@@ -1437,6 +1437,9 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     bonoColacion: '', bonoMovilizacion: '', viaticos: '0',
     otrosImponibles: '0', otrosNoImponibles: '0',
     descuentoAdicional: '0', anticipo: '0',
+    // Licencia médica: días de reposo que caen en este período. La empresa no
+    // los paga — el subsidio lo entera la isapre, Fonasa o la CCAF.
+    diasLicencia: '0', tipoLicencia: 'comun', folioLicencia: '', pagarCarencia: false,
     items: [],
     estado: 'pendiente', observaciones: '',
   };
@@ -1495,6 +1498,9 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
   // Monto recurrente de referencia, para el pie "Automático desde…" del campo anticipo
   const anticipoBase  = trabajadorSel?.anticipoRecurrente || '';
+  // Con anticipos registrados en su colección, el campo manual se ignora en el
+  // cálculo. Mostrarlo editable invitaría a escribir un número muerto.
+  const hayAnticipoRegistrado = anticiposRegistrados !== undefined && anticiposRegistrados !== null;
 
   // ── Valor de la hora extra (Art. 32 CT) ──
   // (sueldo × 7) / (jornada semanal × 30) × 1,5. La jornada sale del contrato
@@ -1520,7 +1526,21 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   const calc = (contratoSel && form.sueldoBase)
     // Sin segundo argumento: la UTM se resuelve por el mes y año de la
     // liquidación, no por una constante que envejece.
-    ? calcularLiquidacionConIUT({ ...contratoSel, ...form, afp: trabajadorSel?.afp })
+    // El tramo y las cargas salen de la ficha salvo que la liquidación los
+    // sobrescriba, igual que la AFP.
+    ? calcularLiquidacionConIUT({
+        ...contratoSel, ...form,
+        afp: trabajadorSel?.afp,
+        tramoAsignacion:  form.tramoAsignacion  ?? trabajadorSel?.tramoAsignacion,
+        cargas:           form.cargas           ?? trabajadorSel?.cargas,
+        cargasMaternales: form.cargasMaternales ?? trabajadorSel?.cargasMaternales,
+        cargasInvalidez:  form.cargasInvalidez  ?? trabajadorSel?.cargasInvalidez,
+        // Las colecciones mandan sobre los campos manuales, igual que en la
+        // tabla y en la nómina. Si acá no se pasaran, la previsualización
+        // mostraría un líquido que no coincide con el que se transfiere.
+        ...(anticiposRegistrados !== undefined ? { anticiposRegistrados } : {}),
+        ...(licenciasRegistradas !== undefined ? { licenciasRegistradas } : {}),
+      })
     : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
 
@@ -1656,10 +1676,20 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo ($)">
-            <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
-            <Auto valor={form.anticipo} sugerido={anticipoBase} fuente="la ficha del trabajador"
-              onRestaurar={() => set('anticipo', String(anticipoBase))}
-              formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
+            <input type="text" className={inp}
+              value={hayAnticipoRegistrado ? formatCLP(anticiposRegistrados) : formatCLP(form.anticipo)}
+              disabled={hayAnticipoRegistrado}
+              onChange={e => set('anticipo', parseCLP(e.target.value))} />
+            {hayAnticipoRegistrado ? (
+              <p className="text-[11px] text-sky-600 mt-1 leading-snug">
+                Viene de los anticipos del período. Para cambiarlo, edítalo en Anticipos:
+                lo que se escriba acá no tiene efecto.
+              </p>
+            ) : (
+              <Auto valor={form.anticipo} sugerido={anticipoBase} fuente="la ficha del trabajador"
+                onRestaurar={() => set('anticipo', String(anticipoBase))}
+                formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
+            )}
           </Field>
           <Field label="Glosa anticipo">
             <input className={inp} value={form.glosaAnticipo || ''} onChange={e => set('glosaAnticipo', e.target.value)} placeholder="Ej: Anticipo quincena…" />
@@ -1705,6 +1735,49 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 
         {calc && (
           <>
+            <Divider label="Licencia médica" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Días de reposo en este período">
+                <input type="number" min="0" max="30" className={inp} value={form.diasLicencia}
+                  onChange={e => set('diasLicencia', e.target.value)} />
+              </Field>
+              <Field label="Tipo">
+                <select className={inp} value={form.tipoLicencia}
+                  onChange={e => set('tipoLicencia', e.target.value)}>
+                  <option value="comun">Enfermedad común</option>
+                  <option value="maternal">Maternal / pre y postnatal</option>
+                  <option value="accidente">Accidente del trabajo (Ley 16.744)</option>
+                  <option value="profesional">Enfermedad profesional</option>
+                </select>
+              </Field>
+              <Field label="Folio">
+                <input className={inp} value={form.folioLicencia || ''}
+                  onChange={e => set('folioLicencia', e.target.value)} placeholder="N° de licencia" />
+              </Field>
+            </div>
+            {calc?.diasLicencia > 0 && (
+              <div className="rounded-xl bg-sky-50 border border-sky-100 px-4 py-3 space-y-2">
+                <p className="text-[11px] text-sky-800 leading-snug">
+                  Se pagan <strong>{calc.diasTrab} días</strong> de los 30 del mes. Los {calc.diasLicNoPagados} días
+                  de reposo no los paga la empresa: el subsidio lo entera la isapre, Fonasa o la CCAF
+                  directo al trabajador, junto con las cotizaciones de pensiones y salud de todo el reposo.
+                </p>
+                {calc.diasCarencia > 0 && (
+                  <>
+                    <p className="text-[11px] text-amber-700 leading-snug">
+                      Licencia de {calc.detalleLic[0]?.dias} días: los primeros {calc.diasCarencia} no dan
+                      derecho a subsidio, y la empresa tampoco está obligada a pagarlos. Hoy el trabajador los pierde.
+                    </p>
+                    <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
+                      <input type="checkbox" checked={!!form.pagarCarencia}
+                        onChange={e => set('pagarCarencia', e.target.checked)} />
+                      Pagar los días de carencia por cuenta de la empresa
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+
             <Divider label="Previsualización liquidación" />
             <div className="rounded-xl border border-slate-200 overflow-hidden">
               <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100">
@@ -1720,12 +1793,24 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
                   </div>
                 ))}
               </div>
-              <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex gap-4">
+              <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex gap-4 flex-wrap">
                 <span>AFP: <strong className="text-red-500">-{fmt(calc.afpM)}</strong></span>
                 <span>Salud: <strong className="text-red-500">-{fmt(calc.salM)}</strong></span>
                 <span>Cesantía: <strong className="text-red-500">-{fmt(calc.cesM)}</strong></span>
                 <span>SIS (emp.): <strong className="text-slate-400">-{fmt(calc.sisM)}</strong></span>
+                {calc.asigFamiliar > 0 && (
+                  <span>
+                    Asig. familiar (tramo {calc.tramoAF}, {calc.cargasEquiv} carga{calc.cargasEquiv === 1 ? '' : 's'}):{' '}
+                    <strong className="text-emerald-600">+{fmt(calc.asigFamiliar)}</strong>
+                  </span>
+                )}
               </div>
+              {trabajadorSel && !calc.tramoAF && (calc.cargasSimp + calc.cargasMat + calc.cargasInv) > 0 && (
+                <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-[11px] text-amber-700">
+                  Este trabajador tiene cargas registradas pero no tiene tramo de asignación familiar
+                  asignado, así que no se le está pagando nada. El tramo se define en la ficha, pestaña Familia.
+                </div>
+              )}
             </div>
           </>
         )}

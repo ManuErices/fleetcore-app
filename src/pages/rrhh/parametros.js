@@ -46,7 +46,35 @@ const JORNADA_MAXIMA = [
   { desde: '1900-01-01', horas: 45 },
 ];
 
-// ── UTM y UF por período ─────────────────────────────────────────────────────
+// ── Asignación familiar y maternal (DFL 150 / Ley 18.987) ────────────────────
+// Los tramos se reajustan junto con el IMM, por la misma ley. `hasta` es el
+// techo de ingreso mensual del tramo; el último tramo (D) no tiene derecho a
+// pago en dinero, pero la persona conserva la calidad de carga para salud.
+//
+// El monto se DUPLICA por cada carga con invalidez acreditada ante COMPIN,
+// en todos los tramos. La asignación maternal usa la misma escala.
+const ASIGNACION_FAMILIAR = [
+  {
+    desde: '2026-05-01', norma: 'Ley 21.830',
+    tramos: [
+      { tramo: 'A', hasta:  649039, monto: 22601 },
+      { tramo: 'B', hasta:  947990, monto: 13870 },
+      { tramo: 'C', hasta: 1478539, monto:  4382 },
+      { tramo: 'D', hasta: Infinity, monto:     0 },
+    ],
+  },
+  {
+    desde: '2026-01-01', norma: 'Ley 21.751',
+    tramos: [
+      { tramo: 'A', hasta:  631976, monto: 22007 },
+      { tramo: 'B', hasta:  923067, monto: 13505 },
+      { tramo: 'C', hasta: 1439668, monto:  4267 },
+      { tramo: 'D', hasta: Infinity, monto:     0 },
+    ],
+  },
+];
+
+
 // Semilla mínima. Lo normal es que estos valores lleguen desde Firestore
 // (`empresas/{id}/parametros_legales/{YYYY-MM}`) o desde mindicador.cl vía
 // `aplicarIndicadores`. La UF se guarda como valor del día 1 del mes: sirve
@@ -133,6 +161,11 @@ export function paramsDe(periodo) {
     topeGratMensual: Math.round(imm.mayor18 * 4.75 / 12),
     topeGratAnual:   Math.round(imm.mayor18 * 4.75),
     jornadaMaxima: jor.horas,
+    // Escala de asignación familiar vigente. Si se pide un período anterior a
+    // la tabla se devuelve vacía y el cálculo paga 0: preferible a inventar un
+    // monto para un mes cuyo decreto no está cargado.
+    asignacionFamiliar: (vigenteEn(ASIGNACION_FAMILIAR, fecha) || {}).tramos || [],
+    asignacionFamiliarNorma: (vigenteEn(ASIGNACION_FAMILIAR, fecha) || {}).norma || '',
     utm:          ind.utm || UTM_FALLBACK,
     uf:           ind.uf  || UF_FALLBACK,
     // Permite que la UI advierta cuando se está calculando con el fallback
@@ -163,6 +196,28 @@ export function aplicarIndicadores(mapa) {
 /** Lo que hay cargado, para pantallas de configuración. */
 export function indicadoresCargados() {
   return { ...INDICADORES };
+}
+
+/**
+ * Tramo de asignación familiar que le corresponde a un ingreso mensual.
+ * Es solo una SUGERENCIA: el tramo oficial lo determina el IPS o la caja de
+ * compensación sobre el promedio de la renta imponible del semestre anterior,
+ * no sobre el sueldo del mes que se está liquidando. Sirve para advertir
+ * cuando el tramo registrado en la ficha se ve desalineado con la renta.
+ */
+export function tramoSugerido(ingresoMensual, periodo) {
+  const escala = paramsDe(periodo).asignacionFamiliar;
+  const ing    = Number(ingresoMensual) || 0;
+  const t      = escala.find(x => ing <= x.hasta);
+  return t ? t.tramo : 'D';
+}
+
+/** Monto por carga de un tramo ('A'|'B'|'C'|'D'). Devuelve 0 si no aplica. */
+export function montoAsignacionFamiliar(tramo, periodo) {
+  if (!tramo) return 0;
+  const escala = paramsDe(periodo).asignacionFamiliar;
+  const t = escala.find(x => x.tramo === String(tramo).toUpperCase().trim());
+  return t ? t.monto : 0;
 }
 
 /** Tabla de IMM completa, para mostrarla en la pantalla de parámetros. */

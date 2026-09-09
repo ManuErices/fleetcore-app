@@ -19,6 +19,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { inp, MESES } from './shared';
 import {
   useAnticipos, crearAnticipo, actualizarAnticipo, eliminarAnticipo, ESTADOS_ANTICIPO,
+  quincenasPendientes, generarQuincenasDelMes,
 } from './anticipos';
 
 const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
@@ -42,6 +43,8 @@ export default function AnticiposSection() {
   const [guardando, setGuardando] = useState(false);
   const [error, setError]   = useState(null);
   const [confirmar, setConfirmar] = useState(null);
+  const [generando, setGenerando] = useState(false);
+  const [aviso, setAviso] = useState(null);
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -68,6 +71,27 @@ export default function AnticiposSection() {
       })
       .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
   }, [anticipos, trabajadores, mes, anio, busqueda]);
+
+  // Quincenas pactadas en la ficha que todavía no existen como anticipo del mes.
+  // El monto de la ficha es una plantilla: sin un documento no tiene fecha, no
+  // se puede pagar y no entra a ninguna nómina.
+  const pendientes = useMemo(
+    () => quincenasPendientes(trabajadores, anticipos, mes, anio),
+    [trabajadores, anticipos, mes, anio]);
+
+  const totalPendiente = useMemo(
+    () => pendientes.reduce((s, p) => s + p.monto, 0), [pendientes]);
+
+  const generar = async () => {
+    setError(null); setAviso(null); setGenerando(true);
+    try {
+      const r = await generarQuincenasDelMes(empresaId, trabajadores, anticipos, mes, anio);
+      setAviso(r.fallidos
+        ? `Se generaron ${r.creados} de ${r.total}. ${r.fallidos} fallaron.`
+        : `${r.creados} ${r.creados === 1 ? 'anticipo generado' : 'anticipos generados'}.`);
+    } catch (e) { setError(e.message); }
+    setGenerando(false);
+  };
 
   const totales = useMemo(() => ({
     pendiente: delPeriodo.filter(a => a.estado === 'pendiente').reduce((s, a) => s + (a.monto || 0), 0),
@@ -133,6 +157,44 @@ export default function AnticiposSection() {
           </div>
         ))}
       </div>
+
+      {/* ── Quincenas pactadas por generar ── */}
+      {pendientes.length > 0 && (
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+          <p className="text-xs font-black text-sky-900">
+            {pendientes.length} {pendientes.length === 1 ? 'persona tiene' : 'personas tienen'} quincena
+            pactada sin generar en {MESES[parseInt(mes) - 1]} {anio}
+          </p>
+          <p className="text-[11px] text-sky-700 mt-1 mb-3 leading-snug">
+            El monto de la ficha del trabajador es el acuerdo, no el anticipo. Hasta que no se genera
+            el documento no tiene fecha, no se puede pagar en una nómina ni se descuenta en la
+            liquidación. Total a generar: <strong>{fmt(totalPendiente)}</strong>.
+          </p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {pendientes.slice(0, 8).map(p => (
+              <span key={p.trabajadorId}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white text-sky-800 border border-sky-200">
+                {p.trabajador.apellidoPaterno} {p.trabajador.nombre} · {fmt(p.monto)}
+              </span>
+            ))}
+            {pendientes.length > 8 && (
+              <span className="text-[10px] font-bold px-2 py-1 text-sky-600">
+                y {pendientes.length - 8} más
+              </span>
+            )}
+          </div>
+          <button onClick={generar} disabled={generando}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-40">
+            {generando ? 'Generando…' : `Generar las ${pendientes.length} quincenas del mes`}
+          </button>
+        </div>
+      )}
+
+      {aviso && (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+          <p className="text-xs font-bold text-emerald-800">{aviso}</p>
+        </div>
+      )}
 
       {/* ── Alta ── */}
       <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4 space-y-3">
@@ -223,7 +285,7 @@ export default function AnticiposSection() {
       {/* ── Confirmación ── */}
       {confirmar && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirmar(null)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirmar(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="text-base font-black text-slate-900">
               {confirmar.estado === 'pagado' ? '¿Anular este anticipo?' : '¿Eliminar este anticipo?'}
