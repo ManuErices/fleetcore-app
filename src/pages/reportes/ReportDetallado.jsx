@@ -738,19 +738,9 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
-                    Número de Reporte
-                    <span className="ml-2 text-[10px] text-blue-600">(Generado automáticamente)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.numeroReporte}
-                    readOnly
-                    className="input-modern w-full text-sm sm:text-base bg-slate-100 cursor-not-allowed font-semibold"
-                  />
-                </div>
-                
+                {/* El N° de reporte se sigue generando internamente (correlativo
+                    que usa el admin), pero no se muestra en el formulario: la
+                    referencia visible para el operador es el Folio. */}
                 <InputField
                   label="Fecha"
                   type="date"
