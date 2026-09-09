@@ -738,21 +738,9 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-                {/* El N° de reporte se genera al escanear/elegir la máquina.
-                    Antes se mostraba una caja gris vacía sin utilidad; ahora
-                    solo aparece cuando ya tiene valor. */}
-                {formData.numeroReporte && (
-                  <div>
-                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
-                      Número de Reporte
-                      <span className="ml-2 text-[10px] text-blue-600">(Generado automáticamente)</span>
-                    </label>
-                    <div className="w-full text-sm sm:text-base rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-black px-4 py-2.5">
-                      {formData.numeroReporte}
-                    </div>
-                  </div>
-                )}
-
+                {/* El N° de reporte se sigue generando internamente (correlativo
+                    que usa el admin), pero no se muestra en el formulario: la
+                    referencia visible para el operador es el Folio. */}
                 <InputField
                   label="Fecha"
                   type="date"
