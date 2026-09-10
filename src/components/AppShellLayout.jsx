@@ -161,18 +161,26 @@ export default function AppShellLayout({
         </button>
       )}
 
-      {/* Empresa activa. En riel queda solo su inicial: el nombre completo no
-          entra y truncado a dos letras no distingue nada. */}
-      {empresa && (
-        <div className={`flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 mt-3 ${
-          compacto ? 'justify-center px-1 py-1.5' : 'px-3 py-2'}`}
-          title={compacto ? empresa.nombre : undefined}>
+      {/* Empresa activa. En riel se queda solo el cuadrito con la inicial: la
+          caja con borde alrededor de un icono de 20px se ve desproporcionada
+          en 64px de ancho, y el nombre no entra de ninguna forma. */}
+      {empresa && (compacto ? (
+        <div className="flex justify-center mt-3" title={empresa.nombre}>
+          {empresa.logoUrl
+            ? <img src={empresa.logoUrl} alt="" className="w-8 h-8 rounded-lg object-contain" />
+            : <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600">
+                {empresa.nombre?.[0]}
+              </div>}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 mt-3 px-3 py-2"
+          title={empresa.nombre}>
           {empresa.logoUrl
             ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain flex-shrink-0" />
             : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600 flex-shrink-0">{empresa.nombre?.[0]}</div>}
-          {!compacto && <span className="text-xs font-semibold text-slate-700 truncate">{empresa.nombre}</span>}
+          <span className="text-xs font-semibold text-slate-700 truncate">{empresa.nombre}</span>
         </div>
-      )}
+      ))}
 
       {/* Controles propios del módulo — un filtro de proyecto, por ejemplo.
           Se ocultan en riel: son controles con texto, no iconos. */}
@@ -265,21 +273,40 @@ export default function AppShellLayout({
     </nav>
   );
 
+  const inicialUsuario = (user?.displayName || user?.email || '?').trim()[0]?.toUpperCase() || '?';
+
   const pie = (
     <div className={`border-t border-slate-100 flex-shrink-0 py-3 ${compacto ? 'px-2' : 'px-3'}`}>
       {footerSlot && (
         <div className={`flex items-center mb-2 ${compacto ? 'justify-center' : 'gap-2'}`}>{footerSlot}</div>
       )}
-      <UserMenuDropdown
-        user={user}
-        userRole={userRole}
-        onLogout={onLogout}
-        onBackToSelector={onBackToSelector}
-        onAdminPanel={onAdminPanel}
-        onAdminEmpresaPanel={onAdminEmpresaPanel}
-        placement="top-left"
-        compact={compacto}
-      />
+
+      {/* UserMenuDropdown dibuja nombre, estado y chevron con su propio ancho:
+          en 64px se desborda sobre el contenido. En riel se reemplaza por el
+          avatar, que al pulsarlo expande la barra y deja el menú a mano. Es un
+          clic más, pero es predecible — y la alternativa era un menú cortado. */}
+      {compacto ? (
+        <button
+          onClick={() => setRiel(false)}
+          title={`${user?.displayName || user?.email || 'Usuario'} — expandir para ver el menú`}
+          aria-label="Expandir menú de usuario"
+          className="w-full flex justify-center"
+        >
+          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-sm hover:opacity-90 transition-opacity">
+            {inicialUsuario}
+          </span>
+        </button>
+      ) : (
+        <UserMenuDropdown
+          user={user}
+          userRole={userRole}
+          onLogout={onLogout}
+          onBackToSelector={onBackToSelector}
+          onAdminPanel={onAdminPanel}
+          onAdminEmpresaPanel={onAdminEmpresaPanel}
+          placement="top-left"
+        />
+      )}
     </div>
   );
 

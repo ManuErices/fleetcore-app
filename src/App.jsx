@@ -27,6 +27,7 @@ import RRHH from "./pages/rrhh";
 import ReportesShell from "./pages/reportes/ReportesShell";
 import MaquinariaShell from "./pages/maquinaria/MaquinariaShell";
 import RRHHShell from "./pages/rrhh/RRHHShell";
+import AppShellLayout from "./components/AppShellLayout";
 import OperadoresApp from "./pages/operadores";
 import FinanzasApp from "./pages/finanzas/FinanzasApp.jsx";
 import ContabilidadApp from "./pages/contabilidad/ContabilidadApp.jsx";
@@ -57,7 +58,6 @@ import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { usePlan } from "./hooks/usePlan.js";
 import { getPlanTier } from "./lib/plans.js";
-import UserMenuDropdown from "./components/UserMenuDropdown";
 
 // ============================================================
 // Shell principal (Oficina Técnica / FleetCore)
@@ -67,222 +67,69 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
   const canGoToAdmin = ['superadmin', 'admin_contrato'].includes(userRole);
   const handleAdminPanel = canGoToAdmin ? () => { localStorage.setItem('selectedApp', 'admin'); navigate('/admin'); } : undefined;
   const handleAdminEmpresaPanel = canGoToAdmin ? () => { localStorage.setItem('selectedApp', 'admin'); navigate('/admin/empresa'); } : undefined;
-  const [showCostsMenu, setShowCostsMenu] = useState(false);
-  const [showFuelMenu, setShowFuelMenu] = useState(false);
-  const [showAdminMenu, setShowAdminMenu] = useState(false);
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const { empresaId, empresa } = useEmpresa();
+  const esMandante = userRole === 'mandante';
 
-  const { activeModules } = usePlan();
-  const planTier = getPlanTier(activeModules);
+  // Los iconos son el `d` de un path; el shell acepta también nodos JSX.
+  const IC = {
+    dashboard:   'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
+    registro:    'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z',
+    equipos:     'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+    flota:       'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z',
+    estadoPago:  'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01',
+    combustible: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z',
+    tarjeta:     'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
+    subcontrato: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z',
+    oc:          'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+    precio:      'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+    reporte:     'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+  };
+
+  // El mandante solo ve el reporte de equipos: los desplegables de Control de
+  // Producción y Combustible estaban ocultos para él de todas formas, y un
+  // menú lleno de destinos bloqueados no aporta nada.
+  const navGroups = esMandante
+    ? [{ label: '', tabs: [{ id: 'reporte-workfleet', label: 'Equipos y Servicios', icon: IC.equipos }] }]
+    : [
+        { label: '', tabs: [
+          { id: '',                  label: 'Dashboard', icon: IC.dashboard },
+          { id: 'reporte-detallado', label: 'Reporte Detallado', icon: IC.reporte },
+        ]},
+        { label: 'Control de Producción y EP', tabs: [
+          { id: 'payroll',              label: 'Registro Diario',     icon: IC.registro },
+          { id: 'reporte-workfleet',    label: 'Equipos y Servicios', icon: IC.equipos },
+          { id: 'consolidado',          label: 'Detalle Flota',       icon: IC.flota },
+          { id: 'payment-status',       label: 'Estado de Pago',      icon: IC.estadoPago },
+          { id: 'combustible-detalle',  label: 'Combustible (4.1)',   icon: IC.combustible },
+          { id: 'rendiciones',          label: 'Rendiciones',         icon: IC.tarjeta },
+          { id: 'pasajes',              label: 'Pasajes',             icon: IC.tarjeta },
+          { id: 'subcontratos',         label: 'Subcontratos',        icon: IC.subcontrato },
+          { id: 'oc',                   label: 'Órdenes de Compra',   icon: IC.oc },
+        ]},
+        { label: 'Combustible', tabs: [
+          { id: 'fuel',       label: 'Recargas', icon: IC.combustible },
+          { id: 'fuel-price', label: 'Precios',  icon: IC.precio },
+        ]},
+      ];
 
   return (
-    <div className="min-h-screen bg-slate-50 relative">
-      <div className="fixed inset-0 bg-grid opacity-30 pointer-events-none" />
-      <div className="fixed top-0 right-0 w-[1000px] h-[1000px] bg-gradient-radial from-blue-100/50 via-transparent to-transparent blur-3xl pointer-events-none" />
-
-      <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-1 sm:py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
-              <img src="/favicon.svg" alt="Fleet Core Logo" className="h-14 w-14 object-contain block sm:hidden" />
-              <img src="/logo-header.svg" alt="Fleet Core Logo" className="h-14 w-auto object-contain hidden sm:block" />
-              {empresa && (
-                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
-                  {empresa.logoUrl
-                    ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
-                    : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600">{empresa.nombre?.[0]}</div>
-                  }
-                  <span className="text-xs font-semibold text-slate-700 max-w-[140px] truncate">{empresa.nombre}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
-              {user && (
-                <div className="hidden lg:block">
-                  <UserMenuDropdown
-                    user={user}
-                    userRole={userRole}
-                    onLogout={onLogout}
-                    onBackToSelector={onBackToSelector}
-                    onGoToPricing={onGoToPricing}
-                    onAdminPanel={handleAdminPanel}
-                    onAdminEmpresaPanel={handleAdminEmpresaPanel}
-                  />
-                </div>
-              )}
-              <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors">
-                <svg className="w-6 h-6 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {showMobileMenu
-                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Desktop Nav */}
-          <nav className="hidden lg:flex items-center gap-3 mt-6 pt-6 border-t border-slate-200/50">
-            <NavTab to="/fleetcore" label="Dashboard" locked={userRole === 'mandante'} />
-
-            {/* Control de Producción dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => { if (!['mandante'].includes(userRole)) { setShowCostsMenu(!showCostsMenu); setShowFuelMenu(false); } }}
-                disabled={userRole === 'mandante'}
-                className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
-              >
-                {userRole === 'mandante' && <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
-                Control de Producción y EP
-                <svg className={`w-4 h-4 transition-transform ${showCostsMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-              </button>
-              {showCostsMenu && !['mandante'].includes(userRole) && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowCostsMenu(false)} />
-                  <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
-                    <div className="p-2 space-y-1">
-                      {[
-                        { to: "/fleetcore/payroll", label: "Registro Diario", colors: "from-emerald-50 to-teal-50 text-emerald-700", icon: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" },
-                        { to: "/fleetcore/reporte-workfleet", label: "Equipos y Servicios", colors: "from-blue-50 to-cyan-50 text-blue-700", icon: "M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
-                        { to: "/fleetcore/consolidado", label: "Detalle Flota", colors: "from-indigo-50 to-blue-50 text-indigo-700", icon: "M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" },
-                        { to: "/fleetcore/payment-status", label: "Estado de Pago", colors: "from-violet-50 to-purple-50 text-violet-700", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
-                        { to: "/fleetcore/combustible-detalle", label: "Combustible (4.1)", colors: "from-orange-50 to-amber-50 text-orange-700", icon: "M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" },
-                        { to: "/fleetcore/rendiciones", label: "Rendiciones", colors: "from-amber-50 to-yellow-50 text-amber-700", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
-                        { to: "/fleetcore/pasajes", label: "Pasajes", colors: "from-sky-50 to-blue-50 text-sky-700", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" },
-                        { to: "/fleetcore/subcontratos", label: "Subcontratos", colors: "from-teal-50 to-cyan-50 text-teal-700", icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" },
-                        { to: "/fleetcore/oc", label: "Órdenes de Compra", colors: "from-rose-50 to-pink-50 text-rose-700", icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" },
-                      ].map(item => (
-                        <NavLink key={item.to} to={item.to} onClick={() => setShowCostsMenu(false)}
-                          className={({ isActive }) => `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${isActive ? `bg-gradient-to-r ${item.colors}` : `text-slate-900 hover:bg-gradient-to-r hover:${item.colors}`}`}>
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>
-                          {item.label}
-                        </NavLink>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Combustible dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => { if (!['mandante'].includes(userRole)) { setShowFuelMenu(!showFuelMenu); setShowCostsMenu(false); } }}
-                disabled={userRole === 'mandante'}
-                className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${userRole === 'mandante' ? 'text-slate-400 cursor-not-allowed opacity-60' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
-              >
-                {userRole === 'mandante' && <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
-                Combustible
-                <svg className={`w-4 h-4 transition-transform ${showFuelMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-              </button>
-              {showFuelMenu && !['mandante'].includes(userRole) && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowFuelMenu(false)} />
-                  <div className="absolute left-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-scaleIn">
-                    <div className="p-2 space-y-1">
-                      {[
-                        { to: "/fleetcore/fuel", label: "Recargas", colors: "from-orange-50 to-amber-50 text-orange-700", icon: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z" },
-                        { to: "/fleetcore/fuel-price", label: "Precios", colors: "from-amber-50 to-yellow-50 text-amber-700", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 2v8m0 0v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
-                      ].map(item => (
-                        <NavLink key={item.to} to={item.to} onClick={() => setShowFuelMenu(false)}
-                          className={({ isActive }) => `flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-colors ${isActive ? `bg-gradient-to-r ${item.colors}` : `text-slate-900 hover:bg-gradient-to-r hover:${item.colors}`}`}>
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>
-                          {item.label}
-                        </NavLink>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-          </nav>
-        </div>
-      </header>
-
-      {/* Mobile menu */}
-      {showMobileMenu && (
-          <>
-            <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
-            <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{ background: 'linear-gradient(135deg,#2A3F5F 0%,#0F1C2E 100%)' }}>
-                <div className="flex items-center gap-3">
-                  <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
-                  <h2 className="text-base font-black text-white">Menú</h2>
-                </div>
-                <button onClick={() => setShowMobileMenu(false)} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-                <MobileNavLink to="/fleetcore" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
-                <div className="h-px bg-slate-200 my-4" />
-                <MobileNavLink to="/fleetcore/reporte-detallado" label="Reporte Detallado" onClick={() => setShowMobileMenu(false)} />
-                <div className="h-px bg-slate-200 my-4" />
-                <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Combustible</div>
-                <MobileNavLink to="/fleetcore/fuel" label="Recargas" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/fuel-price" label="Precios Combustible" onClick={() => setShowMobileMenu(false)} />
-                <div className="h-px bg-slate-200 my-4" />
-                <div className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Costos</div>
-                <MobileNavLink to="/fleetcore/payroll" label="Remuneraciones" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/payment-status" label="Estados de Pago" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/combustible-detalle" label="Combustible (4.1)" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/rendiciones" label="Rendiciones" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/subcontratos" label="Subcontratos" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/oc" label="Órdenes de Compra" onClick={() => setShowMobileMenu(false)} />
-                <MobileNavLink to="/fleetcore/consolidado" label="Consolidado Total" onClick={() => setShowMobileMenu(false)} />
-                <div className="h-px bg-slate-200 my-4" />
-                <button
-                  onClick={() => { setShowMobileMenu(false); onGoToPricing(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-blue-700 hover:bg-blue-50 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                  </svg>
-                  Mi plan · {planTier.label}
-                </button>
-                <div className="h-px bg-slate-200 my-2" />
-                {canGoToAdmin && (
-                  <button
-                    onClick={() => { setShowMobileMenu(false); handleAdminPanel(); }}
-                    className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                    Panel de Admin
-                  </button>
-                )}
-                <button
-                  onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                  Cambiar aplicación
-                </button>
-                <button
-                  onClick={() => { setShowMobileMenu(false); onLogout(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
-                  </svg>
-                  Cerrar sesión
-                </button>
-              </nav>
-            </div>
-          </>
-        )}
-
-      <main className="max-w-[1400px] mx-auto px-0 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
+    <AppShellLayout
+      navGroups={navGroups}
+      basePath="/fleetcore"
+      marca={{
+        titulo: 'Fleet', resalte: 'Core', subtitulo: 'Oficina Técnica',
+        gradiente: 'linear-gradient(135deg,#2563eb,#1d4ed8)',
+        iconoPath: IC.flota,
+      }}
+      user={user} userRole={userRole} onLogout={onLogout}
+      onBackToSelector={onBackToSelector}
+      onGoToPricing={onGoToPricing}
+      onAdminPanel={handleAdminPanel}
+      onAdminEmpresaPanel={handleAdminEmpresaPanel}
+    >
+      <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-[1500px] mx-auto">
         <Routes>
           <Route path="/reporte-workfleet" element={<ReporteWorkFleet />} />
-          {!['mandante'].includes(userRole) ? (
+          {!esMandante ? (
             <>
               <Route path="/" element={<Dashboard />} />
               <Route path="/logs" element={<Logs />} />
@@ -307,55 +154,8 @@ function Shell({ user, userRole, onLogout, selectedApp, onBackToSelector, onGoTo
             <Route path="*" element={<Navigate to="/reporte-workfleet" replace />} />
           )}
         </Routes>
-      </main>
-
-      <footer className="border-t border-slate-200/50 mt-8 sm:mt-12 lg:mt-16">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-slate-600">
-            <div className="flex items-center gap-2">
-              <img src="/favicon.svg" alt="Fleet Core" className="h-6 w-6 object-contain" />
-              <span className="font-medium">FleetCore by <strong>SAER TI</strong></span>
-            </div>
-            <div className="text-center sm:text-right">© {new Date().getFullYear()} Todos los derechos reservados</div>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-// ============================================================
-// NavTab / MobileNavLink helpers (usados por Shell)
-// ============================================================
-function NavTab({ to, label, locked = false }) {
-  if (locked) {
-    return (
-      <button disabled className="relative px-6 py-3 text-sm font-semibold rounded-xl transition-all text-slate-400 cursor-not-allowed opacity-60 flex items-center gap-2" title="Acceso restringido">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
-        <span>{label}</span>
-      </button>
-    );
-  }
-  return (
-    <NavLink to={to} end={to === "/fleetcore" || to === "/"} className={({ isActive }) => `relative px-6 py-3 text-sm font-semibold rounded-xl transition-all ${isActive ? "text-white" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"}`}>
-      {({ isActive }) => (
-        <>
-          {isActive && <div className="absolute inset-0 bg-gradient-to-r from-blue-900 to-blue-700 rounded-xl shadow-lg" />}
-          <span className="relative z-10">{label}</span>
-        </>
-      )}
-    </NavLink>
-  );
-}
-
-function MobileNavLink({ to, label, onClick }) {
-  return (
-    <NavLink to={to} end={to === "/fleetcore" || to === "/"} onClick={onClick}
-      className={({ isActive }) => `flex items-center px-4 py-3 rounded-xl font-semibold text-sm transition-all ${isActive ? "bg-gradient-to-r from-blue-900 to-blue-700 text-white shadow-lg" : "text-slate-700 hover:bg-slate-100"}`}>
-      {label}
-    </NavLink>
+      </div>
+    </AppShellLayout>
   );
 }
 
