@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useEmpresa } from "../../lib/useEmpresa";
-import UserMenuDropdown from "../../components/UserMenuDropdown";
+import AppShellLayout from "../../components/AppShellLayout";
 import { MaquinariaFilterProvider, useMaquinariaFilter } from "../../components/maquinaria/MaquinariaFilterContext";
 import { buildMaquinariaAlerts } from "../../components/maquinaria/maquinariaAlerts";
 import OrdenesTrabajo from "./OrdenesTrabajo";
@@ -20,13 +20,32 @@ import MaquinariaAlertas from "./MaquinariaAlertas";
 
 // ============================================================
 // MaquinariaShell — contenedor del módulo Maquinaria
-// Sigue el mismo patrón que RRHHShell / ReportesShell: header +
-// nav interna + <Routes> anidadas bajo /maquinaria/*
 //
-// NOTA: por ahora solo existe la pantalla de Órdenes de Trabajo.
-// A medida que se construyan Equipos/Mantenimiento, Fallas y
-// Repuestos, se agregan acá como nuevos <NavTab> + <Route>.
+// La barra lateral la dibuja AppShellLayout, igual que el resto de los
+// módulos. Antes eran pestañas horizontales con menús desplegables: con trece
+// destinos repartidos en Rental y Taller, la barra lateral los muestra todos a
+// la vez y ya no hay que abrir un dropdown para saber qué existe.
+//
+// Este archivo se quedó con lo propio del módulo: el catálogo de destinos, las
+// rutas, el filtro de proyecto y la campana de alertas.
 // ============================================================
+
+// Los iconos son el `d` de un path; el shell acepta también nodos JSX.
+const IC = {
+  dashboard:    "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
+  tablero:      "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
+  rentabilidad: "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6",
+  cotizacion:   "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+  contrato:     "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
+  pagos:        "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
+  clientes:     "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
+  equipos:      "M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1",
+  ordenes:      "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+  fallas:       "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+  repuestos:    "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
+  config:       "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4",
+};
+
 export default function MaquinariaShell(props) {
   return (
     <MaquinariaFilterProvider>
@@ -36,14 +55,12 @@ export default function MaquinariaShell(props) {
 }
 
 function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
-  const { empresa } = useEmpresa();
   const { empresaId } = useEmpresa();
   const { projectId, setProjectId, projects } = useMaquinariaFilter();
   const navigate = useNavigate();
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [alerts, setAlerts] = useState([]);
-  const canGoToAdmin = ['superadmin', 'admin_contrato', 'administrativo'].includes(userRole);
-  const isMecanico = userRole === 'mecanico';
+  const canGoToAdmin = ["superadmin", "admin_contrato", "administrativo"].includes(userRole);
+  const isMecanico = userRole === "mecanico";
 
   useEffect(() => {
     if (!empresaId || isMecanico) return;
@@ -57,184 +74,65 @@ function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAd
     return () => { cancel = true; };
   }, [empresaId, isMecanico]);
 
+  // El mecánico solo ve sus órdenes: un menú con trece destinos que no puede
+  // abrir es ruido, no información.
+  const navGroups = isMecanico
+    ? [{ label: "", tabs: [{ id: "ordenes-trabajo", label: "Mis Órdenes de Trabajo", icon: IC.ordenes }] }]
+    : [
+        { label: "", tabs: [
+          { id: "dashboard", label: "Dashboard", icon: IC.dashboard },
+          { id: "alertas",   label: "Alertas",   icon: IC.fallas, badge: alerts.length, badgeCritico: alerts.some(a => a.severidad === "critica") },
+        ]},
+        { label: "Rental", tabs: [
+          { id: "rental",       label: "Tablero Rental",  icon: IC.tablero },
+          { id: "rentabilidad", label: "Rentabilidad",    icon: IC.rentabilidad },
+          { id: "cotizaciones", label: "Cotizaciones",    icon: IC.cotizacion },
+          { id: "contratos",    label: "Contratos",       icon: IC.contrato },
+          { id: "pagos",        label: "Estados de pago", icon: IC.pagos },
+          { id: "clientes",     label: "Clientes",        icon: IC.clientes },
+          { id: "equipos",      label: "Equipos",         icon: IC.equipos },
+        ]},
+        { label: "Taller", tabs: [
+          { id: "ordenes-trabajo", label: "Órdenes de Trabajo", icon: IC.ordenes },
+          { id: "fallas",          label: "Fallas",             icon: IC.fallas },
+          { id: "repuestos",       label: "Repuestos",          icon: IC.repuestos },
+          { id: "config",          label: "Configuración",      icon: IC.config },
+        ]},
+      ];
+
+  const inicio = isMecanico ? "/maquinaria/ordenes-trabajo" : "/maquinaria/dashboard";
+
   return (
-    <div className="min-h-screen bg-slate-50 relative">
-      <div className="fixed inset-0 bg-grid opacity-30 pointer-events-none" />
-      <div className="fixed top-0 right-0 w-[1000px] h-[1000px] bg-gradient-radial from-red-100/50 via-transparent to-transparent blur-3xl pointer-events-none" />
-
-      <header className="sticky top-0 z-40 glass-card border-b border-slate-200/50">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-1 sm:py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 sm:gap-4 lg:gap-5 animate-fadeInUp">
-              <img src="/favicon.svg" alt="Maquinaria" className="h-14 w-14 object-contain block sm:hidden" />
-              <div className="hidden sm:flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center shadow-md">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </div>
-                <span className="text-base font-black text-slate-900">Maquinaria</span>
-              </div>
-              {empresa && (
-                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
-                  {empresa.logoUrl
-                    ? <img src={empresa.logoUrl} alt="" className="w-5 h-5 rounded object-contain" />
-                    : <div className="w-5 h-5 rounded bg-slate-300 flex items-center justify-center text-[9px] font-black text-slate-600">{empresa.nombre?.[0]}</div>
-                  }
-                  <span className="text-xs font-semibold text-slate-700 max-w-[140px] truncate">{empresa.nombre}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 sm:gap-4 animate-slideInRight">
-              {!isMecanico && <AlertBell alerts={alerts} navigate={navigate} />}
-              {!isMecanico && (
-                <select
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  className="hidden md:block border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 max-w-[200px]"
-                  title="Filtrar el módulo por proyecto"
-                >
-                  <option value="">Todos los proyectos</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              )}
-              {user && (
-                <div className="hidden lg:block">
-                  <UserMenuDropdown
-                    user={user}
-                    userRole={userRole}
-                    onLogout={onLogout}
-                    onBackToSelector={onBackToSelector}
-                    onAdminPanel={canGoToAdmin ? onAdminPanel : undefined}
-                    onAdminEmpresaPanel={canGoToAdmin ? onAdminEmpresaPanel : undefined}
-                  />
-                </div>
-              )}
-              <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors">
-                <svg className="w-6 h-6 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {showMobileMenu
-                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Desktop Nav — agrupado en categorías Rental / Taller */}
-          <nav className="hidden lg:flex items-center gap-2 mt-6 pt-6 border-t border-slate-200/50">
-            {isMecanico ? (
-              <MaquinariaNavTab to="/maquinaria/ordenes-trabajo" label="Mis Órdenes de Trabajo" />
-            ) : (
-              <>
-                <MaquinariaNavTab to="/maquinaria/dashboard" label="Dashboard" />
-                <NavDropdown
-                  label="Rental"
-                  items={[
-                    { to: "/maquinaria/rental", label: "Tablero Rental" },
-                    { to: "/maquinaria/rentabilidad", label: "Rentabilidad" },
-                    { to: "/maquinaria/cotizaciones", label: "Cotizaciones" },
-                    { to: "/maquinaria/contratos", label: "Contratos" },
-                    { to: "/maquinaria/pagos", label: "Estados de pago" },
-                    { to: "/maquinaria/clientes", label: "Clientes" },
-                    { to: "/maquinaria/equipos", label: "Equipos" },
-                  ]}
-                />
-                <NavDropdown
-                  label="Taller"
-                  items={[
-                    { to: "/maquinaria/ordenes-trabajo", label: "Órdenes de Trabajo" },
-                    { to: "/maquinaria/fallas", label: "Fallas" },
-                    { to: "/maquinaria/repuestos", label: "Repuestos" },
-                    { to: "/maquinaria/config", label: "Configuración" },
-                  ]}
-                />
-              </>
-            )}
-          </nav>
-        </div>
-
-        {/* Mobile menu */}
-        {showMobileMenu && (
-          <>
-            <div className="lg:hidden fixed inset-0 bg-black/60 z-[60] animate-fadeIn" onClick={() => setShowMobileMenu(false)} />
-            <div className="lg:hidden fixed top-0 right-0 bottom-0 w-full sm:w-80 bg-white z-[70] shadow-2xl animate-slideInRight flex flex-col">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200" style={{ background: 'linear-gradient(135deg,#7f1d1d 0%,#450a0a 100%)' }}>
-                <div className="flex items-center gap-3">
-                  <img src="/favicon.svg" alt="Logo" className="w-7 h-7 object-contain" />
-                  <h2 className="text-base font-black text-white">Maquinaria</h2>
-                </div>
-                <button onClick={() => setShowMobileMenu(false)} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-                {isMecanico ? (
-                  <MaquinariaMobileNavLink to="/maquinaria/ordenes-trabajo" label="Mis Órdenes de Trabajo" onClick={() => setShowMobileMenu(false)} />
-                ) : (
-                  <>
-                    <MaquinariaMobileNavLink to="/maquinaria/dashboard" label="Dashboard" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/alertas" label="Alertas" onClick={() => setShowMobileMenu(false)} />
-
-                    <p className="text-[10px] font-black text-slate-400 uppercase px-4 pt-4 pb-1">Rental</p>
-                    <MaquinariaMobileNavLink to="/maquinaria/rental" label="Tablero Rental" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/rentabilidad" label="Rentabilidad" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/cotizaciones" label="Cotizaciones" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/contratos" label="Contratos" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/pagos" label="Estados de pago" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/clientes" label="Clientes" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/equipos" label="Equipos" onClick={() => setShowMobileMenu(false)} />
-
-                    <p className="text-[10px] font-black text-slate-400 uppercase px-4 pt-4 pb-1">Taller</p>
-                    <MaquinariaMobileNavLink to="/maquinaria/ordenes-trabajo" label="Órdenes de Trabajo" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/fallas" label="Fallas" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/repuestos" label="Repuestos" onClick={() => setShowMobileMenu(false)} />
-                    <MaquinariaMobileNavLink to="/maquinaria/config" label="Configuración" onClick={() => setShowMobileMenu(false)} />
-                  </>
-                )}
-                <div className="h-px bg-slate-200 my-4" />
-                {canGoToAdmin && onAdminPanel && (
-                  <button
-                    onClick={() => { setShowMobileMenu(false); onAdminPanel(); }}
-                    className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                    Panel de Admin
-                  </button>
-                )}
-                <button
-                  onClick={() => { setShowMobileMenu(false); onBackToSelector(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-slate-700 hover:bg-slate-100 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                  Cambiar aplicación
-                </button>
-                <button
-                  onClick={() => { setShowMobileMenu(false); onLogout(); }}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl font-semibold text-sm text-red-600 hover:bg-red-50 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
-                  </svg>
-                  Cerrar sesión
-                </button>
-              </nav>
-            </div>
-          </>
-        )}
-      </header>
-
-      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 relative">
+    <AppShellLayout
+      navGroups={navGroups}
+      basePath="/maquinaria"
+      marca={{
+        titulo: "Fleet", resalte: "Core", subtitulo: "Maquinaria",
+        gradiente: "linear-gradient(135deg,#dc2626,#e11d48)",
+        iconoPath: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
+      }}
+      // El filtro de proyecto aplica a todo el módulo, así que vive en la barra
+      // y no dentro de cada pantalla.
+      headerSlot={!isMecanico && (
+        <select
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          className="w-full border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 bg-white"
+          title="Filtrar el módulo por proyecto"
+        >
+          <option value="">Todos los proyectos</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      )}
+      footerSlot={!isMecanico && <AlertBell alerts={alerts} navigate={navigate} />}
+      user={user} userRole={userRole} onLogout={onLogout}
+      onBackToSelector={onBackToSelector}
+      onAdminPanel={canGoToAdmin ? onAdminPanel : undefined}
+      onAdminEmpresaPanel={canGoToAdmin ? onAdminEmpresaPanel : undefined}
+    >
+      <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-[1500px] mx-auto">
         <Routes>
-          <Route path="/" element={<Navigate to={isMecanico ? "/maquinaria/ordenes-trabajo" : "/maquinaria/dashboard"} replace />} />
+          <Route path="/" element={<Navigate to={inicio} replace />} />
           {!isMecanico && <Route path="/dashboard" element={<MaquinariaDashboard />} />}
           <Route path="/ordenes-trabajo" element={<OrdenesTrabajo />} />
           <Route path="/equipos" element={<Equipos />} />
@@ -248,51 +146,14 @@ function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAd
           <Route path="/fallas" element={<Fallas />} />
           {!isMecanico && <Route path="/config" element={<MaquinariaConfig />} />}
           {!isMecanico && <Route path="/alertas" element={<MaquinariaAlertas />} />}
-          <Route path="*" element={<Navigate to={isMecanico ? "/maquinaria/ordenes-trabajo" : "/maquinaria/dashboard"} replace />} />
+          <Route path="*" element={<Navigate to={inicio} replace />} />
         </Routes>
-      </main>
-
-      <footer className="border-t border-slate-200/50 mt-8 sm:mt-12 lg:mt-16">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs sm:text-sm text-slate-600">
-            <div className="flex items-center gap-2">
-              <img src="/favicon.svg" alt="Fleet Core" className="h-6 w-6 object-contain" />
-              <span className="font-medium">FleetCore Maquinaria by <strong>SAER TI</strong></span>
-            </div>
-            <div className="text-center sm:text-right">© {new Date().getFullYear()} Todos los derechos reservados</div>
-          </div>
-        </div>
-      </footer>
-    </div>
+      </div>
+    </AppShellLayout>
   );
 }
 
 // ============================================================
-// Helpers de navegación (mismo estilo que Shell en App.jsx)
-// ============================================================
-function MaquinariaNavTab({ to, label }) {
-  return (
-    <NavLink to={to} className={({ isActive }) => `relative px-6 py-3 text-sm font-semibold rounded-xl transition-all ${isActive ? "text-white" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"}`}>
-      {({ isActive }) => (
-        <>
-          {isActive && <div className="absolute inset-0 bg-gradient-to-r from-red-700 to-rose-600 rounded-xl shadow-lg" />}
-          <span className="relative z-10">{label}</span>
-        </>
-      )}
-    </NavLink>
-  );
-}
-
-function MaquinariaMobileNavLink({ to, label, onClick }) {
-  return (
-    <NavLink to={to} onClick={onClick}
-      className={({ isActive }) => `flex items-center px-4 py-3 rounded-xl font-semibold text-sm transition-all ${isActive ? "bg-gradient-to-r from-red-700 to-rose-600 text-white shadow-lg" : "text-slate-700 hover:bg-slate-100"}`}>
-      {label}
-    </NavLink>
-  );
-}
-
-// Campana de alertas con dropdown de notificaciones (sin cambiar de vista)
 function AlertBell({ alerts, navigate }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -375,52 +236,6 @@ function AlertBell({ alerts, navigate }) {
               Ver todas las alertas{count > visibles.length ? ` (${count})` : ""}
             </button>
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Menú desplegable de categoría (Rental / Taller) para desktop
-function NavDropdown({ label, items }) {
-  const [open, setOpen] = useState(false);
-  const location = useLocation();
-  const ref = useRef(null);
-  const activo = items.some((it) => location.pathname === it.to);
-
-  useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  // Cerrar al cambiar de ruta
-  useEffect(() => { setOpen(false); }, [location.pathname]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className={`relative flex items-center gap-1.5 px-6 py-3 text-sm font-semibold rounded-xl transition-all ${activo ? "text-white" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"}`}
-      >
-        {activo && <div className="absolute inset-0 bg-gradient-to-r from-red-700 to-rose-600 rounded-xl shadow-lg" />}
-        <span className="relative z-10">{label}</span>
-        <svg className={`relative z-10 w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="absolute left-0 mt-2 w-56 bg-white border-2 border-slate-100 rounded-2xl shadow-xl overflow-hidden z-50">
-          {items.map((it) => (
-            <NavLink
-              key={it.to}
-              to={it.to}
-              className={({ isActive }) => `block px-4 py-3 text-sm font-semibold transition-colors ${isActive ? "bg-red-50 text-red-700" : "text-slate-700 hover:bg-slate-50"}`}
-            >
-              {it.label}
-            </NavLink>
-          ))}
         </div>
       )}
     </div>

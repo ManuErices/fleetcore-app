@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useEmpresa } from '../../lib/useEmpresa';
-import { Modal, inp, MESES, UTM_DEFAULT } from './shared';
+import { Modal, inp, MESES } from './shared';
 import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import {
   borradorDeReliquidacion, montoYaPagado, diferencialDe, guardarReliquidacion,
@@ -31,7 +31,7 @@ function Campo({ label, children }) {
 
 export default function ReliquidacionModal({
   isOpen, onClose, original, editData, trabajador, contrato,
-  anticiposRegistrados, utm = UTM_DEFAULT, onSaved,
+  anticiposRegistrados, licenciasRegistradas, utm, onSaved,
 }) {
   const { empresaId } = useEmpresa();
   const { itemsCustom } = useItemsPago(empresaId);
@@ -45,11 +45,12 @@ export default function ReliquidacionModal({
     if (!isOpen) return;
     if (editData) { setForm({ ...editData }); setEstim(false); return; }
     if (!original) { setForm(null); return; }
-    const { monto, estimado: est } = montoYaPagado(original, trabajador, contrato, { utm, anticiposRegistrados });
+    const { monto, estimado: est } = montoYaPagado(original, trabajador, contrato,
+      { utm, anticiposRegistrados, licenciasRegistradas });
     setForm(borradorDeReliquidacion(original, monto));
     setEstim(est);
     setError(null);
-  }, [isOpen, original, editData, trabajador, contrato, utm, anticiposRegistrados]);
+  }, [isOpen, original, editData, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -59,8 +60,8 @@ export default function ReliquidacionModal({
 
   const resultado = useMemo(() => {
     if (!form || !contrato) return null;
-    return diferencialDe(form, trabajador, contrato, { utm, anticiposRegistrados });
-  }, [form, trabajador, contrato, utm, anticiposRegistrados]);
+    return diferencialDe(form, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas });
+  }, [form, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas]);
 
   const guardar = async () => {
     if (!form) return;

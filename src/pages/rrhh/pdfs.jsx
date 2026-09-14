@@ -1,5 +1,6 @@
-import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, UTM_DEFAULT, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
+import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
 import { calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
+import { paramsDe } from './parametros';
 
 function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml = false, empresa = null } = {}) {
   const rutEmpleador = empresa?.rut || contrato.rutEmpresa || '_______________';
@@ -237,11 +238,14 @@ ${preview || returnHtml ? '' : '<script>window.onload=function(){window.print();
   if (!win) alert('Permite ventanas emergentes para descargar el contrato.');
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null, anticiposRegistrados } = {}) {
-  // `anticiposRegistrados` viene de la colección de anticipos del período. Sin
-  // él, el PDF mostraría un líquido distinto al que se transfirió.
-  const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados });
-  const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || UTM_DEFAULT);
+function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null, anticiposRegistrados, licenciasRegistradas } = {}) {
+  // `anticiposRegistrados` y `licenciasRegistradas` vienen de sus colecciones
+  // del período. Sin ellos el PDF mostraría un líquido distinto al que se
+  // transfirió y días trabajados que no corresponden.
+  const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados, licenciasRegistradas });
+  // La UTM del período liquidado: el IUT es progresivo y una UTM vieja mueve
+  // de tramo. `rem.utm` sigue mandando si el documento la trae congelada.
+  const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm);
   const nombre   = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
     : '_______________';
@@ -252,7 +256,10 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   const rentaTrib    = calcularRentaTributable(calc);
   const liquidoFinal = calc.liquido - iut;
   const diasTrab     = calc.diasTrab || rem.diasTrabajados || 30;
-  const diasLic      = rem.diasLicencia || 0;
+  // Los días de reposo salen del cálculo, que ya resolvió si vienen de la
+  // colección de licencias o del campo manual. Antes leía solo el campo manual
+  // y una licencia registrada en su pantalla no aparecía en el PDF.
+  const diasLic      = calc.diasLicencia ?? rem.diasLicencia ?? 0;
   const diasAus      = rem.diasAusencia || 0;
   const horasBase    = rem.horasBase ?? (contrato?.jornadaHorasSemanales || 45);
   const horasExtra   = rem.horasExtra || 0;
@@ -303,6 +310,10 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
     ['Colación',           calc.bColacion],
     ['Movilización',       calc.bMovil],
     ['Viáticos',           calc.viaticos],
+    // La asignación familiar es haber no imponible de cargo fiscal: el
+    // empleador la paga y la descuenta de las cotizaciones que entera.
+    [`Asignación Familiar${calc.tramoAF ? ` (tramo ${calc.tramoAF}, ${calc.cargasEquiv} carga${calc.cargasEquiv === 1 ? '' : 's'})` : ''}`,
+      calc.asigFamiliar],
     ...itemsPorTipo('noImponible'),
     ['Otros No Imponibles', calc.otrosNoImp],
   ].filter(([, v]) => v > 0);
@@ -941,7 +952,8 @@ ${preview || returnHtml ? '' : '<script>window.onload=function(){window.print();
 function generarCertificadoAnual(trabajador, contrato, liquidacionesAnio, anio, utm) {
   const fmt   = n => `$${Math.round(n||0).toLocaleString('es-CL')}`;
   const fmtN  = n => Math.round(n||0).toLocaleString('es-CL');
-  const utmVal = utm || UTM_DEFAULT;
+  // UTM de diciembre del año certificado, que es la referencia del ejercicio.
+  const utmVal = utm || paramsDe({ mes: '12', anio }).utm;
   const nombre = trabajador
     ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
     : '_______________';
@@ -1465,7 +1477,7 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
       // exportaba `c.liquido` sin restar el IUT, así que a todo trabajador
       // afecto a impuesto se le transfería de más — y la pantalla mostraba
       // el monto correcto mientras el archivo llevaba otro.
-      const iut    = calcularIUT(calcularRentaTributable(c), UTM_DEFAULT);
+      const iut    = calcularIUT(calcularRentaTributable(c), paramsDe({ mes: liq.mes, anio: liq.anio }).utm);
       const monto  = Math.max(0, c.liquido - iut);
       return [
         rut,
@@ -1521,7 +1533,7 @@ function generarCSVImportadorSII(liqPorTrabajador, anio, utm) {
   // liqPorTrabajador: Array de { trabajador, contrato, liquidaciones[] }
   // liquidaciones[]: Array con los meses del año, cada uno con mes='01'..'12'
 
-  const utmVal = utm || UTM_DEFAULT;
+  const utmVal = utm || paramsDe({ mes: '12', anio }).utm;
   const n = v => Math.round(v || 0);  // entero sin decimales
 
   // Separar RUT en cuerpo + dígito verificador

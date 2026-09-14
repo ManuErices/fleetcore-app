@@ -1,10 +1,18 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { paramsDe } from './parametros';
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTES GLOBALES RRHH
 // ─────────────────────────────────────────────────────────────
-export const IMM_2026 = 539000;
-export const IMM_2024 = 501787;
+// El Ingreso Mínimo Mensual dejó de vivir acá: cambia por ley varias veces al
+// año y el valor correcto depende del período que se liquida, no de la fecha en
+// que se escribió la constante. La tabla de vigencias está en parametros.js.
+//
+// Estos dos nombres se conservan solo para no romper imports antiguos.
+/** @deprecated usar paramsDe(periodo).imm */
+export const IMM_2026 = paramsDe('2026-05').imm;
+/** @deprecated usar paramsDe(periodo).imm */
+export const IMM_2024 = paramsDe('2024-07').imm;
 
 export const TASAS_AFP = {
   // Tasa total de cargo del trabajador = 10% obligatorio + comisión de la AFP.
@@ -37,7 +45,12 @@ export const TASAS = {
   mutual:      0.0348, // Mutual AT — tasa específica MPF Ingeniería Civil (3.48%)
 };
 
-export const UTM_DEFAULT = 64085;
+// La UTM se reajusta todos los meses: una constante acá siempre va a estar
+// vieja. Esta quedó en 64.085 (valor de 2024) mientras la de sept-2026 es
+// 71.721, y con una UTM baja el sueldo equivale a más UTM de las que
+// corresponde, así que el impuesto único salía sobrestimado.
+/** @deprecated usar paramsDe(periodo).utm */
+export const UTM_DEFAULT = paramsDe(null).utm;
 export const TOPE_ANIOS_INDEMNIZACION = 11;
 export const CAUSALES_CON_INDEMNIZACION = ['161'];
 
@@ -56,7 +69,11 @@ export const AREAS    = [
 export const AFPS     = ['Capital','Cuprum','Habitat','Modelo','PlanVital','ProVida','Uno'];
 export const ISAPRES  = ['Banmédica','Colmena','Cruz Blanca','Esencial','Masvida','Nueva Masvida','Vida Tres'];
 export const TIPOS_CONTRATO = ['Plazo fijo', 'Indefinido', 'Por obra o faena'];
-export const JORNADAS = ['Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
+// Ley 21.561: 44 hrs desde abril 2024, 42 desde abril 2026, 40 desde abril
+// 2028. Las opciones de 44 y 45 se conservan porque hay contratos firmados con
+// esas jornadas — el cálculo las topea al máximo legal del período sin
+// necesidad de anexo, así que no hay que corregir contratos viejos a mano.
+export const JORNADAS = ['Completa (42 hrs)','Completa (44 hrs)','Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
 export const CENTROS_COSTO = ['Obras','Administración Central','Oficina Técnica','Logística'];
 export const TIPOS_PERIODO = ['mensual','quincenal','semanal','turno'];
 export const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -201,17 +218,40 @@ const _norm = (s) => String(s || '')
   .toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 /**
+ * Reduce el nombre de una institución a su parte distintiva.
+ *
+ * El importador de nómina copia el texto del archivo de origen tal cual, así
+ * que llegan razones sociales completas: "BANCO FALABELLA S.A.",
+ * "MERCADO PAGO EMISORA S.A.". Comparar eso contra el catálogo por igualdad
+ * exacta falla siempre, y la persona queda fuera del archivo de pago sin que
+ * nadie entienda por qué.
+ *
+ * Se quita el "BANCO" inicial, la forma societaria del final y las palabras
+ * que describen el giro en vez de identificar a la institución. "CHILE" NO se
+ * toca: es lo único que distingue a Banco de Chile.
+ */
+function _clave(s) {
+  let n = _norm(s);
+  n = n.replace(/^BANCO(DE)?/, '');
+  n = n.replace(/(SOCIEDAD)?EMISORA(DETARJETAS(DEPAGO)?)?/, '');
+  n = n.replace(/(SPA|SAC|SA|NA|LTDA|LIMITADA)$/, '');
+  return n;
+}
+
+/**
  * Resuelve el código de banco a partir de lo que traiga la ficha.
- * Acepta el código directo, el nombre exacto, o un nombre libre heredado
- * ("BANCOESTADO", "BCI") — de ahí los alias.
+ * Acepta el código directo, el nombre exacto, la razón social completa, o un
+ * nombre libre heredado ("BANCOESTADO", "BCI") — de ahí los alias.
  */
 export function codigoBanco(valor) {
   if (!valor) return '';
   const v = String(valor).trim();
   if (/^\d{3}$/.test(v) && BANCOS_CHILE.some(b => b.codigo === v)) return v;
+
   const n = _norm(v);
   const exacto = BANCOS_CHILE.find(b => _norm(b.nombre) === n);
   if (exacto) return exacto.codigo;
+
   const ALIAS = {
     BANCOESTADO: '012', ESTADO: '012', BANCODELESTADO: '012',
     BCI: '016', CREDITOEINVERSIONES: '016',
@@ -221,7 +261,24 @@ export function codigoBanco(valor) {
     COOPEUCH: '672', TENPO: '730', MERCADOPAGO: '875', PREX: '743',
     LOSANDES: '732', CAJALOSANDES: '732', GLOBAL66: '738', FINTUAL: '746',
   };
-  return ALIAS[n] || '';
+  if (ALIAS[n]) return ALIAS[n];
+
+  // Razón social completa: se compara por la parte distintiva.
+  const k = _clave(v);
+  if (!k) return '';
+  const porClave = BANCOS_CHILE.find(b => _clave(b.nombre) === k);
+  if (porClave) return porClave.codigo;
+  if (ALIAS[k]) return ALIAS[k];
+
+  // Último recurso: el catálogo contenido en lo que llegó ("SCOTIABANK CHILE").
+  // Se elige la coincidencia MÁS LARGA para que un nombre corto no le gane a
+  // uno específico, y se exigen 4 caracteres para no enganchar por casualidad.
+  const contenido = BANCOS_CHILE
+    .map(b => ({ b, k: _clave(b.nombre) }))
+    .filter(x => x.k.length >= 4 && k.includes(x.k))
+    .sort((a, z) => z.k.length - a.k.length)[0];
+
+  return contenido ? contenido.b.codigo : '';
 }
 
 export const nombreBanco = (codigo) =>
@@ -297,6 +354,72 @@ export function exportarReporteCSV(filas, nombre = 'reporte') {
 // COMPONENTES UI COMPARTIDOS
 // ─────────────────────────────────────────────────────────────
 
+
+/**
+ * Selector de trabajador con buscador, en modal.
+ *
+ * Reemplaza a las listas de chips que mostraban solo los primeros doce: con 60
+ * personas, el que buscabas casi nunca estaba entre ellos y no había forma de
+ * llegar al resto. Acá se buscan todos por nombre o RUT.
+ *
+ * `meta` permite que cada pantalla decida qué mostrar a la derecha de cada
+ * nombre — cantidad de anexos, cotización del mes, lo que aplique — sin que
+ * este componente tenga que saber de qué va la pantalla que lo usa.
+ */
+export function SelectorTrabajadorModal({
+  isOpen, onClose, trabajadores = [], onSelect,
+  titulo = 'Buscar trabajador', subtitulo, meta, vacio = 'Sin trabajadores',
+}) {
+  const [q, setQ] = useState('');
+
+  useEffect(() => { if (isOpen) setQ(''); }, [isOpen]);
+
+  const lista = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return (trabajadores || [])
+      .filter(x => !t || `${x.nombre} ${x.apellidoPaterno} ${x.apellidoMaterno} ${x.rut} ${x.cargo}`
+        .toLowerCase().includes(t))
+      .sort((a, b) => (a.apellidoPaterno || '').localeCompare(b.apellidoPaterno || ''));
+  }, [trabajadores, q]);
+
+  if (!isOpen) return null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={titulo} subtitle={subtitulo} maxWidth="max-w-xl">
+      <div className="space-y-3">
+        <input autoFocus className={inp} placeholder="Nombre, RUT o cargo…"
+          value={q} onChange={e => setQ(e.target.value)} />
+
+        <p className="text-[11px] font-bold text-slate-400">
+          {lista.length} de {trabajadores.length}
+        </p>
+
+        {/* Alto acotado: la lista completa haría del modal un scroll infinito y
+            el buscador quedaría fuera de vista justo cuando se necesita. */}
+        <div className="max-h-[52vh] overflow-y-auto rounded-xl border border-slate-100 divide-y divide-slate-50">
+          {lista.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-10">{vacio}</p>
+          ) : lista.map(t => (
+            <button key={t.id} onClick={() => { onSelect?.(t); onClose?.(); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-violet-50 transition-colors text-left">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-white font-black text-[10px] flex-shrink-0">
+                {(t.nombre?.[0] || '')}{(t.apellidoPaterno?.[0] || '')}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-800 truncate">
+                  {t.nombre} {t.apellidoPaterno}
+                </p>
+                <p className="text-[11px] text-slate-400 truncate font-mono">{t.rut || '—'}</p>
+              </div>
+              {meta && <div className="flex-shrink-0">{meta(t)}</div>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Modal base con overlay, header degradado y botón cerrar */
 export function Modal({ isOpen, onClose, title, subtitle, children, maxWidth = 'max-w-2xl' }) {
   useEffect(() => {
@@ -336,7 +459,7 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, nombre }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
         style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.25)' }}>
         <div className="w-12 h-12 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-4">

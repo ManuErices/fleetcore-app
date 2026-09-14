@@ -94,6 +94,57 @@ export async function crearAnticipo(empresaId, { trabajadorId, mes, anio, monto,
   return ref.id;
 }
 
+/**
+ * Trabajadores con quincena pactada a los que todavía NO se les generó el
+ * anticipo del período.
+ *
+ * El monto pactado vive en la ficha (`anticipoRecurrente`), pero eso es una
+ * plantilla, no un anticipo: no tiene fecha, no se puede pagar y no aparece en
+ * ninguna nómina. Esta función es el puente entre las dos cosas.
+ *
+ * Se excluye a quien ya tiene un anticipo vigente del mes aunque el monto sea
+ * distinto: si alguien lo editó a mano, generar otro encima duplicaría el
+ * descuento en su liquidación.
+ */
+export function quincenasPendientes(trabajadores, anticipos, mes, anio) {
+  return (trabajadores || [])
+    .filter(t => t.estado === 'activo')
+    .filter(t => (parseInt(t.anticipoRecurrente) || 0) > 0)
+    .filter(t => anticiposDe(anticipos, t.id, mes, anio).length === 0)
+    .map(t => ({
+      trabajadorId: t.id,
+      trabajador: t,
+      monto: parseInt(t.anticipoRecurrente) || 0,
+      glosa: t.glosaAnticipoRecurrente || 'Anticipo quincena',
+    }));
+}
+
+/**
+ * Crea de una vez los anticipos del período para todos los que tienen quincena
+ * pactada. Es idempotente: correrla dos veces no duplica nada, porque
+ * `quincenasPendientes` ya descartó a quien tiene uno.
+ *
+ * La fecha se fija al día 15, que es cuando efectivamente se transfiere la
+ * quincena. Queda editable en la tabla si ese mes se pagó otro día.
+ */
+export async function generarQuincenasDelMes(empresaId, trabajadores, anticipos, mes, anio) {
+  const pendientes = quincenasPendientes(trabajadores, anticipos, mes, anio);
+  const fecha = `${anio}-${String(mes).padStart(2, '0')}-15`;
+
+  const resultados = await Promise.allSettled(
+    pendientes.map(p => crearAnticipo(empresaId, {
+      trabajadorId: p.trabajadorId, mes, anio, monto: p.monto, glosa: p.glosa, fecha,
+    }))
+  );
+
+  const fallidos = resultados.filter(r => r.status === 'rejected');
+  return {
+    creados: resultados.length - fallidos.length,
+    fallidos: fallidos.length,
+    total: pendientes.length,
+  };
+}
+
 export async function actualizarAnticipo(empresaId, id, cambios) {
   const patch = { updatedAt: serverTimestamp() };
   if (cambios.monto !== undefined) {

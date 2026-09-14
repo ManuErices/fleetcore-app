@@ -29,7 +29,12 @@ import {
   collection, doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { liquidacionDe, calcularIUT, calcularRentaTributable } from './calculo';
-import { UTM_DEFAULT } from './shared';
+import { paramsDe } from './parametros';
+
+// La UTM se resuelve por el período del documento, no por una constante: el
+// impuesto único es progresivo y con una UTM vieja el sueldo equivale a más
+// UTM de las que corresponde, así que sale sobrestimado.
+const utmDe = (liq, utm) => utm || paramsDe({ mes: liq?.mes, anio: liq?.anio }).utm;
 
 /** Campos que NO se copian al reliquidar: pertenecen al documento original. */
 const NO_COPIAR = new Set([
@@ -46,12 +51,12 @@ const NO_COPIAR = new Set([
  * una estimación, y la UI lo advierte para que alguien lo confirme antes de
  * emitir la diferencia.
  */
-export function montoYaPagado(liq, trabajador, contrato, { utm = UTM_DEFAULT, anticiposRegistrados } = {}) {
+export function montoYaPagado(liq, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas } = {}) {
   if (liq?.montoPagado != null) {
     return { monto: Math.max(0, Math.round(liq.montoPagado)), estimado: false };
   }
-  const c   = liquidacionDe(trabajador, contrato, liq, { anticiposRegistrados });
-  const iut = calcularIUT(calcularRentaTributable(c), utm);
+  const c   = liquidacionDe(trabajador, contrato, liq, { anticiposRegistrados, licenciasRegistradas });
+  const iut = calcularIUT(calcularRentaTributable(c), utmDe(liq, utm));
   return { monto: Math.max(0, Math.round(c.liquido - iut)), estimado: true };
 }
 
@@ -81,9 +86,9 @@ export function borradorDeReliquidacion(original, pagoAnterior) {
  * fuera de la nómina, porque un archivo de transferencia no admite montos
  * negativos.
  */
-export function diferencialDe(rel, trabajador, contrato, { utm = UTM_DEFAULT, anticiposRegistrados } = {}) {
-  const c   = liquidacionDe(trabajador, contrato, rel, { anticiposRegistrados });
-  const iut = calcularIUT(calcularRentaTributable(c), utm);
+export function diferencialDe(rel, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas } = {}) {
+  const c   = liquidacionDe(trabajador, contrato, rel, { anticiposRegistrados, licenciasRegistradas });
+  const iut = calcularIUT(calcularRentaTributable(c), utmDe(rel, utm));
   const dif = c.liquido - iut;             // `liquido` ya trae restado pagoAnterior
   return {
     calc: c,

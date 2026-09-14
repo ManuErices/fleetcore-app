@@ -3,7 +3,6 @@ import { db, storage } from '../../lib/firebase';
 import { useEmpresa } from "../../lib/useEmpresa";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
 import * as Shared from './shared';
 import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
@@ -21,6 +20,7 @@ const {
   calcularLiquidacion, calcularLiquidacionConIUT, calcularFiniquito,
   calcularAntiguedad, labelPeriodo, diasDelMes, analizarDia,
   alertaVencimiento, exportarAsistenciaCSV, horasOrdinariasSemanales,
+  valorHoraExtra,
 } = Calc;
 
 const {
@@ -50,7 +50,7 @@ function Modal({ isOpen, onClose, title, subtitle, children, maxWidth = 'max-w-2
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-10 overflow-y-auto">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${maxWidth} mb-10`}
         style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.04)' }}>
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between"
@@ -153,6 +153,11 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     // Datos de pago: el Archivo de Pago lee banco y nroCuenta, pero no había
     // dónde cargarlos desde la interfaz. Solo llegaban por importación.
     banco: '', tipoCuenta: 'Cuenta Corriente', nroCuenta: '',
+    // Anticipo (quincena) pactado al contratar: se paga todos los meses por el
+    // mismo monto salvo excepciones. Vive en el trabajador y no en el contrato
+    // porque no es cláusula contractual — ajustarlo no debe requerir un anexo.
+    // Cada liquidación lo copia como valor inicial y ahí queda editable.
+    anticipoRecurrente: '', glosaAnticipoRecurrente: 'Anticipo quincena',
     esPensionado: false,
     estado: 'activo', observaciones: '',
     // Campos WorkFleet
@@ -813,6 +818,24 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         </div>
 
+        <Divider label="Anticipo recurrente (quincena)" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Monto mensual ($)">
+            <input type="text" className={inp} value={formatCLP(form.anticipoRecurrente)}
+              onChange={e => set('anticipoRecurrente', parseCLP(e.target.value))}
+              placeholder="Ej: 400.000" />
+            <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+              Es el monto acordado, no un anticipo. Para que se pague y se descuente hay que
+              generarlo cada mes desde Anticipos, con un clic para toda la empresa.
+            </p>
+          </Field>
+          <Field label="Glosa">
+            <input className={inp} value={form.glosaAnticipoRecurrente || ''}
+              onChange={e => set('glosaAnticipoRecurrente', e.target.value)}
+              placeholder="Ej: Anticipo quincena" />
+          </Field>
+        </div>
+
         <Divider label="Observaciones" />
         <Field label="Observaciones">
           <textarea className={inp} rows={2} value={form.observaciones}
@@ -999,7 +1022,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-end">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative h-full w-full max-w-md bg-white shadow-2xl overflow-y-auto flex flex-col"
         style={{ boxShadow: '-8px 0 40px rgba(0,0,0,0.15)' }}>
 
@@ -1197,7 +1220,7 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
   const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
-    cargo: '', jornada: 'Completa (45 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
+    cargo: '', jornada: 'Completa (42 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
     // Jornada personalizada (cuando jornada === 'Otro')
     jornadaHorasSemanales: '', jornadaHoraEntrada: '', jornadaHoraSalida: '',
@@ -1312,15 +1335,21 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
           </Field>
         </div>
 
-        {/* Campos adicionales cuando jornada es "Otro" */}
-        {form.jornada === 'Otro' && (
+        {/* Campos adicionales para jornada "Otro" y para turnos: en ambos casos
+            el divisor de la hora extra sale del promedio semanal declarado. */}
+        {(form.jornada === 'Otro' || /x|turno/i.test(form.jornada || '')) && (
           <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-4 space-y-3">
-            <p className="text-[11px] font-black text-violet-600 uppercase tracking-widest">Detalle de jornada especial (Art. 22 CT)</p>
+            <p className="text-[11px] font-black text-violet-600 uppercase tracking-widest">Detalle de jornada especial (Art. 22 / Art. 38 CT)</p>
             <div className="grid grid-cols-3 gap-3">
-              <Field label="Horas semanales">
+              <Field label="Horas semanales promedio">
                 <input type="number" className={inp} value={form.jornadaHorasSemanales}
                   onChange={e => set('jornadaHorasSemanales', e.target.value)}
-                  placeholder="Ej: 36" min="1" max="45" />
+                  placeholder="Ej: 42" min="1" max="45" />
+                <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                  En turnos, el promedio del ciclo completo — no las horas de una semana punta.
+                  Un 14x14 de turnos de 12 hrs son 168 hrs en 28 días: 42 semanales.
+                  De acá sale el valor de la hora extra.
+                </p>
               </Field>
               <Field label="Hora entrada">
                 <input type="time" className={inp} value={form.jornadaHoraEntrada}
@@ -1395,8 +1424,10 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
 
 // ─── LiquidacionModal ─────────────────────────────────────────────────────────
 
-function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
-  const { empresaId } = useEmpresa();
+function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, anticiposRegistrados, licenciasRegistradas, onSaved }) {
+  // `empresa` alimenta el encabezado del PDF. Faltaba en este destructuring y el
+  // botón de vista previa reventaba con "empresa is not defined" al hacer click.
+  const { empresaId, empresa } = useEmpresa();
   const hoy = new Date();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -1406,11 +1437,15 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     bonoColacion: '', bonoMovilizacion: '', viaticos: '0',
     otrosImponibles: '0', otrosNoImponibles: '0',
     descuentoAdicional: '0', anticipo: '0',
+    // Licencia médica: días de reposo que caen en este período. La empresa no
+    // los paga — el subsidio lo entera la isapre, Fonasa o la CCAF.
+    diasLicencia: '0', tipoLicencia: 'comun', folioLicencia: '', pagarCarencia: false,
     items: [],
     estado: 'pendiente', observaciones: '',
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState(null);
   const { itemsCustom } = useItemsPago(empresaId);
 
   useEffect(() => {
@@ -1440,20 +1475,72 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     set('items', itemsForm.filter(i => i.itemId !== itemId));
 
   const handleTrabajador = (tid) => {
-    const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    const contrato   = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    const trabajador = trabajadores?.find(t => t.id === tid);
+    // El anticipo pactado al contratar se copia como valor inicial, no como
+    // referencia: cambiar la base en la ficha no debe alterar liquidaciones ya
+    // emitidas. Acá queda editable para los meses en que varía.
+    const antBase = trabajador?.anticipoRecurrente;
     setForm(f => ({
       ...f, trabajadorId: tid,
       contratoId: contrato?.id || '',
       sueldoBase: contrato?.sueldoBase || '',
       bonoColacion: contrato?.bonoColacion || '',
       bonoMovilizacion: contrato?.bonoMovilizacion || '',
+      anticipo: antBase ? String(antBase) : '0',
+      glosaAnticipo: antBase
+        ? (trabajador?.glosaAnticipoRecurrente || 'Anticipo quincena')
+        : (f.glosaAnticipo || ''),
     }));
   };
 
   const contratoSel   = contratos?.find(c => c.id === form.contratoId);
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
+  // Monto recurrente de referencia, para el pie "Automático desde…" del campo anticipo
+  const anticipoBase  = trabajadorSel?.anticipoRecurrente || '';
+  // Con anticipos registrados en su colección, el campo manual se ignora en el
+  // cálculo. Mostrarlo editable invitaría a escribir un número muerto.
+  const hayAnticipoRegistrado = anticiposRegistrados !== undefined && anticiposRegistrados !== null;
+
+  // ── Valor de la hora extra (Art. 32 CT) ──
+  // (sueldo × 7) / (jornada semanal × 30) × 1,5. La jornada sale del contrato
+  // topeada al máximo legal del período: un contrato de 45 hrs divide por 42
+  // desde abril de 2026 sin necesidad de anexo, y la hora vale más.
+  const periodoLiq   = { mes: form.mes, anio: form.anio };
+  const jornadaSem   = contratoSel ? horasOrdinariasSemanales(contratoSel, periodoLiq) : null;
+  const vheSugerido  = contratoSel && form.sueldoBase
+    ? valorHoraExtra(form.sueldoBase, contratoSel, periodoLiq)
+    : 0;
+
+  // Se rellena solo mientras el usuario no lo haya tocado. Si lo editó a mano
+  // (por ejemplo, un recargo pactado sobre el 50% legal) se respeta, y el pie
+  // `Auto` le ofrece volver al valor calculado.
+  const vhePrevio = useRef(null);
+  useEffect(() => {
+    if (!vheSugerido) return;
+    const actual = String(form.valorHoraExtra || '');
+    const sinTocar = actual === '' || actual === '0' || actual === String(vhePrevio.current);
+    if (sinTocar) setForm(f => ({ ...f, valorHoraExtra: String(vheSugerido) }));
+    vhePrevio.current = vheSugerido;
+  }, [vheSugerido]);
   const calc = (contratoSel && form.sueldoBase)
-    ? calcularLiquidacionConIUT({ ...contratoSel, ...form, afp: trabajadorSel?.afp }, UTM_DEFAULT)
+    // Sin segundo argumento: la UTM se resuelve por el mes y año de la
+    // liquidación, no por una constante que envejece.
+    // El tramo y las cargas salen de la ficha salvo que la liquidación los
+    // sobrescriba, igual que la AFP.
+    ? calcularLiquidacionConIUT({
+        ...contratoSel, ...form,
+        afp: trabajadorSel?.afp,
+        tramoAsignacion:  form.tramoAsignacion  ?? trabajadorSel?.tramoAsignacion,
+        cargas:           form.cargas           ?? trabajadorSel?.cargas,
+        cargasMaternales: form.cargasMaternales ?? trabajadorSel?.cargasMaternales,
+        cargasInvalidez:  form.cargasInvalidez  ?? trabajadorSel?.cargasInvalidez,
+        // Las colecciones mandan sobre los campos manuales, igual que en la
+        // tabla y en la nómina. Si acá no se pasaran, la previsualización
+        // mostraría un líquido que no coincide con el que se transfiere.
+        ...(anticiposRegistrados !== undefined ? { anticiposRegistrados } : {}),
+        ...(licenciasRegistradas !== undefined ? { licenciasRegistradas } : {}),
+      })
     : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
 
@@ -1463,7 +1550,14 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Se congelan los parámetros legales usados (IMM, UTM, UF, jornada). Una
+      // liquidación emitida no debe cambiar de resultado porque en enero se
+      // actualizó la tabla de parámetros.
+      const payload = {
+        ...form,
+        parametros: calc?.parametros || null,
+        updatedAt: serverTimestamp(),
+      };
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'remuneraciones', editData.id), payload);
       } else {
@@ -1475,6 +1569,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   };
 
   return (
+    <>
     <Modal isOpen={isOpen} onClose={onClose}
       title={editData ? 'Editar Liquidación' : 'Nueva Liquidación'}
       subtitle="Art. 54 CT · Cotizaciones previsionales · IUT Art. 42 N°1 LIR"
@@ -1542,11 +1637,15 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
           <Field label="Otros imponibles ($)">
             <input type="text" className={inp} value={formatCLP(form.otrosImponibles)} onChange={e => set('otrosImponibles', parseCLP(e.target.value))} />
           </Field>
-          <Field label="Horas extra">
-            <input type="number" className={inp} value={form.horasExtra} onChange={e => set('horasExtra', e.target.value)} />
+          <Field label="Horas extra del mes">
+            <input type="number" step="0.5" className={inp} value={form.horasExtra} onChange={e => set('horasExtra', e.target.value)} />
           </Field>
           <Field label="Valor hora extra ($)">
             <input type="text" className={inp} value={formatCLP(form.valorHoraExtra)} onChange={e => set('valorHoraExtra', parseCLP(e.target.value))} />
+            <Auto valor={form.valorHoraExtra} sugerido={vheSugerido || ''}
+              fuente={`jornada de ${jornadaSem} hrs, recargo 50%`}
+              onRestaurar={() => set('valorHoraExtra', String(vheSugerido))}
+              formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
         </div>
 
@@ -1577,7 +1676,20 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Anticipo ($)">
-            <input type="text" className={inp} value={formatCLP(form.anticipo)} onChange={e => set('anticipo', parseCLP(e.target.value))} />
+            <input type="text" className={inp}
+              value={hayAnticipoRegistrado ? formatCLP(anticiposRegistrados) : formatCLP(form.anticipo)}
+              disabled={hayAnticipoRegistrado}
+              onChange={e => set('anticipo', parseCLP(e.target.value))} />
+            {hayAnticipoRegistrado ? (
+              <p className="text-[11px] text-sky-600 mt-1 leading-snug">
+                Viene de los anticipos del período. Para cambiarlo, edítalo en Anticipos:
+                lo que se escriba acá no tiene efecto.
+              </p>
+            ) : (
+              <Auto valor={form.anticipo} sugerido={anticipoBase} fuente="la ficha del trabajador"
+                onRestaurar={() => set('anticipo', String(anticipoBase))}
+                formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
+            )}
           </Field>
           <Field label="Glosa anticipo">
             <input className={inp} value={form.glosaAnticipo || ''} onChange={e => set('glosaAnticipo', e.target.value)} placeholder="Ej: Anticipo quincena…" />
@@ -1623,6 +1735,49 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
 
         {calc && (
           <>
+            <Divider label="Licencia médica" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Field label="Días de reposo en este período">
+                <input type="number" min="0" max="30" className={inp} value={form.diasLicencia}
+                  onChange={e => set('diasLicencia', e.target.value)} />
+              </Field>
+              <Field label="Tipo">
+                <select className={inp} value={form.tipoLicencia}
+                  onChange={e => set('tipoLicencia', e.target.value)}>
+                  <option value="comun">Enfermedad común</option>
+                  <option value="maternal">Maternal / pre y postnatal</option>
+                  <option value="accidente">Accidente del trabajo (Ley 16.744)</option>
+                  <option value="profesional">Enfermedad profesional</option>
+                </select>
+              </Field>
+              <Field label="Folio">
+                <input className={inp} value={form.folioLicencia || ''}
+                  onChange={e => set('folioLicencia', e.target.value)} placeholder="N° de licencia" />
+              </Field>
+            </div>
+            {calc?.diasLicencia > 0 && (
+              <div className="rounded-xl bg-sky-50 border border-sky-100 px-4 py-3 space-y-2">
+                <p className="text-[11px] text-sky-800 leading-snug">
+                  Se pagan <strong>{calc.diasTrab} días</strong> de los 30 del mes. Los {calc.diasLicNoPagados} días
+                  de reposo no los paga la empresa: el subsidio lo entera la isapre, Fonasa o la CCAF
+                  directo al trabajador, junto con las cotizaciones de pensiones y salud de todo el reposo.
+                </p>
+                {calc.diasCarencia > 0 && (
+                  <>
+                    <p className="text-[11px] text-amber-700 leading-snug">
+                      Licencia de {calc.detalleLic[0]?.dias} días: los primeros {calc.diasCarencia} no dan
+                      derecho a subsidio, y la empresa tampoco está obligada a pagarlos. Hoy el trabajador los pierde.
+                    </p>
+                    <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
+                      <input type="checkbox" checked={!!form.pagarCarencia}
+                        onChange={e => set('pagarCarencia', e.target.checked)} />
+                      Pagar los días de carencia por cuenta de la empresa
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+
             <Divider label="Previsualización liquidación" />
             <div className="rounded-xl border border-slate-200 overflow-hidden">
               <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100">
@@ -1638,19 +1793,34 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
                   </div>
                 ))}
               </div>
-              <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex gap-4">
+              <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex gap-4 flex-wrap">
                 <span>AFP: <strong className="text-red-500">-{fmt(calc.afpM)}</strong></span>
                 <span>Salud: <strong className="text-red-500">-{fmt(calc.salM)}</strong></span>
                 <span>Cesantía: <strong className="text-red-500">-{fmt(calc.cesM)}</strong></span>
                 <span>SIS (emp.): <strong className="text-slate-400">-{fmt(calc.sisM)}</strong></span>
+                {calc.asigFamiliar > 0 && (
+                  <span>
+                    Asig. familiar (tramo {calc.tramoAF}, {calc.cargasEquiv} carga{calc.cargasEquiv === 1 ? '' : 's'}):{' '}
+                    <strong className="text-emerald-600">+{fmt(calc.asigFamiliar)}</strong>
+                  </span>
+                )}
               </div>
+              {trabajadorSel && !calc.tramoAF && (calc.cargasSimp + calc.cargasMat + calc.cargasInv) > 0 && (
+                <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 text-[11px] text-amber-700">
+                  Este trabajador tiene cargas registradas pero no tiene tramo de asignación familiar
+                  asignado, así que no se le está pagando nada. El tramo se define en la ficha, pestaña Familia.
+                </div>
+              )}
             </div>
           </>
         )}
 
         <div className="flex justify-between items-center pt-2">
           {calc && (
-            <button onClick={() => generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { empresa })}
+            <button onClick={() => setPdfPreview({
+                url: generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { preview: true, empresa }),
+                filename: `Liquidación — ${labelPeriodo(form)}`,
+              })}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
               📄 Vista previa PDF
             </button>
@@ -1662,6 +1832,14 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         </div>
       </div>
     </Modal>
+
+    {/* Se monta fuera del <Modal> para que no quede atrapado en su capa */}
+    <PdfPreviewModal
+      isOpen={!!pdfPreview}
+      onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }}
+      url={pdfPreview?.url}
+      filename={pdfPreview?.filename} />
+    </>
   );
 }
 
@@ -1702,49 +1880,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     pagoAvisoPrevio: 'no', anticipoPendiente: '0', otrosDescuentos: '0',
     gratificacionYaPagada: 'si',
     estadoFirma: 'pendiente', observaciones: '',
-    evidenciaFirma: null, evidenciaTipo: 'notaria',
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
-  const [subiendoEvidencia, setSubiendoEvidencia] = useState(null); // 0-100 mientras sube
-  const [evidenciaError, setEvidenciaError] = useState('');
-
-  // Sube la foto/escaneo del finiquito firmado ante notario/DT a Storage.
-  // Requiere que el finiquito ya exista (necesitamos su id para la ruta).
-  const handleEvidencia = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setEvidenciaError('');
-    if (!editData?.id) { setEvidenciaError('Guarda el finiquito primero; luego podrás adjuntar la evidencia firmada.'); e.target.value = ''; return; }
-    if (!(file.type.startsWith('image/') || file.type === 'application/pdf')) { setEvidenciaError('Solo se permite imagen (foto) o PDF.'); e.target.value = ''; return; }
-    if (file.size > 10 * 1024 * 1024) { setEvidenciaError('El archivo supera los 10 MB.'); e.target.value = ''; return; }
-
-    const ruta = `empresas/${empresaId}/finiquitos/${editData.id}/${Date.now()}_${file.name}`;
-    const task = uploadBytesResumable(ref(storage, ruta), file);
-    setSubiendoEvidencia(0);
-    task.on('state_changed',
-      snap => setSubiendoEvidencia(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-      err  => { setEvidenciaError('Error al subir: ' + err.message); setSubiendoEvidencia(null); },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        const u = getAuth().currentUser;
-        set('evidenciaFirma', {
-          url, ruta, nombreArchivo: file.name,
-          tipo: form.evidenciaTipo || 'notaria',
-          fecha: new Date().toISOString(),
-          subidoPor: u?.displayName || u?.email || null,
-        });
-        setSubiendoEvidencia(null);
-      }
-    );
-  };
-
-  const eliminarEvidencia = async () => {
-    if (!window.confirm('¿Eliminar la evidencia adjunta?')) return;
-    const rutaPrev = form.evidenciaFirma?.ruta;
-    set('evidenciaFirma', null);
-    if (rutaPrev) { try { await deleteObject(ref(storage, rutaPrev)); } catch { /* archivo ya no existe */ } }
-  };
 
   useEffect(() => {
     setForm(editData ? { ...empty, ...editData } : empty);
@@ -2046,44 +2184,6 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
           <Field label="Observaciones">
             <input className={inp} value={form.observaciones} onChange={e => set('observaciones', e.target.value)} />
           </Field>
-        </div>
-
-        {/* Evidencia del finiquito firmado ante notario / DT (no va por firma
-            electrónica: los finiquitos se ratifican presencialmente). */}
-        <div className="rounded-2xl border border-slate-200 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Evidencia documento firmado</p>
-            <select className="px-2 py-1 border-2 border-slate-200 rounded-lg text-xs bg-white"
-              value={form.evidenciaFirma?.tipo || form.evidenciaTipo || 'notaria'}
-              onChange={e => {
-                if (form.evidenciaFirma) set('evidenciaFirma', { ...form.evidenciaFirma, tipo: e.target.value });
-                else set('evidenciaTipo', e.target.value);
-              }}>
-              <option value="notaria">Ante notario</option>
-              <option value="dt">En Dirección del Trabajo</option>
-            </select>
-          </div>
-
-          {form.evidenciaFirma?.url ? (
-            <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-              <a href={form.evidenciaFirma.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm font-bold text-emerald-700 hover:underline truncate">
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <span className="truncate">{form.evidenciaFirma.nombreArchivo || 'Documento adjunto'}</span>
-              </a>
-              <button type="button" onClick={eliminarEvidencia} className="text-xs font-bold text-red-500 hover:underline flex-shrink-0">Quitar</button>
-            </div>
-          ) : subiendoEvidencia !== null ? (
-            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-              <div className="bg-violet-500 h-2 transition-all" style={{ width: `${subiendoEvidencia}%` }} />
-            </div>
-          ) : (
-            <label className={`flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed rounded-xl text-sm font-bold cursor-pointer transition-colors ${editData?.id ? 'border-violet-300 text-violet-600 hover:bg-violet-50' : 'border-slate-200 text-slate-400 cursor-not-allowed'}`}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-              {editData?.id ? 'Subir foto o PDF del finiquito firmado' : 'Guarda el finiquito para adjuntar evidencia'}
-              <input type="file" accept="image/*,application/pdf" className="hidden" disabled={!editData?.id} onChange={handleEvidencia} />
-            </label>
-          )}
-          {evidenciaError && <p className="text-xs text-red-500">{evidenciaError}</p>}
         </div>
 
         <div className="flex justify-between items-center pt-2">

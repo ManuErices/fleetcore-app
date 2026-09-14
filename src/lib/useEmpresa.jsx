@@ -148,6 +148,10 @@ export function EmpresaProvider({ user, children }) {
         console.error('Error escuchando usuario:', err);
         setError('Error al cargar datos de empresa.');
         setLoading(false);
+        // Si el listener falla (permission-denied, red caída) hay que soltar el
+        // spinner de cambio de empresa; si no, el menú queda pegado en
+        // "Cambiando de empresa…" para siempre.
+        setCambiandoEmpresa(false);
       }
     );
 

@@ -128,10 +128,26 @@ function PortalRoute() {
 }
 
 // ── Root RRHH component ───────────────────────────────────────────────────────
-export default function RRHH() {
+export default function RRHH({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   return (
     <Routes>
-      <Route element={<AppShellLayout navGroups={NAV_GROUPS} basePath="/rrhh" />}>
+      {/* La marca, la empresa activa y el menú de usuario viven en la barra
+          lateral, no en un header propio: así RRHH recupera la franja superior
+          y queda igual que Finanzas. */}
+      <Route element={
+        <AppShellLayout
+          navGroups={NAV_GROUPS}
+          basePath="/rrhh"
+          marca={{
+            titulo: 'Fleet', resalte: 'Core', subtitulo: 'Recursos Humanos',
+            gradiente: 'linear-gradient(135deg,#059669,#0f766e)',
+            iconoPath: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z',
+          }}
+          user={user} userRole={userRole} onLogout={onLogout}
+          onBackToSelector={onBackToSelector}
+          onAdminPanel={onAdminPanel} onAdminEmpresaPanel={onAdminEmpresaPanel}
+        />
+      }>
 
         {/* Redirect root to dashboard */}
         <Route index element={<Navigate to="dashboard" replace />} />

@@ -241,6 +241,24 @@ service cloud.firestore {
                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acuseRecibo']);
       }
 
+      // ── LICENCIAS MÉDICAS ────────────────────────────────
+      // El trabajador lee las suyas, pero no las escribe: quien registra folio
+      // y fechas es RRHH contra el documento físico. Si más adelante se quiere
+      // que suba su licencia desde el portal, eso va en una colección de
+      // solicitudes aparte — igual que vacaciones — y no acá.
+      //
+      // Los días de reposo se derivan de las fechas al leer, nunca se guardan,
+      // así que no hay campo que un trabajador pudiera falsear para cambiar su
+      // propia liquidación aunque tuviera escritura.
+      match /licencias/{docId} {
+        allow read, write: if isSuperAdmin()
+                           || canWriteEmpresa(empresaId);
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && (resource == null || (resource.data.trabajadorId != null
+                    && miTrabajadorDocId(empresaId) == resource.data.trabajadorId));
+      }
+
       // ── ASISTENCIA ───────────────────────────────────────
       match /asistencia/{docId} {
         allow read, write: if isSuperAdmin()
