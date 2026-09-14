@@ -764,14 +764,26 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
           || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
 
-        toast({ type: 'success', message: `Reporte de Entrega registrado: ${numeroReporte}`, duration: 5000 });
+        toast({
+          type: online ? 'success' : 'warning',
+          message: online
+            ? `Reporte de Entrega registrado: ${numeroReporte}`
+            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+          duration: online ? 5000 : 7000,
+        });
         if (isReportesView) {
           onClose();
         } else {
           resetForm();
         }
       } else {
-        toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
+        toast({
+          type: online ? 'success' : 'warning',
+          message: online
+            ? `Reporte de Entrada registrado: ${numeroReporte}`
+            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+          duration: online ? 5000 : 7000,
+        });
         if (isReportesView) {
           onClose();
         } else {
