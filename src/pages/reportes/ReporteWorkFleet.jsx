@@ -197,14 +197,18 @@ export default function ReporteWorkFleet() {
         }));
         setMachines(machinesData);
 
-        // Cargar empleados
-        const empleadosRef = collection(db, 'empresas', empresaId, 'employees');
-        const empleadosSnap = await getDocs(empleadosRef);
-        const empleadosData = empleadosSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setEmpleados(empleadosData);
+        // Cargar operadores registrados. La sección "Operadores" del admin los
+        // guarda en 'trabajadores'; otros módulos usan 'employees'. Se cargan
+        // ambas y se fusionan para poblar el desplegable de "quién registra".
+        const [empSnap, trabSnap] = await Promise.all([
+          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
+          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
+        ]);
+        const porId = new Map();
+        [...trabSnap.docs, ...empSnap.docs].forEach(d => {
+          if (!porId.has(d.id)) porId.set(d.id, { id: d.id, ...d.data() });
+        });
+        setEmpleados([...porId.values()]);
 
         // Planes y eventos de mantención (helpers ya scoped a empresaId).
         // Si el módulo maquinaria no está en uso, quedan vacíos y el panel
