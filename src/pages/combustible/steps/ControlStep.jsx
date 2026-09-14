@@ -50,23 +50,10 @@ const TruckLargeIcon = ({ className = "w-7 h-7" }) => (
   </svg>
 );
 
-const isCamionCombustible = (m) => {
-  if (!m) return false;
-  const type = (m.tipo || m.type || m.nombre || m.name || '').toLowerCase();
-  const normType = type.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return normType.includes('camion') && (normType.includes('combustible') || normType.includes('surtidor') || normType.includes('aljibe'));
-};
-
-const isMochila = (m) => {
-  if (!m) return false;
-  const type = (m.tipo || m.type || m.nombre || m.name || '').toLowerCase();
-  const normType = type.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return normType.includes('mochila');
-};
-
-const canDeliverFuel = (m) => {
-  return isCamionCombustible(m) || isMochila(m);
-};
+// Nota: antes se filtraban los equipos surtidores por tipo (solo cami\u00f3n de
+// combustible o mochila), lo que dejaba fuera surtidores v\u00e1lidos como los de
+// tipo "estanque de combustible". Ahora cualquier equipo de Administraci\u00f3n >
+// Surtidores puede entregar/recibir combustible, as\u00ed que ya no se filtra.
 
 export default function ControlStep({
   tipoReporte,
@@ -339,7 +326,7 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-52 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => canDeliverFuel(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -401,7 +388,9 @@ export default function ControlStep({
                             <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                           </div>
                           <div className="max-h-52 overflow-y-auto space-y-1">
-                            {equiposSurtidores.filter(m => isCamionCombustible(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                            {/* Cualquier equipo de Administración > Surtidores
+                                (camión combustible, mochila móvil, estanque…). */}
+                            {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                               <button key={m.id} type="button"
                                 onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                                 className="w-full flex items-center gap-3 px-3 py-2 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
@@ -635,7 +624,7 @@ export default function ControlStep({
                           <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                         </div>
                         <div className="max-h-52 overflow-y-auto space-y-1">
-                          {equiposSurtidores.filter(m => canDeliverFuel(m)).filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
+                          {equiposSurtidores.filter(m => matchMachine({ ...m, tipo: m.nombre }, searchEquipo)).map(m => (
                             <button key={m.id} type="button"
                               onClick={() => { setDatosControl(prev => ({ ...prev, equipoSurtidorId: m.id })); setSearchEquipo(''); }}
                               className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">

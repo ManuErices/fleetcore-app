@@ -5,6 +5,7 @@ import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
 import Paso2Form from '../Paso2Form';
+import { useToast, ToastContainer } from '../../components/Toast';
 import {
   LIMITES_DEFAULT,
   getLimitesReporte,
@@ -34,13 +35,16 @@ export const etiquetaEstado = (valor) =>
 
 export default function ReportDetallado({ onClose, onSaved } = {}) {
   const { empresaId, empresa } = useEmpresa();
+  const { toast, toasts, removeToast } = useToast();
   const [projects, setProjects] = useState([]);
   const [operadoresDisponibles, setOperadoresDisponibles] = useState([]);
   const [userRole, setUserRole] = useState('operador');
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  
+  const [busquedaMaquina, setBusquedaMaquina] = useState(''); // buscador de máquina en el form
+  const [confirmarOtro, setConfirmarOtro] = useState(false);  // modal "¿cargar otro reporte?"
+
   // Estado para QR Scanner
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [qrError, setQrError] = useState('');
@@ -203,9 +207,17 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
         if (userDoc.exists()) {
           setUserRole(userDoc.data().role || 'operador');
         }
-        // Cargar operadores de la empresa
-        const snap = await getDocs(collection(db, 'empresas', empresaId, 'trabajadores'));
-        setOperadoresDisponibles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // Cargar operadores de la empresa. Según el módulo, la gente vive en
+        // 'employees' o en 'trabajadores'; se cargan ambas y se fusionan.
+        const [empSnap, trabSnap] = await Promise.all([
+          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
+          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
+        ]);
+        const porId = new Map();
+        [...empSnap.docs, ...trabSnap.docs].forEach(d => {
+          if (!porId.has(d.id)) porId.set(d.id, { id: d.id, ...d.data() });
+        });
+        setOperadoresDisponibles([...porId.values()]);
       } catch (e) { console.error('Error cargando operadores:', e); }
     })();
   }, [empresaId]);
@@ -462,14 +474,14 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     
     if (!empresaId) return;
     if (!selectedProject || !formData.machineId) {
-      alert("❌ Selecciona proyecto y máquina");
+      toast({ type: 'error', message: 'Selecciona proyecto y máquina antes de continuar.' });
       return;
     }
 
     // ── Validación 1: No permitir fecha futura ────────────────────
     const today = isoToday();
     if (formData.fecha > today) {
-      alert("❌ No puedes ingresar un reporte con fecha futura.\nLa fecha debe ser igual o anterior a hoy.");
+      toast({ type: 'error', message: 'La fecha no puede ser futura: debe ser hoy o anterior.' });
       return;
     }
 
@@ -486,7 +498,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       if (duplicadosVigentes.length > 0) {
         const selectedMachineName = machines.find(m => m.id === formData.machineId);
         const machineName = selectedMachineName?.code || selectedMachineName?.patente || 'esta máquina';
-        alert(`❌ Ya existe un reporte de "${machineName}" para el ${formData.fecha}.\nNo se pueden ingresar dos reportes de la misma máquina el mismo día.`);
+        toast({ type: 'error', message: `Ya existe un reporte de "${machineName}" para el ${formData.fecha}. No se permiten dos el mismo día.` });
         return;
       }
     } catch (err) {
@@ -497,18 +509,13 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     const { errores, advertencias } = validatePaso1();
 
     if (errores.length > 0) {
-      alert('Errores de validación:\n\n' + errores.join('\n'));
+      toast({ type: 'error', message: errores.join(' · ') });
       return;
     }
 
-    // Las advertencias no bloquean: se confirman una sola vez
+    // Las advertencias no bloquean: solo se informan con un toast.
     if (advertencias.length > 0) {
-      const ok = window.confirm(
-        'Revisa estos valores antes de continuar:\n\n' +
-        advertencias.join('\n') +
-        '\n\n¿Los datos son correctos?'
-      );
-      if (!ok) return;
+      toast({ type: 'warning', message: advertencias.join(' · '), duration: 6000 });
     }
 
     // ✅ Si la máquina no operó, no tiene sentido pedir el detalle horario de
@@ -517,10 +524,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     // lo que alimenta el cálculo de disponibilidad de flota.
     if (!requiereActividadEfectiva(formData.estadoMaquina)) {
       if (!formData.observaciones?.trim()) {
-        alert(
-          `La máquina está marcada como "${etiquetaEstado(formData.estadoMaquina)}".\n\n` +
-          'Describe brevemente el motivo en Observaciones antes de guardar.'
-        );
+        toast({ type: 'error', message: `La máquina está "${etiquetaEstado(formData.estadoMaquina)}": describe el motivo en Observaciones antes de guardar.` });
         return;
       }
       await guardarReporte();
@@ -609,24 +613,27 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       // devolvía al usuario a Reporte Combustible.
       if (onSaved) onSaved();
 
+      toast({ type: 'success', message: 'Reporte guardado correctamente.' });
       // ✅ Encadenar reportes: en terreno se cargan varias máquinas seguidas.
-      const otro = window.confirm(
-        'Reporte guardado correctamente.\n\n' +
-        '¿Quieres cargar otro reporte ahora?'
-      );
-
-      if (otro) {
-        await limpiarFormulario();
-      } else if (onClose) {
-        onClose();
-      } else {
-        await limpiarFormulario();
-      }
+      // En vez de un confirm nativo, se abre un modal profesional.
+      setConfirmarOtro(true);
     } catch (error) {
       console.error("Error:", error);
-      alert("❌ Error al guardar el reporte. Intenta nuevamente.");
+      toast({ type: 'error', message: 'No se pudo guardar el reporte. Revisa tu conexión e intenta nuevamente.' });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Respuesta al modal "¿cargar otro reporte?"
+  const responderCargarOtro = async (otro) => {
+    setConfirmarOtro(false);
+    if (otro) {
+      await limpiarFormulario();
+    } else if (onClose) {
+      onClose();
+    } else {
+      await limpiarFormulario();
     }
   };
 
@@ -636,65 +643,48 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
   };
 
   const selectedMachine = machines.find(m => m.id === formData.machineId);
+  const esAdmin = ['superadmin', 'admin_contrato', 'administrativo'].includes(userRole);
+
+  // Aplica una máquina ya resuelta al formulario (genera el correlativo, fija
+  // proyecto si corresponde y avisa con un toast). Compartido por el buscador
+  // y por el escaneo QR.
+  const aplicarMaquina = async (machine) => {
+    if (!machine) return;
+    const reportNumber = await generateReportNumber(machine);
+    const projectToUse = machine.projectId || selectedProject || (projects.length > 0 ? projects[0].id : '');
+    if (projectToUse && !selectedProject) setSelectedProject(projectToUse);
+    setFormData(prev => ({ ...prev, machineId: machine.id, numeroReporte: reportNumber }));
+    setShowQRScanner(false);
+    setBusquedaMaquina('');
+    setQrError('');
+    toast({ type: 'success', message: `Máquina seleccionada: ${machine.code || machine.patente}` });
+  };
 
   const handleQRScan = async (qrCode) => {
     if (!qrCode) return;
-    
-    console.log("🔍 QR escaneado:", qrCode);
-    console.log("📋 Máquinas disponibles:", machines.length);
-    console.log("📊 Datos de máquinas:", machines);
-    
     setQrError('');
-    
-    // Normalizar el código ingresado para búsqueda case-insensitive
     const qrNorm = qrCode.trim().toUpperCase();
-    
     // Buscar máquina con prioridad: qrCode > code > patente (case-insensitive)
-    let machine = null;
-    
-    // 1. Intentar por qrCode
-    machine = machines.find(m => m.qrCode && m.qrCode.toUpperCase() === qrNorm);
-    if (machine) {
-      console.log(`✅ Máquina encontrada por qrCode:`, machine);
-    }
-    
-    // 2. Si no encontró, intentar por code
-    if (!machine) {
-      machine = machines.find(m => m.code && m.code.toUpperCase() === qrNorm);
-      if (machine) {
-        console.log(`✅ Máquina encontrada por code:`, machine);
-      }
-    }
-    
-    // 3. Si no encontró, intentar por patente
-    if (!machine) {
-      machine = machines.find(m => m.patente && m.patente.toUpperCase() === qrNorm);
-      if (machine) {
-        console.log(`✅ Máquina encontrada por patente:`, machine);
-      }
-    }
-    
-    if (machine) {
-      // Generar número de reporte basado en esta máquina
-      const reportNumber = await generateReportNumber(machine);
+    let machine = machines.find(m => m.qrCode && m.qrCode.toUpperCase() === qrNorm)
+      || machines.find(m => m.code && m.code.toUpperCase() === qrNorm)
+      || machines.find(m => m.patente && m.patente.toUpperCase() === qrNorm);
 
-      // Si la máquina tiene projectId, usarlo; si no, usar el primer proyecto disponible
-      const projectToUse = machine.projectId || selectedProject || (projects.length > 0 ? projects[0].id : '');
-      if (projectToUse && !selectedProject) setSelectedProject(projectToUse);
-      
-      setFormData({ 
-        ...formData, 
-        machineId: machine.id,
-        numeroReporte: reportNumber
-      });
-      setShowQRScanner(false);
-      alert(`✅ Máquina seleccionada: ${machine.code || machine.patente}\nReporte: ${reportNumber}`);
+    if (machine) {
+      await aplicarMaquina(machine);
     } else {
-      console.error(`❌ No se encontró máquina con código: ${qrCode}`);
-      console.log("💡 Datos disponibles:", machines.map(m => ({ code: m.code, qrCode: m.qrCode, patente: m.patente })));
-      setQrError(`❌ No se encontró máquina con código: ${qrCode}`);
+      setQrError(`No se encontró ninguna máquina con el código: ${qrCode}`);
     }
   };
+
+  // Sugerencias del buscador de máquina en el formulario (código/patente/tipo…)
+  const maquinasFiltradas = (() => {
+    const q = busquedaMaquina.trim().toLowerCase();
+    if (!q) return [];
+    const inc = (s) => (s || '').toLowerCase().includes(q);
+    return machines
+      .filter(m => inc(m.code) || inc(m.patente) || inc(m.type) || inc(m.marca) || inc(m.modelo) || inc(m.name))
+      .slice(0, 6);
+  })();
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
@@ -771,23 +761,59 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-                
-                {/* Botón de escaneo QR */}
+
+                {/* Buscador de máquina por código o nombre */}
+                <div className="relative">
+                  <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
+                    {formData.machineId ? 'Cambiar máquina' : 'Buscar máquina por código o nombre'}
+                  </label>
+                  <div className="relative">
+                    <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                    </svg>
+                    <input
+                      type="text"
+                      value={busquedaMaquina}
+                      onChange={(e) => setBusquedaMaquina(e.target.value)}
+                      placeholder="Ej: EX-01, TSBS36, Excavadora..."
+                      className="input-modern w-full pl-9 text-sm sm:text-base"
+                    />
+                  </div>
+                  {maquinasFiltradas.length > 0 && (
+                    <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                      {maquinasFiltradas.map(m => {
+                        const desc = [m.type, m.marca, m.modelo].filter(Boolean).join(' ');
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => aplicarMaquina(m)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors flex items-center justify-between gap-2"
+                          >
+                            <span className="font-mono font-bold text-purple-700 text-sm shrink-0">{m.code || m.patente || '—'}</span>
+                            {desc && <span className="text-xs text-slate-500 truncate">{desc}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {busquedaMaquina.trim() && maquinasFiltradas.length === 0 && (
+                    <div className="mt-2 text-xs text-slate-400">Sin coincidencias.</div>
+                  )}
+                </div>
+
+                {/* Botón explícito de escaneo QR (abre la cámara) */}
                 <button
                   type="button"
                   onClick={() => setShowQRScanner(true)}
-                  className="w-full px-4 sm:px-6 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl text-base sm:text-lg"
+                  className="w-full px-4 py-3 bg-white border-2 border-purple-300 hover:bg-purple-50 text-purple-700 font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base"
                 >
-                  <div className="flex items-center justify-center gap-3">
-                    <svg className="w-7 h-7 sm:w-8 sm:h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                    </svg>
-                    <span>
-                      {formData.machineId ? 'Cambiar Máquina (Escanear QR)' : 'Escanear Código QR de Máquina'}
-                    </span>
-                  </div>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                  </svg>
+                  Escanear código QR con la cámara
                 </button>
-                
+
                 {/* Máquina seleccionada */}
                 {selectedMachine && (
                   <div className="p-4 sm:p-5 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-300 shadow-md">
@@ -798,7 +824,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
                         </svg>
                       </div>
                       <div className="flex-1">
-                        <div className="text-xs font-bold text-purple-600 mb-1">✅ MÁQUINA ESCANEADA</div>
+                        <div className="text-xs font-bold text-purple-600 mb-1">✅ MÁQUINA SELECCIONADA</div>
                         {selectedMachine.type && (
                           <div className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-1">{selectedMachine.type}</div>
                         )}
@@ -826,8 +852,9 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
               }
             >
               <div className="space-y-3 sm:space-y-4">
-                {/* Admin puede seleccionar operador manualmente */}
-                {(userRole === 'superadmin' || userRole === 'admin_contrato') ? (
+                {/* Admin puede seleccionar/cambiar el operador manualmente
+                    (útil al transcribir reportes hechos en papel en terreno). */}
+                {esAdmin ? (
                   <>
                     <div>
                       <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-2">
@@ -842,7 +869,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
                           if (op) {
                             setFormData(prev => ({
                               ...prev,
-                              operador: op.nombre || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' '),
+                              operador: op.nombre || op.name || op.displayName || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' '),
                               rut: op.rut || '',
                               userId: op.id
                             }));
@@ -852,7 +879,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
                         <option value="">— Seleccione operador —</option>
                         {operadoresDisponibles.map(op => (
                           <option key={op.id} value={op.id}>
-                            {op.nombre || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' ')} {op.rut ? `· ${op.rut}` : ''}
+                            {op.nombre || op.name || op.displayName || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' ')} {op.rut ? `· ${op.rut}` : ''}
                           </option>
                         ))}
                       </select>
@@ -1168,6 +1195,37 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
           error={qrError}
         />
       )}
+
+      {/* Modal profesional: ¿cargar otro reporte? (reemplaza al confirm nativo) */}
+      {confirmarOtro && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-black text-slate-900 mb-1">Reporte guardado</h3>
+            <p className="text-sm text-slate-500 mb-5">¿Quieres cargar otro reporte ahora?</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => responderCargarOtro(false)}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all"
+              >
+                No, cerrar
+              </button>
+              <button
+                onClick={() => responderCargarOtro(true)}
+                className="flex-1 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl transition-all"
+              >
+                Sí, cargar otro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }
@@ -1203,6 +1261,7 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
   const [foco, setFoco] = useState(false);
   const [scanning, setScanning] = useState(true);
   const [recientes, setRecientes] = useState([]);
+  const [camError, setCamError] = useState('');
   const videoRef = React.useRef(null);
   const streamRef = React.useRef(null);
 
@@ -1283,10 +1342,11 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
         videoRef.current.srcObject = stream;
       }
       
+      setCamError('');
       scanQRCode();
     } catch (err) {
       console.error('Error accediendo a la cámara:', err);
-      alert('No se pudo acceder a la cámara. Usa entrada manual.');
+      setCamError('No se pudo acceder a la cámara. Revisa los permisos del navegador o busca la máquina por código.');
       setScanning(false);
     }
   };
@@ -1474,6 +1534,12 @@ function QRScannerModal({ onScan, onClose, error, machines = [] }) {
               <div className="text-[10px] sm:text-xs text-red-600 mt-1">
                 Verifica que el código QR coincida con una máquina registrada
               </div>
+            </div>
+          )}
+
+          {camError && (
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-lg sm:rounded-xl p-3">
+              <div className="text-xs sm:text-sm font-bold text-amber-700">{camError}</div>
             </div>
           )}
 

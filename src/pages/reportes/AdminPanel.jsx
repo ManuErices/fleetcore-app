@@ -60,7 +60,7 @@ const TIPOS_MAQUINA = [
   'OTRO',
 ];
 
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   { label: 'General',     ids: ['operadores', 'proyectos', 'usuarios', 'emails', 'capacitaciones'] },
   { label: 'Flota',       ids: ['maquinas', 'actividades'] },
   { label: 'Combustible', ids: ['surtidores', 'empresas_combustible', 'estaciones'] },
@@ -68,7 +68,7 @@ const NAV_GROUPS = [
   { label: 'Sistema',     ids: ['mi_empresa', 'mi_plan', 'empresas_registro'] },
 ];
 
-const TAB_DEFS = [
+export const TAB_DEFS = [
   { id: 'operadores',          label: 'Operadores',           color: 'blue',   modules: [],                           icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
   { id: 'maquinas',            label: 'Máquinas',             color: 'purple', modules: ['fleetcore', 'workfleet'],   icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
   { id: 'actividades',         label: 'Actividades',          color: 'green',  modules: ['fleetcore', 'workfleet'],   icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
@@ -85,7 +85,7 @@ const TAB_DEFS = [
   { id: 'mi_plan',             label: 'Mi Plan / Módulos',    color: 'indigo', modules: [],                           icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
 ];
 
-const GRADIENTS = {
+export const GRADIENTS = {
   blue:   'from-blue-600 to-indigo-600',
   purple: 'from-purple-600 to-indigo-600',
   green:  'from-emerald-600 to-teal-600',
@@ -97,6 +97,20 @@ const GRADIENTS = {
   slate:  'from-slate-700 to-slate-800',
   violet: 'from-violet-600 to-purple-600',
 };
+
+// Filtra los TAB_DEFS visibles según rol/plan. Compartido por AdminPanel y por
+// el submenú de "Administración" en ReportesShell, para no duplicar la lógica.
+export function filtrarTabsVisibles({ isSuperAdmin, activeModules = [], planLoading, currentUserRole, hideSystem }) {
+  return TAB_DEFS.filter(tab => {
+    if (hideSystem && ['mi_empresa', 'mi_plan', 'empresas_registro'].includes(tab.id)) return false;
+    if (tab.id === 'mi_plan') return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
+    if (tab.modules.includes('__superadmin__')) return isSuperAdmin;
+    if (tab.modules.length === 0) return true;
+    if (isSuperAdmin) return true;
+    if (planLoading) return false;
+    return tab.modules.some(m => activeModules.includes(m));
+  });
+}
 
 const TAB_ACTIVE = {
   blue:   'bg-blue-600 text-white shadow-lg shadow-blue-200',
@@ -4043,7 +4057,7 @@ function MiPlanSection() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
-export default function AdminPanel({ onClose, hideSystem = false }) {
+export default function AdminPanel({ onClose, hideSystem = false, embedded = false, activeTab: activeTabProp, onTabChange }) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
@@ -4051,9 +4065,14 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
 
   const { empresaId, empresa } = useEmpresa();
   const { activeModules, loading: planLoading } = usePlan();
-  
+
   const [currentUserRole, setCurrentUserRole] = useState(null);
-  const [activeTab, setActiveTab] = useState(tabParam || 'operadores');
+  const [activeTabInterno, setActiveTabInterno] = useState(tabParam || 'operadores');
+
+  // Cuando el panel está embebido (submenú en ReportesShell) el tab lo controla
+  // el contenedor; si no, se maneja el estado interno.
+  const activeTab = embedded ? (activeTabProp || 'operadores') : activeTabInterno;
+  const setActiveTab = embedded ? (id) => onTabChange?.(id) : setActiveTabInterno;
 
   const isSuperAdmin = currentUserRole === 'superadmin';
 
@@ -4066,19 +4085,10 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
     });
   }, []);
 
-  const tabsVisibles = useMemo(() => TAB_DEFS.filter(tab => {
-    if (hideSystem && ['mi_empresa', 'mi_plan', 'empresas_registro'].includes(tab.id)) {
-      return false;
-    }
-    if (tab.id === 'mi_plan') {
-      return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
-    }
-    if (tab.modules.includes('__superadmin__')) return isSuperAdmin;
-    if (tab.modules.length === 0) return true;
-    if (isSuperAdmin) return true;
-    if (planLoading) return false;
-    return tab.modules.some(m => activeModules.includes(m));
-  }), [isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem]);
+  const tabsVisibles = useMemo(
+    () => filtrarTabsVisibles({ isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem }),
+    [isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem]
+  );
 
   // Una sola vez: cuando el rol carga y el tab del URL se vuelve visible, aplicarlo
   useEffect(() => {
@@ -4098,6 +4108,30 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
   const active = tabsVisibles.find(t => t.id === activeTab) || tabsVisibles[0];
 
   const activeTabDef = tabsVisibles.find(t => t.id === activeTab) || tabsVisibles[0];
+
+  const contenido = (
+    <>
+      {activeTab === 'operadores'           && <OperadoresSection />}
+      {activeTab === 'maquinas'             && <MaquinasSection />}
+      {activeTab === 'actividades'          && <ActividadesSection />}
+      {activeTab === 'surtidores'           && <SurtidoresSection />}
+      {activeTab === 'sub_empresas'         && <SubEmpresasSection />}
+      {activeTab === 'empresas_combustible' && <EmpresasSection />}
+      {activeTab === 'proyectos'            && <ProyectosSection />}
+      {activeTab === 'estaciones'           && <EstacionesSection />}
+      {activeTab === 'usuarios'             && <UsuariosSection />}
+      {activeTab === 'emails'               && <EmailsSection />}
+      {activeTab === 'capacitaciones'       && <CapacitacionesSection />}
+      {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
+      {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
+      {activeTab === 'mi_plan'              && <MiPlanSection />}
+    </>
+  );
+
+  // Modo embebido: sin header ni sidebar propios (los provee ReportesShell).
+  if (embedded) {
+    return <div className="w-full max-w-5xl mx-auto">{contenido}</div>;
+  }
 
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
@@ -4215,20 +4249,7 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
         {/* ── Content ─────────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
-            {activeTab === 'operadores'           && <OperadoresSection />}
-            {activeTab === 'maquinas'             && <MaquinasSection />}
-            {activeTab === 'actividades'          && <ActividadesSection />}
-            {activeTab === 'surtidores'           && <SurtidoresSection />}
-            {activeTab === 'sub_empresas'         && <SubEmpresasSection />}
-            {activeTab === 'empresas_combustible' && <EmpresasSection />}
-            {activeTab === 'proyectos'            && <ProyectosSection />}
-            {activeTab === 'estaciones'           && <EstacionesSection />}
-            {activeTab === 'usuarios'             && <UsuariosSection />}
-            {activeTab === 'emails'               && <EmailsSection />}
-            {activeTab === 'capacitaciones'       && <CapacitacionesSection />}
-            {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
-            {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
-            {activeTab === 'mi_plan'              && <MiPlanSection />}
+            {contenido}
           </div>
         </main>
       </div>

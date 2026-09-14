@@ -283,24 +283,41 @@ export default function ReporteDetalleModal({
         {/* Contenido scrolleable */}
         <div className="p-6 pb-24 overflow-y-auto max-h-[calc(95vh-140px)] space-y-6">
 
-          {/* Folio del documento físico (editable por admin) */}
+          {/* Folio y Fecha del registro (editables por admin) */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border-l-4 border-amber-500">
             <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center gap-2">
               <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              Folio
+              Folio y Fecha
             </h3>
             {isEditing ? (
-              <input
-                type="text"
-                className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
-                value={editedData.folio || ''}
-                onChange={(e) => updateField('folio', e.target.value)}
-                placeholder="Folio del talonario / guía física"
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Folio</label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    value={editedData.folio || ''}
+                    onChange={(e) => updateField('folio', e.target.value)}
+                    placeholder="Folio del talonario / guía física"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Fecha del registro</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg focus:outline-none focus:border-amber-500"
+                    value={editedData.fecha || ''}
+                    onChange={(e) => updateField('fecha', e.target.value)}
+                  />
+                </div>
+              </div>
             ) : (
-              <DataField label="N° de folio" value={reporte.folio || reporte.folioExterno || '—'} />
+              <div className="grid grid-cols-2 gap-x-4">
+                <DataField label="N° de folio" value={reporte.folio || reporte.folioExterno || '—'} />
+                <DataField label="Fecha" value={reporte.fecha || '—'} />
+              </div>
             )}
           </div>
 

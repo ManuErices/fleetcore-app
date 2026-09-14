@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
+import { useToast, ToastContainer } from "../../components/Toast";
 import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
 
 // Estandariza nombres propios (operadores, obras) a Capitalización de Título:
@@ -98,6 +99,8 @@ export function descargarPlantillaReportes() {
 
 export default function ReporteWorkFleet() {
   const { empresaId } = useEmpresa();
+  const { toast, toasts, removeToast } = useToast();
+  const [reporteAEliminar, setReporteAEliminar] = useState(null); // reporte pendiente de confirmar eliminación
   const [reportes, setReportes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [machines, setMachines] = useState([]);
@@ -259,15 +262,15 @@ export default function ReporteWorkFleet() {
   // ✅ FIX correlativo: soft-delete. El documento se conserva marcado como
   // eliminado, de modo que su número de reporte sigue "tomado" y el correlativo
   // de la máquina nunca retrocede ni reutiliza folios ya impresos en terreno.
-  const handleEliminarReporte = async (id) => {
+  // Abre el modal de confirmación (reemplaza al window.confirm nativo)
+  const handleEliminarReporte = (id) => {
     const reporte = reportes.find(r => r.id === id);
-    const ok = window.confirm(
-      `¿Eliminar el reporte ${reporte?.numeroReporte || ''}?\n\n` +
-      'Quedará oculto del listado pero se conserva en la base de datos, ' +
-      'para no reutilizar su número correlativo.'
-    );
-    if (!ok) return;
+    setReporteAEliminar(reporte || { id });
+  };
 
+  const confirmarEliminarReporte = async () => {
+    const id = reporteAEliminar?.id;
+    if (!id) return;
     try {
       await updateDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id), {
         deleted: true,
@@ -279,8 +282,11 @@ export default function ReporteWorkFleet() {
         },
       });
       setReportes(prev => prev.map(r => (r.id === id ? { ...r, deleted: true } : r)));
+      toast({ type: 'success', message: `Reporte ${reporteAEliminar?.numeroReporte || ''} eliminado.` });
     } catch (err) {
-      alert('Error al eliminar: ' + err.message);
+      toast({ type: 'error', message: 'No se pudo eliminar el reporte: ' + err.message });
+    } finally {
+      setReporteAEliminar(null);
     }
   };
 
@@ -1812,6 +1818,41 @@ export default function ReporteWorkFleet() {
       {maquinaDetalle && (
         <MaquinaDetalleModal machine={maquinaDetalle} empresaId={empresaId} onClose={() => setMaquinaDetalle(null)} />
       )}
+
+      {/* Confirmación de eliminación (reemplaza al confirm nativo) */}
+      {reporteAEliminar && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-black text-slate-900 text-center mb-1">
+              Eliminar reporte {reporteAEliminar.numeroReporte || ''}
+            </h3>
+            <p className="text-sm text-slate-500 text-center mb-5">
+              Quedará oculto del listado pero se conserva en la base de datos, para no reutilizar su número correlativo.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setReporteAEliminar(null)}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarEliminarReporte}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
 
       {/* Modal de Detalle del Reporte */}
       {reporteDetalle && (
