@@ -13,6 +13,13 @@ import CombustibleImporter from "../combustible/CombustibleImporter";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
 
+/**
+ * Equipo surtidor (camión / mochila / estanque) de un reporte.
+ * El formulario guarda los datos de control tanto anidados (`datosControl`)
+ * como aplanados en la raíz, y los registros antiguos solo tienen la raíz.
+ */
+const getEquipoSurtidorId = (r) => r?.datosControl?.equipoSurtidorId || r?.equipoSurtidorId || '';
+
 function SurtidoresStatsPanel({ stats, selectedSurtidorId, onSelectSurtidor, fechaInicio, fechaFin }) {
   if (stats.length === 0) return null;
 
@@ -492,7 +499,7 @@ export default function ReporteCombustible() {
     if (filtros.surtidor) {
       resultado = resultado.filter(r => {
         if (r.tipo === 'entrega') {
-          return r.datosControl?.equipoSurtidorId === filtros.surtidor;
+          return getEquipoSurtidorId(r) === filtros.surtidor;
         } else if (r.tipo === 'entrada') {
           return r.datosEntrada?.machineId === filtros.surtidor;
         }
@@ -562,8 +569,8 @@ export default function ReporteCombustible() {
       let surtidorTruck = null;
       if (r.tipo === 'entrada' && r.datosEntrada?.destinoCarga === 'camion') {
         surtidorTruck = equiposSurtidores.find(m => m.id === r.datosEntrada.machineId);
-      } else if (r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId) {
-        surtidorTruck = equiposSurtidores.find(m => m.id === r.datosControl.equipoSurtidorId);
+      } else if (r.tipo === 'entrega' && getEquipoSurtidorId(r)) {
+        surtidorTruck = equiposSurtidores.find(m => m.id === getEquipoSurtidorId(r));
       }
 
       const horometroOdometro = r.datosEntrega?.horometroOdometro
@@ -582,8 +589,9 @@ export default function ReporteCombustible() {
         surtidorName: surtidorTruck?.nombre || surtidorTruck?.name || '',
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
-        operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.operadorNombre || '',
-        operadorRut: operador?.rut || r.operadorRut || '',
+        operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.datosEntrega?.receptorNombre
+          || r.datosEntrega?.operadorExterno?.nombre || r.operadorNombre || '',
+        operadorRut: operador?.rut || r.datosEntrega?.receptorRut || r.operadorRut || '',
         receptorNombre: r.datosEntrada?.receptorNombre || '',
         cantidad: cantidad,
         horometroOdometro,
@@ -613,7 +621,7 @@ export default function ReporteCombustible() {
       const totalIngresadoAllTime = entradasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrada?.cantidad) || 0), 0);
 
       // Entregas históricas (All-Time)
-      const entregasHist = reportes.filter(r => r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId === s.id);
+      const entregasHist = reportes.filter(r => r.tipo === 'entrega' && getEquipoSurtidorId(r) === s.id);
       const totalEntregadoAllTime = entregasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrega?.cantidadLitros) || 0), 0);
 
       // Stock actual real (All-time balance)
@@ -762,7 +770,7 @@ export default function ReporteCombustible() {
 
     } else {
       // --- LOGICA PARA ENTREGA (SALIDA) ---
-      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoId = getEquipoSurtidorId(reporte);
       const equipoSurtidor = equipoId ? (equiposSurtidores.find(m => m.id === equipoId) || machines.find(m => m.id === equipoId)) : null;
 
       const machineId = reporte.datosEntrega?.machineId;
@@ -967,7 +975,7 @@ export default function ReporteCombustible() {
       doc.setFont(undefined, 'normal');
       doc.setTextColor(55, 65, 81);
       doc.setFontSize(9);
-      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoId = getEquipoSurtidorId(reporte);
       const equipoSurtidor = equipoId ? machines.find(m => m.id === equipoId) : null;
       doc.text(`Equipo: ${equipoSurtidor?.name || equipoSurtidor?.patente || 'No especificado'}`, margin + colWidth, yPos + 6);
       doc.text(`Obra: ${reporte.projectName || 'N/A'}`, margin + colWidth, yPos + 12);

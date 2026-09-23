@@ -67,6 +67,9 @@ export default function ControlStep({
   machinesLocal, machines,
   trabajadoresLocales,
   surtidoresPersonas,
+  repartidoresDisponibles,
+  puedeElegirRepartidor,
+  stockSurtidor, capacidadSurtidor,
   currentUserData, isAdmin,
   isReportesView,
   cargarEstaciones,
@@ -79,7 +82,6 @@ export default function ControlStep({
   setShowModalProyecto,
   setShowModalEstacion,
 }) {
-  const [searchRepartidor, setSearchRepartidor] = useState('');
   const [searchEquipo, setSearchEquipo] = useState('');
   const [searchMaquinaProveedor, setSearchMaquinaProveedor] = useState('');
   const [searchOperadorProveedor, setSearchOperadorProveedor] = useState('');
@@ -140,8 +142,65 @@ export default function ControlStep({
     setPaso(3);
   };
 
-  const repartidorSel = surtidoresPersonas.find(e => e.id === datosControl.repartidorId);
+  const repartidores = (repartidoresDisponibles?.length ? repartidoresDisponibles : surtidoresPersonas) || [];
+  const repartidorSel = repartidores.find(e => e.id === datosControl.repartidorId);
   const equipoSel = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId);
+
+  const fmtL = (n) => Number(n || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 });
+
+  /** Remanente / capacidad del equipo surtidor seleccionado. */
+  const renderStockBadge = () => {
+    if (!datosControl.equipoSurtidorId || stockSurtidor === null || stockSurtidor === undefined) return null;
+    const lleno = capacidadSurtidor > 0 && stockSurtidor >= capacidadSurtidor - 0.01;
+    return (
+      <div className={`px-3 py-2 rounded-xl text-xs font-black flex items-center justify-between gap-2 ${lleno ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+        <span>Remanente: {fmtL(stockSurtidor)} L</span>
+        {capacidadSurtidor > 0 && (
+          <span className={lleno ? 'text-red-600' : 'text-slate-400'}>
+            {lleno ? 'Equipo lleno' : `Capacidad ${fmtL(capacidadSurtidor)} L`}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * Selector de repartidor.
+   * Solo admin / admin_contrato o quien registra desde el módulo de reportes
+   * puede elegir a otra persona; el resto queda con su propio usuario.
+   */
+  const renderRepartidor = (color = 'green') => {
+    if (!puedeElegirRepartidor) {
+      return (
+        <div className="px-4 py-3 bg-blue-50 border-2 border-blue-100 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm">
+          <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
+          {currentUserData?.nombre || 'Mi usuario'}
+        </div>
+      );
+    }
+    const focusCls = color === 'blue' ? 'focus:border-blue-500' : 'focus:border-green-500';
+    return (
+      <>
+        <select
+          value={datosControl.repartidorId || ''}
+          onChange={(e) => setDatosControl(prev => ({ ...prev, repartidorId: e.target.value }))}
+          className={`w-full px-4 py-3 bg-white border-2 rounded-xl font-bold text-slate-700 text-sm shadow-sm ${focusCls} ${hasErr('repartidorId') ? 'border-red-300 bg-red-50/30' : 'border-slate-200'}`}
+        >
+          <option value="">Seleccione repartidor</option>
+          {repartidores.map(emp => (
+            <option key={emp.id} value={emp.id}>
+              {emp.nombre || emp.name}{emp.rut ? ` — ${emp.rut}` : ''}
+            </option>
+          ))}
+        </select>
+        {repartidorSel && (
+          <p className="px-1 text-xs font-bold text-slate-400">
+            Entrega: {shortName(repartidorSel.nombre || repartidorSel.name)}
+          </p>
+        )}
+      </>
+    );
+  };
 
   const proveedorMachines = (machinesLocal || []).filter(m =>
     empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrada.origen))
@@ -268,40 +327,7 @@ export default function ControlStep({
                       <label className={`block text-sm font-black uppercase tracking-wider px-1 ${hasErr('repartidorId') ? 'text-red-600' : 'text-slate-500'}`}>
                         Repartidor{hasErr('repartidorId') && <span className="ml-1 font-normal normal-case text-xs">— requerido</span>}
                       </label>
-                      {isAdmin ? (
-                        datosControl.repartidorId ? (
-                          <div className="p-3 bg-gradient-to-br from-green-600 to-emerald-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
-                            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center font-black">{repartidorSel?.nombre?.charAt(0) || '?'}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-black text-sm uppercase truncate">{repartidorSel?.nombre}</div>
-                            </div>
-                            <button onClick={() => setDatosControl(prev => ({ ...prev, repartidorId: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black transition-all">✕</button>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="relative">
-                              <input type="text" placeholder="Buscar repartidor..." value={searchRepartidor} onChange={e => setSearchRepartidor(e.target.value)}
-                                className={`w-full pl-10 pr-4 py-3 bg-white border-2 rounded-xl focus:border-green-500 font-medium text-sm ${hasErr('repartidorId') ? 'border-red-300' : 'border-slate-200'}`} />
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
-                            </div>
-                            <div className="max-h-52 overflow-y-auto space-y-1">
-                              {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
-                                <button key={emp.id} type="button"
-                                  onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
-                                  className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-green-400 rounded-xl transition-all text-left">
-                                  <div className="w-7 h-7 rounded-lg bg-green-50 text-green-600 flex items-center justify-center"><PersonIcon /></div>
-                                  <div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div>
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )
-                      ) : (
-                        <div className="px-4 py-3 bg-blue-50 border-2 border-blue-100 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm">
-                          <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
-                          {currentUserData?.nombre || 'Mi usuario'}
-                        </div>
-                      )}
+                      {renderRepartidor('green')}
                     </div>
 
                     {/* Equipo Surtidor - searchable */}
@@ -318,7 +344,8 @@ export default function ControlStep({
                           </div>
                           <button onClick={() => setDatosControl(prev => ({ ...prev, equipoSurtidorId: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black transition-all">✕</button>
                         </div>
-                      ) : (
+                      ) : null}
+                      {datosControl.equipoSurtidorId ? renderStockBadge() : (
                         <>
                           <div className="relative">
                             <input type="text" placeholder="Buscar equipo..." value={searchEquipo} onChange={e => setSearchEquipo(e.target.value)}
@@ -377,10 +404,12 @@ export default function ControlStep({
                         <div className="p-3 bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-xl flex items-center gap-3 shadow-md">
                           <div className="flex-1 min-w-0">
                             <div className="font-black text-sm uppercase truncate">{equipoSel?.patente || equipoSel?.code}</div>
+                            <div className="text-xs opacity-75">{equipoSel?.nombre}</div>
                           </div>
                           <button onClick={() => setDatosControl(prev => ({ ...prev, equipoSurtidorId: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black">✕</button>
                         </div>
-                      ) : (
+                      ) : null}
+                      {datosControl.equipoSurtidorId ? renderStockBadge() : (
                         <>
                           <div className="relative">
                             <input type="text" placeholder="Buscar equipo..." value={searchEquipo} onChange={e => setSearchEquipo(e.target.value)}
@@ -409,7 +438,7 @@ export default function ControlStep({
                   {/* Quién recibe */}
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
                     <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Quién recibe</label>
-                    {isAdmin ? (
+                    {puedeElegirRepartidor ? (
                       datosEntrada.receptorNombre ? (
                         <div className="p-3 bg-gradient-to-br from-green-600 to-emerald-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
                           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center font-black text-sm">{datosEntrada.receptorNombre.charAt(0)}</div>
@@ -567,40 +596,10 @@ export default function ControlStep({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
 
-                  {/* Repartidor - searchable */}
+                  {/* Repartidor */}
                   <div className="space-y-2">
-                    {isAdmin ? (
-                      datosControl.repartidorId ? (
-                        <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl flex items-center gap-3 shadow-md animate-in zoom-in duration-200">
-                          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center font-black">{repartidorSel?.nombre?.charAt(0) || '?'}</div>
-                          <div className="flex-1 min-w-0"><div className="font-black text-sm uppercase truncate">{repartidorSel?.nombre}</div></div>
-                          <button onClick={() => setDatosControl(prev => ({ ...prev, repartidorId: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black">✕</button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="relative">
-                            <input type="text" placeholder="Buscar repartidor..." value={searchRepartidor} onChange={e => setSearchRepartidor(e.target.value)}
-                              className="w-full pl-10 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl focus:border-blue-500 font-medium text-sm" />
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
-                          </div>
-                          <div className="max-h-52 overflow-y-auto space-y-1">
-                            {surtidoresPersonas.filter(emp => matchWorker(emp, searchRepartidor)).map(emp => (
-                              <button key={emp.id} type="button"
-                                onClick={() => { setDatosControl(prev => ({ ...prev, repartidorId: emp.id })); setSearchRepartidor(''); }}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-blue-400 rounded-xl transition-all text-left">
-                                <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
-                                <div className="font-black text-sm text-slate-700">{shortName(emp.nombre)}</div>
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )
-                    ) : (
-                      <div className="px-4 py-3 bg-white/50 border-2 border-blue-200 rounded-xl font-bold text-blue-900 flex items-center gap-2 text-sm">
-                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center"><PersonIcon /></div>
-                        {currentUserData?.nombre || 'Mi usuario'}
-                      </div>
-                    )}
+                    <label className="block text-sm font-black text-slate-500 uppercase tracking-wider px-1">Repartidor</label>
+                    {renderRepartidor('blue')}
                   </div>
 
                   {/* Equipo Surtidor - searchable */}
@@ -616,7 +615,8 @@ export default function ControlStep({
                         </div>
                         <button onClick={() => setDatosControl(prev => ({ ...prev, equipoSurtidorId: '' }))} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center font-black">✕</button>
                       </div>
-                    ) : (
+                    ) : null}
+                    {datosControl.equipoSurtidorId ? renderStockBadge() : (
                       <>
                         <div className="relative">
                           <input type="text" placeholder="Buscar equipo..." value={searchEquipo} onChange={e => setSearchEquipo(e.target.value)}
