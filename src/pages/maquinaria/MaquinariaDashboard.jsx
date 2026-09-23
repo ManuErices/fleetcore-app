@@ -86,7 +86,12 @@ export default function MaquinariaDashboard() {
     const m = machineById(plan.machineId);
     if (!m || m.medidorActual == null) return { plan, m, estado: "sindata", restante: null };
     const ev = eventosPorPlan(plan.id);
-    const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn : Number(m.medidorActual) + Number(plan.intervalo || 0);
+    // Misma resolución que en las alertas y en la ficha del equipo: evento
+    // ejecutado, o el ancla del plan. Nunca `medidorActual + intervalo`, que
+    // es un objetivo móvil y deja el restante clavado en el intervalo.
+    const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn
+      : (plan.proximaEnMedidor != null ? Number(plan.proximaEnMedidor) : null);
+    if (objetivo == null) return { plan, m, estado: "sinancla", restante: null };
     const restante = objetivo - Number(m.medidorActual);
     const tol = Number(plan.tolerancia || 0);
     let estado = "ok";
@@ -96,6 +101,7 @@ export default function MaquinariaDashboard() {
   });
   const atrasadas = planStatus.filter((p) => p.estado === "atrasada");
   const proximas = planStatus.filter((p) => p.estado === "proxima");
+  const sinAncla = planStatus.filter((p) => p.estado === "sinancla");
 
   // ── Fallas abiertas ──
   const fallasAbiertas = failures.filter((f) => f.estado === "abierta");
@@ -154,6 +160,10 @@ export default function MaquinariaDashboard() {
           <StatRow label="Atrasadas" value={atrasadas.length} highlight={atrasadas.length > 0} danger />
           <StatRow label="Próximas" value={proximas.length} highlight={proximas.length > 0} />
           <StatRow label="Planes activos" value={plans.length} />
+          {/* Un plan sin objetivo no avisa nunca: vale la pena verlo acá. */}
+          {sinAncla.length > 0 && (
+            <StatRow label="Sin próxima definida" value={sinAncla.length} highlight danger />
+          )}
         </Panel>
 
         {/* Fallas / stock */}
