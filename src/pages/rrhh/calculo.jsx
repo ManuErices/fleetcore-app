@@ -40,6 +40,45 @@ function factorPeriodo(tipoPeriodo) {
     default:          return 1;   // mensual
   }
 }
+/**
+ * Días del período que el contrato estuvo vigente, en base 30.
+ *
+ * Quien entra el 21 de septiembre trabaja 10 días, no 30, y su sueldo base es
+ * proporcional (Art. 44 inc. 3 CT: la remuneración se paga por el tiempo
+ * efectivamente servido). Antes el motor asumía 30 días siempre que nadie los
+ * escribiera a mano, así que un ingreso a mitad de mes pagaba el mes completo
+ * y nadie lo notaba: la liquidación se veía correcta.
+ *
+ * Se usa el mes comercial de 30 días, que es la convención previsional chilena
+ * y la que ya usa el resto del motor. Días 31 se cuentan como 30.
+ *
+ * Devuelve null cuando no hay fechas con qué calcular: ahí manda el default.
+ */
+function diasVigentesEnPeriodo(contrato, mes, anio) {
+  const m = parseInt(mes), a = parseInt(anio);
+  if (!m || !a) return null;
+
+  const ini = contrato?.fechaInicio ? new Date(`${contrato.fechaInicio}T12:00:00`) : null;
+  const fin = contrato?.fechaFin    ? new Date(`${contrato.fechaFin}T12:00:00`)    : null;
+  if ((!ini || isNaN(ini)) && (!fin || isNaN(fin))) return null;
+
+  const primero = new Date(a, m - 1, 1, 12);
+  const ultimo  = new Date(a, m, 0, 12);          // último día real del mes
+
+  // Fuera del período: el contrato no alcanza a tocar este mes.
+  if (ini && !isNaN(ini) && ini > ultimo) return 0;
+  if (fin && !isNaN(fin) && fin < primero) return 0;
+
+  const desde = ini && !isNaN(ini) && ini > primero ? ini.getDate() : 1;
+  const hasta = fin && !isNaN(fin) && fin < ultimo  ? fin.getDate() : ultimo.getDate();
+
+  // Mes comercial: el día 31 se funde con el 30, en los dos extremos. Sin
+  // topear también el `desde`, quien entra un 31 daba 0 días trabajados y su
+  // liquidación salía en cero.
+  const dias = Math.min(30, Math.max(0, Math.min(hasta, 30) - Math.min(desde, 30) + 1));
+  return desde === 1 && hasta >= ultimo.getDate() ? 30 : dias;
+}
+
 function calcularLiquidacion(rem) {
   // ── Parámetros legales del período que se está liquidando ──
   // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
@@ -107,7 +146,13 @@ function calcularLiquidacion(rem) {
   // Días que la empresa efectivamente no paga
   const diasLicNoPagados = pagarCarencia ? diasLicencia - diasCarencia : diasLicencia;
 
-  const diasBase   = parseInt(rem.diasTrabajados) >= 0 ? parseInt(rem.diasTrabajados) : 30;
+  // Prioridad: los días escritos a mano en la liquidación, y si no, los que el
+  // contrato estuvo vigente dentro del período. El default de 30 queda solo
+  // para cuando no hay fechas con qué calcular.
+  const diasPorContrato = diasVigentesEnPeriodo(rem, rem.mes, rem.anio);
+  const diasBase   = parseInt(rem.diasTrabajados) >= 0
+    ? parseInt(rem.diasTrabajados)
+    : (diasPorContrato ?? 30);
   // Si la liquidación ya trae los días trabajados netos (el modal los calcula
   // al registrar la licencia) no se descuenta de nuevo. El tope evita el doble
   // descuento cuando alguien baja los días a mano Y registra la licencia.
@@ -277,7 +322,7 @@ function calcularLiquidacion(rem) {
     descAdicional, anticipo, pagoAnterior, liquido,
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
-    diasTrab, fdias,          // expuestos para auditoría / PDF
+    diasTrab, fdias, diasPorContrato,   // expuestos para auditoría / PDF
     diasLicencia, diasCarencia, diasLicNoPagados, pagarCarencia, detalleLic,
     baseCompleto, gratCompleto: Math.round(P.topeGratMensual * fp),
     // Snapshot de los parámetros con que se calculó. Se guarda en el documento
@@ -987,7 +1032,7 @@ function fueReliquidada(liq, liquidaciones) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  nombreTrabajador,
+  nombreTrabajador, diasVigentesEnPeriodo,
   calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
