@@ -1229,14 +1229,41 @@ function fmtCodigo(raw, empresa) {
   }
 }
 
-// Formatea patente: ABCD-12
+/**
+ * Formatea una patente chilena, en cualquiera de los dos formatos vigentes.
+ *
+ *   · Antiguo (hasta 2007): 2 letras + 4 dígitos  → AB-1234
+ *   · Actual:               4 letras + 2 dígitos  → ABCD-12
+ *
+ * Antes solo contemplaba el formato nuevo: tomaba cuatro letras y DOS dígitos,
+ * así que al escribir "AB1234" guardaba "AB-12" y botaba el 34 sin avisar. Las
+ * máquinas antiguas de la flota quedaban con la patente mutilada.
+ *
+ * Cuál de los dos aplica lo decide la cantidad de letras, que es lo que el
+ * usuario escribe primero: con una o dos letras es formato antiguo y admite
+ * hasta cuatro dígitos; con tres o más, es el nuevo y admite dos.
+ */
 function fmtPatente(raw) {
-  let v = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const v = String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   if (!v) return '';
+
   const letras = v.replace(/[^A-Z]/g, '').slice(0, 4);
-  const nums   = v.replace(/[^0-9]/g, '').slice(0, 2);
-  if (!letras) return v.slice(0,6);
-  return nums ? letras + '-' + nums : letras;
+  if (!letras) return v.slice(0, 4);   // todavía no escribe letras
+
+  const maxNums = letras.length <= 2 ? 4 : 2;
+  const nums = v.replace(/[^0-9]/g, '').slice(0, maxNums);
+  return nums ? `${letras}-${nums}` : letras;
+}
+
+/**
+ * ¿La patente está completa y bien formada? Se usa solo para avisar, no para
+ * bloquear: hay maquinaria pesada sin patente —excavadoras, cargadores— que
+ * igual tiene que poder registrarse.
+ */
+function patenteValida(p) {
+  const v = String(p || '').trim().toUpperCase();
+  if (!v) return true;                       // vacía es válida: no toda máquina tiene
+  return /^[A-Z]{2}-\d{4}$/.test(v) || /^[A-Z]{4}-\d{2}$/.test(v);
 }
 function MaquinasSection() {
   const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
@@ -1405,14 +1432,23 @@ function MaquinasSection() {
                 <p className="text-[10px] text-amber-500 mt-1 font-medium">⚠ Selecciona empresa primero</p>
               )}
             </Field>
-            <Field label="Patente (ABCD-12)">
+            <Field label="Patente">
               <input
                 className={inputCls}
                 value={form.patente}
                 onChange={e => setForm({ ...form, patente: fmtPatente(e.target.value) })}
-                placeholder="Ej: TBJP-70"
+                placeholder="ABCD-12 o AB-1234"
                 maxLength={7}
               />
+              {form.patente && !patenteValida(form.patente) ? (
+                <p className="text-[10px] text-amber-500 mt-1 font-medium">
+                  ⚠ Incompleta — faltan dígitos para {form.patente.replace(/[^A-Z]/g, '').length <= 2 ? 'AB-1234' : 'ABCD-12'}
+                </p>
+              ) : (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Nueva (ABCD-12) o antigua (AB-1234). Vacía si el equipo no tiene.
+                </p>
+              )}
             </Field>
           </div>
 
