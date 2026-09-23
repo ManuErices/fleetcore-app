@@ -1569,6 +1569,8 @@ export default function AsistenciaSection() {
           worker={assigningWorker}
           turnos={turnos}
           currentAssignment={asignaciones.find(a => a.trabajadorId === assigningWorker.id && a.activo)}
+          contrato={contratos?.find(c => c.trabajadorId === assigningWorker.id && c.estado === 'vigente')
+                 || contratos?.find(c => c.trabajadorId === assigningWorker.id)}
           onSave={handleAssignShift}
         />
       )}
@@ -1892,11 +1894,25 @@ function ShiftModal({ isOpen, onClose, onSave, editData }) {
   );
 }
 
-function AssignShiftModal({ isOpen, onClose, worker, turnos, currentAssignment, onSave }) {
+function AssignShiftModal({ isOpen, onClose, worker, turnos, currentAssignment, contrato, onSave }) {
   const [turnoId, setTurnoId] = useState(currentAssignment?.turnoId || '');
+
+  // La asignación arranca en la fecha de contratación, no en hoy.
+  //
+  // Con "hoy" por defecto, la asistencia de todo el tiempo ya trabajado quedaba
+  // sin turno asociado: los días previos no se podían analizar ni comparar
+  // contra jornada, y el hueco solo se notaba semanas después. La fecha de
+  // ingreso es el momento en que la obligación de registrar asistencia empieza
+  // de verdad (Art. 33 CT).
+  //
+  // Orden: la asignación que ya existía, la fecha de inicio del contrato
+  // vigente, la fecha de ingreso de la ficha, y recién ahí hoy.
   const [fechaInicio, setFechaInicio] = useState(() => {
-    const today = new Date().toISOString().split('T')[0];
-    return currentAssignment?.fechaInicio || today;
+    const hoy = new Date().toISOString().split('T')[0];
+    return currentAssignment?.fechaInicio
+      || contrato?.fechaInicio
+      || worker?.fechaIngreso
+      || hoy;
   });
   const [fechaFin, setFechaFin] = useState(currentAssignment?.fechaFin || '');
 
@@ -1925,6 +1941,13 @@ function AssignShiftModal({ isOpen, onClose, worker, turnos, currentAssignment, 
           <div>
             <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Fecha de Inicio</label>
             <input type="date" className={inp} value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} />
+            {!currentAssignment && (contrato?.fechaInicio || worker?.fechaIngreso) && (
+              <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                Precargada con {contrato?.fechaInicio ? 'el inicio del contrato' : 'la fecha de ingreso'}:
+                así la asistencia ya registrada queda cubierta por el turno. Cámbiala si el turno
+                empieza después.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Fecha de Término (Opcional)</label>
