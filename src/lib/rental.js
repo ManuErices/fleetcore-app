@@ -501,15 +501,61 @@ export function diasVigenciaCotizacion(quote) {
 // Un solo acto: se registra la OC (número, fecha, monto y archivo) y la
 // cotización queda aceptada y vinculada a ella.
 
+/**
+ * Resuelve el cliente de una cotización rápida.
+ *
+ * Una cotización a cliente no registrado guarda sus datos en el propio
+ * documento (`clienteManual`) y deja `clienteId` en null. Eso sirve para
+ * enviarla, pero no para aceptarla: la OC, el contrato y toda la consolidación
+ * de deuda cuelgan del `clienteId`. Con null, esos documentos quedarían
+ * huérfanos y el cliente nunca aparecería en su propia cuenta corriente.
+ *
+ * Así que al aceptar se crea la ficha con lo que ya se escribió. Si el RUT ya
+ * existe, se reutiliza esa ficha en vez de fallar: es el mismo cliente al que
+ * alguien cotizó sin buscarlo primero, que es justamente el caso que la
+ * cotización rápida vino a resolver.
+ */
+async function resolverClienteDeCotizacion(empresaId, quote) {
+  if (quote.clienteId) return { clienteId: quote.clienteId, clienteNombre: quote.clienteNombre, creado: false };
+
+  const manual = quote.clienteManual;
+  if (!manual?.nombre) {
+    throw new Error("La cotización no tiene cliente. Selecciona uno o completa los datos antes de aceptarla.");
+  }
+
+  const rutLimpio = limpiarRut(manual.rut);
+  if (rutLimpio) {
+    const existentes = await listRentalClients(empresaId, { incluirInactivos: true });
+    const yaEsta = existentes.find((c) => limpiarRut(c.rut) === rutLimpio);
+    if (yaEsta) return { clienteId: yaEsta.id, clienteNombre: yaEsta.nombre, creado: false };
+  }
+
+  const clienteId = await upsertRentalClient(empresaId, {
+    nombre: manual.nombre,
+    rut: manual.rut || "",
+    giro: manual.giro || "",
+    contacto: manual.ejecutivo || "",
+    email: manual.email || "",
+    telefono: manual.telefono || "",
+    direccion: manual.direccion || "",
+    notas: `Ficha creada al aceptar la cotización ${quote.numero || ""}`.trim(),
+  });
+  return { clienteId, clienteNombre: manual.nombre.trim(), creado: true };
+}
+
 export async function aceptarCotizacion(empresaId, quote, ocData = {}, file = null) {
   if (!quote?.id) throw new Error("Cotización inválida");
   if (quote.estado === "aceptada" || quote.ocId) throw new Error("Esta cotización ya fue aceptada");
   if (quote.estado === "rechazada") throw new Error("Esta cotización fue rechazada");
 
+  // Se resuelve ANTES de crear la OC: si la ficha falla —RUT inválido, por
+  // ejemplo— no queda una orden de compra a medio camino.
+  const { clienteId, clienteNombre, creado } = await resolverClienteDeCotizacion(empresaId, quote);
+
   const ocId = await upsertRentalPurchaseOrder(empresaId, {
     numeroOC: ocData.numeroOC,
-    clienteId: quote.clienteId,
-    clienteNombre: quote.clienteNombre,
+    clienteId,
+    clienteNombre,
     cotizacionId: quote.id,
     cotizacionNumero: quote.numero || "",
     fechaEmision: ocData.fechaEmision,
@@ -527,10 +573,14 @@ export async function aceptarCotizacion(empresaId, quote, ocData = {}, file = nu
     ocId,
     ocNumero: String(ocData.numeroOC || "").trim(),
     fechaAceptacion: new Date().toISOString().slice(0, 10),
+    // La cotización queda apuntando a la ficha real. `clienteManual` se
+    // conserva como registro de con qué datos se cotizó ese día.
+    clienteId,
+    clienteNombre,
     updatedAt: serverTimestamp(),
   });
 
-  return ocId;
+  return { ocId, clienteId, clienteCreado: creado };
 }
 
 export async function rechazarCotizacion(empresaId, quoteId, motivo = "") {
