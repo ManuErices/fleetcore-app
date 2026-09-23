@@ -77,7 +77,10 @@ export default function OrdenesTrabajo() {
       fechaApertura: new Date().toISOString(),
     });
     await refresh();
-    setSelectedOT({ id, machineId, origen: "solicitud", estado: "pendiente" });
+    // Se relee de la lista en vez de armar un objeto a mano: el parcial perdía
+    // los campos que no se escribieron acá y el detalle abría sin ellos.
+    const lista = await listWorkOrders(empresaId, {});
+    setSelectedOT(lista.find((o) => o.id === id) || { id, machineId, origen: "solicitud", estado: "pendiente" });
   };
 
   return (
@@ -149,7 +152,16 @@ export default function OrdenesTrabajo() {
                   )}
                 </div>
                 <h3 className="font-black text-slate-900">{machineName(wo.machineId)}</h3>
-                <p className="text-xs text-slate-500 mt-1 capitalize">Origen: {wo.origen?.replace("_", " ")}</p>
+                {/* Una OT preventiva muestra su plan: es la diferencia entre
+                    "hay que revisar algo" y "toca la pauta de 250 h". */}
+                {wo.origenRefId ? (
+                  <p className="text-xs font-bold text-indigo-600 mt-1">
+                    Preventiva · {wo.planNombre || "plan del equipo"}
+                    {wo.objetivoMedidor != null && ` · a los ${Number(wo.objetivoMedidor).toLocaleString("es-CL")}`}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-1 capitalize">Origen: {wo.origen?.replace("_", " ")}</p>
+                )}
                 {wo.diagnostico && <p className="text-xs text-slate-600 mt-2 line-clamp-2">{wo.diagnostico}</p>}
                 <p className="text-[10px] text-slate-400 mt-3">
                   Abierta: {wo.fechaApertura ? new Date(wo.fechaApertura).toLocaleDateString("es-CL") : "-"}
@@ -166,6 +178,10 @@ export default function OrdenesTrabajo() {
           machine={machines.find((m) => m.id === selectedOT.machineId)}
           isMecanico={isMecanico}
           onClose={() => setSelectedOT(null)}
+          // `onSaved` refresca la lista y deja el modal abierto — avanzar de
+          // estado no es terminar. `onUpdated` cierra: solo lo llama el cierre
+          // definitivo de la OT.
+          onSaved={refresh}
           onUpdated={() => { setSelectedOT(null); refresh(); }}
         />
       )}

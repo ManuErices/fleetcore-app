@@ -1,6 +1,7 @@
 import {
   listMachines, listMachineDocuments, listRentalContracts,
   listSpareParts, listMaintenancePlans, listMaintenanceEvents,
+  listWorkOrders,
 } from "../../lib/db";
 
 // ============================================================
@@ -32,13 +33,22 @@ const TIPOS_DOC_LABEL = {
 export async function buildMaquinariaAlerts(empresaId) {
   if (!empresaId) return { alerts: [], counts: {} };
 
-  const [machines, contracts, spareParts, plans, events] = await Promise.all([
+  const [machines, contracts, spareParts, plans, events, workOrders] = await Promise.all([
     listMachines(empresaId),
     listRentalContracts(empresaId),
     listSpareParts(empresaId),
     listMaintenancePlans(empresaId),
     listMaintenanceEvents(empresaId),
+    // Para no repetir la alerta de un plan que ya tiene su OT en curso: el
+    // aviso cumplió su función cuando la orden se creó.
+    listWorkOrders(empresaId).catch(() => []),
   ]);
+
+  const planesConOT = new Set(
+    (workOrders || [])
+      .filter((o) => o.origen === "preventiva" && o.origenRefId && !["cerrada", "cancelada"].includes(o.estado))
+      .map((o) => o.origenRefId)
+  );
 
   // Documentos: se consultan por máquina (colección filtrada por machineId)
   const docsPorMaquina = await Promise.all(
@@ -107,9 +117,14 @@ export async function buildMaquinariaAlerts(empresaId) {
     // blanco que se movía junto con el horómetro, así que `restante` era
     // siempre igual al intervalo y esta alerta no podía dispararse nunca.
     const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn
+      : (plan.ultimaMantencionEn != null && plan.intervalo)
+        ? Number(plan.ultimaMantencionEn) + Number(plan.intervalo)
       : (plan.proximaEnMedidor != null ? Number(plan.proximaEnMedidor) : null);
 
     // Un plan sin objetivo es un plan que no avisa. Decirlo es la alerta.
+    // Con OT abierta el plan está atendido: alertar de nuevo es ruido.
+    if (planesConOT.has(plan.id)) continue;
+
     if (objetivo == null) {
       alerts.push({
         id: `plan-sinancla-${plan.id}`, tipo: "mantencion", severidad: "media",
@@ -132,6 +147,9 @@ export async function buildMaquinariaAlerts(empresaId) {
         titulo: "Mantención atrasada",
         detalle: `${machineName(m)} · ${plan.nombre} · vencida por ${Math.abs(restante).toLocaleString("es-CL")} ${unidad}${costoTxt}`,
         entidad: "machine", entidadId: m.id,
+        // Se arrastra el plan para que la pantalla pueda ofrecer la acción
+        // —generar la OT— y no solo mostrar el aviso.
+        planId: plan.id, restante, objetivo,
       });
     } else if (restante <= tol) {
       // Dentro de la tolerancia: es el aviso oportuno que faltaba. Antes solo
@@ -141,6 +159,7 @@ export async function buildMaquinariaAlerts(empresaId) {
         titulo: "Mantención próxima",
         detalle: `${machineName(m)} · ${plan.nombre} · faltan ${restante.toLocaleString("es-CL")} ${unidad} (a los ${Number(objetivo).toLocaleString("es-CL")})${costoTxt}`,
         entidad: "machine", entidadId: m.id,
+        planId: plan.id, restante, objetivo,
       });
     }
   }

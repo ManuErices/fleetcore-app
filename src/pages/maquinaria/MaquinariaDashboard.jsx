@@ -90,6 +90,8 @@ export default function MaquinariaDashboard() {
     // ejecutado, o el ancla del plan. Nunca `medidorActual + intervalo`, que
     // es un objetivo móvil y deja el restante clavado en el intervalo.
     const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn
+      : (plan.ultimaMantencionEn != null && plan.intervalo)
+        ? Number(plan.ultimaMantencionEn) + Number(plan.intervalo)
       : (plan.proximaEnMedidor != null ? Number(plan.proximaEnMedidor) : null);
     if (objetivo == null) return { plan, m, estado: "sinancla", restante: null };
     const restante = objetivo - Number(m.medidorActual);
