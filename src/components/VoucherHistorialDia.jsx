@@ -82,8 +82,10 @@ export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, rep
         nombre: reporte.repartidorNombre || repartidorNombre || '',
         rut: reporte.repartidorRut || ''
       };
-      const equipoSurtidorInfo = reporte.datosControl?.equipoSurtidorId
-        ? machines.find(m => m.id === reporte.datosControl.equipoSurtidorId)
+      // datosControl se guarda anidado y aplanado en la raíz (registros antiguos)
+      const equipoSurtidorId = reporte.datosControl?.equipoSurtidorId || reporte.equipoSurtidorId;
+      const equipoSurtidorInfo = equipoSurtidorId
+        ? machines.find(m => m.id === equipoSurtidorId)
         : null;
 
       printThermalVoucher({

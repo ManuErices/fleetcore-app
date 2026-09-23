@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { formatMiles } from '../../../utils/formatters';
-import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
+import { matchWorker, matchMachine, shortName, machineTitulo, machinePatente } from '../../../utils/searchHelpers';
 import { PillButton } from "../../../components/ui/PillButton";
 import { useKeyboardAvoidingView } from "../../../hooks/useKeyboardAvoidingView";
 
@@ -48,18 +48,22 @@ export default function EntregaStep({
   nuevoEmpleadoData,
   isAdmin,
   isReportesView,
+  operadorExterno, setOperadorExterno,
+  equipoSurtidorSel, stockSurtidor,
 }) {
   const [emailInput, setEmailInput] = useState('');
   const [searchMaquina, setSearchMaquina] = useState('');
+  const [verTodasLasMaquinas, setVerTodasLasMaquinas] = useState(false);
   const [validationErrors, setValidationErrors] = useState([]);
 
   useKeyboardAvoidingView();
 
-  const machineLabel = (m) => {
-    if (!m) return 'S/P';
-    if (m.codigo && m.patente && m.codigo !== m.patente) return `${m.codigo} · ${m.patente}`;
-    return m.patente || m.codigo || m.code || m.modelo || 'S/P';
-  };
+  const machineLabel = machinePatente;
+
+  // La empresa receptora es externa: el receptor suele ser alguien que no está
+  // (ni conviene que esté) registrado como trabajador, así que se escribe libre.
+  const empresaExterna = !!datosEntrega.empresa && !esMPF(datosEntrega.empresa);
+  const receptorLibre = (operadorExterno?.nombre || '').trim();
 
   const FIELD_LABELS = {
     cantidadLitros: 'Litros entregados',
@@ -73,11 +77,11 @@ export default function EntregaStep({
     const missing = [];
     if (!datosEntrega.cantidadLitros || parseFloat(datosEntrega.cantidadLitros) === 0) missing.push('cantidadLitros');
     if (!datosEntrega.machineId) missing.push('machineId');
-    if (!datosEntrega.operadorId) missing.push('operadorId');
+    if (!datosEntrega.operadorId && !receptorLibre) missing.push('operadorId');
     if (!datosEntrega.horometroOdometro) missing.push('horometroOdometro');
     if (!isReportesView && !firmaReceptor) missing.push('firmaReceptor');
     return missing;
-  }, [datosEntrega, firmaReceptor, isReportesView]);
+  }, [datosEntrega, firmaReceptor, isReportesView, receptorLibre]);
 
   const errSet = new Set(validationErrors);
   const hasErr = (key) => errSet.has(key);
@@ -127,10 +131,18 @@ export default function EntregaStep({
     setDatosEntrega({ ...datosEntrega, extraEmails: datosEntrega.extraEmails.filter((_, i) => i !== idx) });
   };
 
-  const filteredMachines = (machinesLocal || [])
+  // Máquinas de la empresa receptora. Si esa empresa todavía no tiene equipos
+  // vinculados, se ofrece ver toda la flota para no bloquear la entrega.
+  const machinesEmpresa = (machinesLocal || [])
     .filter(m => esMPF(datosEntrega.empresa) ? esMPF(m.empresa) : empresasMatch(m.empresa, resolverNombreEmpresa(datosEntrega.empresa)));
+  const sinMaquinasDeLaEmpresa = !!datosEntrega.empresa && machinesEmpresa.length === 0;
+  const filteredMachines = (verTodasLasMaquinas || sinMaquinasDeLaEmpresa) ? (machinesLocal || []) : machinesEmpresa;
 
   const mpfNombre = empresasLocal.find(e => esMPF(e.id))?.nombre || 'Empresa Propia';
+
+  const fmtL = (n) => Number(n || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 });
+  const litrosEntrega = parseFloat(String(datosEntrega.cantidadLitros ?? '').replace(',', '.')) || 0;
+  const stockInsuficiente = stockSurtidor !== null && stockSurtidor !== undefined && litrosEntrega > stockSurtidor + 0.01;
 
   return (
     <div className="flex flex-col space-y-3 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -156,7 +168,12 @@ export default function EntregaStep({
                 </div>
                 <select
                   value={datosEntrega.empresa}
-                  onChange={(e) => setDatosEntrega({ ...datosEntrega, empresa: e.target.value, machineId: '', operadorId: '' })}
+                  onChange={(e) => {
+                    setDatosEntrega({ ...datosEntrega, empresa: e.target.value, machineId: '', operadorId: '' });
+                    setVerTodasLasMaquinas(false);
+                    setSearchMaquina('');
+                    setOperadorExterno?.({ nombre: '', rut: '' });
+                  }}
                   className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-bold text-sm text-slate-700 shadow-inner"
                 >
                   <option value="">Seleccione empresa</option>
@@ -183,11 +200,11 @@ export default function EntregaStep({
                     Selecciona primero la empresa receptora
                   </div>
                 ) : datosEntrega.machineId ? (() => {
-                  const sel = filteredMachines.find(m => m.id === datosEntrega.machineId);
+                  const sel = (machinesLocal || []).find(m => m.id === datosEntrega.machineId);
                   return (
                     <div className="p-4 bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl flex items-center gap-3 shadow-lg animate-in zoom-in duration-200">
                       <div className="flex-1 min-w-0">
-                        <div className="font-black text-sm uppercase">{sel?.tipo || 'Sin tipo'}</div>
+                        <div className="font-black text-sm uppercase">{machineTitulo(sel)}</div>
                         <div className="text-xs opacity-75">{machineLabel(sel)}</div>
                       </div>
                       <button onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: '' }); setSearchMaquina(''); }} className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center font-black transition-all">✕</button>
@@ -200,6 +217,11 @@ export default function EntregaStep({
                         className={`w-full pl-10 pr-4 py-3 bg-white border-2 rounded-xl focus:border-blue-500 font-medium text-sm ${hasErr('machineId') ? 'border-red-300' : 'border-slate-200'}`} />
                       <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
                     </div>
+                    {sinMaquinasDeLaEmpresa && (
+                      <p className="px-1 text-xs font-bold text-amber-600">
+                        Esta empresa aún no tiene equipos vinculados: se muestran todos. Usa + para registrar uno a su nombre.
+                      </p>
+                    )}
                     <div className="max-h-44 overflow-y-auto space-y-1">
                       {filteredMachines
                         .filter(m => matchMachine(m, searchMaquina))
@@ -208,13 +230,20 @@ export default function EntregaStep({
                             onClick={() => { setDatosEntrega({ ...datosEntrega, machineId: m.id }); setSearchMaquina(''); }}
                             className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-blue-400 rounded-xl transition-all text-left">
                             <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center"><TruckIcon /></div>
-                            <div>
-                              <div className="font-black text-sm text-slate-700 uppercase">{m.tipo || 'Sin tipo'}</div>
-                              <div className="text-xs text-slate-400">{machineLabel(m)}</div>
+                            <div className="min-w-0">
+                              <div className="font-black text-sm text-slate-700 uppercase truncate">{machineTitulo(m)}</div>
+                              <div className="text-xs text-slate-400">{machineLabel(m)}{m.empresa ? ` · ${m.empresa}` : ''}</div>
                             </div>
                           </button>
                         ))}
                     </div>
+                    {!sinMaquinasDeLaEmpresa && machinesEmpresa.length < (machinesLocal || []).length && (
+                      <button type="button"
+                        onClick={() => setVerTodasLasMaquinas(v => !v)}
+                        className="w-full py-2 text-xs font-black text-blue-600 hover:underline">
+                        {verTodasLasMaquinas ? 'Mostrar solo las de esta empresa' : 'No la encuentro: ver todas las máquinas'}
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -233,20 +262,46 @@ export default function EntregaStep({
                   >+</button>
                 </div>
 
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Buscar nombre o RUT..."
-                    value={searchOperador}
-                    onChange={(e) => setSearchOperador(e.target.value)}
-                    className={`w-full pl-10 pr-5 py-3 bg-white border-2 rounded-2xl focus:border-blue-500 font-medium text-sm uppercase tracking-wide ${hasErr('operadorId') ? 'border-red-300' : 'border-slate-200'}`}
-                  />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
-                </div>
+                {!empresaExterna && (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Buscar nombre o RUT..."
+                      value={searchOperador}
+                      onChange={(e) => setSearchOperador(e.target.value)}
+                      className={`w-full pl-10 pr-5 py-3 bg-white border-2 rounded-2xl focus:border-blue-500 font-medium text-sm uppercase tracking-wide ${hasErr('operadorId') ? 'border-red-300' : 'border-slate-200'}`}
+                    />
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2"><SearchIcon /></span>
+                  </div>
+                )}
 
                 {!datosEntrega.empresa ? (
                   <div className="py-3 px-4 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 font-bold text-center">
                     Selecciona primero la empresa receptora
+                  </div>
+                ) : empresaExterna ? (
+                  /* Empresa externa: el receptor cambia seguido, se escribe a mano */
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Nombre de quien recibe"
+                      value={operadorExterno?.nombre || ''}
+                      onChange={(e) => {
+                        setOperadorExterno?.({ ...(operadorExterno || {}), nombre: e.target.value.toUpperCase() });
+                        if (datosEntrega.operadorId) setDatosEntrega({ ...datosEntrega, operadorId: '' });
+                      }}
+                      className={`w-full px-5 py-3 bg-white border-2 rounded-2xl focus:border-blue-500 font-bold text-sm uppercase tracking-wide ${hasErr('operadorId') ? 'border-red-300' : 'border-slate-200'}`}
+                    />
+                    <input
+                      type="text"
+                      placeholder="RUT (opcional)"
+                      value={operadorExterno?.rut || ''}
+                      onChange={(e) => setOperadorExterno?.({ ...(operadorExterno || {}), rut: e.target.value })}
+                      className="w-full px-5 py-3 bg-white border-2 border-slate-200 rounded-2xl focus:border-blue-500 font-bold text-sm"
+                    />
+                    <p className="px-1 text-xs font-bold text-slate-400">
+                      Empresa externa: escribe el nombre de la persona, no hace falta registrarla.
+                    </p>
                   </div>
                 ) : datosEntrega.operadorId ? (() => {
                   const sel = trabajadoresLocales.find(e => e.id === datosEntrega.operadorId);
@@ -317,6 +372,21 @@ export default function EntregaStep({
             <p className="text-xs text-slate-400 px-1">Próximamente vía Twilio</p>
           </div>
         </div>
+
+        {/* Remanente del equipo que entrega */}
+        {stockSurtidor !== null && stockSurtidor !== undefined && (
+          <div className={`px-4 py-3 rounded-2xl border-2 flex items-center justify-between gap-3 text-sm font-black ${stockInsuficiente ? 'bg-red-50 border-red-300 text-red-700' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+            <span className="uppercase tracking-wider text-xs">
+              Remanente {equipoSurtidorSel?.nombre || equipoSurtidorSel?.patente || 'del equipo'}
+            </span>
+            <span>{fmtL(stockSurtidor)} L</span>
+          </div>
+        )}
+        {stockInsuficiente && (
+          <p className="px-1 -mt-3 text-xs font-bold text-red-600">
+            Estás entregando más litros de los que registra el equipo. Revisa las cargas pendientes antes de continuar.
+          </p>
+        )}
 
         {/* Cantidades */}
         <div className="grid grid-cols-2 gap-3">
