@@ -1890,9 +1890,12 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleTrabajador = (tid) => {
-
   // Al cambiar causal 159-4 (vencimiento plazo), auto-completar fecha del contrato
+  //
+  // Esta función estaba declarada DENTRO de handleTrabajador, así que al nivel
+  // del componente no existía: el onChange del select de causal lanzaba
+  // ReferenceError, la causal nunca llegaba al formulario y el finiquito no se
+  // podía guardar. El bug compilaba sin problemas — solo se caía al usarlo.
   const handleCausal = (causal) => {
     setForm(f => {
       const contratoActual = contratos?.find(c => c.id === f.contratoId);
@@ -1904,6 +1907,8 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                pagoAvisoPrevio: causal === '161' ? 'si' : 'no' };
     });
   };
+
+  const handleTrabajador = (tid) => {
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente')
       || contratos?.find(c => c.trabajadorId === tid);
     const trab = trabajadores?.find(t => t.id === tid);
@@ -2107,7 +2112,12 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                 <tbody className="divide-y divide-slate-50">
                   {[
                     ['Feriado proporcional',
-                      `${calc.feriadoPropDias} días hábiles · desde el último aniversario`,
+                      // De dónde sale el número, para poder discutirlo con el
+                      // trabajador sin recalcularlo a mano: aniversario, meses
+                      // corridos desde ahí, y el valor del día.
+                      calc.feriadoDetalle?.ultimoAniversario
+                        ? `${calc.feriadoPropDias} días hábiles · ${calc.feriadoDetalle.mesesDesdeAniversario} meses desde el aniversario del ${calc.feriadoDetalle.ultimoAniversario} · día ${fmt(calc.feriadoDetalle.valorDiaCorrido)}`
+                        : `${calc.feriadoPropDias} días hábiles · falta la fecha de inicio del contrato`,
                       calc.feriadoPropMonto],
                     ['Feriado pendiente',
                       `${calc.feriadoPendiente} días acumulados`,

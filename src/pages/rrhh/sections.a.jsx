@@ -15,6 +15,10 @@ import ItemsPagoModal from './ItemsPagoModal';
 import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
 import ReliquidacionModal from './ReliquidacionModal';
 import { fueReliquidada, liquidacionesVigentes } from './calculo';
+import { paramsDe } from './parametros';
+import { lineaDePago } from './nominaBanco';
+// Se usaba sin importar: pulsar "acuse de recibo" lanzaba ReferenceError.
+import { registrarAcuseRecibo } from './acuse';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
@@ -23,7 +27,7 @@ const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, liquidacionDe, remDe, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
-  horasOrdinariasSemanales, exportarAsistenciaCSV } = Calc;
+  horasOrdinariasSemanales, exportarAsistenciaCSV, nombreTrabajador } = Calc;
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
   generarCertificadoAnual, generarPDFReporte, generarPDFAsientos,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago,
@@ -102,6 +106,40 @@ function DashboardSection() {
     return s + calc.totalDescuentos + calc.cesEmpM + calc.sisEmpM;
   }, 0);
   const costoTotalEmpresa = masaSalarialBruta + costoCotizaciones;
+
+  // ── Peso de lo no imponible ──
+  //
+  // Colación, movilización y viáticos no cotizan ni tributan (Art. 41 CT), así
+  // que cada peso que pasa por ahí en vez de por el sueldo imponible ahorra
+  // cotizaciones del empleador y baja el impuesto del trabajador. Saber qué
+  // proporción de la nómina va por ese carril es lo que permite decidir si
+  // queda espacio — y la pantalla no lo mostraba en ninguna parte.
+  //
+  // El ahorro es una estimación deliberadamente conservadora: solo las
+  // cotizaciones de cargo del empleador (cesantía + SIS + mutual) sobre el
+  // monto no imponible. No incluye el menor impuesto del trabajador, que
+  // depende de su tramo. Los montos tienen que ser razonables y respaldados:
+  // el SII los recalifica como renta si no lo son.
+  const totalNoImponible = remMes.reduce((s, r) => {
+    const c = contratos.find(x => x.id === r.contratoId);
+    if (!c) return s;
+    const calc = liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r);
+    return s + (calc.noImponible || 0);
+  }, 0);
+
+  const ahorroEstimado = remMes.reduce((s, r) => {
+    const c = contratos.find(x => x.id === r.contratoId);
+    if (!c) return s;
+    const calc = liquidacionDe(trabajadores.find(t => t.id === r.trabajadorId), c, r);
+    const base = calc.noImponible || 0;
+    if (!base || !calc.imponible) return s;
+    // Tasa efectiva de cargo empleador sobre la base imponible de esa persona
+    const tasaEmpleador = ((calc.cesEmpM || 0) + (calc.sisEmpM || 0) + (calc.mutualM || 0)) / calc.imponible;
+    return s + Math.round(base * tasaEmpleador);
+  }, 0);
+
+  const pctNoImponible = masaSalarialBruta
+    ? Math.round((totalNoImponible / masaSalarialBruta) * 100) : 0;
 
   // ── Alertas críticas ──
   const alertas = [];
@@ -256,6 +294,33 @@ function DashboardSection() {
               <p className="text-xs text-slate-400 mt-0.5">{fmt(value)}</p>
             </div>
           ))}
+        </div>
+
+        {/* Peso de lo no imponible sobre la nómina del mes */}
+        <div className="mt-4 rounded-2xl px-5 py-4" style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                Haberes no imponibles (Art. 41 CT)
+              </p>
+              <p className="text-2xl font-black text-blue-600 mt-1">
+                {fmt(totalNoImponible)} <span className="text-base text-slate-400 font-bold">· {pctNoImponible}% de la masa</span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Ahorro estimado en cotizaciones</p>
+              <p className="text-xl font-black text-emerald-600 mt-1">{fmt(ahorroEstimado)}</p>
+            </div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, pctNoImponible)}%` }} />
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2 leading-snug">
+            Colación, movilización y viáticos no cotizan ni tributan. El ahorro estimado son solo las
+            cotizaciones de cargo del empleador sobre ese monto; no incluye el menor impuesto del
+            trabajador. Tienen que ser montos razonables y respaldados: el SII los recalifica como
+            renta si no lo son.
+          </p>
         </div>
       </div>
 
@@ -805,6 +870,7 @@ function TrabajadoresSection() {
 }
 
 function ContratosSection() {
+  const navigate = useNavigate();
   const [contratos, setContratos] = useState([]);
   const { empresaId } = useEmpresa();
   const [trabajadores, setTrabajadores] = useState([]);
@@ -866,17 +932,42 @@ function ContratosSection() {
 
   // Stats
   const hoy = new Date().toISOString().split('T')[0];
-  const porVencer = contratos.filter(c => {
-    if (!c.fechaFin || c.estado !== 'vigente') return false;
-    const dias = diasEntre(hoy, c.fechaFin);
-    return dias >= 0 && dias <= 30;
-  }).length;
+
+  const esPlazoFijo = (c) => String(c.tipoContrato || '').toLowerCase().includes('plazo');
+
+  // Los que vencen dentro de 30 días, con nombre y días — no solo el conteo.
+  const porVencerLista = contratos
+    .filter(c => c.fechaFin && c.estado === 'vigente')
+    .map(c => ({ ...c, _dias: diasEntre(hoy, c.fechaFin) }))
+    .filter(c => c._dias >= 0 && c._dias <= 30)
+    .sort((a, b) => a._dias - b._dias);
+  const porVencer = porVencerLista.length;
+
+  const vencidos = contratos.filter(c => c.estado === 'vigente' && c.fechaFin && diasEntre(hoy, c.fechaFin) < 0);
+
+  // Art. 159 N°4: la SEGUNDA renovación de un plazo fijo convierte el contrato
+  // en indefinido. Quien ya acumula dos plazos fijos con el mismo empleador
+  // está en ese borde: renovarlo otra vez es contratar indefinido, se firme lo
+  // que se firme. Es la única decisión real de esta pantalla, y antes estaba
+  // escondida en una línea de texto del banner.
+  const enBordeIndefinido = porVencerLista.filter(c => {
+    const suyos = contratos.filter(x => x.trabajadorId === c.trabajadorId && esPlazoFijo(x));
+    return esPlazoFijo(c) && suyos.length >= 2;
+  });
 
   const stats = [
-    { label: 'Total contratos', value: contratos.length, color: 'text-purple-600' },
-    { label: 'Vigentes', value: contratos.filter(c => c.estado === 'vigente').length, color: 'text-emerald-600' },
-    { label: 'Por vencer (30d)', value: porVencer, color: porVencer > 0 ? 'text-amber-500' : 'text-slate-400' },
-    { label: 'Terminados', value: contratos.filter(c => c.estado === 'terminado' || c.estado === 'vencido').length, color: 'text-slate-500' },
+    { label: 'Vigentes', value: contratos.filter(c => c.estado === 'vigente').length, color: 'text-emerald-600',
+      hint: `${contratos.length} en total, ${contratos.filter(c => c.estado === 'terminado' || c.estado === 'vencido').length} cerrados` },
+    { label: 'Vencidos sin cerrar', value: vencidos.length,
+      color: vencidos.length > 0 ? 'text-red-500' : 'text-slate-400',
+      hint: vencidos.length > 0
+        ? 'Siguen vigentes en el sistema pero su plazo ya pasó'
+        : 'Ninguno con el plazo pasado' },
+    { label: 'Vencen en 30 días', value: porVencer, color: porVencer > 0 ? 'text-amber-500' : 'text-slate-400',
+      hint: porVencer > 0 ? `El más próximo, en ${porVencerLista[0]._dias} día${porVencerLista[0]._dias === 1 ? '' : 's'}` : 'Nada por renovar este mes' },
+    { label: 'Pasan a indefinido si se renuevan', value: enBordeIndefinido.length,
+      color: enBordeIndefinido.length > 0 ? 'text-violet-600' : 'text-slate-400',
+      hint: 'Art. 159 N°4 — segunda renovación de plazo fijo' },
   ];
 
   const estadoBadge = {
@@ -897,10 +988,11 @@ function ContratosSection() {
     <>
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {stats.map(({ label, value, color }) => (
+        {stats.map(({ label, value, color, hint }) => (
           <div key={label} className="rounded-2xl px-5 py-4" style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(124,58,237,0.04)" }}>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{label}</p>
             <p className={`text-4xl font-black ${color} mt-1`}>{value}</p>
+            {hint && <p className="text-[11px] text-slate-400 mt-1 leading-snug">{hint}</p>}
           </div>
         ))}
       </div>
@@ -911,9 +1003,36 @@ function ContratosSection() {
           <svg className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-black text-amber-800">⚠ {porVencer} contrato{porVencer > 1 ? 's' : ''} vence{porVencer > 1 ? 'n' : ''} en los próximos 30 días</p>
-            <p className="text-xs text-amber-600 mt-0.5">Recuerda que 2 renovaciones de plazo fijo consecutivas convierten el contrato en indefinido (Art. 159 N°4 CT).</p>
+            {/* Antes el banner solo decía cuántos. Con el nombre y los días a la
+                vista se puede decidir sin abrir la tabla, y cada chip lleva a la
+                ficha del trabajador, que es donde se renueva o se finiquita. */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {porVencerLista.slice(0, 10).map(c => {
+                const t = c._trabajador;
+                const borde = enBordeIndefinido.some(x => x.id === c.id);
+                return (
+                  <button key={c.id}
+                    onClick={() => t?.id && navigate(`/rrhh/trabajadores/${t.id}`)}
+                    title={borde
+                      ? 'Ya acumula dos plazos fijos: renovarlo de nuevo lo convierte en indefinido (Art. 159 N°4 CT)'
+                      : 'Abrir la ficha del trabajador'}
+                    className={`text-[11px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                      borde
+                        ? 'bg-violet-100 border-violet-200 text-violet-800 hover:bg-violet-200'
+                        : 'bg-white border-amber-200 text-amber-800 hover:bg-amber-100'
+                    }`}>
+                    {nombreTrabajador(t) || 'Sin ficha'} · {c._dias}d{borde ? ' · pasa a indefinido' : ''}
+                  </button>
+                );
+              })}
+              {porVencerLista.length > 10 && (
+                <span className="text-[11px] font-bold text-amber-600 px-2 py-1">
+                  y {porVencerLista.length - 10} más
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1452,7 +1571,20 @@ function RemuneracionesSection() {
                 {paginadas.map(row => {
                   const c = row._calc;
                   const ini = `${row._trabajador?.nombre?.[0] || ''}${row._trabajador?.apellidoPaterno?.[0] || ''}`;
-                  const nombre = `${row._trabajador?.nombre || ''} ${row._trabajador?.apellidoPaterno || ''}`.trim() || '—';
+                  const nombre = nombreTrabajador(row._trabajador) || '—';
+
+                  // Dos avisos que antes solo se podían descubrir abriendo el
+                  // PDF o el Archivo de Pago:
+                  //   · AFP no reconocida → el motor aplica 11,37% por defecto
+                  //     y el descuento queda mal. Es el caso de las fichas
+                  //     importadas sin AFP.
+                  //   · Sin datos bancarios → la persona queda fuera de la
+                  //     nómina, así que nunca se marca como pagada y la
+                  //     liquidación se queda en borrador para siempre.
+                  const afpDudosa = c && !c.afpResuelta && !c.esPensionado;
+                  const faltaBanco = row.estado !== 'pagado'
+                    ? (lineaDePago({ trabajador: row._trabajador, monto: 1 }).faltan || null)
+                    : null;
                   return (
                     <tr key={row.id} className="transition-colors" style={{}} onMouseEnter={e => e.currentTarget.style.background = "#faf9ff"} onMouseLeave={e => e.currentTarget.style.background = ""}>
                       <td className="px-4 py-3">
@@ -1460,7 +1592,14 @@ function RemuneracionesSection() {
                           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0" style={{ background: "linear-gradient(135deg, #7c3aed, #4f46e5)", boxShadow: "0 2px 6px rgba(124,58,237,0.25)" }}>{ini}</div>
                           <div>
                             <p className="font-bold text-slate-800 text-sm">{nombre}</p>
-                            <p className="text-[11px] text-slate-400">{row._trabajador?.afp || '—'}</p>
+                            {afpDudosa ? (
+                              <p className="text-[11px] font-bold text-amber-600"
+                                title="La ficha no tiene una AFP reconocida, así que se está aplicando la tasa por defecto de 11,37%. Corrige la AFP en la ficha del trabajador y vuelve a emitir.">
+                                ⚠ AFP sin definir — 11,37% por defecto
+                              </p>
+                            ) : (
+                              <p className="text-[11px] text-slate-400">{row._trabajador?.afp || '—'}</p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1472,7 +1611,11 @@ function RemuneracionesSection() {
                       <td className="px-4 py-3 text-sm text-blue-600">{c && c.noImponible ? `$${c.noImponible.toLocaleString('es-CL')}` : '—'}</td>
                       <td className="px-4 py-3">
                         {c ? (() => {
-                          const iutRow = calcularIUT(calcularRentaTributable(c), UTM_DEFAULT);
+                          // UTM del período liquidado. Con UTM_DEFAULT, una
+                          // liquidación de un mes pasado calculaba el impuesto
+                          // con la UTM de hoy y el líquido de la tabla no
+                          // coincidía con el del PDF ni con el transferido.
+                          const iutRow = calcularIUT(calcularRentaTributable(c), paramsDe({ mes: row.mes, anio: row.anio }).utm);
                           const liqReal = c.liquido - iutRow;
                           return <span className="font-black text-emerald-600 text-sm">${liqReal.toLocaleString('es-CL')}</span>;
                         })() : <span>—</span>}
@@ -1485,6 +1628,12 @@ function RemuneracionesSection() {
                             }`}>
                             {row.estado === 'pagado' ? 'Pagado' : row.estado === 'borrador' ? 'Borrador' : 'Pendiente'}
                           </span>
+                          {faltaBanco && (
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700"
+                              title={`Queda fuera de la nómina bancaria porque falta: ${faltaBanco.join(', ')}. Por eso no se marca como pagada. Completa los datos en la ficha del trabajador.`}>
+                              Falta {faltaBanco[0]}
+                            </span>
+                          )}
                           {row._reemplazada && (
                             <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-400"
                               title="Reemplazada por una reliquidación: no cuenta en los totales del mes">
@@ -1655,14 +1804,70 @@ function FiniquitosSection() {
   const totalPag = Math.ceil(filtrados.length / POR_PAGINA);
   const paginados = filtrados.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
-  const pendientesFirma = finiquitos.filter(f => f.estadoFirma === 'pendiente').length;
   const totalPagado = enriquecidos.reduce((s, f) => s + (f._calc?.totalFiniquito || 0), 0);
+  // Ya no es un KPI, pero sigue alimentando la alerta de abajo: un finiquito
+  // sin ratificar ante ministro de fe es exigible de vuelta por el trabajador
+  // (Art. 177 CT), así que avisar sí corresponde — ocupar un KPI permanente, no.
+  const pendientesFirma = finiquitos.filter(f => f.estadoFirma === 'pendiente').length;
+
+  // ── KPIs orientados a decisión ──
+  //
+  // Antes eran "Pendientes firma" y "Ratificados": dos contadores de trámite
+  // que no cambian ninguna decisión y que la mayor parte del tiempo están en
+  // cero. Lo que sí sirve es cuánto está costando la salida de gente y si la
+  // cosa se está acelerando, porque eso es lo que se mira antes de aprobar la
+  // próxima desvinculación.
+  const mesDe = (f) => String(f.fechaTermino || '').slice(0, 7);
+  const hoy = new Date();
+  const keyMes = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const mesActual   = keyMes(hoy);
+  const mesAnterior = keyMes(new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1));
+
+  const delMes      = enriquecidos.filter(f => mesDe(f) === mesActual);
+  const delAnterior = enriquecidos.filter(f => mesDe(f) === mesAnterior);
+  const costo = (lista) => lista.reduce((s, f) => s + (f._calc?.totalFiniquito || 0), 0);
+
+  // El Art. 161 —necesidades de la empresa— es el único que obliga a pagar
+  // indemnización por años de servicio, así que es el que encarece la salida.
+  // Separarlo del resto dice dónde se va la plata.
+  const porNecesidades = delMes.filter(f => String(f.causal || '').startsWith('161'));
+  const costoNec = costo(porNecesidades);
+
+  const variacion = delAnterior.length
+    ? Math.round(((delMes.length - delAnterior.length) / delAnterior.length) * 100)
+    : null;
 
   const stats = [
-    { label: 'Total finiquitos', value: finiquitos.length, color: 'text-purple-600', mono: false },
-    { label: 'Pendientes firma', value: pendientesFirma, color: pendientesFirma > 0 ? 'text-amber-500' : 'text-slate-400', mono: false },
-    { label: 'Ratificados', value: finiquitos.filter(f => f.estadoFirma === 'ratificado').length, color: 'text-emerald-600', mono: false },
-    { label: 'Total pagado', value: `$${totalPagado.toLocaleString('es-CL')}`, color: 'text-slate-700', mono: true },
+    {
+      label: `Salidas este mes`,
+      value: delMes.length,
+      color: delMes.length > delAnterior.length ? 'text-red-500' : 'text-purple-600',
+      mono: false,
+      hint: variacion === null
+        ? `${delAnterior.length} el mes anterior`
+        : `${variacion >= 0 ? '+' : ''}${variacion}% vs mes anterior (${delAnterior.length})`,
+    },
+    {
+      label: 'Costo del mes',
+      value: `$${costo(delMes).toLocaleString('es-CL')}`,
+      color: 'text-slate-700', mono: true,
+      hint: `$${costo(delAnterior).toLocaleString('es-CL')} el mes anterior`,
+    },
+    {
+      label: 'Por necesidades (Art. 161)',
+      value: porNecesidades.length,
+      color: porNecesidades.length > 0 ? 'text-amber-600' : 'text-slate-400',
+      mono: false,
+      hint: costoNec > 0
+        ? `$${costoNec.toLocaleString('es-CL')} en indemnizaciones`
+        : 'sin indemnización por años de servicio',
+    },
+    {
+      label: 'Total pagado histórico',
+      value: `$${totalPagado.toLocaleString('es-CL')}`,
+      color: 'text-slate-700', mono: true,
+      hint: `${finiquitos.length} finiquito${finiquitos.length === 1 ? '' : 's'} en total`,
+    },
   ];
 
   const estadoFirmaBadge = {
@@ -1680,10 +1885,12 @@ function FiniquitosSection() {
     <>
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {stats.map(({ label, value, color, mono }) => (
+        {stats.map(({ label, value, color, mono, hint }) => (
           <div key={label} className="rounded-2xl px-5 py-4" style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(124,58,237,0.04)" }}>
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{label}</p>
             <p className={`${mono ? 'text-2xl' : 'text-4xl'} font-black ${color} mt-1 leading-tight`}>{value}</p>
+            {/* Un número solo no dice si está bien o mal. La comparación sí. */}
+            {hint && <p className="text-[11px] text-slate-400 mt-1 leading-snug">{hint}</p>}
           </div>
         ))}
       </div>
