@@ -98,15 +98,48 @@ export async function buildMaquinariaAlerts(empresaId) {
 
   for (const plan of plans) {
     const m = machineById(plan.machineId);
-    if (!m || m.medidorActual == null) continue;
+    if (!m) continue;
+    const unidad = m.medidorTipo === "kilometraje" ? "km" : "h";
     const ev = eventosPorPlan(plan.id);
-    const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn : Number(m.medidorActual) + Number(plan.intervalo || 0);
+
+    // Objetivo absoluto: la última mantención ejecutada, o el ancla del plan.
+    // Antes, sin mantención previa, caía a `medidorActual + intervalo`: un
+    // blanco que se movía junto con el horómetro, así que `restante` era
+    // siempre igual al intervalo y esta alerta no podía dispararse nunca.
+    const objetivo = ev.length > 0 ? ev[0].proximaMantencionEn
+      : (plan.proximaEnMedidor != null ? Number(plan.proximaEnMedidor) : null);
+
+    // Un plan sin objetivo es un plan que no avisa. Decirlo es la alerta.
+    if (objetivo == null) {
+      alerts.push({
+        id: `plan-sinancla-${plan.id}`, tipo: "mantencion", severidad: "media",
+        titulo: "Plan sin próxima mantención definida",
+        detalle: `${machineName(m)} · ${plan.nombre} · no puede avisar hasta que se indique a qué ${unidad} toca`,
+        entidad: "machine", entidadId: m.id,
+      });
+      continue;
+    }
+    if (m.medidorActual == null) continue;
+
     const restante = objetivo - Number(m.medidorActual);
     const tol = Number(plan.tolerancia || 0);
+    const costo = Number(plan.costoEstimado || 0);
+    const costoTxt = costo ? ` · ~$${costo.toLocaleString("es-CL")} neto` : "";
+
     if (restante < -tol) {
       alerts.push({
         id: `plan-${plan.id}`, tipo: "mantencion", severidad: "alta",
-        titulo: "Mantención atrasada", detalle: `${machineName(m)} · ${plan.nombre} · vencida por ${Math.abs(restante)}`,
+        titulo: "Mantención atrasada",
+        detalle: `${machineName(m)} · ${plan.nombre} · vencida por ${Math.abs(restante).toLocaleString("es-CL")} ${unidad}${costoTxt}`,
+        entidad: "machine", entidadId: m.id,
+      });
+    } else if (restante <= tol) {
+      // Dentro de la tolerancia: es el aviso oportuno que faltaba. Antes solo
+      // existía la alerta cuando ya estaba vencida, o sea cuando ya era tarde.
+      alerts.push({
+        id: `plan-prox-${plan.id}`, tipo: "mantencion", severidad: "media",
+        titulo: "Mantención próxima",
+        detalle: `${machineName(m)} · ${plan.nombre} · faltan ${restante.toLocaleString("es-CL")} ${unidad} (a los ${Number(objetivo).toLocaleString("es-CL")})${costoTxt}`,
         entidad: "machine", entidadId: m.id,
       });
     }
