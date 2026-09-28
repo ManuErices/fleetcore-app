@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
 
+// Nombre completo de un operador/empleado, sin importar cómo lo guarde cada
+// colección: 'trabajadores' usa nombres+apellidos; otros usan nombre/name.
+function nombreEmpleado(emp) {
+  if (!emp) return '';
+  return (emp.nombre
+    || [emp.nombres, emp.apellidos].filter(Boolean).join(' ').trim()
+    || [emp.nombres, emp.apellidoPaterno, emp.apellidoMaterno].filter(Boolean).join(' ').trim()
+    || emp.name || emp.displayName || '').trim();
+}
+
 export default function ReporteDetalleModal({ 
   reporte, 
   onClose, 
@@ -337,25 +347,24 @@ export default function ReporteDetalleModal({
                   <>
                     {empleados.length > 0 && (
                       <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Elegir empleado</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Elegir operador registrado</label>
                         <select
                           className="w-full px-3 py-2 border-2 border-cyan-200 rounded-lg focus:outline-none focus:border-cyan-500"
                           value=""
                           onChange={(e) => {
                             const emp = empleados.find(x => x.id === e.target.value);
                             if (!emp) return;
-                            const nombre = emp.nombre || emp.name || emp.displayName || '';
-                            updateField('operador', nombre);
+                            updateField('operador', nombreEmpleado(emp));
                             updateField('rut', emp.rut || '');
                           }}
                         >
                           <option value="">— Seleccionar de la lista —</option>
                           {empleados
                             .slice()
-                            .sort((a, b) => (a.nombre || a.name || '').localeCompare(b.nombre || b.name || ''))
+                            .sort((a, b) => nombreEmpleado(a).localeCompare(nombreEmpleado(b)))
                             .map(emp => (
                               <option key={emp.id} value={emp.id}>
-                                {emp.nombre || emp.name || emp.displayName || '(sin nombre)'}{emp.rut ? ` · ${emp.rut}` : ''}
+                                {nombreEmpleado(emp) || '(sin nombre)'}{emp.rut ? ` · ${emp.rut}` : ''}
                               </option>
                             ))}
                         </select>

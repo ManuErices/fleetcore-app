@@ -613,7 +613,13 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       // devolvía al usuario a Reporte Combustible.
       if (onSaved) onSaved();
 
-      toast({ type: 'success', message: 'Reporte guardado correctamente.' });
+      // Firestore persiste la escritura localmente y la sincroniza al
+      // reconectar; avisamos si se guardó sin señal.
+      if (navigator.onLine) {
+        toast({ type: 'success', message: 'Reporte guardado correctamente.' });
+      } else {
+        toast({ type: 'warning', message: 'Guardado sin conexión. Se sincronizará automáticamente al reconectar.', duration: 7000 });
+      }
       // ✅ Encadenar reportes: en terreno se cargan varias máquinas seguidas.
       // En vez de un confirm nativo, se abre un modal profesional.
       setConfirmarOtro(true);

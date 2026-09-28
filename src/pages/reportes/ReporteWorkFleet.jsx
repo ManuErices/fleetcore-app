@@ -198,13 +198,14 @@ export default function ReporteWorkFleet() {
         }));
         setMachines(machinesData);
 
-        // Cargar empleados.
-        // La nómina vive en 'trabajadores'; 'employees' es la colección
-        // anterior a la migración y aún tiene fichas antiguas. Se leen las dos
-        // y se fusionan por id/RUT: si solo se lee la vieja, los operadores
-        // registrados hoy no aparecen en este reporte.
+        // Cargar operadores registrados para el desplegable de "quién registra".
+        // La nómina vive en 'trabajadores'; 'employees' es la colección anterior
+        // a la migración y aún tiene fichas antiguas. Se leen las dos y se
+        // fusionan por RUT (cayendo al id si no hay RUT), así la misma persona
+        // presente en ambas colecciones aparece una sola vez y con los datos de
+        // 'trabajadores', que es la fuente vigente.
         const [trabSnap, legacySnap] = await Promise.all([
-          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
+          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
           getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
         ]);
         const porClave = new Map();
