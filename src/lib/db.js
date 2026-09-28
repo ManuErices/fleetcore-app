@@ -42,25 +42,33 @@ export const globalDoc = (colName, docId) => doc(db, colName, docId);
 // PROYECTOS
 // ============================================
 
+// Orden alfabético por nombre, tolerante a documentos sin el campo
+const porNombreProyecto = (a, b) =>
+  String(a?.name || a?.nombre || '').localeCompare(String(b?.name || b?.nombre || ''), 'es');
+
 export async function listActiveProjects(empresaId) {
-  const q = query(
-    EMPRESA_COL(empresaId, 'projects'),
-    where("active", "==", true),
-    orderBy("name")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (!empresaId) return [];
+  // Antes: where('active','==',true) + orderBy('name').
+  // Los proyectos creados desde Administración o desde el módulo de
+  // combustible NO traen el campo `active`, y en Firestore tanto el where
+  // como el orderBy descartan los documentos que no tienen el campo: esos
+  // proyectos no existían para Oficina Técnica. Y sin proyecto, pantallas
+  // como Mano de Obra quedan en blanco (parece que se borró la información).
+  // Ahora se lee todo y solo se excluye lo desactivado explícitamente.
+  const snap = await getDocs(EMPRESA_COL(empresaId, 'projects'));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((p) => p.active !== false)
+    .sort(porNombreProyecto);
 }
 
 // Lista TODOS los proyectos (activos e inactivos) — para la pantalla de gestión
 export async function listAllProjects(empresaId) {
   if (!empresaId) return [];
-  const q = query(
-    EMPRESA_COL(empresaId, 'projects'),
-    orderBy("name")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const snap = await getDocs(EMPRESA_COL(empresaId, 'projects'));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort(porNombreProyecto);
 }
 
 // Crea o actualiza un proyecto
@@ -99,12 +107,17 @@ export async function deleteProject(empresaId, projectId) {
 
 export async function listMachines(empresaId, projectId) {
   if (!empresaId) return [];
-  const col = EMPRESA_COL(empresaId, 'machines');
-  const q = (projectId !== undefined && projectId !== null)
-    ? query(col, where("projectId", "==", projectId), orderBy("code"))
-    : query(col, orderBy("code"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Sin orderBy('code'): una máquina sin ese campo quedaba fuera del listado
+  // sin aviso. El filtro por proyecto se mantiene tal cual (los KPI por obra
+  // dependen de él); el orden se hace en memoria.
+  const snap = await getDocs(EMPRESA_COL(empresaId, 'machines'));
+  const machines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const filtradas = (projectId !== undefined && projectId !== null)
+    ? machines.filter((m) => m.projectId === projectId)
+    : machines;
+  return filtradas.sort((a, b) =>
+    String(a.code || a.patente || a.name || '').localeCompare(String(b.code || b.patente || b.name || ''), 'es')
+  );
 }
 
 export async function upsertMachine(empresaId, machine) {
@@ -253,14 +266,17 @@ export async function listEmployees(empresaId, projectId) {
   console.log(`👥 Cargando trabajadores${projectId ? ` del proyecto ${projectId}` : ''}`);
   if (!empresaId) return [];
   try {
-    const col = EMPRESA_COL(empresaId, 'trabajadores');
-    const q = (projectId !== undefined && projectId !== null)
-      ? query(col, where("projectId", "==", projectId))
-      : col;
-    const snap = await getDocs(q);
+    // Se lee la colección completa y se filtra en memoria. Con
+    // where('projectId','==',X) Firestore descarta toda ficha que no tenga el
+    // campo, y la mayoría de los trabajadores se crea sin proyecto asignado:
+    // parecían borrados. Quien no tiene proyecto se muestra igual.
+    const snap = await getDocs(EMPRESA_COL(empresaId, 'trabajadores'));
     const employees = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    console.log(`✅ ${employees.length} trabajadores cargados`);
-    return employees;
+    const filtrados = (projectId !== undefined && projectId !== null)
+      ? employees.filter(e => e.projectId === projectId || !e.projectId)
+      : employees;
+    console.log(`✅ ${filtrados.length} trabajadores cargados`);
+    return filtrados;
   } catch (error) {
     console.error("❌ Error al cargar trabajadores:", error);
     throw error;
@@ -269,17 +285,19 @@ export async function listEmployees(empresaId, projectId) {
 
 export async function getEmployeeByRut(empresaId, projectId, rut) {
   try {
-    const q = query(
+    // Solo por RUT: al filtrar además por projectId no se encontraba al
+    // trabajador ya registrado (su ficha suele no tener proyecto) y cada
+    // importación de remuneraciones creaba un duplicado.
+    const snap = await getDocs(query(
       EMPRESA_COL(empresaId, 'trabajadores'),
-      where("projectId", "==", projectId),
       where("rut", "==", rut)
-    );
-    
-    const snap = await getDocs(q);
+    ));
     if (snap.empty) return null;
-    
-    const doc = snap.docs[0];
-    return { id: doc.id, ...doc.data() };
+
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Si hay varias fichas con el mismo RUT, se prefiere la del proyecto pedido
+    const preferida = docs.find(d => d.projectId === projectId) || docs[0];
+    return preferida;
   } catch (error) {
     console.error("❌ Error buscando empleado por RUT:", error);
     return null;

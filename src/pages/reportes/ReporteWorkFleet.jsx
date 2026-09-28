@@ -11,6 +11,7 @@ import ReportDetallado from "./ReportDetallado";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
 import { useToast, ToastContainer } from "../../components/Toast";
 import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
+import { machineLabel } from "../../utils/searchHelpers";
 
 // Estandariza nombres propios (operadores, obras) a Capitalización de Título:
 // la data llega en MAYÚSCULAS ("JOSE BRAVO BRAVO") y se ve mejor uniforme.
@@ -197,18 +198,23 @@ export default function ReporteWorkFleet() {
         }));
         setMachines(machinesData);
 
-        // Cargar operadores registrados. La sección "Operadores" del admin los
-        // guarda en 'trabajadores'; otros módulos usan 'employees'. Se cargan
-        // ambas y se fusionan para poblar el desplegable de "quién registra".
-        const [empSnap, trabSnap] = await Promise.all([
-          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
+        // Cargar operadores registrados para el desplegable de "quién registra".
+        // La nómina vive en 'trabajadores'; 'employees' es la colección anterior
+        // a la migración y aún tiene fichas antiguas. Se leen las dos y se
+        // fusionan por RUT (cayendo al id si no hay RUT), así la misma persona
+        // presente en ambas colecciones aparece una sola vez y con los datos de
+        // 'trabajadores', que es la fuente vigente.
+        const [trabSnap, legacySnap] = await Promise.all([
           getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
+          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
         ]);
-        const porId = new Map();
-        [...trabSnap.docs, ...empSnap.docs].forEach(d => {
-          if (!porId.has(d.id)) porId.set(d.id, { id: d.id, ...d.data() });
+        const porClave = new Map();
+        [...legacySnap.docs, ...trabSnap.docs].forEach(d => {
+          const data = { id: d.id, ...d.data() };
+          const clave = (data.rut || '').replace(/[.\-\s]/g, '').toUpperCase() || d.id;
+          porClave.set(clave, { ...(porClave.get(clave) || {}), ...data });
         });
-        setEmpleados([...porId.values()]);
+        setEmpleados([...porClave.values()]);
 
         // Planes y eventos de mantención (helpers ya scoped a empresaId).
         // Si el módulo maquinaria no está en uso, quedan vacíos y el panel
@@ -1184,7 +1190,7 @@ export default function ReporteWorkFleet() {
               >
                 <option value="">Todas</option>
                 {machinesDisponibles.map(m => (
-                  <option key={m.id} value={m.id}>{m.code || m.patente || m.name}</option>
+                  <option key={m.id} value={m.id}>{machineLabel(m)}</option>
                 ))}
               </select>
             </div>

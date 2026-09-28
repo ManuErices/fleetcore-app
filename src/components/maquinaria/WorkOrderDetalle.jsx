@@ -4,6 +4,7 @@ import { auth } from "../../lib/firebase";
 import {
   upsertWorkOrder, listChecklistTemplates,
   uploadWorkOrderPhoto, deleteWorkOrderPhoto,
+  upsertMaintenancePlan, listMaintenancePlans,
 } from "../../lib/db";
 import SparePartPicker from "./SparePartPicker";
 
@@ -16,13 +17,17 @@ const ESTADOS_SIGUIENTES = {
   en_ejecucion: "terminada",
 };
 
-export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClose, onUpdated }) {
+export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClose, onUpdated, onSaved }) {
   const { empresaId } = useEmpresa();
   const [estado, setEstado] = useState(workOrder.estado);
   const [diagnostico, setDiagnostico] = useState(workOrder.diagnostico || "");
   const [trabajoRealizado, setTrabajoRealizado] = useState(workOrder.trabajoRealizado || "");
   const [horasTrabajo, setHorasTrabajo] = useState(workOrder.horasTrabajo || "");
-  const [medidorFinal, setMedidorFinal] = useState(machine?.medidorActual || "");
+  // Lo ya guardado en la OT manda sobre el medidor de la máquina: si el
+  // mecánico anotó 8435 y volvió a entrar, tiene que ver 8435.
+  const [medidorFinal, setMedidorFinal] = useState(
+    workOrder.medidorFinal ?? machine?.medidorActual ?? ""
+  );
   const [observaciones, setObservaciones] = useState(workOrder.observaciones || "");
   const [repuestos, setRepuestos] = useState(workOrder.repuestosUsados || []);
   const [saving, setSaving] = useState(false);
@@ -32,6 +37,7 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
   const [checklist, setChecklist] = useState(workOrder.checklist || []);
   const [fotos, setFotos] = useState(workOrder.fotos || []); // [{ url, path, nombre }]
   const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [guardadoOk, setGuardadoOk] = useState(null);
 
   const cerrada = estado === "cerrada" || estado === "cancelada";
 
@@ -41,8 +47,13 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
     (async () => {
       try {
         const templates = await listChecklistTemplates(empresaId);
+        // `origen` es de dónde nació la OT; `tipo` es qué pauta le toca.
+        // Una OT de plan nace "preventiva" y carga la pauta preventiva; una de
+        // falla nace "falla" y carga la correctiva. Las manuales ("solicitud")
+        // no tienen pauta propia: caen en correctiva, que es lo que son.
         const tipoOT = workOrder.origen === "preventiva" ? "preventiva"
           : workOrder.origen === "falla" ? "correctiva"
+          : workOrder.origen === "solicitud" ? "correctiva"
           : workOrder.origen || "preventiva";
         const tpl = templates.find((t) => t.activo !== false && t.tipo === tipoOT);
         if (tpl) {
@@ -80,14 +91,47 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
     await upsertWorkOrder(empresaId, { id: workOrder.id, fotos: nuevas });
   };
 
+  /**
+   * Todo lo que el mecánico escribió en la OT.
+   *
+   * Antes `avanzarEstado` guardaba solo cuatro campos: el medidor final, las
+   * observaciones y los repuestos se perdían en cada avance. Y como la lista
+   * cerraba el modal al avanzar, el trabajo se iba sin aviso. Ahora se guarda
+   * todo en cada paso, y el modal se queda abierto.
+   */
+  const camposEditables = () => ({
+    diagnostico, trabajoRealizado, horasTrabajo, checklist,
+    observaciones, repuestosUsados: repuestos,
+    medidorFinal: medidorFinal === "" ? null : Number(medidorFinal),
+  });
+
+  const guardarAvance = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await upsertWorkOrder(empresaId, { id: workOrder.id, ...camposEditables() });
+      setGuardadoOk(new Date().toISOString());
+      onSaved?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const avanzarEstado = async () => {
     const siguiente = ESTADOS_SIGUIENTES[estado];
     if (!siguiente) return;
     setSaving(true);
+    setError("");
     try {
-      await upsertWorkOrder(empresaId, { id: workOrder.id, estado: siguiente, diagnostico, trabajoRealizado, horasTrabajo, checklist });
+      await upsertWorkOrder(empresaId, { id: workOrder.id, estado: siguiente, ...camposEditables() });
       setEstado(siguiente);
-      onUpdated();
+      setGuardadoOk(new Date().toISOString());
+      // `onSaved` refresca la lista de atrás sin cerrar el modal: avanzar de
+      // estado es parte del trabajo, no el final. Cerrarlo obligaba a volver a
+      // buscar la OT para el paso siguiente.
+      onSaved?.();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -123,6 +167,38 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No se pudo cerrar la orden de trabajo');
+
+      // ── Reflejar la mantención en el plan ──
+      //
+      // El cálculo real lo hace la Cloud Function: escribe el evento con su
+      // `proximaMantencionEn`, y ese evento es el que manda en la resolución
+      // del objetivo. Esto es un espejo para que el formulario del plan muestre
+      // la última mantención verdadera en vez del valor que alguien tecleó
+      // hace meses.
+      //
+      // Va después del cierre y en try propio: si la función falla, el plan no
+      // debe avanzar; y si falla este espejo, la OT ya quedó cerrada y el
+      // objetivo sigue correcto por la vía del evento.
+      if (workOrder.origenRefId) {
+        try {
+          const planes = await listMaintenancePlans(empresaId, workOrder.machineId);
+          const plan = planes.find((p) => p.id === workOrder.origenRefId);
+          if (plan) {
+            await upsertMaintenancePlan(empresaId, {
+              id: plan.id,
+              ultimaMantencionEn: Number(medidorFinal),
+              // Se limpia el objetivo escrito a mano: a partir de acá manda la
+              // cuenta última + intervalo, que es la que se mantiene sola.
+              proximaEnMedidor: null,
+              ultimaMantencionFecha: new Date().toISOString(),
+              ultimaMantencionOT: workOrder.id,
+            });
+          }
+        } catch (e) {
+          console.warn('OT cerrada; el objetivo sigue bien por el evento, pero no se pudo reflejar en el plan:', e);
+        }
+      }
+
       onUpdated();
     } catch (e) {
       setError(e.message || "No se pudo cerrar la orden de trabajo");
@@ -140,6 +216,18 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
         </div>
+
+        {workOrder.origenRefId && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2">
+            <p className="text-xs font-bold text-indigo-900">
+              Mantención preventiva · {workOrder.planNombre || "plan del equipo"}
+            </p>
+            <p className="text-[11px] text-indigo-700 mt-0.5">
+              {workOrder.objetivoMedidor != null && `Programada a los ${Number(workOrder.objetivoMedidor).toLocaleString("es-CL")}. `}
+              Al cerrarla, el plan avanza solo al siguiente intervalo.
+            </p>
+          </div>
+        )}
 
         <div className="text-xs font-bold text-slate-500 uppercase">
           Estado actual: <span className="text-slate-900">{estado.replace("_", " ")}</span>
@@ -274,7 +362,26 @@ export default function WorkOrderDetalle({ workOrder, machine, isMecanico, onClo
           disabled={cerrada}
         />
 
+        {guardadoOk && (
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+            <span className="text-emerald-600 font-black">✓</span>
+            <p className="text-xs text-emerald-800 font-semibold">
+              Avance guardado · {new Date(guardadoOk).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+        )}
+
         <div className="flex gap-3 pt-2 border-t border-slate-100">
+          {!cerrada && (
+            <button
+              onClick={guardarAvance}
+              disabled={saving}
+              className="px-4 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-bold text-sm disabled:opacity-50 whitespace-nowrap"
+              title="Guarda lo escrito sin cambiar el estado de la OT"
+            >
+              Guardar
+            </button>
+          )}
           {estado !== "cerrada" && estado !== "cancelada" && ESTADOS_SIGUIENTES[estado] && (
             <button
               onClick={avanzarEstado}

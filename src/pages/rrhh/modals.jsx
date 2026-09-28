@@ -1553,8 +1553,20 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
       // Se congelan los parámetros legales usados (IMM, UTM, UF, jornada). Una
       // liquidación emitida no debe cambiar de resultado porque en enero se
       // actualizó la tabla de parámetros.
+      // `form` nace de `editData`, que es la fila enriquecida de la tabla: trae
+      // `_trabajador`, `_contrato`, `_calc` y `_anticipoReg`. Firestore rechaza
+      // cualquier `undefined`, y `_anticipoReg` lo es cuando la persona no
+      // tiene anticipos ese mes — de ahí el "Unsupported field value" al
+      // actualizar, que no aparecía al crear porque ahí no hay `editData`.
+      //
+      // Se limpian los dos casos: los campos derivados (prefijo `_`) porque no
+      // pertenecen al documento, y cualquier `undefined` porque no es guardable.
+      const limpiar = (obj) => Object.fromEntries(
+        Object.entries(obj).filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
+
       const payload = {
-        ...form,
+        ...limpiar(form),
         parametros: calc?.parametros || null,
         updatedAt: serverTimestamp(),
       };
@@ -1794,6 +1806,18 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
                 ))}
               </div>
               <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 text-[11px] text-slate-500 flex gap-4 flex-wrap">
+                {/* El prorrateo por días de contrato es invisible si no se
+                    dice: un sueldo base de $800.000 que aparece como $266.667
+                    parece un error hasta que se ve de dónde sale. */}
+                {calc.diasTrab < 30 && (
+                  <span className="font-bold text-amber-600">
+                    {calc.diasTrab} de 30 días
+                    {calc.diasPorContrato != null && calc.diasPorContrato === calc.diasTrab
+                      ? ' (contrato vigente parte del mes)'
+                      : calc.diasLicencia > 0 ? ` (${calc.diasLicencia} de licencia)` : ''}
+                    {' '}· sueldo base prorrateado
+                  </span>
+                )}
                 <span>AFP: <strong className="text-red-500">-{fmt(calc.afpM)}</strong></span>
                 <span>Salud: <strong className="text-red-500">-{fmt(calc.salM)}</strong></span>
                 <span>Cesantía: <strong className="text-red-500">-{fmt(calc.cesM)}</strong></span>
@@ -1890,9 +1914,12 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleTrabajador = (tid) => {
-
   // Al cambiar causal 159-4 (vencimiento plazo), auto-completar fecha del contrato
+  //
+  // Esta función estaba declarada DENTRO de handleTrabajador, así que al nivel
+  // del componente no existía: el onChange del select de causal lanzaba
+  // ReferenceError, la causal nunca llegaba al formulario y el finiquito no se
+  // podía guardar. El bug compilaba sin problemas — solo se caía al usarlo.
   const handleCausal = (causal) => {
     setForm(f => {
       const contratoActual = contratos?.find(c => c.id === f.contratoId);
@@ -1904,6 +1931,8 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                pagoAvisoPrevio: causal === '161' ? 'si' : 'no' };
     });
   };
+
+  const handleTrabajador = (tid) => {
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente')
       || contratos?.find(c => c.trabajadorId === tid);
     const trab = trabajadores?.find(t => t.id === tid);
@@ -2107,7 +2136,12 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                 <tbody className="divide-y divide-slate-50">
                   {[
                     ['Feriado proporcional',
-                      `${calc.feriadoPropDias} días hábiles · desde el último aniversario`,
+                      // De dónde sale el número, para poder discutirlo con el
+                      // trabajador sin recalcularlo a mano: aniversario, meses
+                      // corridos desde ahí, y el valor del día.
+                      calc.feriadoDetalle?.ultimoAniversario
+                        ? `${calc.feriadoPropDias} días hábiles · ${calc.feriadoDetalle.mesesDesdeAniversario} meses desde el aniversario del ${calc.feriadoDetalle.ultimoAniversario} · día ${fmt(calc.feriadoDetalle.valorDiaCorrido)}`
+                        : `${calc.feriadoPropDias} días hábiles · falta la fecha de inicio del contrato`,
                       calc.feriadoPropMonto],
                     ['Feriado pendiente',
                       `${calc.feriadoPendiente} días acumulados`,

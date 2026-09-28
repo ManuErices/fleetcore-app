@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { formatMiles } from '../../../utils/formatters';
-import { matchWorker, matchMachine, shortName } from '../../../utils/searchHelpers';
+import { matchWorker, matchMachine, shortName, machineTitulo, machinePatente } from '../../../utils/searchHelpers';
 import { PillButton } from "../../../components/ui/PillButton";
 import { useKeyboardAvoidingView } from "../../../hooks/useKeyboardAvoidingView";
 
@@ -52,6 +52,8 @@ export default function EntradaStep({
   setShowModalEmpleado, setNuevoEmpleadoData,
   handleSubmit, loading,
   setPaso,
+  equipoSurtidorSel, capacidadSurtidor, stockSurtidor,
+  entradaCargaAlSurtidor, litrosExcedenSurtidor,
 }) {
   const [emailInput, setEmailInput] = useState('');
   const [searchReceptor, setSearchReceptor] = useState('');
@@ -94,9 +96,23 @@ export default function EntradaStep({
   const errSet = new Set(validationErrors);
   const hasErr = (key) => errSet.has(key);
 
+  // ── Capacidad del equipo surtidor ───────────────────────────────
+  const parseNumero = (v) => {
+    const n = parseFloat(String(v ?? '').trim().replace(',', '.'));
+    return isNaN(n) ? 0 : n;
+  };
+  const fmtL = (n) => Number(n || 0).toLocaleString('es-CL', { maximumFractionDigits: 2 });
+  const litrosIngresados = isEstacion
+    ? (datosEntrada.documentosEstacion || []).reduce((acc, r) => acc + parseNumero(r.cantidad), 0)
+    : parseNumero(datosEntrada.cantidad);
+  const controlaCapacidad = entradaCargaAlSurtidor && capacidadSurtidor > 0 && stockSurtidor !== null && stockSurtidor !== undefined;
+  const espacioDisponible = controlaCapacidad ? Math.max(0, capacidadSurtidor - stockSurtidor) : null;
+  const capacidadError = litrosExcedenSurtidor ? litrosExcedenSurtidor(litrosIngresados) : null;
+
   const handleSubmitWithValidation = () => {
     const missing = getMissingFields();
     if (missing.length > 0) { setValidationErrors(missing); return; }
+    if (capacidadError) { setValidationErrors([]); return; }
     setValidationErrors([]);
     handleSubmit();
   };
@@ -120,11 +136,7 @@ export default function EntradaStep({
   const mpfMachines = (machinesLocal || []).filter(m => esMPF(m.empresa));
   const mpfWorkers = (trabajadoresLocales || []).filter(emp => esMPF(emp.empresa));
 
-  const machineLabel = (m) => {
-    if (!m) return 'S/P';
-    if (m.codigo && m.patente && m.codigo !== m.patente) return `${m.codigo} · ${m.patente}`;
-    return m.patente || m.codigo || m.code || m.modelo || 'S/P';
-  };
+  const machineLabel = machinePatente;
 
   return (
     <div className="flex flex-col space-y-3 pb-32 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -624,7 +636,7 @@ export default function EntradaStep({
                   return (
                     <div className="p-4 bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-2xl flex items-center gap-3 shadow-lg animate-in zoom-in duration-200">
                       <div className="flex-1 min-w-0">
-                        <div className="font-black text-sm uppercase">{sel?.tipo || 'Sin tipo'}</div>
+                        <div className="font-black text-sm uppercase">{machineTitulo(sel)}</div>
                         <div className="text-xs opacity-80">{machineLabel(sel)}</div>
                       </div>
                       <button onClick={() => setDatosEntrada({ ...datosEntrada, machineId: '' })} className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center font-black transition-all">✕</button>
@@ -646,7 +658,7 @@ export default function EntradaStep({
                             className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border-2 border-slate-100 hover:border-amber-400 rounded-xl transition-all text-left">
                             <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center text-amber-500"><TruckIcon /></div>
                             <div>
-                              <div className="font-black text-sm text-slate-700 uppercase">{m.tipo || 'Sin tipo'}</div>
+                              <div className="font-black text-sm text-slate-700 uppercase">{machineTitulo(m)}</div>
                               <div className="text-xs text-slate-400">{machineLabel(m)}</div>
                             </div>
                           </button>
@@ -656,6 +668,35 @@ export default function EntradaStep({
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Capacidad del equipo surtidor */}
+        {controlaCapacidad && (
+          <div className={`p-4 rounded-2xl border-2 ${capacidadError ? 'bg-red-50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-xs font-black uppercase tracking-widest text-slate-500">
+                  Capacidad de {equipoSurtidorSel?.nombre || equipoSurtidorSel?.patente || 'el equipo'}
+                </div>
+                <div className="text-sm font-bold text-slate-600 mt-1">
+                  Remanente {fmtL(stockSurtidor)} L de {fmtL(capacidadSurtidor)} L
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs font-black uppercase tracking-widest text-slate-400">Puedes cargar hasta</div>
+                <div className={`text-2xl font-black ${capacidadError ? 'text-red-600' : 'text-emerald-600'}`}>{fmtL(espacioDisponible)} L</div>
+              </div>
+            </div>
+            <div className="mt-3 h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${capacidadError ? 'bg-red-500' : 'bg-emerald-500'}`}
+                style={{ width: `${Math.min(100, ((stockSurtidor + litrosIngresados) / capacidadSurtidor) * 100)}%` }}
+              />
+            </div>
+            {capacidadError && (
+              <p className="mt-3 text-sm font-bold text-red-700 leading-snug">{capacidadError}</p>
+            )}
           </div>
         )}
 
@@ -696,6 +737,17 @@ export default function EntradaStep({
 
       {/* Sticky footer */}
       <div className="sticky bottom-0 bg-white/95 backdrop-blur-md border-t border-slate-100 mt-2">
+        {capacidadError && (
+          <div className="mx-4 mt-3 bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-2">
+            <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="font-black text-red-700 text-xs uppercase tracking-wider">Supera la capacidad del equipo</p>
+              <p className="text-sm text-red-600 font-bold mt-0.5">{capacidadError}</p>
+            </div>
+          </div>
+        )}
         {validationErrors.length > 0 && (
           <div className="mx-4 mt-3 bg-red-50 border-2 border-red-200 rounded-2xl p-3 flex items-start gap-2">
             <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -726,7 +778,7 @@ export default function EntradaStep({
           <PillButton
             variant="secondary"
             onClick={handleSubmitWithValidation}
-            disabled={loading}
+            disabled={loading || !!capacidadError}
             isLoading={loading}
             loadingText="Guardando..."
             className="flex-[2]"

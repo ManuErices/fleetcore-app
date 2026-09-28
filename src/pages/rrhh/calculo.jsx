@@ -40,6 +40,45 @@ function factorPeriodo(tipoPeriodo) {
     default:          return 1;   // mensual
   }
 }
+/**
+ * Días del período que el contrato estuvo vigente, en base 30.
+ *
+ * Quien entra el 21 de septiembre trabaja 10 días, no 30, y su sueldo base es
+ * proporcional (Art. 44 inc. 3 CT: la remuneración se paga por el tiempo
+ * efectivamente servido). Antes el motor asumía 30 días siempre que nadie los
+ * escribiera a mano, así que un ingreso a mitad de mes pagaba el mes completo
+ * y nadie lo notaba: la liquidación se veía correcta.
+ *
+ * Se usa el mes comercial de 30 días, que es la convención previsional chilena
+ * y la que ya usa el resto del motor. Días 31 se cuentan como 30.
+ *
+ * Devuelve null cuando no hay fechas con qué calcular: ahí manda el default.
+ */
+function diasVigentesEnPeriodo(contrato, mes, anio) {
+  const m = parseInt(mes), a = parseInt(anio);
+  if (!m || !a) return null;
+
+  const ini = contrato?.fechaInicio ? new Date(`${contrato.fechaInicio}T12:00:00`) : null;
+  const fin = contrato?.fechaFin    ? new Date(`${contrato.fechaFin}T12:00:00`)    : null;
+  if ((!ini || isNaN(ini)) && (!fin || isNaN(fin))) return null;
+
+  const primero = new Date(a, m - 1, 1, 12);
+  const ultimo  = new Date(a, m, 0, 12);          // último día real del mes
+
+  // Fuera del período: el contrato no alcanza a tocar este mes.
+  if (ini && !isNaN(ini) && ini > ultimo) return 0;
+  if (fin && !isNaN(fin) && fin < primero) return 0;
+
+  const desde = ini && !isNaN(ini) && ini > primero ? ini.getDate() : 1;
+  const hasta = fin && !isNaN(fin) && fin < ultimo  ? fin.getDate() : ultimo.getDate();
+
+  // Mes comercial: el día 31 se funde con el 30, en los dos extremos. Sin
+  // topear también el `desde`, quien entra un 31 daba 0 días trabajados y su
+  // liquidación salía en cero.
+  const dias = Math.min(30, Math.max(0, Math.min(hasta, 30) - Math.min(desde, 30) + 1));
+  return desde === 1 && hasta >= ultimo.getDate() ? 30 : dias;
+}
+
 function calcularLiquidacion(rem) {
   // ── Parámetros legales del período que se está liquidando ──
   // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
@@ -107,7 +146,13 @@ function calcularLiquidacion(rem) {
   // Días que la empresa efectivamente no paga
   const diasLicNoPagados = pagarCarencia ? diasLicencia - diasCarencia : diasLicencia;
 
-  const diasBase   = parseInt(rem.diasTrabajados) >= 0 ? parseInt(rem.diasTrabajados) : 30;
+  // Prioridad: los días escritos a mano en la liquidación, y si no, los que el
+  // contrato estuvo vigente dentro del período. El default de 30 queda solo
+  // para cuando no hay fechas con qué calcular.
+  const diasPorContrato = diasVigentesEnPeriodo(rem, rem.mes, rem.anio);
+  const diasBase   = parseInt(rem.diasTrabajados) >= 0
+    ? parseInt(rem.diasTrabajados)
+    : (diasPorContrato ?? 30);
   // Si la liquidación ya trae los días trabajados netos (el modal los calcula
   // al registrar la licencia) no se descuenta de nuevo. El tope evita el doble
   // descuento cuando alguien baja los días a mano Y registra la licencia.
@@ -277,7 +322,7 @@ function calcularLiquidacion(rem) {
     descAdicional, anticipo, pagoAnterior, liquido,
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
-    diasTrab, fdias,          // expuestos para auditoría / PDF
+    diasTrab, fdias, diasPorContrato,   // expuestos para auditoría / PDF
     diasLicencia, diasCarencia, diasLicNoPagados, pagarCarencia, detalleLic,
     baseCompleto, gratCompleto: Math.round(P.topeGratMensual * fp),
     // Snapshot de los parámetros con que se calculó. Se guarda en el documento
@@ -337,14 +382,30 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const dtTerm  = new Date(fechaTerm);
   const dtIng   = fechaIng ? new Date(fechaIng) : null;
 
+  // El aniversario se busca avanzando año a año desde el ingreso, en vez de
+  // saltar con `anios`. Antes dependía de que `calcularAntiguedad` acertara: si
+  // devolvía un año de menos —o si `fechaIng` venía de otra fuente que la del
+  // contrato— el aniversario quedaba a más de 12 meses del término, el
+  // `Math.min(12, …)` lo topeaba en silencio y el finiquito pagaba los 15 días
+  // completos como si fuera un año entero sin tomar vacaciones.
+  //
+  // Recorrer los aniversarios no puede equivocarse: por construcción el último
+  // queda siempre dentro del año previo al término.
   let mesesFeriado = 0;
-  if (dtIng && !isNaN(dtIng) && !isNaN(dtTerm)) {
-    // Último aniversario cumplido antes del término
+  let ultimoAniversario = null;
+  if (dtIng && !isNaN(dtIng) && !isNaN(dtTerm) && dtTerm >= dtIng) {
     const aniv = new Date(dtIng);
-    aniv.setFullYear(dtIng.getFullYear() + anios);
-    if (aniv > dtTerm) aniv.setFullYear(aniv.getFullYear() - 1);
-    const dias = Math.max(0, Math.round((dtTerm - aniv) / 86400000));
-    mesesFeriado = Math.min(12, dias / 30);
+    while (true) {
+      const siguiente = new Date(aniv);
+      siguiente.setFullYear(aniv.getFullYear() + 1);
+      if (siguiente > dtTerm) break;
+      aniv.setFullYear(aniv.getFullYear() + 1);
+    }
+    ultimoAniversario = aniv.toISOString().slice(0, 10);
+    const diasDesdeAniv = Math.max(0, Math.round((dtTerm - aniv) / 86400000));
+    // El tope de 12 queda como red de seguridad, no como parche: con el
+    // recorrido anterior `diasDesdeAniv` nunca debería pasar de 365.
+    mesesFeriado = Math.min(12, diasDesdeAniv / 30);
   }
 
   // 15 días HÁBILES al año (Art. 67). Se pagan como días corridos, así que hay
@@ -357,6 +418,13 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const feriadoPendMonto   = Math.round(ult / 30 * feriadoPendiente * FACTOR_HABIL_CORRIDO);
   const totalFeriado       = feriadoPropMonto + feriadoPendMonto;
   const mesesEnAnioActual  = dtTerm.getMonth() + 1; // se conserva por compatibilidad
+  // Detalle del feriado, para que el monto se pueda auditar sin abrir el código.
+  const feriadoDetalle = {
+    ultimoAniversario,
+    mesesDesdeAniversario: Math.round(mesesFeriado * 10) / 10,
+    diasProporcionales: feriadoPropDias,
+    valorDiaCorrido: ult ? Math.round(ult / 30) : 0,
+  };
 
   // ── Gratificación proporcional (Art. 50 CT) ──
   // 25% de lo devengado en el año, tope 4.75 IMM anual. Proporcional a meses.
@@ -422,7 +490,8 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   return {
     anios, meses, dias, totalMeses,
-    mesesEnAnioActual, mesesFeriado,
+    mesesEnAnioActual,
+    feriadoDetalle, mesesFeriado,
     feriadoPropDias, feriadoPropMonto,
     feriadoPendiente, feriadoPendMonto, totalFeriado,
     gratPropMonto, gratAnualTope,
@@ -523,13 +592,41 @@ function calcularIUT(renImponible, utm) {
 // cuando le pasan un `calc` armado a mano sin período.
 const UF_REFERENCIA = paramsDe(null).uf;
 
+/**
+ * Nombre completo del trabajador, a prueba de campos faltantes.
+ *
+ * Los `${t.nombre} ${t.apellidoPaterno} ${t.apellidoMaterno}` sueltos imprimen
+ * la palabra "undefined" cuando falta un apellido, y eso terminó saliendo en el
+ * PDF que firma el trabajador. Además limpia el literal "undefined"/"null" que
+ * quedó guardado como texto en fichas creadas por importaciones antiguas: el
+ * dato malo ya está en Firestore y corregirlo registro por registro es otra
+ * tarea; mientras tanto, no tiene por qué verse.
+ */
+function nombreTrabajador(t, { apellidoPrimero = false } = {}) {
+  const limpio = (v) => {
+    const s = String(v ?? '').trim();
+    return (!s || s === 'undefined' || s === 'null' || s === '.') ? '' : s;
+  };
+  const partes = apellidoPrimero
+    ? [t?.apellidoPaterno, t?.apellidoMaterno, t?.nombre]
+    : [t?.nombre, t?.apellidoPaterno, t?.apellidoMaterno];
+  return partes.map(limpio).filter(Boolean).join(' ');
+}
+
 function calcularRentaTributable(calc) {
   // El APV en régimen B rebaja la base del impuesto único, con tope de 50 UF
   // mensuales. En régimen A no rebaja nada: la franquicia llega como
   // bonificación fiscal, no como menor impuesto.
   const topeApvB = Math.round(50 * (calc.uf || UF_REFERENCIA));
   const rebajaApv = calc.apvRegimen === 'B' ? Math.min(calc.apvM || 0, topeApvB) : 0;
-  return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.sisM - calc.cesM - rebajaApv);
+  // El SIS NO se resta: es cotización de cargo del EMPLEADOR (Art. 59 DL 3.500).
+  // No se le descuenta al trabajador, así que tampoco rebaja su renta
+  // tributable. Restarlo bajaba la base y el impuesto salía por debajo del
+  // correcto —$35.950 de base y $1.438 de impuesto en un sueldo de 2,2 MM—,
+  // diferencia que el SII cobra después con reajuste e intereses.
+  //
+  // Lo que sí rebaja: AFP, salud y cesantía del trabajador (Art. 42 N°1 LIR).
+  return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.cesM - rebajaApv);
 }
 function calcularLiquidacionConIUT(rem, utm) {
   // Si no llega una UTM explícita se usa la del período liquidado. Antes caía a
@@ -825,6 +922,11 @@ function generarTXTPrevired(liquidaciones, mes, anio) {
   // Sin cabecera — Previred no usa header en el TXT
   return rows.join('\r\n');
 }
+// Nombres de día para el CSV de asistencia. Antes referenciaba un
+// `DIAS_SEMANA` que solo existe dentro de AsistenciaSection, así que exportar
+// el CSV lanzaba ReferenceError. Se indexa por getDay(): 0 = domingo.
+const NOMBRE_DIA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
 function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
   const dias = diasDelMes(anio, mes);
   const header = 'FECHA;DIA;ESTADO;HORAS_TRAB;HORAS_EXTRA;OBSERVACION\n';
@@ -833,7 +935,7 @@ function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
     const { extra } = analizarDia(r, contrato?.jornada);
     return [
       d.fecha,
-      DIAS_SEMANA[d.diaSemana],
+      NOMBRE_DIA[d.diaSemana] || '',
       r.estado || (d.esFinSemana ? 'fin_semana' : 'sin_registro'),
       r.horasTrabajadas || '',
       r.estado === 'trabajado' ? extra || '' : '',
@@ -930,6 +1032,7 @@ function fueReliquidada(liq, liquidaciones) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
+  nombreTrabajador, diasVigentesEnPeriodo,
   calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,

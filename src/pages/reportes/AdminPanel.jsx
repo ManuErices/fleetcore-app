@@ -10,6 +10,7 @@ import { db, auth, firebaseConfig } from '../../lib/firebase';
 import { onAuthStateChanged, createUserWithEmailAndPassword, getAuth, setPersistence, inMemoryPersistence, signOut as firebaseSignOut } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import { usePlan } from '../../hooks/usePlan';
 import {
   MODULES as CONFIG_MODULES,
@@ -568,6 +569,7 @@ function fmtRut(raw) {
 function OperadoresSection() {
   const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
   const [data, setData] = useState([]);
+  const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
@@ -584,13 +586,21 @@ function OperadoresSection() {
   const { items: cargosDB, load: reloadCargos } = useCatalogo('cargo_operador');
   const CARGOS_TODOS = [...new Set([...CARGOS_LIST, ...cargosDB.map(c=>c.nombre)])].sort();
 
+  // Sin orderBy: en Firestore un orderBy también FILTRA (deja fuera a quien no
+  // tenga el campo), y las fichas creadas desde RRHH, combustible o el
+  // importador no siempre traen los mismos campos. Se ordena en memoria.
+  // Si la lectura falla NO se muestra la lista vacía: eso se veía como si la
+  // base de datos de operadores se hubiera borrado.
   const load = useCallback(async () => {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      setLoadError(null);
+      setData(await fetchTrabajadores(empresaId));
+    } catch (e) {
+      console.error('Error cargando operadores:', e);
+      setLoadError(e?.message || 'No se pudo cargar la lista de operadores.');
+    }
     setLoading(false);
   }, [empresaId]);
 
@@ -790,7 +800,11 @@ function OperadoresSection() {
       const ops = [deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id))];
       if (uid) {
         ops.push(
-          setDoc(doc(db, 'users', uid), { deleted: true, deletedAt: serverTimestamp() }),
+          // merge: sin él, el doc del usuario quedaba reducido a {deleted:true} y
+          // perdía empresaId/email. Al volver a crear a esa persona, Firebase
+          // respondía "email ya en uso" y la búsqueda por (email, empresaId) ya
+          // no lo encontraba: la cuenta quedaba muerta y había que reinventarla.
+          setDoc(doc(db, 'users', uid), { deleted: true, deletedAt: serverTimestamp() }, { merge: true }),
           deleteDoc(doc(db, 'empresas', empresaId, 'users', uid)),
         );
         fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
@@ -830,6 +844,23 @@ function OperadoresSection() {
       <SectionCard title="Operadores" subtitle="Empleados registrados en el sistema" count={data.length} color="blue" onAdd={openNew} addLabel="Nuevo Operador"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
       >
+        {loadError && (
+          <div className="mb-4 flex items-start gap-3 p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
+            <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-black text-amber-800">No se pudo cargar la lista de operadores</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Los datos NO se borraron: es un problema de conexión o de permisos. Reintenta antes de volver a ingresarlos.
+              </p>
+              <p className="text-[11px] text-amber-600 mt-1 font-mono">{loadError}</p>
+            </div>
+            <button onClick={load} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-lg transition-colors">
+              Reintentar
+            </button>
+          </div>
+        )}
         {(() => {
           const empresasOpciones = [...new Set(data.map(r => r.empresa).filter(Boolean))].sort();
           return (
@@ -1007,13 +1038,12 @@ function useCatalogo(categoria) {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(
-        collection(db, 'empresas', empresaId, 'catalogo_maquinas'),
-        orderBy('nombre')
-      ));
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'catalogo_maquinas'));
+      const all = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
       setItems(all.filter(x => x.categoria === categoria));
-    } catch { setItems([]); }
+    } catch (e) { console.error('Error cargando catálogo:', e); }
     setLoading(false);
   }, [categoria, empresaId]);
 
@@ -1229,14 +1259,41 @@ function fmtCodigo(raw, empresa) {
   }
 }
 
-// Formatea patente: ABCD-12
+/**
+ * Formatea una patente chilena, en cualquiera de los dos formatos vigentes.
+ *
+ *   · Antiguo (hasta 2007): 2 letras + 4 dígitos  → AB-1234
+ *   · Actual:               4 letras + 2 dígitos  → ABCD-12
+ *
+ * Antes solo contemplaba el formato nuevo: tomaba cuatro letras y DOS dígitos,
+ * así que al escribir "AB1234" guardaba "AB-12" y botaba el 34 sin avisar. Las
+ * máquinas antiguas de la flota quedaban con la patente mutilada.
+ *
+ * Cuál de los dos aplica lo decide la cantidad de letras, que es lo que el
+ * usuario escribe primero: con una o dos letras es formato antiguo y admite
+ * hasta cuatro dígitos; con tres o más, es el nuevo y admite dos.
+ */
 function fmtPatente(raw) {
-  let v = raw.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const v = String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   if (!v) return '';
+
   const letras = v.replace(/[^A-Z]/g, '').slice(0, 4);
-  const nums   = v.replace(/[^0-9]/g, '').slice(0, 2);
-  if (!letras) return v.slice(0,6);
-  return nums ? letras + '-' + nums : letras;
+  if (!letras) return v.slice(0, 4);   // todavía no escribe letras
+
+  const maxNums = letras.length <= 2 ? 4 : 2;
+  const nums = v.replace(/[^0-9]/g, '').slice(0, maxNums);
+  return nums ? `${letras}-${nums}` : letras;
+}
+
+/**
+ * ¿La patente está completa y bien formada? Se usa solo para avisar, no para
+ * bloquear: hay maquinaria pesada sin patente —excavadoras, cargadores— que
+ * igual tiene que poder registrarse.
+ */
+function patenteValida(p) {
+  const v = String(p || '').trim().toUpperCase();
+  if (!v) return true;                       // vacía es válida: no toda máquina tiene
+  return /^[A-Z]{2}-\d{4}$/.test(v) || /^[A-Z]{4}-\d{2}$/.test(v);
 }
 function MaquinasSection() {
   const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
@@ -1269,9 +1326,13 @@ function MaquinasSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'machines'), orderBy('name')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('name'): en Firestore ese orderBy deja fuera a las máquinas
+      // que no tengan el campo. Se ordena en memoria.
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'machines'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.name || a.code || a.patente || '').localeCompare(String(b.name || b.code || b.patente || ''), 'es')));
+    } catch (e) { console.error('Error cargando máquinas:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1405,14 +1466,23 @@ function MaquinasSection() {
                 <p className="text-[10px] text-amber-500 mt-1 font-medium">⚠ Selecciona empresa primero</p>
               )}
             </Field>
-            <Field label="Patente (ABCD-12)">
+            <Field label="Patente">
               <input
                 className={inputCls}
                 value={form.patente}
                 onChange={e => setForm({ ...form, patente: fmtPatente(e.target.value) })}
-                placeholder="Ej: TBJP-70"
+                placeholder="ABCD-12 o AB-1234"
                 maxLength={7}
               />
+              {form.patente && !patenteValida(form.patente) ? (
+                <p className="text-[10px] text-amber-500 mt-1 font-medium">
+                  ⚠ Incompleta — faltan dígitos para {form.patente.replace(/[^A-Z]/g, '').length <= 2 ? 'AB-1234' : 'ABCD-12'}
+                </p>
+              ) : (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Nueva (ABCD-12) o antigua (AB-1234). Vacía si el equipo no tiene.
+                </p>
+              )}
             </Field>
           </div>
 
@@ -1764,9 +1834,13 @@ function SubEmpresasSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('nombre'): así no se pierden las sub-empresas sin ese campo
+      // y la consulta deja de depender del índice compuesto.
+      const snap = await getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId)));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')));
+    } catch (e) { console.error('Error cargando empresas internas:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1868,9 +1942,11 @@ function EmpresasSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'empresas_combustible'), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'empresas_combustible'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')));
+    } catch (e) { console.error('Error cargando empresas de combustible:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1997,9 +2073,12 @@ function ProyectosSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('name') (dejaba fuera a los proyectos sin ese campo)
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'projects'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es')));
+    } catch (e) { console.error('Error cargando proyectos:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -2013,7 +2092,8 @@ function ProyectosSection() {
     try {
       const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'projects', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, createdAt: serverTimestamp() });
+      // active: true — sin este campo el proyecto no aparecía en Oficina Técnica
+      else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, active: true, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
@@ -2823,7 +2903,8 @@ function UsuariosSection() {
         deleteDoc(doc(db, 'empresas', empresaId, 'users', confirm.id)),
         // Tombstone en vez de deleteDoc: fuerza sign out inmediato en el cliente del usuario eliminado
         // y evita que EmpresaSetup lo re-cree automáticamente al detectar su email en trabajadores
-        setDoc(doc(db, 'users', confirm.id), { deleted: true, deletedAt: serverTimestamp() }),
+        // merge: conserva email/empresaId para poder reactivar o re-vincular la cuenta
+        setDoc(doc(db, 'users', confirm.id), { deleted: true, deletedAt: serverTimestamp() }, { merge: true }),
         fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

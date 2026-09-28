@@ -1,5 +1,5 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
-import { calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
+import { nombreTrabajador, calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
 import { paramsDe } from './parametros';
 
 function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml = false, empresa = null } = {}) {
@@ -14,7 +14,7 @@ function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml 
   };
 
   const nombreCompleto = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
+    ? nombreTrabajador(trabajador)
     : '_______________';
 
   const base       = parseInt(contrato.sueldoBase)||0;
@@ -247,7 +247,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   // de tramo. `rem.utm` sigue mandando si el documento la trae congelada.
   const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm);
   const nombre   = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
+    ? nombreTrabajador(trabajador)
     : '_______________';
   const mesLabel = labelPeriodo(rem);
   const fmt      = (n) => `$${(n||0).toLocaleString('es-CL')}`;
@@ -531,7 +531,7 @@ function generarPDFResumenNomina(liquidaciones, periodoLabel) {
 
   const filas = liquidaciones.map(l => {
     const nombre = l._trabajador
-      ? `${l._trabajador.apellidoPaterno} ${l._trabajador.nombre}`
+      ? nombreTrabajador(l._trabajador, { apellidoPrimero: true })
       : 'Desconocido';
     const c = l._calc;
     return `<tr>
@@ -641,7 +641,7 @@ function generarPDFFiniquito(fin, trabajador, contrato, { preview = false } = {}
     return `${parseInt(d)} de ${meses[parseInt(m)-1]} de ${y}`;
   };
   const nombre = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
+    ? nombreTrabajador(trabajador)
     : '_______________';
   const causalLabel = CAUSALES_TERMINO.find(c=>c.codigo===fin.causal)?.label || fin.causal || '_______________';
   const empresa = contrato?.empresa || 'MPF Ingeniería Civil';
@@ -802,7 +802,7 @@ function generarPDFAnexo(anexo, contrato, trabajador, nroAnexo, { preview = fals
   };
   const fmt   = n => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '$0';
   const nombre = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
+    ? nombreTrabajador(trabajador)
     : '_______________';
   const tipoLabel = TIPOS_ANEXO.find(t=>t.value===anexo.tipo)?.label || 'Modificación contractual';
   const empresa   = contrato?.empresa || 'MPF Ingeniería Civil';
@@ -955,7 +955,7 @@ function generarCertificadoAnual(trabajador, contrato, liquidacionesAnio, anio, 
   // UTM de diciembre del año certificado, que es la referencia del ejercicio.
   const utmVal = utm || paramsDe({ mes: '12', anio }).utm;
   const nombre = trabajador
-    ? `${trabajador.nombre} ${trabajador.apellidoPaterno} ${trabajador.apellidoMaterno||''}`.trim()
+    ? nombreTrabajador(trabajador)
     : '_______________';
   const empresa    = contrato?.empresa    || 'MPF Ingeniería Civil';
   const rutEmpresa = contrato?.rutEmpresa || '77.158.216-8';

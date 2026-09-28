@@ -253,7 +253,12 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
   const [trabajando, setTrabajando] = useState(false);
 
   const ef = estadoEfectivoCotizacion(quote);
-  const cliente = clients.find((c) => c.id === quote.clienteId);
+  // Un cliente no registrado no está en `clients`: sus datos viven en el
+  // propio documento. Se normalizan a la misma forma para que la vista de
+  // impresión no tenga que saber de dónde vienen.
+  const cliente = clients.find((c) => c.id === quote.clienteId) || (
+    quote.clienteManual ? { ...quote.clienteManual, _noRegistrado: true } : null
+  );
   const oc = purchaseOrders.find((o) => o.id === quote.ocId);
   const bloqueada = quote.estado === "aceptada" || quote.estado === "rechazada";
 
@@ -280,7 +285,15 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
                 <h2 className="text-xl font-black text-slate-900">{quote.numero || "Sin folio"}</h2>
                 <Badge estado={ESTADOS_COTIZACION[ef]} />
               </div>
-              <p className="text-sm text-slate-500 mt-1">{quote.clienteNombre}</p>
+              <p className="text-sm text-slate-500 mt-1">
+                {quote.clienteNombre}
+                {cliente?._noRegistrado && (
+                  <span className="ml-2 text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                    title="Los datos están en esta cotización, no en la lista de clientes">
+                    No registrado
+                  </span>
+                )}
+              </p>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-2xl leading-none shrink-0">&times;</button>
           </div>
@@ -312,6 +325,14 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
                 Eliminar
               </button>
             )}
+
+          {cliente?._noRegistrado && !bloqueada && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3 leading-snug">
+              Cliente no registrado. Al aceptar la cotización se crea su ficha automáticamente con
+              estos datos —o se reutiliza la existente si el RUT ya está—, porque la OC y el contrato
+              cuelgan de ella.
+            </p>
+          )}
           </div>
         </div>
 
@@ -413,7 +434,7 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
           empresaId={empresaId}
           quote={quote}
           onClose={() => setAccion(null)}
-          onListo={() => onCambio("Orden de compra registrada. La cotización quedó aceptada.")}
+          onListo={(msg) => onCambio(msg || "Orden de compra registrada. La cotización quedó aceptada.")}
         />
       )}
       {accion === "rechazar" && (
@@ -471,6 +492,7 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const setManual = (k, v) => setF((p) => ({ ...p, clienteManual: { ...p.clienteManual, [k]: v } }));
 
   const guardar = async () => {
     setError("");
@@ -479,8 +501,12 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
     if (!Number(f.montoNeto)) return setError("Ingresa el monto neto autorizado");
     setSaving(true);
     try {
-      await aceptarCotizacion(empresaId, quote, f, archivo);
-      onListo();
+      const r = await aceptarCotizacion(empresaId, quote, f, archivo);
+      // Si se creó la ficha del cliente, conviene decirlo: alguien tiene que
+      // ir a completarla con los datos que la cotización rápida no pide.
+      onListo(r?.clienteCreado
+        ? "Cotización aceptada. Se creó la ficha del cliente — complétala en Clientes."
+        : undefined);
     } catch (e) {
       setError(e.message);
       setSaving(false);
@@ -597,6 +623,7 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const setManual = (k, v) => setF((p) => ({ ...p, clienteManual: { ...p.clienteManual, [k]: v } }));
 
   const guardar = async () => {
     setError("");
@@ -691,6 +718,11 @@ function VistaImpresion({ quote, machines, cliente, onClose }) {
                   {[cliente.direccion, cliente.comuna, cliente.ciudad].filter(Boolean).join(", ")}
                 </p>
               )}
+              {/* En una cotización rápida el ejecutivo es a quién va dirigida:
+                  sin él, el documento llega sin destinatario. */}
+              {cliente?.ejecutivo && <p className="text-slate-600 mt-1">At.: {cliente.ejecutivo}</p>}
+              {cliente?.email && <p className="text-slate-600">{cliente.email}</p>}
+              {cliente?.telefono && <p className="text-slate-600">{cliente.telefono}</p>}
             </div>
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase mb-1">Condiciones comerciales</p>
@@ -766,9 +798,19 @@ function VistaImpresion({ quote, machines, cliente, onClose }) {
 // ============================================================
 // Formulario de cotización
 // ============================================================
+
+/** Valor centinela del selector para "cliente no registrado". */
+const MANUAL = "__manual__";
 function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved }) {
+  // `clienteId: "__manual__"` marca una cotización a cliente no registrado.
+  // Los datos van dentro del propio documento (`clienteManual`), no en la
+  // colección de clientes: una cotización rápida no debería obligar a crear
+  // una ficha que quizá nunca se use.
   const [f, setF] = useState({
-    clienteId: quote?.clienteId || "",
+    clienteId: quote?.clienteId || (quote?.clienteManual ? MANUAL : ""),
+    clienteManual: quote?.clienteManual || {
+      nombre: "", rut: "", ejecutivo: "", email: "", telefono: "", direccion: "", giro: "",
+    },
     fecha: (quote?.fecha || new Date().toISOString()).slice(0, 10),
     validezDias: quote?.validezDias || 15,
     plazoMeses: quote?.plazoMeses || "",
@@ -784,6 +826,7 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const setManual = (k, v) => setF((p) => ({ ...p, clienteManual: { ...p.clienteManual, [k]: v } }));
 
   const totales = useMemo(
     () => totalesDocumento(
@@ -807,21 +850,34 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
     }));
   };
 
+  const esManual = f.clienteId === MANUAL;
+
   const guardar = async () => {
     setError("");
     if (!f.clienteId) return setError("Selecciona un cliente");
+    if (esManual && !f.clienteManual.nombre.trim()) {
+      return setError("Ingresa al menos el nombre de la empresa del cliente");
+    }
     const validas = lineas.filter((l) => l.machineId && Number(l.tarifaValor) > 0);
     if (!validas.length) return setError("Agrega al menos un equipo con su tarifa");
 
     setSaving(true);
     try {
       const cliente = clients.find((c) => c.id === f.clienteId);
+      const { clienteManual, ...resto } = f;
       await upsertRentalQuote(empresaId, {
         id: quote?.id,
         numero: quote?.numero,
-        ...f,
+        ...resto,
+        // Sin ficha, el `clienteId` no apunta a nada: se guarda en null y los
+        // datos quedan en `clienteManual`. Así la cotización se imprime
+        // completa aunque el cliente nunca se registre.
+        clienteId: esManual ? null : f.clienteId,
+        clienteManual: esManual
+          ? Object.fromEntries(Object.entries(clienteManual).map(([k, v]) => [k, String(v || "").trim()]))
+          : null,
         fecha: new Date(`${f.fecha}T12:00:00`).toISOString(),
-        clienteNombre: cliente?.nombre || "",
+        clienteNombre: esManual ? clienteManual.nombre.trim() : (cliente?.nombre || ""),
         lineas: validas,
       });
       onSaved();
@@ -857,9 +913,46 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
           label="Cliente"
           value={f.clienteId}
           onChange={(v) => set("clienteId", v)}
-          opciones={clients.map((c) => ({ value: c.id, label: c.nombre }))}
+          opciones={[
+            ...clients.map((c) => ({ value: c.id, label: c.nombre })),
+            { value: MANUAL, label: "— Cliente no registrado (cotización rápida) —" },
+          ]}
           full
         />
+
+        {esManual && (
+          <div className="col-span-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div>
+              <p className="text-xs font-black text-slate-600 uppercase">Datos del cliente</p>
+              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                Quedan guardados en esta cotización, no en la lista de clientes. Si el negocio
+                avanza, conviene crear la ficha antes de registrar la OC.
+              </p>
+            </div>
+
+            <Campo
+              label="Nombre o razón social"
+              value={f.clienteManual.nombre}
+              onChange={(v) => setManual("nombre", v)}
+              placeholder="Constructora Ejemplo SpA"
+              full
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="RUT empresa" value={f.clienteManual.rut}
+                onChange={(v) => setManual("rut", v)} placeholder="77.123.456-7" />
+              <Campo label="Giro" value={f.clienteManual.giro}
+                onChange={(v) => setManual("giro", v)} placeholder="Construcción" />
+              <Campo label="Nombre del ejecutivo" value={f.clienteManual.ejecutivo}
+                onChange={(v) => setManual("ejecutivo", v)} placeholder="A quién va dirigida" />
+              <Campo label="Teléfono" value={f.clienteManual.telefono}
+                onChange={(v) => setManual("telefono", v)} placeholder="+56 9 ..." />
+              <Campo label="Email" type="email" value={f.clienteManual.email}
+                onChange={(v) => setManual("email", v)} placeholder="contacto@empresa.cl" />
+              <Campo label="Dirección" value={f.clienteManual.direccion}
+                onChange={(v) => setManual("direccion", v)} placeholder="Calle 123, Comuna" />
+            </div>
+          </div>
+        )}
         <Campo label="Fecha" type="date" value={f.fecha} onChange={(v) => set("fecha", v)} />
         <Campo label="Validez (días)" type="number" value={f.validezDias} onChange={(v) => set("validezDias", v)} />
         <Campo

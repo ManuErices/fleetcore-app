@@ -12,6 +12,14 @@ import CombustibleAnalytics from "../combustible/CombustibleAnalytics";
 import CombustibleImporter from "../combustible/CombustibleImporter";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
+import { machineTitulo } from "../../utils/searchHelpers";
+
+/**
+ * Equipo surtidor (camión / mochila / estanque) de un reporte.
+ * El formulario guarda los datos de control tanto anidados (`datosControl`)
+ * como aplanados en la raíz, y los registros antiguos solo tienen la raíz.
+ */
+const getEquipoSurtidorId = (r) => r?.datosControl?.equipoSurtidorId || r?.equipoSurtidorId || '';
 
 function SurtidoresStatsPanel({ stats, selectedSurtidorId, onSelectSurtidor, fechaInicio, fechaFin }) {
   if (stats.length === 0) return null;
@@ -211,6 +219,7 @@ export default function ReporteCombustible() {
     'proyecto',
     'empresa',
     'surtidor',
+    'maquina',
     'receptor',
     'creadoPor',
     'litros',
@@ -492,7 +501,7 @@ export default function ReporteCombustible() {
     if (filtros.surtidor) {
       resultado = resultado.filter(r => {
         if (r.tipo === 'entrega') {
-          return r.datosControl?.equipoSurtidorId === filtros.surtidor;
+          return getEquipoSurtidorId(r) === filtros.surtidor;
         } else if (r.tipo === 'entrada') {
           return r.datosEntrada?.machineId === filtros.surtidor;
         }
@@ -562,8 +571,8 @@ export default function ReporteCombustible() {
       let surtidorTruck = null;
       if (r.tipo === 'entrada' && r.datosEntrada?.destinoCarga === 'camion') {
         surtidorTruck = equiposSurtidores.find(m => m.id === r.datosEntrada.machineId);
-      } else if (r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId) {
-        surtidorTruck = equiposSurtidores.find(m => m.id === r.datosControl.equipoSurtidorId);
+      } else if (r.tipo === 'entrega' && getEquipoSurtidorId(r)) {
+        surtidorTruck = equiposSurtidores.find(m => m.id === getEquipoSurtidorId(r));
       }
 
       const horometroOdometro = r.datosEntrega?.horometroOdometro
@@ -575,15 +584,17 @@ export default function ReporteCombustible() {
         ...r,
         projectName: project?.name || r.projectId || '',
         empresaNombre,
-        machinePatente: machine?.patente || '',
-        machineName: machine?.nombre || machine?.name
-          || (machine?.type && machine?.marca ? `${machine.type} - ${machine.marca}` : machine?.modelo || ''),
+        // Nombre "humano" del equipo (Camioneta, Bulldozer…) + patente: las
+        // máquinas guardan el tipo en `type` o en `tipo` según dónde se crearon.
+        machinePatente: machine?.patente || machine?.code || machine?.codigo || '',
+        machineName: machine ? machineTitulo(machine) : '',
         surtidorPatente: surtidorTruck?.patente || '',
         surtidorName: surtidorTruck?.nombre || surtidorTruck?.name || '',
         repartidorNombre: repartidor?.nombre || r.repartidorNombre || '',
         repartidorRut: repartidor?.rut || r.repartidorRut || '',
-        operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.operadorNombre || '',
-        operadorRut: operador?.rut || r.operadorRut || '',
+        operadorNombre: operador?.nombre || r.datosEntrada?.receptorNombre || r.datosEntrega?.receptorNombre
+          || r.datosEntrega?.operadorExterno?.nombre || r.operadorNombre || '',
+        operadorRut: operador?.rut || r.datosEntrega?.receptorRut || r.operadorRut || '',
         receptorNombre: r.datosEntrada?.receptorNombre || '',
         cantidad: cantidad,
         horometroOdometro,
@@ -613,7 +624,7 @@ export default function ReporteCombustible() {
       const totalIngresadoAllTime = entradasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrada?.cantidad) || 0), 0);
 
       // Entregas históricas (All-Time)
-      const entregasHist = reportes.filter(r => r.tipo === 'entrega' && r.datosControl?.equipoSurtidorId === s.id);
+      const entregasHist = reportes.filter(r => r.tipo === 'entrega' && getEquipoSurtidorId(r) === s.id);
       const totalEntregadoAllTime = entregasHist.reduce((sum, r) => sum + (parseFloat(r.datosEntrega?.cantidadLitros) || 0), 0);
 
       // Stock actual real (All-time balance)
@@ -762,7 +773,7 @@ export default function ReporteCombustible() {
 
     } else {
       // --- LOGICA PARA ENTREGA (SALIDA) ---
-      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoId = getEquipoSurtidorId(reporte);
       const equipoSurtidor = equipoId ? (equiposSurtidores.find(m => m.id === equipoId) || machines.find(m => m.id === equipoId)) : null;
 
       const machineId = reporte.datosEntrega?.machineId;
@@ -859,7 +870,7 @@ export default function ReporteCombustible() {
       if (columnasVisibles.includes('proyecto')) row['Proyecto'] = r.projectName || '';
       if (columnasVisibles.includes('empresa')) row['Empresa'] = r.empresaNombre || '';
       if (columnasVisibles.includes('surtidor')) row['Surtidor'] = r.surtidorPatente ? `${r.surtidorPatente} - ${r.surtidorName}` : '';
-      if (columnasVisibles.includes('maquina')) row['Máquina'] = r.machinePatente ? `${r.machinePatente} - ${r.machineName}` : '';
+      if (columnasVisibles.includes('maquina')) row['Máquina'] = [r.machineName, r.machinePatente].filter(Boolean).join(' ');
       if (columnasVisibles.includes('repartidor')) row['Repartidor'] = r.repartidorNombre || '';
       if (columnasVisibles.includes('receptor')) row['Receptor'] = r.operadorNombre || '';
       if (columnasVisibles.includes('creadoPor')) row['Creado por'] = r.creadoPor || '';
@@ -967,7 +978,7 @@ export default function ReporteCombustible() {
       doc.setFont(undefined, 'normal');
       doc.setTextColor(55, 65, 81);
       doc.setFontSize(9);
-      const equipoId = reporte.datosControl?.equipoSurtidorId;
+      const equipoId = getEquipoSurtidorId(reporte);
       const equipoSurtidor = equipoId ? machines.find(m => m.id === equipoId) : null;
       doc.text(`Equipo: ${equipoSurtidor?.name || equipoSurtidor?.patente || 'No especificado'}`, margin + colWidth, yPos + 6);
       doc.text(`Obra: ${reporte.projectName || 'N/A'}`, margin + colWidth, yPos + 12);
@@ -1152,7 +1163,7 @@ export default function ReporteCombustible() {
         if (k === 'proyecto') return r.projectName || '-';
         if (k === 'empresa') return r.empresaNombre || '-';
         if (k === 'surtidor') return r.surtidorPatente ? `${r.surtidorPatente} - ${r.surtidorName}` : '-';
-        if (k === 'maquina') return r.machinePatente ? `${r.machinePatente} - ${r.machineName}` : '-';
+        if (k === 'maquina') return [r.machineName, r.machinePatente].filter(Boolean).join(' ') || '-';
         if (k === 'repartidor') return r.repartidorNombre || '-';
         if (k === 'receptor') return r.operadorNombre || '-';
         if (k === 'creadoPor') return r.creadoPor || '-';
@@ -1810,10 +1821,10 @@ export default function ReporteCombustible() {
                         )}
                         {columnasVisibles.includes('maquina') && (
                           <td className="px-3 py-3 text-sm whitespace-nowrap">
-                            {reporte.machinePatente ? (
+                            {(reporte.machineName || reporte.machinePatente) ? (
                               <div className="flex flex-col">
-                                <span className="font-bold text-slate-800">{reporte.machinePatente}</span>
-                                <span className="text-[11px] text-slate-500 font-normal leading-tight">{reporte.machineName}</span>
+                                <span className="font-bold text-slate-800">{reporte.machineName || 'Sin tipo'}</span>
+                                <span className="text-[11px] text-slate-500 font-normal leading-tight">{reporte.machinePatente}</span>
                               </div>
                             ) : (reporte.tipo === 'entrada' ? <span className="text-slate-400 font-medium">N/A</span> : '-')}
                           </td>
@@ -1825,7 +1836,15 @@ export default function ReporteCombustible() {
                         )}
                         {columnasVisibles.includes('receptor') && (
                           <td className="px-3 py-3 text-sm text-slate-700 whitespace-nowrap">
-                            {reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}
+                            <div className="flex flex-col">
+                              <span>{reporte.operadorNombre || (reporte.tipo === 'entrada' ? 'N/A' : '-')}</span>
+                              {/* El equipo que recibió, junto al receptor: quién cargó y en qué */}
+                              {(reporte.machineName || reporte.machinePatente) && (
+                                <span className="text-[11px] text-slate-500 font-normal leading-tight">
+                                  {[reporte.machineName, reporte.machinePatente].filter(Boolean).join(' ')}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         )}
                         {columnasVisibles.includes('creadoPor') && (
