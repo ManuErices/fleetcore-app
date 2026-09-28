@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import {
   collection,
   getDocs,
@@ -153,12 +154,11 @@ export default function AsistenciaSection() {
     if (!empresaId) return;
     setLoadingBase(true);
     try {
-      const [tSnap, cSnap] = await Promise.all([
-        getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('apellidoPaterno'))),
+      const [workersList, cSnap] = await Promise.all([
+        fetchTrabajadores(empresaId),
         getDocs(collection(db, 'empresas', empresaId, 'contratos'))
       ]);
 
-      const workersList = tSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setTrabajadores(workersList);
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 

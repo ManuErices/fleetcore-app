@@ -472,11 +472,27 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     setLoading(true);
     try {
       const empresaNombre = resolverNombreEmpresa(nuevoEmpleadoData.empresaId);
+      // Ficha completa: RRHH y Asistencia ordenan por apellidoPaterno y antes
+      // estas fichas (creadas al vuelo desde combustible) quedaban invisibles
+      // ahí, como si no existieran. Se guardan los mismos campos base que usa
+      // el resto del sistema.
+      const nombreCompleto = nuevoEmpleadoData.nombre.trim().toUpperCase();
+      const partes = nombreCompleto.split(/\s+/).filter(Boolean);
+      const nombres = partes.length >= 3 ? partes.slice(0, partes.length - 2).join(' ') : (partes[0] || '');
+      const apellidoPaterno = partes.length >= 3 ? partes[partes.length - 2] : (partes[1] || '');
+      const apellidoMaterno = partes.length >= 3 ? partes[partes.length - 1] : '';
       const eRef = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), {
-        nombre: nuevoEmpleadoData.nombre.toUpperCase(),
+        nombre: nombreCompleto,
+        nombres,
+        apellidoPaterno,
+        apellidoMaterno,
         rut: nuevoEmpleadoData.rut || '',
         empresa: empresaNombre,
         empresaId: nuevoEmpleadoData.empresaId,
+        cargo: '',
+        estado: 'activo',
+        tipo: 'OPERADOR',
+        origen: 'combustible',
         fechaCreacion: new Date().toISOString()
       });
       const newTrabajador = {
@@ -516,6 +532,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'projects'), {
         name: nuevoProyecto.name.trim(),
         codigo: nuevoProyecto.codigo.trim(),
+        // active: true — sin este campo Oficina Técnica no ve el proyecto
+        active: true,
         createdAt: serverTimestamp()
       });
       const nuevoProj = { id: docRef.id, name: nuevoProyecto.name.trim(), codigo: nuevoProyecto.codigo.trim() };
