@@ -283,21 +283,31 @@ export async function listEmployees(empresaId, projectId) {
   }
 }
 
+// RUT sin puntos, guión ni espacios. La misma persona está guardada como
+// "10.622.520-6" o "10622520-6" según por dónde entró, así que comparar el
+// texto tal cual no sirve para identificarla.
+const rutPlano = (s) => String(s || '').replace(/[.\-\s]/g, '').toUpperCase();
+
 export async function getEmployeeByRut(empresaId, projectId, rut) {
   try {
-    // Solo por RUT: al filtrar además por projectId no se encontraba al
-    // trabajador ya registrado (su ficha suele no tener proyecto) y cada
-    // importación de remuneraciones creaba un duplicado.
-    const snap = await getDocs(query(
-      EMPRESA_COL(empresaId, 'trabajadores'),
-      where("rut", "==", rut)
-    ));
-    if (snap.empty) return null;
+    // Se compara el RUT normalizado en memoria en vez de con where('rut','=='):
+    // la búsqueda exacta (y el filtro por projectId que había antes) no
+    // encontraba la ficha existente y cada importación de remuneraciones
+    // creaba un duplicado de toda la nómina.
+    const snap = await getDocs(EMPRESA_COL(empresaId, 'trabajadores'));
+    const buscado = rutPlano(rut);
+    if (!buscado) return null;
 
-    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // Si hay varias fichas con el mismo RUT, se prefiere la del proyecto pedido
-    const preferida = docs.find(d => d.projectId === projectId) || docs[0];
-    return preferida;
+    const candidatos = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(d => rutPlano(d.rut) === buscado);
+    if (!candidatos.length) return null;
+
+    // Si hay varias fichas con el mismo RUT se prefiere la del proyecto pedido,
+    // y entre las demás la que tenga ficha de RRHH completa (apellidos).
+    return candidatos.find(d => d.projectId === projectId)
+      || candidatos.find(d => d.apellidoPaterno)
+      || candidatos[0];
   } catch (error) {
     console.error("❌ Error buscando empleado por RUT:", error);
     return null;
