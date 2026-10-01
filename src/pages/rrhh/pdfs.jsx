@@ -323,7 +323,12 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
     ...(calc.apvM > 0
       ? [[`APV ( Régimen ${calc.apvRegimen || 'B'} )${calc.apvInstitucion ? ` ( ${calc.apvInstitucion} )` : ''}`, calc.apvM]]
       : []),
-    [`Salud 7% (${salud})`, calc.salM],
+    // Se abre en dos líneas cuando el plan supera el 7% legal: el trabajador
+    // tiene que poder ver cuánto es cotización obligatoria y cuánto es su plan.
+    ...(calc.salAdicional > 0
+      ? [[`Salud 7% (${salud})`, calc.salLegal],
+         [`Adicional sobre 7% (plan ${trabajador?.planIsapre || 'pactado'})`, calc.salAdicional]]
+      : [[`Salud 7% (${salud})`, calc.salM]]),
     ['Seguro Cesantía Trabajador', calc.cesM],
     [`Impuestos ( Renta Tributable: ${fmt(rentaTrib)} )`, iut],
   ].filter(([, v]) => v > 0);

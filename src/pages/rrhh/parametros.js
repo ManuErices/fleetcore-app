@@ -75,6 +75,28 @@ const ASIGNACION_FAMILIAR = [
 ];
 
 
+// ── Tope imponible mensual (DL 3.500 Art. 16 / Ley 19.728) ──────────────────
+// Lo fija la Superintendencia de Pensiones cada año según la variación del
+// Índice de Remuneraciones Reales del INE. Son DOS topes distintos:
+//
+//   · previsional — AFP, salud y Ley 16.744 (accidentes del trabajo)
+//   · cesantía    — AFC, siempre más alto
+//
+// El de 2026 cambió dos veces: la Res. ex. N°26 fijó 89,9 y 135,1 UF desde
+// enero, y la N°236 las dejó en 90,0 y 135,2 desde febrero. Por eso van dos
+// filas y no una.
+//
+// Sin este tope, un sueldo sobre ~$3,7 millones cotiza por el total y tanto el
+// trabajador como la empresa pagan de más, todos los meses.
+const TOPE_IMPONIBLE = [
+  { desde: '2026-02-01', previsionalUF: 90.0, cesantiaUF: 135.2, norma: 'Res. ex. 236/2026 SP' },
+  { desde: '2026-01-01', previsionalUF: 89.9, cesantiaUF: 135.1, norma: 'Res. ex. 26/2026 SP' },
+  { desde: '2025-01-01', previsionalUF: 87.8, cesantiaUF: 131.9, norma: 'SP 2025' },
+  { desde: '2024-01-01', previsionalUF: 84.3, cesantiaUF: 126.6, norma: 'SP 2024' },
+  { desde: '1900-01-01', previsionalUF: 84.3, cesantiaUF: 126.6, norma: 'valor heredado — sin verificar' },
+];
+
+
 // Semilla mínima. Lo normal es que estos valores lleguen desde Firestore
 // (`empresas/{id}/parametros_legales/{YYYY-MM}`) o desde mindicador.cl vía
 // `aplicarIndicadores`. La UF se guarda como valor del día 1 del mes: sirve
@@ -82,9 +104,14 @@ const ASIGNACION_FAMILIAR = [
 // exacto del día de pago.
 // UF anotada: 07-09-2026 (Banco Central). Sirve para topes en UF, no para
 // convertir montos exactos a la fecha de pago.
+//
+// `ufFin` es la UF del ÚLTIMO día del mes. No es un lujo: las cotizaciones de
+// AFP y el plan de isapre se convierten con esa UF, no con la del día 1
+// (Circular SP; así lo hace Previred y así lo hace Talana). Con la del día 1
+// el plan de salud sale corto por unos mil pesos al mes.
 const INDICADORES = {
-  '2026-09': { utm: 71721, uf: 40883 },
-  '2026-08': { utm: 71649, uf: null  },
+  '2026-09': { utm: 71721, uf: 40883, ufFin: null },
+  '2026-08': { utm: 71649, uf: null,  ufFin: null },
 };
 
 // Último recurso si se pide un período sin UTM/UF cargada ni override.
@@ -148,7 +175,9 @@ export function paramsDe(periodo) {
   const mes   = fecha.slice(0, 7);
   const imm   = vigenteEn(IMM, fecha);
   const jor   = vigenteEn(JORNADA_MAXIMA, fecha);
+  const tope  = vigenteEn(TOPE_IMPONIBLE, fecha);
   const ind   = INDICADORES[mes] || {};
+  const uf    = ind.uf || UF_FALLBACK;
 
   return {
     periodo:      mes,
@@ -167,7 +196,24 @@ export function paramsDe(periodo) {
     asignacionFamiliar: (vigenteEn(ASIGNACION_FAMILIAR, fecha) || {}).tramos || [],
     asignacionFamiliarNorma: (vigenteEn(ASIGNACION_FAMILIAR, fecha) || {}).norma || '',
     utm:          ind.utm || UTM_FALLBACK,
-    uf:           ind.uf  || UF_FALLBACK,
+    uf,
+    // Topes en UF y convertidos a pesos con la UF del período. La SP manda
+    // usar la UF del último día del mes; acá se tiene la del día 1, así que la
+    // conversión puede moverse unos pesos. Solo afecta a quien está sobre el
+    // tope, y por un monto marginal.
+    // UF del último día del mes, que es la que corresponde para convertir el
+    // plan de isapre y los topes. Si no está cargada cae a la del día 1, y el
+    // resultado queda corto por la variación del mes.
+    ufFin:           ind.ufFin || uf,
+    ufFinCargada:    !!ind.ufFin,
+    topeImponibleUF: tope.previsionalUF,
+    topeCesantiaUF:  tope.cesantiaUF,
+    topeImponible:   Math.round(tope.previsionalUF * uf),
+    topeCesantia:    Math.round(tope.cesantiaUF * uf),
+    // Tope de la rebaja de salud para el impuesto único: 7% del tope imponible
+    // (SII, Of. 2406/2016). Lo cotizado por sobre eso no rebaja la base.
+    topeRebajaSalud: Math.round(tope.previsionalUF * uf * 0.07),
+    topeNorma:       tope.norma,
     // Permite que la UI advierta cuando se está calculando con el fallback
     utmCargada:   !!ind.utm,
     ufCargada:    !!ind.uf,
@@ -187,8 +233,9 @@ export function aplicarIndicadores(mapa) {
     if (!/^\d{4}-\d{2}$/.test(mes) || !val) return;
     const actual = INDICADORES[mes] || {};
     INDICADORES[mes] = {
-      utm: Number(val.utm) > 0 ? Number(val.utm) : actual.utm,
-      uf:  Number(val.uf)  > 0 ? Number(val.uf)  : actual.uf,
+      utm:   Number(val.utm)   > 0 ? Number(val.utm)   : actual.utm,
+      uf:    Number(val.uf)    > 0 ? Number(val.uf)    : actual.uf,
+      ufFin: Number(val.ufFin) > 0 ? Number(val.ufFin) : actual.ufFin,
     };
   });
 }
@@ -220,6 +267,31 @@ export function montoAsignacionFamiliar(tramo, periodo) {
   return t ? t.monto : 0;
 }
 
+/** Tabla de topes imponibles, para la pantalla de parámetros. */
+export function tablaTopeImponible() {
+  return TOPE_IMPONIBLE.map(r => ({ ...r }));
+}
+
+/**
+ * Convierte el plan de salud pactado a pesos del período.
+ *
+ * `planIsapre` guarda texto: "6,311 UF", "6.42 UF", "250000 $". Se escribe así
+ * porque viene de la importación de nómina, que lo arma pegando dos columnas.
+ * Nunca se había parseado: el motor cobraba el 7% legal y el plan quedaba de
+ * adorno en el PDF.
+ */
+export function valorPlanSalud(planIsapre, periodo) {
+  const txt = String(planIsapre || '').trim();
+  if (!txt) return 0;
+  const limpio = txt.replace(/[^\d,.]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const num = parseFloat(limpio);
+  if (!(num > 0)) return 0;
+  // Sin unidad explícita se decide por magnitud: nadie pacta un plan de
+  // 250.000 UF, ni uno de 6 pesos.
+  const esUF = /uf/i.test(txt) || num < 1000;
+  return esUF ? Math.round(num * paramsDe(periodo).ufFin) : Math.round(num);
+}
+
 /** Tabla de IMM completa, para mostrarla en la pantalla de parámetros. */
 export function tablaIMM() {
   return IMM.map(r => ({ ...r }));
@@ -245,8 +317,8 @@ export async function cargarIndicadoresFirestore(fs, empresaId, periodo) {
     const snap = await fs.getDoc(fs.doc(fs.db, 'empresas', empresaId, 'parametros_legales', mes));
     if (!snap.exists()) return null;
     const d = snap.data() || {};
-    aplicarIndicadores({ [mes]: { utm: d.utm, uf: d.uf } });
-    return { mes, utm: d.utm || null, uf: d.uf || null };
+    aplicarIndicadores({ [mes]: { utm: d.utm, uf: d.uf, ufFin: d.ufFin } });
+    return { mes, utm: d.utm || null, uf: d.uf || null, ufFin: d.ufFin || null };
   } catch (e) {
     console.warn('[parametros] no se pudo leer parametros_legales:', e.message);
     return null;
@@ -264,10 +336,13 @@ export async function consultarIndicadoresOnline(periodo) {
   const mes = claveMes(periodo);
   const [anio, mm] = mes.split('-');
   const fecha = `01-${mm}-${anio}`;
+  // Último día del mes: `new Date(anio, mm, 0)` da el día 0 del mes siguiente.
+  const ultimo = new Date(Number(anio), Number(mm), 0).getDate();
+  const fechaFin = `${String(ultimo).padStart(2, '0')}-${mm}-${anio}`;
 
-  const pedir = async (indicador) => {
+  const pedir = async (indicador, dia) => {
     try {
-      const r = await fetch(`https://mindicador.cl/api/${indicador}/${fecha}`);
+      const r = await fetch(`https://mindicador.cl/api/${indicador}/${dia}`);
       if (!r.ok) return null;
       const j = await r.json();
       const v = Number(j?.serie?.[0]?.valor);
@@ -277,7 +352,13 @@ export async function consultarIndicadoresOnline(periodo) {
     }
   };
 
-  const [utm, uf] = await Promise.all([pedir('utm'), pedir('uf')]);
+  const [utm, uf, ufFin] = await Promise.all([
+    pedir('utm', fecha), pedir('uf', fecha), pedir('uf', fechaFin),
+  ]);
   if (!utm && !uf) return null;
-  return { mes, utm, uf: uf ? Math.round(uf) : null };
+  return {
+    mes, utm,
+    uf:    uf    ? Math.round(uf)    : null,
+    ufFin: ufFin ? Math.round(ufFin) : null,
+  };
 }

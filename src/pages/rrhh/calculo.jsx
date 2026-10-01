@@ -3,7 +3,7 @@ import { TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
   TRAMOS_IUT, normalizarItemsPago } from './shared';
 // IMM, UTM, UF y jornada máxima legal ya no son constantes: dependen del
 // período que se está liquidando. Ver parametros.js.
-import { paramsDe, montoAsignacionFamiliar, tramoSugerido } from './parametros';
+import { paramsDe, montoAsignacionFamiliar, tramoSugerido, valorPlanSalud } from './parametros';
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
@@ -77,6 +77,12 @@ function diasVigentesEnPeriodo(contrato, mes, anio) {
   // liquidación salía en cero.
   const dias = Math.min(30, Math.max(0, Math.min(hasta, 30) - Math.min(desde, 30) + 1));
   return desde === 1 && hasta >= ultimo.getDate() ? 30 : dias;
+}
+
+/** Fonasa cotiza el 7% parejo; el plan pactado solo existe en isapre. */
+function esFonasa(rem) {
+  const p = String(rem?.prevision || '').toLowerCase();
+  return !p || p.includes('fonasa');
 }
 
 function calcularLiquidacion(rem) {
@@ -261,17 +267,46 @@ function calcularLiquidacion(rem) {
 
   const afpResuelta = !!TASAS_AFP[rem.afp];
   const tasaAfp = esPensionado ? 0 : (TASAS_AFP[rem.afp] || 0.1137);
-  const afpM  = Math.round(imponible * tasaAfp);
-  const salM  = Math.round(imponible * TASAS.salud);
+
+  // ── Tope imponible (DL 3.500 Art. 16) ──
+  //
+  // Las cotizaciones se calculan sobre la renta imponible TOPEADA, no sobre la
+  // total. Son dos topes: 90 UF para AFP y salud, 135,2 UF para cesantía
+  // (valores 2026, Res. ex. 236 de la Superintendencia de Pensiones).
+  //
+  // No estaba aplicado. Un sueldo sobre ~$3,7 millones cotizaba por el total:
+  // el trabajador pagaba AFP y salud de más, y la empresa pagaba de más el SIS,
+  // la mutual y su parte de la cesantía.
+  const baseCotiza = Math.min(imponible, P.topeImponible);
+  const baseCesantia = Math.min(imponible, P.topeCesantia);
+  const sobreTope = imponible > P.topeImponible;
+
+  const afpM  = Math.round(baseCotiza * tasaAfp);
+
+  // ── Salud: el 7% es el MÍNIMO, no el monto ──
+  //
+  // Quien tiene isapre cotiza lo que pactó en su plan, y el 7% legal es solo el
+  // piso (DL 3.500 Art. 84). El motor cobraba el 7% y listo, así que a todo
+  // afiliado a isapre con plan sobre el mínimo se le pagaba de más: en un plan
+  // de 6,311 UF sobre $1.919.115 imponibles, $124.774 al mes.
+  //
+  // El valor del plan ya estaba en la ficha (`planIsapre`), se imprimía en el
+  // PDF y nunca entraba al cálculo.
+  const salLegal = Math.round(baseCotiza * TASAS.salud);
+  const planSaludM = esFonasa(rem) ? 0 : valorPlanSalud(rem.planIsapre, { mes: rem.mes, anio: rem.anio });
+  const salM = Math.max(salLegal, planSaludM);
+  const salAdicional = Math.max(0, salM - salLegal);
   const esCt  = rem.tipoContrato && (
     rem.tipoContrato.toLowerCase().includes('plazo') || 
     rem.tipoContrato.toLowerCase().includes('obra')
   );
   // AFC: indefinido 0,6% trabajador; plazo fijo/obra 0% (lo paga íntegro el empleador)
+  // La cesantía tiene su propio tope, más alto que el previsional.
   const cesM  = esPensionado ? 0
-    : Math.round(imponible * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
-  // SIS: cargo empleador (referencial, no descuenta al trabajador)
-  const sisM  = esPensionado ? 0 : Math.round(imponible * TASAS.sis);
+    : Math.round(baseCesantia * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
+  // SIS: cargo empleador (referencial, no descuenta al trabajador). Va sobre
+  // el tope previsional, igual que AFP y salud.
+  const sisM  = esPensionado ? 0 : Math.round(baseCotiza * TASAS.sis);
   // ── APV — Ahorro Previsional Voluntario (Art. 20 DL 3.500) ──
   // Régimen A: el trabajador recibe la bonificación fiscal del 15%, y el aporte
   //            NO rebaja la base del impuesto único.
@@ -318,6 +353,10 @@ function calcularLiquidacion(rem) {
     imponible, noImponible,
     itemsDetalle, itemsImp, itemsNoImp, itemsDesc,
     afpM, salM, sisM, cesM, apvM, apvRegimen, apvInstitucion: rem.apvInstitucion || '',
+    // Desglose de salud y topes, para el PDF y la pantalla.
+    salLegal, salAdicional, planSaludM,
+    baseCotiza, baseCesantia, sobreTope,
+    topeImponible: P.topeImponible, topeRebajaSalud: P.topeRebajaSalud,
     totalDescuentos,
     descAdicional, anticipo, pagoAnterior, liquido,
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
@@ -343,15 +382,15 @@ function calcularLiquidacion(rem) {
     uf: P.uf,   // lo consume calcularRentaTributable para el tope de APV
     tasaAfp, afpResuelta,
     esPensionado,
-    cesEmpM: esPensionado ? 0 : Math.round(imponible * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
-    sisEmpM: esPensionado ? 0 : Math.round(imponible * TASAS.sis),
+    cesEmpM: esPensionado ? 0 : Math.round(baseCesantia * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
+    sisEmpM: esPensionado ? 0 : Math.round(baseCotiza * TASAS.sis),
     // Aporte del empleador Ley 16.744 (accidentes del trabajo y Ley SANNA).
     // La tasa es PROPIA DE CADA EMPRESA: cotización básica más la adicional
     // diferenciada según su siniestralidad. `TASAS.mutual` está fijada a la de
     // MPF, así que se acepta `rem.tasaMutual` para que la empresa la configure
     // sin editar código. Es columna obligatoria del LRE (cód. 4152).
     tasaMutual: Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual,
-    mutualM: Math.round(imponible * (Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual)),
+    mutualM: Math.round(baseCotiza * (Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual)),
   };
 }
 function calcularAntiguedad(fechaIngreso, fechaTermino) {
@@ -366,6 +405,140 @@ function calcularAntiguedad(fechaIngreso, fechaTermino) {
   const totalMeses = anios * 12 + Math.max(0, meses);
   return { anios, meses: Math.max(0,meses), dias: Math.max(0,dias), totalMeses };
 }
+/**
+ * Base de cálculo de la indemnización — Art. 172 CT.
+ *
+ * "Última remuneración mensual" NO es el sueldo base. El artículo manda incluir
+ * toda cantidad que el trabajador estuviere percibiendo por la prestación de
+ * sus servicios: sueldo base, gratificación, y las asignaciones permanentes
+ * —colación, movilización, viáticos, bonos fijos—. La DT ha sostenido que
+ * colación y movilización se incluyen, porque el artículo solo excluye tres
+ * cosas:
+ *
+ *   · asignación familiar legal
+ *   · pagos por sobretiempo (horas extra)
+ *   · beneficios esporádicos o de una vez al año
+ *
+ * Antes se usaba solo `contrato.sueldoBase`. Con un sueldo de $1.600.000 más
+ * gratificación y asignaciones, la base real puede ser casi el doble, y la
+ * indemnización salía a la mitad de lo que corresponde. Es una diferencia que
+ * el trabajador reclama y la Inspección ordena pagar, con reajuste e intereses.
+ */
+function baseArt172(liq, contrato) {
+  if (!liq) return parseInt(contrato?.sueldoBase) || 0;
+
+  const n = (v) => parseInt(v) || 0;
+
+  // Imponibles permanentes. Las horas extra quedan fuera por mandato expreso.
+  const sueldo   = n(liq.sueldoBase) || n(contrato?.sueldoBase);
+  const bono     = n(liq.bonoProduccion);
+  const otrosImp = n(liq.otrosImponibles);
+
+  // Gratificación: la que se paga mes a mes. Si es anual, es un beneficio
+  // "por una sola vez al año" y el propio Art. 172 la excluye.
+  const grat = liq.gratificacion === false ? 0
+    : Math.min(Math.round(sueldo * 0.25), n(paramsDe(liq)?.topeGratMensual) || Math.round(sueldo * 0.25));
+
+  // No imponibles permanentes. La asignación familiar se excluye por ley y no
+  // entra acá porque no es un campo del formulario: la calcula el motor.
+  const colacion    = n(liq.colacion);
+  const movilizacion = n(liq.movilizacion);
+  const viaticos    = n(liq.viaticos);
+  const otrosNoImp  = n(liq.otrosNoImponibles);
+
+  return sueldo + bono + otrosImp + grat + colacion + movilizacion + viaticos + otrosNoImp;
+}
+
+// ─── Feriado: conversión de días hábiles a días a pagar ──────────────────────
+//
+// El Art. 69 manda que el feriado comprenda los sábados, domingos y festivos
+// que caigan DENTRO del período. La DT lo aplica corriendo el calendario desde
+// el día siguiente al término del contrato, contando los días hábiles uno a uno
+// y sumando los inhábiles que aparezcan en medio.
+//
+// Antes acá había un factor fijo de 21/15 = 1,4. Es una aproximación: el
+// resultado real depende del día de la semana en que termina el contrato y de
+// los festivos del tramo. En el ejemplo oficial de la DT —10,08 hábiles desde
+// el 17-11-2021— el calendario da 14,08 y el factor da 14,11. En otros casos
+// la diferencia es mucho mayor: 7,4 hábiles desde un 02-07-2026 dan 11,4 días
+// por calendario contra 10,36 por factor, más de $55.000 en un sueldo de
+// $1.600.000.
+//
+// Fuente: DT, "¿Cómo se calcula el feriado proporcional?" y Ord. 826/13.
+
+/** Domingo de Pascua (algoritmo de Meeus/Jones/Butcher). */
+function domingoPascua(anio) {
+  const a = anio % 19, b = Math.floor(anio / 100), c = anio % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mes = Math.floor((h + l - 7 * m + 114) / 31);
+  const dia = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(anio, mes - 1, dia, 12);
+}
+
+const _iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * Festivos legales de un año.
+ *
+ * NO incluye los feriados regionales (Arica, Chillán, Ñuble) ni los electorales,
+ * que se fijan por ley cada vez. Si un tramo de feriado cae sobre uno de esos,
+ * el cálculo queda corto por un día y hay que ajustarlo a mano.
+ */
+function festivosChile(anio) {
+  const F = new Set([
+    '01-01', // Año Nuevo
+    '05-01', // Día del Trabajo
+    '05-21', // Glorias Navales
+    '06-20', // Pueblos Indígenas
+    '06-29', // San Pedro y San Pablo
+    '07-16', // Virgen del Carmen
+    '08-15', // Asunción
+    '09-18', '09-19', // Fiestas Patrias
+    '10-12', // Encuentro de Dos Mundos
+    '10-31', // Iglesias Evangélicas
+    '11-01', // Todos los Santos
+    '12-08', // Inmaculada Concepción
+    '12-25', // Navidad
+  ].map((md) => `${anio}-${md}`));
+
+  const p = domingoPascua(anio);
+  const viernesSanto = new Date(p); viernesSanto.setDate(p.getDate() - 2);
+  const sabadoSanto  = new Date(p); sabadoSanto.setDate(p.getDate() - 1);
+  F.add(_iso(viernesSanto));
+  F.add(_iso(sabadoSanto));
+  return F;
+}
+
+/**
+ * Días a pagar por un saldo de feriado expresado en días hábiles.
+ *
+ * Se cuenta desde el día siguiente al término. La fracción de día ocupa un día
+ * hábil completo del calendario, pero se paga como fracción (Ord. 826/13).
+ */
+function diasFeriadoAPagar(diasHabiles, fechaTermino) {
+  const n = Number(diasHabiles) || 0;
+  if (n <= 0) return 0;
+  const inicio = new Date(`${fechaTermino}T12:00:00`);
+  if (isNaN(inicio)) return Math.round(n * (21 / 15) * 100) / 100;  // sin fecha, la aproximación
+
+  const anio = inicio.getFullYear();
+  const F = new Set([...festivosChile(anio), ...festivosChile(anio + 1)]);
+  const inhabil = (d) => d.getDay() === 0 || d.getDay() === 6 || F.has(_iso(d));
+
+  const enteros = Math.ceil(n);
+  const d = new Date(inicio);
+  let habiles = 0, inhabiles = 0;
+  // Tope de seguridad: 400 iteraciones cubren cualquier saldo razonable.
+  for (let i = 0; habiles < enteros && i < 400; i++) {
+    d.setDate(d.getDate() + 1);
+    if (inhabil(d)) inhabiles++; else habiles++;
+  }
+  return Math.round((n + inhabiles) * 100) / 100;
+}
+
 function calcularFiniquito(fin, contrato, trabajador) {
   const ult      = parseInt(fin.ultimaRemuneracion || contrato?.sueldoBase) || 0;
   const causal   = fin.causal || '';
@@ -408,14 +581,40 @@ function calcularFiniquito(fin, contrato, trabajador) {
     mesesFeriado = Math.min(12, diasDesdeAniv / 30);
   }
 
-  // 15 días HÁBILES al año (Art. 67). Se pagan como días corridos, así que hay
-  // que convertirlos: 15 hábiles ≈ 21 corridos (se agregan los días de descanso
-  // comprendidos en el período, Art. 69).
-  const FACTOR_HABIL_CORRIDO = 21 / 15;
+  // 15 días HÁBILES al año (Art. 67), que se pagan agregando los días de
+  // descanso comprendidos en el período (Art. 69).
+
+  // El feriado NO se paga sobre la base del Art. 172.
+  //
+  // Art. 71: durante el feriado la remuneración íntegra es el SUELDO, para el
+  // trabajador de remuneración fija. Y el Art. 41 inc. 2 deja fuera del
+  // concepto de remuneración a la colación, la movilización y los viáticos,
+  // que son compensatorios de un gasto, no contraprestación del trabajo.
+  //
+  // Son dos bases distintas para dos cosas distintas: indemnizar una salida
+  // (Art. 172, base amplia) y pagar vacaciones no tomadas (Art. 71, sueldo).
+  // Usar la base amplia acá pagaría vacaciones de más.
+  const sueldoFeriado = parseInt(fin.sueldoBaseFeriado)
+    || parseInt(contrato?.sueldoBase)
+    || ult;
   const feriadoPropDias    = Math.round((15 / 12) * mesesFeriado * 10) / 10;
-  const feriadoPropMonto   = Math.round(ult / 30 * feriadoPropDias * FACTOR_HABIL_CORRIDO);
   const feriadoPendiente   = parseFloat(fin.diasFeriadoPendiente || 0);
-  const feriadoPendMonto   = Math.round(ult / 30 * feriadoPendiente * FACTOR_HABIL_CORRIDO);
+
+  // Días efectivamente pagados: los hábiles más los sábados, domingos y
+  // festivos que caen en medio, contados en el calendario real desde el día
+  // siguiente al término (Art. 69). Van acá y no más arriba porque dependen de
+  // `feriadoPropDias` y `feriadoPendiente`, declarados en estas líneas.
+  const propCorridos = diasFeriadoAPagar(feriadoPropDias, fechaTerm);
+  const pendCorridos = diasFeriadoAPagar(feriadoPendiente, fechaTerm);
+
+  const feriadoPropMonto   = Math.round(sueldoFeriado / 30 * propCorridos);
+  // Sugerencia: 15 días hábiles por cada año completo cumplido. Es el techo,
+  // no el dato: hay que restarle lo que la persona ya tomó. El motor no lleva
+  // registro de vacaciones tomadas, así que lo propone y la pantalla pide
+  // confirmarlo en vez de asumir cero — que es lo que hacía antes, y dejaba
+  // fuera del finiquito el feriado de los años anteriores.
+  const feriadoPendSugerido = Math.max(0, anios * 15);
+  const feriadoPendMonto   = Math.round(sueldoFeriado / 30 * pendCorridos);
   const totalFeriado       = feriadoPropMonto + feriadoPendMonto;
   const mesesEnAnioActual  = dtTerm.getMonth() + 1; // se conserva por compatibilidad
   // Detalle del feriado, para que el monto se pueda auditar sin abrir el código.
@@ -423,7 +622,10 @@ function calcularFiniquito(fin, contrato, trabajador) {
     ultimoAniversario,
     mesesDesdeAniversario: Math.round(mesesFeriado * 10) / 10,
     diasProporcionales: feriadoPropDias,
-    valorDiaCorrido: ult ? Math.round(ult / 30) : 0,
+    diasCorridosProp: propCorridos,
+    diasCorridosPend: pendCorridos,
+    valorDiaCorrido: sueldoFeriado ? Math.round(sueldoFeriado / 30) : 0,
+    sueldoFeriado,
   };
 
   // ── Gratificación proporcional (Art. 50 CT) ──
@@ -456,6 +658,10 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // mencionaba pero el tope no se aplicaba en ninguna parte.
   const topeIndem          = Math.round(90 * (fin.uf || paramsDe(fin.fechaTermino).uf));
   const baseIndem          = Math.min(ult, topeIndem);
+  // Se expone para que la pantalla muestre de qué se compone la base: sin el
+  // desglose, un número que no calza con el de la contraparte no se puede
+  // discutir, solo desconfiar.
+  const desgloseBase       = fin.desgloseBase || null;
   const baseTopeada        = ult > topeIndem;
   const indemMonto         = tieneIndemnizacion ? baseIndem * aniosIndemnizacion : 0;
 
@@ -493,11 +699,11 @@ function calcularFiniquito(fin, contrato, trabajador) {
     mesesEnAnioActual,
     feriadoDetalle, mesesFeriado,
     feriadoPropDias, feriadoPropMonto,
-    feriadoPendiente, feriadoPendMonto, totalFeriado,
+    feriadoPendiente, feriadoPendMonto, totalFeriado, feriadoPendSugerido,
     gratPropMonto, gratAnualTope,
     remMesEnCurso, remPendiente, otrosHaberes,
     tieneIndemnizacion, aniosIndemnizacion, aniosConFraccion, indemMonto,
-    baseIndem, baseTopeada, topeIndem, gratMensualPagable,
+    baseIndem, baseTopeada, topeIndem, gratMensualPagable, desgloseBase,
     indemAvisoPrevio,
     descAfp, descSalud, descCes, totalDescPrev,
     anticipoPend, otrosDescuentos, totalDescuentos,
@@ -529,15 +735,32 @@ function calcularHaberesDesdeRemuneraciones(trabajadorId, contratos, remuneracio
     .filter(r => parseInt(r.mes) === mesAnterior && parseInt(r.anio) === anioAnterior)
     .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))[0];
 
-  const ultimaRemuneracion = liqMesAnt?.sueldoBase || contrato.sueldoBase || '';
+  // Art. 172: la base es la última remuneración COMPLETA, no el sueldo base.
+  const ultimaRemuneracion = String(baseArt172(liqMesAnt, contrato) || '');
+  const desgloseBase = liqMesAnt ? {
+    sueldoBase:   parseInt(liqMesAnt.sueldoBase) || parseInt(contrato.sueldoBase) || 0,
+    gratificacion: liqMesAnt.gratificacion === false ? 0
+      : Math.min(Math.round((parseInt(liqMesAnt.sueldoBase) || 0) * 0.25),
+                 paramsDe(liqMesAnt)?.topeGratMensual || Infinity),
+    bonoProduccion:   parseInt(liqMesAnt.bonoProduccion)   || 0,
+    otrosImponibles:  parseInt(liqMesAnt.otrosImponibles)  || 0,
+    colacion:         parseInt(liqMesAnt.colacion)         || 0,
+    movilizacion:     parseInt(liqMesAnt.movilizacion)     || 0,
+    viaticos:         parseInt(liqMesAnt.viaticos)         || 0,
+    otrosNoImponibles:parseInt(liqMesAnt.otrosNoImponibles)|| 0,
+    periodo: `${liqMesAnt.mes}/${liqMesAnt.anio}`,
+  } : null;
 
   // ── 2. Remuneración del mes en curso (si no está liquidada) ──
   const liqMesActual = liqs.find(r => parseInt(r.mes) === mesTerm && parseInt(r.anio) === anioTerm);
   let remMesEnCurso = 0;
   if (!liqMesActual && ultimaRemuneracion) {
     // Proporcional: días trabajados en el mes hasta la fecha de término
-    const diasTrab = dtTerm.getDate();
-    remMesEnCurso = Math.round(parseInt(ultimaRemuneracion) * diasTrab / 30);
+    // Lo que se le debe del mes en curso se prorratea sobre el SUELDO BASE,
+    // no sobre la base del Art. 172: esa base existe solo para indemnizar.
+    const sueldoMes = parseInt(liqMesAnt?.sueldoBase) || parseInt(contrato.sueldoBase) || 0;
+    const diasTrab = Math.min(30, dtTerm.getDate());
+    remMesEnCurso = Math.round(sueldoMes * diasTrab / 30);
   }
 
   // ── 3. Feriado legal acumulado no gozado ──
@@ -568,6 +791,7 @@ function calcularHaberesDesdeRemuneraciones(trabajadorId, contratos, remuneracio
 
   return {
     ultimaRemuneracion: String(ultimaRemuneracion),
+    desgloseBase,
     diasFeriadoPendiente: String(diasFeriadoPendiente),
     remuneracionesPendientes: String(Math.round(remuneracionesPendientes)),
     remMesEnCurso: String(remMesEnCurso),
@@ -626,7 +850,15 @@ function calcularRentaTributable(calc) {
   // diferencia que el SII cobra después con reajuste e intereses.
   //
   // Lo que sí rebaja: AFP, salud y cesantía del trabajador (Art. 42 N°1 LIR).
-  return Math.max(0, calc.imponible - calc.afpM - calc.salM - calc.cesM - rebajaApv);
+  // La cotización de salud rebaja la base del impuesto único, PERO con tope:
+  // el 7% del tope imponible (SII, Of. 2406/2016 y respuesta frecuente
+  // 001.140.1468). Lo cotizado por sobre eso es tributable.
+  //
+  // En la práctica solo muerde cuando el plan pactado supera ese 7%: ahí la
+  // diferencia vuelve a la base y paga impuesto.
+  const topeSalud = calc.topeRebajaSalud || Infinity;
+  const rebajaSalud = Math.min(calc.salM, topeSalud);
+  return Math.max(0, calc.imponible - calc.afpM - rebajaSalud - calc.cesM - rebajaApv);
 }
 function calcularLiquidacionConIUT(rem, utm) {
   // Si no llega una UTM explícita se usa la del período liquidado. Antes caía a
