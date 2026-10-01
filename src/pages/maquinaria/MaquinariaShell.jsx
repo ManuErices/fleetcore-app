@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useCallback } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useEmpresa } from "../../lib/useEmpresa";
 import AppShellLayout from "../../components/AppShellLayout";
 import { MaquinariaFilterProvider, useMaquinariaFilter } from "../../components/maquinaria/MaquinariaFilterContext";
@@ -17,6 +17,7 @@ import RentalCotizaciones from "./RentalCotizaciones";
 import RentalPagos from "./RentalPagos";
 import RentalRentabilidad from "./RentalRentabilidad";
 import MaquinariaAlertas from "./MaquinariaAlertas";
+import MaquinariaNotificacionesDrawer from "../../components/maquinaria/MaquinariaNotificacionesDrawer";
 
 // ============================================================
 // MaquinariaShell — contenedor del módulo Maquinaria
@@ -59,29 +60,35 @@ function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAd
   const { projectId, setProjectId, projects } = useMaquinariaFilter();
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState([]);
+  const [cargandoAlertas, setCargandoAlertas] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const canGoToAdmin = ["superadmin", "admin_contrato", "administrativo"].includes(userRole);
   const isMecanico = userRole === "mecanico";
 
-  useEffect(() => {
-    if (!empresaId || isMecanico) return;
-    let cancel = false;
-    (async () => {
-      try {
-        const { alerts } = await buildMaquinariaAlerts(empresaId);
-        if (!cancel) setAlerts(alerts || []);
-      } catch { /* silencioso */ }
-    })();
-    return () => { cancel = true; };
+  // Se extrae para que el botón de refrescar del cajón use exactamente la
+  // misma consulta que la carga inicial.
+  const recargarAlertas = useCallback(async () => {
+    if (!empresaId || isMecanico) { setCargandoAlertas(false); return; }
+    setCargandoAlertas(true);
+    try {
+      const { alerts } = await buildMaquinariaAlerts(empresaId);
+      setAlerts(alerts || []);
+    } catch { /* silencioso */ }
+    finally { setCargandoAlertas(false); }
   }, [empresaId, isMecanico]);
+
+  useEffect(() => { recargarAlertas(); }, [recargarAlertas]);
 
   // El mecánico solo ve sus órdenes: un menú con trece destinos que no puede
   // abrir es ruido, no información.
   const navGroups = isMecanico
     ? [{ label: "", tabs: [{ id: "ordenes-trabajo", label: "Mis Órdenes de Trabajo", icon: IC.ordenes }] }]
     : [
+        // Las alertas salen de la campana del pie, no del menú: son algo que
+        // se revisa y se despacha, no un destino al que uno navega. Como ítem
+        // permanente con su contador terminaban siendo parte del paisaje.
         { label: "", tabs: [
           { id: "dashboard", label: "Dashboard", icon: IC.dashboard },
-          { id: "alertas",   label: "Alertas",   icon: IC.fallas, badge: alerts.length, badgeCritico: alerts.some(a => a.severidad === "critica") },
         ]},
         { label: "Rental", tabs: [
           { id: "rental",       label: "Tablero Rental",  icon: IC.tablero },
@@ -124,7 +131,7 @@ function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAd
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       )}
-      footerSlot={!isMecanico && <AlertBell alerts={alerts} navigate={navigate} />}
+      footerSlot={!isMecanico && <AlertBell alerts={alerts} onOpen={() => setDrawerOpen(true)} />}
       user={user} userRole={userRole} onLogout={onLogout}
       onBackToSelector={onBackToSelector}
       onAdminPanel={canGoToAdmin ? onAdminPanel : undefined}
@@ -149,95 +156,49 @@ function MaquinariaShellInner({ user, userRole, onLogout, onBackToSelector, onAd
           <Route path="*" element={<Navigate to={inicio} replace />} />
         </Routes>
       </div>
+      <MaquinariaNotificacionesDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        alerts={alerts}
+        loading={cargandoAlertas}
+        onRefresh={recargarAlertas}
+        onNavegar={(ruta) => navigate(ruta)}
+      />
     </AppShellLayout>
   );
 }
 
 // ============================================================
-function AlertBell({ alerts, navigate }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const location = useLocation();
-
-  const SEV = {
-    critica: "bg-red-500",
-    alta: "bg-orange-500",
-    media: "bg-amber-500",
-  };
-  const RUTA_POR_TIPO = {
-    documento: "/maquinaria/equipos",
-    contrato: "/maquinaria/contratos",
-    mantencion: "/maquinaria/equipos",
-    stock: "/maquinaria/repuestos",
-  };
-
-  useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-  useEffect(() => { setOpen(false); }, [location.pathname]);
-
+/**
+ * Campana del pie. Antes desplegaba su propio menú con las ocho primeras
+ * alertas; ahora solo abre el cajón, que las muestra todas agrupadas por
+ * severidad. Dos lugares distintos para lo mismo, con dos diseños distintos,
+ * era la razón por la que nadie sabía cuál mirar.
+ */
+function AlertBell({ alerts, onOpen }) {
   const count = alerts.length;
-  const visibles = alerts.slice(0, 8);
+  const criticas = alerts.filter((a) => a.severidad === "critica").length;
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors"
-        title="Alertas"
-      >
-        <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-        {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center">
-            {count > 99 ? "99+" : count}
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border-2 border-slate-100 rounded-2xl shadow-xl overflow-hidden z-50">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <span className="text-sm font-black text-slate-900">Alertas</span>
-            <span className="text-xs font-bold text-slate-400">{count}</span>
-          </div>
-
-          <div className="max-h-96 overflow-y-auto">
-            {count === 0 ? (
-              <div className="px-4 py-8 text-center">
-                <p className="text-2xl mb-1">✅</p>
-                <p className="text-sm text-slate-500 font-semibold">Todo en orden</p>
-              </div>
-            ) : (
-              visibles.map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => { setOpen(false); navigate(RUTA_POR_TIPO[a.tipo] || "/maquinaria"); }}
-                  className="w-full text-left px-4 py-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 flex items-start gap-2.5"
-                >
-                  <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${SEV[a.severidad] || "bg-slate-400"}`} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-900">{a.titulo}</p>
-                    <p className="text-xs text-slate-500 truncate">{a.detalle}</p>
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-
-          {count > 0 && (
-            <button
-              onClick={() => { setOpen(false); navigate("/maquinaria/alertas"); }}
-              className="w-full px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-50 border-t border-slate-100"
-            >
-              Ver todas las alertas{count > visibles.length ? ` (${count})` : ""}
-            </button>
-          )}
-        </div>
+    <button
+      onClick={onOpen}
+      className={`relative w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+        criticas > 0 ? "bg-red-50 hover:bg-red-100 text-red-600"
+        : count > 0  ? "bg-amber-50 hover:bg-amber-100 text-amber-600"
+        : "bg-slate-100 hover:bg-slate-200 text-slate-500"
+      }`}
+      title="Centro de notificaciones"
+    >
+      <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      </svg>
+      {count > 0 && (
+        <span className={`absolute -top-1 -right-1 min-w-4 h-4 px-0.5 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
+          criticas > 0 ? "bg-red-500" : "bg-amber-500"}`}>
+          {count > 9 ? "9+" : count}
+        </span>
       )}
-    </div>
+    </button>
   );
 }

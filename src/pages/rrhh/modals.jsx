@@ -2042,6 +2042,40 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
               fuente="el sueldo base del contrato" onRestaurar={() => restaurar('ultimaRemuneracion')}
               formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
+
+          {/* De qué se compone la base. Art. 172: no es el sueldo base, es todo
+              lo que la persona percibía —sueldo, gratificación, colación,
+              movilización— menos horas extra y asignación familiar. Con el
+              desglose a la vista, un número que no calza con el de la
+              contraparte se puede discutir línea por línea. */}
+          {calc?.desgloseBase && (
+            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                Base del Art. 172 · según liquidación {calc.desgloseBase.periodo}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
+                {[
+                  ['Sueldo base',      calc.desgloseBase.sueldoBase],
+                  ['Gratificación',    calc.desgloseBase.gratificacion],
+                  ['Bono producción',  calc.desgloseBase.bonoProduccion],
+                  ['Otros imponibles', calc.desgloseBase.otrosImponibles],
+                  ['Colación',         calc.desgloseBase.colacion],
+                  ['Movilización',     calc.desgloseBase.movilizacion],
+                  ['Viáticos',         calc.desgloseBase.viaticos],
+                  ['Otros no imp.',    calc.desgloseBase.otrosNoImponibles],
+                ].filter(([, v]) => v > 0).map(([k, v]) => (
+                  <div key={k} className="flex justify-between text-[11px]">
+                    <span className="text-slate-500">{k}</span>
+                    <span className="font-bold text-slate-700">{fmt(v)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2 leading-snug">
+                Quedan fuera las horas extra y la asignación familiar, que el Art. 172 excluye
+                expresamente. El feriado va aparte, sobre el sueldo base (Art. 71).
+              </p>
+            </div>
+          )}
         </div>
         {calc && (
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600">
@@ -2069,6 +2103,19 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
               </p>
             )}
           </Field>
+          {calc?.feriadoPendSugerido > 0 && Number(form.diasFeriadoPendiente || 0) === 0 && (
+            <p className="sm:col-span-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-snug">
+              Lleva <strong>{calc.anios} año{calc.anios === 1 ? '' : 's'} cumplido{calc.anios === 1 ? '' : 's'}</strong>, así que
+              acumuló hasta <strong>{calc.feriadoPendSugerido} días hábiles</strong> de feriado.
+              En cero, el finiquito paga solo el proporcional del año en curso y deja fuera el de los
+              años anteriores. Descuenta lo que ya tomó y pon el saldo.
+              <button type="button"
+                onClick={() => set('diasFeriadoPendiente', String(calc.feriadoPendSugerido))}
+                className="ml-1 font-black underline">
+                Usar {calc.feriadoPendSugerido}
+              </button>
+            </p>
+          )}
           <Field label="Remuneraciones pendientes ($)">
             <input type="text" className={inp} value={formatCLP(form.remuneracionesPendientes)} onChange={e => set('remuneracionesPendientes', parseCLP(e.target.value))} />
           </Field>
@@ -2140,7 +2187,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                       // trabajador sin recalcularlo a mano: aniversario, meses
                       // corridos desde ahí, y el valor del día.
                       calc.feriadoDetalle?.ultimoAniversario
-                        ? `${calc.feriadoPropDias} días hábiles · ${calc.feriadoDetalle.mesesDesdeAniversario} meses desde el aniversario del ${calc.feriadoDetalle.ultimoAniversario} · día ${fmt(calc.feriadoDetalle.valorDiaCorrido)}`
+                        ? `${calc.feriadoPropDias} días hábiles → ${calc.feriadoDetalle.diasCorridosProp} corridos (Art. 69) · ${calc.feriadoDetalle.mesesDesdeAniversario} meses desde el aniversario del ${calc.feriadoDetalle.ultimoAniversario} · día ${fmt(calc.feriadoDetalle.valorDiaCorrido)}`
                         : `${calc.feriadoPropDias} días hábiles · falta la fecha de inicio del contrato`,
                       calc.feriadoPropMonto],
                     ['Feriado pendiente',
