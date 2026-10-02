@@ -1717,6 +1717,15 @@ export default function AsistenciaSection() {
           }}
           editData={editingAusencia}
           trabajadores={trabajadores}
+          // El modal guardaba bien, pero nadie le pasaba `onSaved`. Como la
+          // lista se alimenta de un onSnapshot, la ausencia nueva aparecía
+          // sola unos segundos después — y entremedio parecía que no se había
+          // registrado nada. Con el callback el cierre y la actualización van
+          // juntos, y además sirve si algún día la carga deja de ser en vivo.
+          onSaved={() => {
+            setShowAusenciaModal(false);
+            setEditingAusencia(null);
+          }}
         />
       )}
     </div>

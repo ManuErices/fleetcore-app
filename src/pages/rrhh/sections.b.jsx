@@ -19,7 +19,7 @@ const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
 const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, liquidacionDe, remDe, liquidacionesVigentes, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
-  horasOrdinariasSemanales, exportarAsistenciaCSV } = Calc;
+  horasOrdinariasSemanales, exportarAsistenciaCSV, nombreTrabajador } = Calc;
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
   generarCertificadoAnual, generarPDFReporte, generarPDFAsientos,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago,
@@ -2693,14 +2693,158 @@ function OrganizacionSection() {
   );
 }
 
+/**
+ * Tabla de reporte.
+ *
+ * `cols` define cada columna: `{ h, align, destacar, ancho }`. `destacar`
+ * marca la columna que el ojo tiene que encontrar primero —el total de la
+ * fila— en negro y con más peso; el resto queda en gris medio. Sin esa
+ * jerarquía, doce columnas de números se leen todas igual y no se lee ninguna.
+ *
+ * `grupos` pinta una banda de color sobre un rango de columnas: sirve para
+ * separar visualmente lo que descuenta al trabajador de lo que paga la
+ * empresa, que son dos bolsillos distintos y hasta ahora iban mezclados.
+ */
+function TablaReporte({ cols, filas, totales, vacio, grupos }) {
+  if (!filas.length) {
+    return (
+      <div className="text-center py-16 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40">
+        <div className="w-11 h-11 rounded-2xl bg-slate-100 mx-auto flex items-center justify-center mb-3">
+          <svg className="w-5 h-5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <p className="text-sm text-slate-400 max-w-xs mx-auto leading-snug">{vacio}</p>
+      </div>
+    );
+  }
+
+  const cls = (c, i) => [
+    'px-3 py-2.5 whitespace-nowrap',
+    c.align === 'left' || i === 0 ? 'text-left' : 'text-right',
+  ].join(' ');
+
+  return (
+    <div className="rounded-2xl border border-slate-200/70 overflow-hidden" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          {grupos && (
+            <thead>
+              <tr>
+                {grupos.map((g, i) => (
+                  <th key={i} colSpan={g.span}
+                    className="px-3 pt-2.5 pb-1 text-[9px] font-black uppercase tracking-[0.12em] text-center"
+                    style={{ color: g.color, background: g.bg, borderBottom: `2px solid ${g.color}22` }}>
+                    {g.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <thead>
+            <tr className="bg-slate-50/80 border-b border-slate-200/70">
+              {cols.map((c, i) => (
+                <th key={i} className={`${cls(c, i)} text-[10px] font-black uppercase tracking-widest ${c.destacar ? 'text-slate-600' : 'text-slate-400'}`}>
+                  {c.h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((fila, fi) => (
+              <tr key={fi} className={`border-b border-slate-50 last:border-0 transition-colors hover:bg-violet-50/50 ${fi % 2 ? 'bg-slate-50/30' : ''}`}>
+                {fila.map((celda, ci) => {
+                  const c = cols[ci] || {};
+                  return (
+                    <td key={ci} className={`${cls(c, ci)} ${
+                      ci === 0 ? 'font-bold text-slate-800'
+                      : c.destacar ? 'font-black text-slate-900'
+                      : c.tenue ? 'text-slate-400'
+                      : 'text-slate-600'
+                    }`}>
+                      {celda}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+          {totales && (
+            <tfoot>
+              <tr style={{ background: 'linear-gradient(90deg,#faf5ff,#f5f3ff)' }} className="border-t-2 border-violet-200">
+                {totales.map((celda, ci) => (
+                  <td key={ci} className={`${cls(cols[ci] || {}, ci)} font-black ${cols[ci]?.destacar ? 'text-violet-800 text-base' : 'text-slate-700'}`}>
+                    {celda}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Tarjeta de institución, con el color de su tipo. */
+function CardInstitucion({ tipo, nombre, monto, personas, fmt }) {
+  const COLORES = {
+    AFP:    { bg: 'from-violet-500 to-purple-600',   chip: 'bg-violet-100 text-violet-700' },
+    Salud:  { bg: 'from-sky-500 to-blue-600',        chip: 'bg-sky-100 text-sky-700' },
+    AFC:    { bg: 'from-amber-500 to-orange-600',    chip: 'bg-amber-100 text-amber-700' },
+    Mutual: { bg: 'from-emerald-500 to-teal-600',    chip: 'bg-emerald-100 text-emerald-700' },
+    SII:    { bg: 'from-rose-500 to-red-600',        chip: 'bg-rose-100 text-rose-700' },
+  };
+  const c = COLORES[tipo] || COLORES.AFP;
+  return (
+    <div className="rounded-2xl bg-white border border-slate-200/70 p-4 hover:shadow-md transition-shadow"
+      style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${c.bg} flex items-center justify-center flex-shrink-0`}>
+          <span className="text-white text-[10px] font-black">{tipo.slice(0, 3).toUpperCase()}</span>
+        </div>
+        <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${c.chip}`}>{tipo}</span>
+      </div>
+      <p className="text-xs font-bold text-slate-500 truncate" title={nombre}>{nombre}</p>
+      <p className="text-xl font-black text-slate-900 mt-0.5 tracking-tight">{fmt(monto)}</p>
+      <p className="text-[10px] text-slate-400 mt-1">{personas} {personas === 1 ? 'persona' : 'personas'}</p>
+    </div>
+  );
+}
+
+/** Cabecera común: título, bajada y botón de descarga. */
+function CabeceraReporte({ titulo, sub, onCSV, puedeCSV }) {
+  return (
+    <div className="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h3 className="text-lg font-black text-slate-900 tracking-tight">{titulo}</h3>
+        <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
+      </div>
+      <button onClick={onCSV} disabled={!puedeCSV}
+        className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Descargar CSV
+      </button>
+    </div>
+  );
+}
+
 function ReportesSection() {
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos, setContratos] = useState([]);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [finiquitos, setFiniquitos] = useState([]);
+  const [ausencias, setAusencias] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tabInner, setTabInner] = useState('kpis');
+  // Período puntual de los reportes operativos. Los de análisis usan la serie
+  // de N meses; estos se piden siempre de un mes concreto.
+  const [repMes, setRepMes]   = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
+  const [repAnio, setRepAnio] = useState(String(new Date().getFullYear()));
+  const [mesesVenc, setMesesVenc] = useState(3);
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [filtroArea, setFiltroArea] = useState('');
   const [periodoMeses, setPeriodoMeses] = useState(6);
@@ -2709,16 +2853,18 @@ function ReportesSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const [tSnap, cSnap, rSnap, fSnap] = await Promise.all([
+      const [tSnap, cSnap, rSnap, fSnap, aSnap] = await Promise.all([
         getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
         getDocs(collection(db, 'empresas', empresaId, 'contratos')),
         getDocs(query(collection(db, 'empresas', empresaId, 'remuneraciones'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'empresas', empresaId, 'finiquitos')),
+        getDocs(collection(db, 'empresas', empresaId, 'ausencias')).catch(() => ({ docs: [] })),
       ]);
       setTrabajadores(tSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLiquidaciones(rSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setFiniquitos(fSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setAusencias((aSnap.docs || []).map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [empresaId]);
@@ -2829,9 +2975,121 @@ function ReportesSection() {
   const fmt = n => n ? `$${Math.round(n).toLocaleString('es-CL')}` : '$0';
   const fmtK = n => n >= 1000000 ? `$${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `$${Math.round(n / 1000)}K` : fmt(n);
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // REPORTES OPERATIVOS — del período puntual (repMes/repAnio)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const liqPeriodo = liquidacionesVigentes(liquidaciones)
+    .filter(l => l.mes === repMes && l.anio === repAnio && idsTrab.has(l.trabajadorId))
+    .map(l => {
+      const t = trabajadores.find(x => x.id === l.trabajadorId);
+      const c = contratos.find(x => x.id === l.contratoId);
+      return { l, t, c, calc: c ? liquidacionDe(t, c, l) : null };
+    })
+    .filter(x => x.calc);
+
+  // ── Detalle de leyes sociales ──
+  // Una fila por trabajador con todo lo que se entera: lo que se le descuenta
+  // y lo que paga la empresa. Es la planilla que se cuadra contra Previred.
+  const filasLeyes = liqPeriodo.map(({ t, calc }) => ({
+    rut: t?.rut || '',
+    nombre: nombreTrabajador(t),
+    afp: t?.afp || '—',
+    salud: t?.prevision === 'Isapre' ? (t?.isapre || 'Isapre') : 'Fonasa',
+    imponible: calc.imponible,
+    afpM: calc.afpM,
+    salM: calc.salM,
+    cesM: calc.cesM,
+    sisEmp: calc.sisEmpM || 0,
+    cesEmp: calc.cesEmpM || 0,
+    mutual: calc.mutualM || 0,
+    iut: calc.iut || 0,
+  }));
+
+  const totalLeyes = filasLeyes.reduce((a, f) => ({
+    imponible: a.imponible + f.imponible, afpM: a.afpM + f.afpM, salM: a.salM + f.salM,
+    cesM: a.cesM + f.cesM, sisEmp: a.sisEmp + f.sisEmp, cesEmp: a.cesEmp + f.cesEmp,
+    mutual: a.mutual + f.mutual, iut: a.iut + f.iut,
+  }), { imponible: 0, afpM: 0, salM: 0, cesM: 0, sisEmp: 0, cesEmp: 0, mutual: 0, iut: 0 });
+
+  // ── Resumen por institución ──
+  // "Aprox. montos a pagar": cuánto le toca a cada AFP y a cada isapre, que es
+  // como llegan las planillas de pago.
+  const porInstitucion = (() => {
+    const m = {};
+    filasLeyes.forEach(f => {
+      const addAfp = m[`AFP ${f.afp}`] || (m[`AFP ${f.afp}`] = { tipo: 'AFP', nombre: f.afp, personas: 0, monto: 0 });
+      addAfp.personas++; addAfp.monto += f.afpM + f.sisEmp;
+      const addSal = m[`SALUD ${f.salud}`] || (m[`SALUD ${f.salud}`] = { tipo: 'Salud', nombre: f.salud, personas: 0, monto: 0 });
+      addSal.personas++; addSal.monto += f.salM;
+    });
+    const lista = Object.values(m).sort((a, b) => b.monto - a.monto);
+    lista.push({ tipo: 'AFC', nombre: 'Seguro de cesantía', personas: filasLeyes.length, monto: totalLeyes.cesM + totalLeyes.cesEmp });
+    lista.push({ tipo: 'Mutual', nombre: 'Ley 16.744', personas: filasLeyes.length, monto: totalLeyes.mutual });
+    lista.push({ tipo: 'SII', nombre: 'Impuesto único (F29)', personas: filasLeyes.filter(f => f.iut > 0).length, monto: totalLeyes.iut });
+    return lista;
+  })();
+
+  // ── Vencimientos de contrato ──
+  // Hacia adelante N meses, pero también deja mirar lo ya vencido: un plazo
+  // fijo que pasó su fecha y sigue "vigente" en el sistema es un indefinido
+  // de hecho (Art. 159 N°4), y eso hay que verlo.
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const filasVenc = contratos
+    .filter(c => c.fechaFin && idsTrab.has(c.trabajadorId) && c.estado === 'vigente')
+    .map(c => {
+      const t = trabajadores.find(x => x.id === c.trabajadorId);
+      const dias = diasEntre(hoyISO, c.fechaFin);
+      const plazosFijos = contratos.filter(x => x.trabajadorId === c.trabajadorId
+        && String(x.tipoContrato || '').toLowerCase().includes('plazo')).length;
+      return { c, t, dias, pasaAIndefinido: plazosFijos >= 2 };
+    })
+    .filter(x => x.dias <= mesesVenc * 30)
+    .sort((a, b) => a.dias - b.dias);
+
+  // ── Ausentismo y horas ──
+  const prefijoMes = `${repAnio}-${repMes}`;
+  const ausPeriodo = ausencias.filter(a =>
+    idsTrab.has(a.trabajadorId) && String(a.fechaDesde || '').startsWith(prefijoMes));
+
+  const filasAusentismo = trabFilt.map(t => {
+    const suyas = ausPeriodo.filter(a => a.trabajadorId === t.id);
+    const dias = (tipo) => suyas.filter(a => a.tipo === tipo)
+      .reduce((s, a) => s + (parseInt(a.dias) || 1), 0);
+    const liq = liqPeriodo.find(x => x.t?.id === t.id);
+    return {
+      rut: t.rut || '', nombre: nombreTrabajador(t), area: t.area || '—',
+      diasTrabajados: liq?.calc?.diasTrab ?? '—',
+      sinGoce: dias('sin goce'),
+      injustificada: dias('falta injustificada'),
+      conGoce: dias('permiso con goce'),
+      licencia: dias('licencia medica') + dias('licencia maternal'),
+      horasExtra: liq ? (parseFloat(liq.l.horasExtra) || 0) : 0,
+      montoExtra: liq?.calc?.heM || 0,
+    };
+  }).filter(f => f.sinGoce || f.injustificada || f.conGoce || f.licencia || f.horasExtra);
+
+  // ── Finiquitos del período ──
+  const filasFiniq = finiquitos
+    .filter(f => String(f.fechaTermino || '').startsWith(prefijoMes) && idsTrab.has(f.trabajadorId))
+    .map(f => {
+      const t = trabajadores.find(x => x.id === f.trabajadorId);
+      const c = contratos.find(x => x.id === f.contratoId);
+      const calc = calcularFiniquito(f, c, t);
+      return { f, t, calc };
+    });
+  const totalFiniq = filasFiniq.reduce((s, x) => s + (x.calc?.totalFiniquito || 0), 0);
+
   const INNER_TABS = [
     { id: 'kpis', label: 'KPIs Ejecutivos' },
     { id: 'nomina', label: 'Evolución Nómina' },
+    // Los cuatro de abajo son los que RRHH pidió por nombre: son operativos —
+    // se usan para pagar, para avisar y para fiscalizar— a diferencia de los
+    // de arriba, que son de análisis. Todos descargan CSV del período filtrado.
+    { id: 'leyes', label: 'Leyes sociales' },
+    { id: 'vencimientos', label: 'Vencimientos de contrato' },
+    { id: 'ausentismo', label: 'Ausentismo y horas' },
+    { id: 'finiq', label: 'Finiquitos del período' },
     { id: 'rotacion', label: 'Rotación' },
     { id: 'costos', label: 'Costo Laboral' },
     { id: 'headcount', label: 'Headcount' },
@@ -3119,6 +3377,359 @@ function ReportesSection() {
           {/* ════════════════════════════════════
               ROTACIÓN
           ════════════════════════════════════ */}
+          {/* ════════════════════════════════════
+              REPORTES OPERATIVOS
+          ════════════════════════════════════ */}
+          {['leyes', 'vencimientos', 'ausentismo', 'finiq'].includes(tabInner) && (
+            <div className="mb-5 flex flex-wrap items-end gap-3 pb-4 border-b border-slate-100">
+              {tabInner !== 'vencimientos' ? (
+                <>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mes</label>
+                    <select value={repMes} onChange={e => setRepMes(e.target.value)} className={inp + ' mt-1'}>
+                      {MESES.map((m, i) => <option key={m} value={String(i + 1).padStart(2, '0')}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Año</label>
+                    <input value={repAnio} onChange={e => setRepAnio(e.target.value)} className={inp + ' mt-1 w-24'} />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ventana</label>
+                  <select value={mesesVenc} onChange={e => setMesesVenc(Number(e.target.value))} className={inp + ' mt-1'}>
+                    {[1, 2, 3, 6, 12].map(n => <option key={n} value={n}>Próximos {n} {n === 1 ? 'mes' : 'meses'}</option>)}
+                  </select>
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400 ml-auto max-w-sm leading-snug">
+                Los filtros de empresa y área de arriba también se aplican. Lo que ves es lo que se descarga.
+              </p>
+            </div>
+          )}
+
+          {/* ── Leyes sociales ── */}
+          {tabInner === 'leyes' && (
+            <div className="space-y-6">
+              <CabeceraReporte
+                titulo={`Leyes sociales · ${MESES[parseInt(repMes) - 1]} ${repAnio}`}
+                sub={`${filasLeyes.length} trabajadores · ${fmt(totalLeyes.afpM + totalLeyes.salM + totalLeyes.cesM + totalLeyes.sisEmp + totalLeyes.cesEmp + totalLeyes.mutual)} a enterar en total`}
+                onCSV={() => exportarReporteCSV([
+                  ['RUT', 'Nombre', 'AFP', 'Salud', 'Imponible', 'AFP trab.', 'Salud trab.', 'AFC trab.', 'SIS empresa', 'AFC empresa', 'Mutual', 'Impuesto único'],
+                  ...filasLeyes.map(f => [f.rut, f.nombre, f.afp, f.salud, f.imponible, f.afpM, f.salM, f.cesM, f.sisEmp, f.cesEmp, f.mutual, f.iut]),
+                  ['', 'TOTALES', '', '', totalLeyes.imponible, totalLeyes.afpM, totalLeyes.salM, totalLeyes.cesM, totalLeyes.sisEmp, totalLeyes.cesEmp, totalLeyes.mutual, totalLeyes.iut],
+                ], `Leyes sociales ${repAnio}-${repMes}`)}
+                puedeCSV={!!filasLeyes.length}
+              />
+
+              {filasLeyes.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                  {/* Dónde se va la plata: la pregunta de una línea que hoy
+                      había que responder sumando doce columnas a mano. */}
+                  <div className="lg:col-span-2 rounded-2xl bg-white border border-slate-200/70 p-5"
+                    style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Distribución</p>
+                    <div className="flex items-center gap-5">
+                      <DonutChart size={120} thickness={20} segments={[
+                        { label: 'AFP + SIS', value: totalLeyes.afpM + totalLeyes.sisEmp, color: '#7c3aed' },
+                        { label: 'Salud',     value: totalLeyes.salM,  color: '#0284c7' },
+                        { label: 'AFC',       value: totalLeyes.cesM + totalLeyes.cesEmp, color: '#f59e0b' },
+                        { label: 'Mutual',    value: totalLeyes.mutual, color: '#10b981' },
+                        { label: 'Impuesto',  value: totalLeyes.iut,    color: '#f43f5e' },
+                      ]} />
+                      <div className="space-y-1.5 min-w-0">
+                        {[
+                          ['AFP + SIS', totalLeyes.afpM + totalLeyes.sisEmp, '#7c3aed'],
+                          ['Salud',     totalLeyes.salM,  '#0284c7'],
+                          ['AFC',       totalLeyes.cesM + totalLeyes.cesEmp, '#f59e0b'],
+                          ['Mutual',    totalLeyes.mutual, '#10b981'],
+                          ['Impuesto',  totalLeyes.iut,    '#f43f5e'],
+                        ].filter(([, v]) => v > 0).map(([l, v, c]) => (
+                          <div key={l} className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: c }} />
+                            <span className="text-[11px] text-slate-500 flex-1">{l}</span>
+                            <span className="text-[11px] font-black text-slate-700">{fmtK(v)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Dos bolsillos distintos, separados: lo que se le descuenta
+                      al trabajador y lo que sale del bolsillo de la empresa. */}
+                  <div className="lg:col-span-3 grid grid-cols-2 gap-4">
+                    <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg,#faf5ff,#f5f3ff)', border: '1px solid rgba(124,58,237,0.15)' }}>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-violet-500">Descuento al trabajador</p>
+                      <p className="text-2xl font-black text-violet-900 mt-1 tracking-tight">
+                        {fmt(totalLeyes.afpM + totalLeyes.salM + totalLeyes.cesM)}
+                      </p>
+                      <p className="text-[11px] text-violet-600/70 mt-0.5">AFP, salud y cesantía</p>
+                    </div>
+                    <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg,#ecfdf5,#f0fdfa)', border: '1px solid rgba(16,185,129,0.18)' }}>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Costo de la empresa</p>
+                      <p className="text-2xl font-black text-emerald-900 mt-1 tracking-tight">
+                        {fmt(totalLeyes.sisEmp + totalLeyes.cesEmp + totalLeyes.mutual)}
+                      </p>
+                      <p className="text-[11px] text-emerald-700/70 mt-0.5">SIS, AFC empleador y mutual</p>
+                    </div>
+                    <div className="col-span-2 rounded-2xl bg-white border border-slate-200/70 px-5 py-4"
+                      style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                      <div className="flex items-baseline justify-between">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Masa imponible</p>
+                          <p className="text-xl font-black text-slate-900 mt-0.5">{fmt(totalLeyes.imponible)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Carga total</p>
+                          <p className="text-xl font-black text-slate-700 mt-0.5">
+                            {totalLeyes.imponible ? Math.round(((totalLeyes.afpM + totalLeyes.salM + totalLeyes.cesM + totalLeyes.sisEmp + totalLeyes.cesEmp + totalLeyes.mutual) / totalLeyes.imponible) * 100) : 0}%
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {filasLeyes.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Montos a pagar por institución</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {porInstitucion.filter(x => x.monto > 0).map(x => (
+                      <CardInstitucion key={x.tipo + x.nombre} {...x} fmt={fmt} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <TablaReporte
+                grupos={filasLeyes.length ? [
+                  { span: 5, label: 'Trabajador',           color: '#64748b', bg: '#f8fafc' },
+                  { span: 3, label: 'Descuento al trabajador', color: '#7c3aed', bg: '#faf5ff' },
+                  { span: 3, label: 'Costo de la empresa',  color: '#059669', bg: '#ecfdf5' },
+                  { span: 1, label: 'SII',                  color: '#e11d48', bg: '#fff1f2' },
+                ] : null}
+                cols={[
+                  { h: 'Nombre', align: 'left' }, { h: 'RUT', tenue: true }, { h: 'AFP', tenue: true },
+                  { h: 'Salud', tenue: true }, { h: 'Imponible', destacar: true },
+                  { h: 'AFP' }, { h: 'Salud' }, { h: 'AFC' },
+                  { h: 'SIS' }, { h: 'AFC emp.' }, { h: 'Mutual' },
+                  { h: 'IUT' },
+                ]}
+                filas={filasLeyes.map(f => [
+                  f.nombre, f.rut, f.afp, f.salud, fmt(f.imponible),
+                  fmt(f.afpM), fmt(f.salM), fmt(f.cesM),
+                  fmt(f.sisEmp), fmt(f.cesEmp), fmt(f.mutual), f.iut ? fmt(f.iut) : '—',
+                ])}
+                totales={['TOTALES', '', '', '', fmt(totalLeyes.imponible),
+                  fmt(totalLeyes.afpM), fmt(totalLeyes.salM), fmt(totalLeyes.cesM),
+                  fmt(totalLeyes.sisEmp), fmt(totalLeyes.cesEmp), fmt(totalLeyes.mutual), fmt(totalLeyes.iut)]}
+                vacio="No hay liquidaciones en este período con los filtros aplicados. Prueba con otro mes o quita el filtro de empresa."
+              />
+            </div>
+          )}
+
+          {/* ── Vencimientos de contrato ── */}
+          {tabInner === 'vencimientos' && (() => {
+            const vencidos = filasVenc.filter(x => x.dias < 0);
+            const urgentes = filasVenc.filter(x => x.dias >= 0 && x.dias <= 30);
+            const indef    = filasVenc.filter(x => x.pasaAIndefinido);
+            return (
+              <div className="space-y-6">
+                <CabeceraReporte
+                  titulo="Vencimientos de contrato"
+                  sub={`${filasVenc.length} contratos en la ventana · ordenados por urgencia`}
+                  onCSV={() => exportarReporteCSV([
+                    ['RUT', 'Nombre', 'Tipo', 'Cargo', 'Inicio', 'Término', 'Días', 'Estado', 'Pasa a indefinido si se renueva'],
+                    ...filasVenc.map(({ c, t, dias, pasaAIndefinido }) => [
+                      t?.rut || '', nombreTrabajador(t), c.tipoContrato || '', c.cargo || '',
+                      c.fechaInicio || '', c.fechaFin || '', dias,
+                      dias < 0 ? 'VENCIDO' : 'Por vencer', pasaAIndefinido ? 'SÍ' : 'No',
+                    ]),
+                  ], `Vencimientos de contrato ${mesesVenc}m`)}
+                  puedeCSV={!!filasVenc.length}
+                />
+
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    ['Vencidos sin cerrar', vencidos.length, '#e11d48', '#fff1f2', 'Su plazo ya pasó y siguen vigentes'],
+                    ['Vencen en 30 días',   urgentes.length, '#f59e0b', '#fffbeb', 'Hay que decidir renovar o finiquitar'],
+                    ['Pasan a indefinido',  indef.length,    '#7c3aed', '#faf5ff', 'Art. 159 N°4 — segunda renovación'],
+                  ].map(([label, valor, color, bg, nota]) => (
+                    <div key={label} className="rounded-2xl p-5" style={{ background: bg, border: `1px solid ${color}22` }}>
+                      <p className="text-[10px] font-black uppercase tracking-widest" style={{ color }}>{label}</p>
+                      <p className="text-3xl font-black mt-1 tracking-tight" style={{ color: valor > 0 ? color : '#cbd5e1' }}>{valor}</p>
+                      <p className="text-[11px] text-slate-500 mt-1 leading-snug">{nota}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <TablaReporte
+                  cols={[
+                    { h: 'Nombre', align: 'left' }, { h: 'Tipo', tenue: true }, { h: 'Cargo', tenue: true },
+                    { h: 'Término' }, { h: 'Plazo', destacar: true }, { h: 'Alerta' },
+                  ]}
+                  filas={filasVenc.map(({ c, t, dias, pasaAIndefinido }) => [
+                    nombreTrabajador(t), c.tipoContrato || '—', c.cargo || '—', c.fechaFin || '—',
+                    dias < 0 ? `vencido hace ${Math.abs(dias)} d` : `en ${dias} d`,
+                    pasaAIndefinido ? 'Pasa a indefinido' : '—',
+                  ])}
+                  vacio="Ningún contrato vence en la ventana seleccionada. Amplíala arriba si quieres mirar más adelante."
+                />
+              </div>
+            );
+          })()}
+
+          {/* ── Ausentismo y horas ── */}
+          {tabInner === 'ausentismo' && (() => {
+            const tot = filasAusentismo.reduce((a, f) => ({
+              sinGoce: a.sinGoce + f.sinGoce, inj: a.inj + f.injustificada,
+              conGoce: a.conGoce + f.conGoce, lic: a.lic + f.licencia,
+              he: a.he + f.horasExtra, monto: a.monto + f.montoExtra,
+            }), { sinGoce: 0, inj: 0, conGoce: 0, lic: 0, he: 0, monto: 0 });
+
+            // Días perdidos por área: la pregunta real de un jefe de RRHH no
+            // es quién faltó, es dónde se está perdiendo el tiempo.
+            const porArea = Object.values(filasAusentismo.reduce((m, f) => {
+              const k = f.area || '—';
+              (m[k] || (m[k] = { area: k, dias: 0, personas: 0 }));
+              m[k].dias += f.sinGoce + f.injustificada + f.conGoce + f.licencia;
+              m[k].personas++;
+              return m;
+            }, {})).filter(x => x.dias > 0).sort((a, b) => b.dias - a.dias);
+            const maxArea = Math.max(1, ...porArea.map(x => x.dias));
+
+            return (
+              <div className="space-y-6">
+                <CabeceraReporte
+                  titulo={`Ausentismo y horas · ${MESES[parseInt(repMes) - 1]} ${repAnio}`}
+                  sub={`${filasAusentismo.length} personas con movimiento · ${tot.sinGoce + tot.inj + tot.conGoce + tot.lic} días no trabajados`}
+                  onCSV={() => exportarReporteCSV([
+                    ['RUT', 'Nombre', 'Área', 'Días trabajados', 'Sin goce', 'Falta injustificada', 'Permiso con goce', 'Licencia médica', 'Horas extra', 'Monto horas extra'],
+                    ...filasAusentismo.map(f => [f.rut, f.nombre, f.area, f.diasTrabajados, f.sinGoce, f.injustificada, f.conGoce, f.licencia, f.horasExtra, f.montoExtra]),
+                  ], `Ausentismo y horas ${repAnio}-${repMes}`)}
+                  puedeCSV={!!filasAusentismo.length}
+                />
+
+                {filasAusentismo.length > 0 && (
+                  <>
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                      {[
+                        ['Sin goce',      tot.sinGoce, '#e11d48', 'descuentan'],
+                        ['Injustificadas', tot.inj,    '#f97316', 'descuentan'],
+                        ['Con goce',      tot.conGoce, '#0284c7', 'no descuentan'],
+                        ['Licencia',      tot.lic,     '#7c3aed', 'las paga la isapre'],
+                        ['Horas extra',   tot.he,      '#059669', fmt(tot.monto)],
+                      ].map(([l, v, c, nota]) => (
+                        <div key={l} className="rounded-2xl bg-white border border-slate-200/70 p-4"
+                          style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                          <div className="w-1.5 h-1.5 rounded-full mb-2" style={{ background: c }} />
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{l}</p>
+                          <p className="text-2xl font-black mt-0.5 tracking-tight" style={{ color: v > 0 ? c : '#cbd5e1' }}>{v}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{nota}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {porArea.length > 0 && (
+                      <div className="rounded-2xl bg-white border border-slate-200/70 p-5"
+                        style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">
+                          Días no trabajados por área
+                        </p>
+                        <div className="space-y-3">
+                          {porArea.map(a => (
+                            <BarraH key={a.area} label={a.area} sub={`${a.personas} ${a.personas === 1 ? 'persona' : 'personas'}`}
+                              value={a.dias} max={maxArea} color="#7c3aed"
+                              formatValue={(v) => `${v} días`} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <TablaReporte
+                  grupos={filasAusentismo.length ? [
+                    { span: 3, label: 'Trabajador',      color: '#64748b', bg: '#f8fafc' },
+                    { span: 2, label: 'Descuentan',      color: '#e11d48', bg: '#fff1f2' },
+                    { span: 2, label: 'No descuentan',   color: '#0284c7', bg: '#f0f9ff' },
+                    { span: 2, label: 'Horas extra',     color: '#059669', bg: '#ecfdf5' },
+                  ] : null}
+                  cols={[
+                    { h: 'Nombre', align: 'left' }, { h: 'Área', tenue: true }, { h: 'Días trab.', destacar: true },
+                    { h: 'Sin goce' }, { h: 'Injustif.' },
+                    { h: 'Con goce' }, { h: 'Licencia' },
+                    { h: 'Horas' }, { h: 'Monto' },
+                  ]}
+                  filas={filasAusentismo.map(f => [
+                    f.nombre, f.area, f.diasTrabajados,
+                    f.sinGoce || '—', f.injustificada || '—',
+                    f.conGoce || '—', f.licencia || '—',
+                    f.horasExtra || '—', f.montoExtra ? fmt(f.montoExtra) : '—',
+                  ])}
+                  vacio="Sin ausencias ni horas extra en el mes. Si esperabas ver algo acá, revisa que estén registradas en Asistencia."
+                />
+              </div>
+            );
+          })()}
+
+          {/* ── Finiquitos del período ── */}
+          {tabInner === 'finiq' && (
+            <div className="space-y-6">
+              <CabeceraReporte
+                titulo={`Finiquitos · ${MESES[parseInt(repMes) - 1]} ${repAnio}`}
+                sub={`${filasFiniq.length} ${filasFiniq.length === 1 ? 'salida' : 'salidas'} · ${fmt(totalFiniq)} en total`}
+                onCSV={() => exportarReporteCSV([
+                  ['RUT', 'Nombre', 'Causal', 'Fecha término', 'Antigüedad', 'Indemnización años', 'Aviso previo', 'Feriado', 'Total finiquito'],
+                  ...filasFiniq.map(({ f, t, calc }) => [
+                    t?.rut || '', nombreTrabajador(t), f.causal || '', f.fechaTermino || '',
+                    `${calc?.anios || 0}a ${calc?.meses || 0}m`,
+                    calc?.indemMonto || 0, calc?.indemAvisoPrevio || 0,
+                    calc?.totalFeriado || 0, calc?.totalFiniquito || 0,
+                  ]),
+                ], `Finiquitos ${repAnio}-${repMes}`)}
+                puedeCSV={!!filasFiniq.length}
+              />
+
+              {filasFiniq.length > 0 && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    ['Salidas',             filasFiniq.length, '#7c3aed'],
+                    ['Indemnización años',  fmtK(filasFiniq.reduce((s, x) => s + (x.calc?.indemMonto || 0), 0)), '#e11d48'],
+                    ['Feriado',             fmtK(filasFiniq.reduce((s, x) => s + (x.calc?.totalFeriado || 0), 0)), '#0284c7'],
+                    ['Total del período',   fmtK(totalFiniq), '#059669'],
+                  ].map(([l, v, c]) => (
+                    <div key={l} className="rounded-2xl bg-white border border-slate-200/70 p-4"
+                      style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                      <div className="w-1.5 h-1.5 rounded-full mb-2" style={{ background: c }} />
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{l}</p>
+                      <p className="text-xl font-black mt-0.5 tracking-tight" style={{ color: c }}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <TablaReporte
+                cols={[
+                  { h: 'Nombre', align: 'left' }, { h: 'Causal', tenue: true }, { h: 'Término', tenue: true },
+                  { h: 'Antigüedad' }, { h: 'Indem. años' }, { h: 'Aviso previo' }, { h: 'Feriado' },
+                  { h: 'Total', destacar: true },
+                ]}
+                filas={filasFiniq.map(({ f, t, calc }) => [
+                  nombreTrabajador(t), f.causal || '—', f.fechaTermino || '—',
+                  `${calc?.anios || 0}a ${calc?.meses || 0}m`,
+                  calc?.indemMonto ? fmt(calc.indemMonto) : '—',
+                  calc?.indemAvisoPrevio ? fmt(calc.indemAvisoPrevio) : '—',
+                  fmt(calc?.totalFeriado), fmt(calc?.totalFiniquito),
+                ])}
+                totales={['TOTAL', '', '', '', '', '', '', fmt(totalFiniq)]}
+                vacio="Sin finiquitos en este período."
+              />
+            </div>
+          )}
+
           {tabInner === 'rotacion' && (
             <div className="space-y-5">
               <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Análisis de rotación — últimos {periodoMeses} meses</p>
