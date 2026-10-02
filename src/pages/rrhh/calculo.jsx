@@ -85,6 +85,42 @@ function esFonasa(rem) {
   return !p || p.includes('fonasa');
 }
 
+/**
+ * Ausencias que caen dentro de un período, con sus días recortados al mes.
+ *
+ * Una ausencia del 28 de marzo al 4 de abril aporta 3 días a marzo y 4 a
+ * abril, no 8 a cada uno. Se usa el mes comercial de 30 días, igual que el
+ * resto del motor.
+ *
+ * Lo consume `RemuneracionesSection` para armar `ausenciasRegistradas`; vive
+ * acá y no en la pantalla para que el recorte sea el mismo en la liquidación,
+ * en el PDF y en cualquier reporte que lo necesite.
+ */
+export function ausenciasDePeriodo(ausencias, mes, anio) {
+  const m = parseInt(mes), a = parseInt(anio);
+  if (!m || !a || !Array.isArray(ausencias)) return [];
+
+  const primero = new Date(a, m - 1, 1, 12);
+  const ultimo  = new Date(a, m, 0, 12);
+
+  return ausencias.reduce((acc, aus) => {
+    if (!aus?.fechaDesde) return acc;
+    const d = new Date(`${aus.fechaDesde}T12:00:00`);
+    // Sin fecha de término se asume un solo día: es lo que pasa con un permiso
+    // de una jornada, que es el caso más común.
+    const h = aus.fechaHasta ? new Date(`${aus.fechaHasta}T12:00:00`) : d;
+    if (isNaN(d) || isNaN(h) || h < primero || d > ultimo) return acc;
+
+    const desde = d > primero ? d : primero;
+    const hasta = h < ultimo  ? h : ultimo;
+    const diasEnPeriodo = Math.min(30,
+      Math.round((hasta - desde) / 86400000) + 1);
+
+    acc.push({ ...aus, diasEnPeriodo });
+    return acc;
+  }, []);
+}
+
 function calcularLiquidacion(rem) {
   // ── Parámetros legales del período que se está liquidando ──
   // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
@@ -152,6 +188,26 @@ function calcularLiquidacion(rem) {
   // Días que la empresa efectivamente no paga
   const diasLicNoPagados = pagarCarencia ? diasLicencia - diasCarencia : diasLicencia;
 
+  // ── Ausencias y permisos sin goce ──
+  //
+  // Hasta acá el motor solo sabía de licencias médicas. Las inasistencias y
+  // los permisos sin goce de sueldo se registraban en la pantalla de
+  // Asistencia y no llegaban nunca a la liquidación: el trabajador faltaba una
+  // semana y cobraba el mes completo.
+  //
+  // Qué descuenta y qué no:
+  //   · sin goce            → descuenta. Es la definición del permiso.
+  //   · falta injustificada → descuenta (Art. 54 CT: se paga el tiempo servido).
+  //   · permiso con goce    → NO descuenta. Es con goce de remuneraciones.
+  //   · licencia médica     → NO se cuenta acá. Viene por `licenciasRegistradas`,
+  //                           y contarla dos veces dejaría al trabajador en cero.
+  //   · accidente           → NO descuenta. Lo cubre la mutual (Ley 16.744).
+  const TIPOS_QUE_DESCUENTAN = ['sin goce', 'falta injustificada'];
+  const ausRegistradas = Array.isArray(rem.ausenciasRegistradas) ? rem.ausenciasRegistradas : [];
+  const detalleAus = ausRegistradas.filter(a => TIPOS_QUE_DESCUENTAN.includes(String(a.tipo || '')));
+  const diasAusencia = Math.max(0, detalleAus.reduce(
+    (s, a) => s + (parseInt(a.diasEnPeriodo ?? a.dias) || 0), 0));
+
   // Prioridad: los días escritos a mano en la liquidación, y si no, los que el
   // contrato estuvo vigente dentro del período. El default de 30 queda solo
   // para cuando no hay fechas con qué calcular.
@@ -162,7 +218,10 @@ function calcularLiquidacion(rem) {
   // Si la liquidación ya trae los días trabajados netos (el modal los calcula
   // al registrar la licencia) no se descuenta de nuevo. El tope evita el doble
   // descuento cuando alguien baja los días a mano Y registra la licencia.
-  const diasTrab   = Math.max(0, Math.min(diasBase, 30 - diasLicNoPagados));
+  //
+  // Las ausencias se restan además del tope: son días no trabajados que se
+  // suman a los de licencia, no se solapan con ellos.
+  const diasTrab   = Math.max(0, Math.min(diasBase, 30 - diasLicNoPagados) - diasAusencia);
   const fdias      = diasTrab / 30; // factor días: 1.0 cuando trabaja el mes completo
 
   // Sueldo base prorrateable
@@ -361,7 +420,7 @@ function calcularLiquidacion(rem) {
     descAdicional, anticipo, pagoAnterior, liquido,
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
-    diasTrab, fdias, diasPorContrato,   // expuestos para auditoría / PDF
+    diasTrab, fdias, diasPorContrato, diasAusencia, detalleAus,   // expuestos para auditoría / PDF
     diasLicencia, diasCarencia, diasLicNoPagados, pagarCarencia, detalleLic,
     baseCompleto, gratCompleto: Math.round(P.topeGratMensual * fp),
     // Snapshot de los parámetros con que se calculó. Se guarda en el documento
@@ -1209,6 +1268,11 @@ function remDe(trabajador, contrato, liq, extras) {
     // copia al documento de la liquidación para que no quede desactualizado.
     ...(extras?.licenciasRegistradas !== undefined
       ? { licenciasRegistradas: extras.licenciasRegistradas }
+      : {}),
+    // Ausencias del período (colección `ausencias`). Mismo criterio: viajan
+    // como contexto del cálculo, no se copian al documento.
+    ...(extras?.ausenciasRegistradas !== undefined
+      ? { ausenciasRegistradas: extras.ausenciasRegistradas }
       : {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,

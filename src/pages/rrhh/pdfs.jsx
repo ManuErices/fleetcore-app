@@ -238,11 +238,11 @@ ${preview || returnHtml ? '' : '<script>window.onload=function(){window.print();
   if (!win) alert('Permite ventanas emergentes para descargar el contrato.');
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null, anticiposRegistrados, licenciasRegistradas } = {}) {
+function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, empresa = null, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas } = {}) {
   // `anticiposRegistrados` y `licenciasRegistradas` vienen de sus colecciones
   // del período. Sin ellos el PDF mostraría un líquido distinto al que se
   // transfirió y días trabajados que no corresponden.
-  const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados, licenciasRegistradas });
+  const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
   // La UTM del período liquidado: el IUT es progresivo y una UTM vieja mueve
   // de tramo. `rem.utm` sigue mandando si el documento la trae congelada.
   const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm);
@@ -260,7 +260,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   // colección de licencias o del campo manual. Antes leía solo el campo manual
   // y una licencia registrada en su pantalla no aparecía en el PDF.
   const diasLic      = calc.diasLicencia ?? rem.diasLicencia ?? 0;
-  const diasAus      = rem.diasAusencia || 0;
+  const diasAus  = calc.diasAusencia ?? (parseInt(rem.diasAusencia) || 0);  // del registro de ausencias, no del campo manual
   const horasBase    = rem.horasBase ?? (contrato?.jornadaHorasSemanales || 45);
   const horasExtra   = rem.horasExtra || 0;
   const cargas       = (parseInt(trabajador?.cargas) || 0)

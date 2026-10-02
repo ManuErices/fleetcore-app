@@ -1262,7 +1262,14 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Doble resguardo: aunque el formulario ya entra limpio, cualquier campo
+      // que quede en `undefined` —una causal sin elegir, un monto vacío— hace
+      // que updateDoc lance "Unsupported field value" y la pantalla solo diga
+      // "Error". Por eso se filtra también acá.
+      const payload = Object.fromEntries(
+        Object.entries({ ...form, updatedAt: serverTimestamp() })
+          .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'contratos', editData.id), payload);
       } else {
@@ -1907,9 +1914,17 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState(null);
 
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    // `editData` es la fila enriquecida de la tabla: trae `_trabajador`,
+    // `_contrato` y `_calc`, que no pertenecen al documento y rompen el
+    // guardado (Firestore rechaza `undefined`). Se filtran al cargar, no al
+    // guardar, para que el formulario trabaje siempre con campos limpios.
+    const limpio = editData
+      ? Object.fromEntries(Object.entries(editData).filter(([k, v]) => !k.startsWith('_') && v !== undefined))
+      : null;
+    setForm(limpio ? { ...empty, ...limpio } : empty);
   }, [editData, isOpen]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -1970,7 +1985,14 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Doble resguardo: aunque el formulario ya entra limpio, cualquier campo
+      // que quede en `undefined` —una causal sin elegir, un monto vacío— hace
+      // que updateDoc lance "Unsupported field value" y la pantalla solo diga
+      // "Error". Por eso se filtra también acá.
+      const payload = Object.fromEntries(
+        Object.entries({ ...form, updatedAt: serverTimestamp() })
+          .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'finiquitos', editData.id), payload);
       } else {
@@ -2269,7 +2291,14 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
 
         <div className="flex justify-between items-center pt-2">
           {calc && (
-            <button onClick={() => generarPDFFiniquito(form, trabajadorSel, contratoSel)}
+            <button
+              // Decía "Vista previa" y descargaba el archivo en silencio: sin
+              // `{ preview: true }` el generador no devuelve blob, dispara la
+              // descarga. El de liquidaciones sí abría el modal; este no.
+              onClick={() => setPdfPreview({
+                url: generarPDFFiniquito(form, trabajadorSel, contratoSel, { preview: true }),
+                filename: `Finiquito — ${[trabajadorSel?.nombre, trabajadorSel?.apellidoPaterno].filter(Boolean).join(' ')}`,
+              })}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
               📄 Vista previa PDF
             </button>
@@ -2279,6 +2308,13 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             <SaveBtn saving={saving} onClick={handleSave} label={editData ? 'Actualizar finiquito' : 'Guardar finiquito'} />
           </div>
         </div>
+
+        <PdfPreviewModal
+          isOpen={!!pdfPreview}
+          onClose={() => { if (pdfPreview?.url) URL.revokeObjectURL(pdfPreview.url); setPdfPreview(null); }}
+          url={pdfPreview?.url}
+          filename={pdfPreview?.filename}
+        />
       </div>
     </Modal>
   );
@@ -2425,9 +2461,17 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState(null);
 
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : empty);
+    // `editData` es la fila enriquecida de la tabla: trae `_trabajador`,
+    // `_contrato` y `_calc`, que no pertenecen al documento y rompen el
+    // guardado (Firestore rechaza `undefined`). Se filtran al cargar, no al
+    // guardar, para que el formulario trabaje siempre con campos limpios.
+    const limpio = editData
+      ? Object.fromEntries(Object.entries(editData).filter(([k, v]) => !k.startsWith('_') && v !== undefined))
+      : null;
+    setForm(limpio ? { ...empty, ...limpio } : empty);
   }, [editData, isOpen]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -2463,7 +2507,14 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Doble resguardo: aunque el formulario ya entra limpio, cualquier campo
+      // que quede en `undefined` —una causal sin elegir, un monto vacío— hace
+      // que updateDoc lance "Unsupported field value" y la pantalla solo diga
+      // "Error". Por eso se filtra también acá.
+      const payload = Object.fromEntries(
+        Object.entries({ ...form, updatedAt: serverTimestamp() })
+          .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'anexos', editData.id), payload);
       } else {
@@ -3168,7 +3219,14 @@ function AsistenciaModal({ isOpen, onClose, editData, trabajadores, contratos, o
     }
     setSaving(true);
     try {
-      const payload = { ...form, updatedAt: serverTimestamp() };
+      // Doble resguardo: aunque el formulario ya entra limpio, cualquier campo
+      // que quede en `undefined` —una causal sin elegir, un monto vacío— hace
+      // que updateDoc lance "Unsupported field value" y la pantalla solo diga
+      // "Error". Por eso se filtra también acá.
+      const payload = Object.fromEntries(
+        Object.entries({ ...form, updatedAt: serverTimestamp() })
+          .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'asistencia', editData.id), payload);
       } else {
@@ -3374,7 +3432,14 @@ function AusenciaModal({ isOpen, onClose, editData, trabajadores, preselectedTra
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setForm(editData ? { ...empty, ...editData } : { ...empty, trabajadorId: preselectedTrabajadorId || '' });
+    // La fila que llega de la tabla viene enriquecida con `_worker` y
+    // `trabajadorNombre`. Si se guarda tal cual, Firestore rechaza el objeto
+    // —`_worker` es `undefined` cuando el trabajador ya no está— y el usuario
+    // solo ve "Error". Se limpian los campos derivados al cargar.
+    const limpio = editData
+      ? Object.fromEntries(Object.entries(editData).filter(([k, v]) => !k.startsWith('_') && v !== undefined))
+      : null;
+    setForm(limpio ? { ...empty, ...limpio } : { ...empty, trabajadorId: preselectedTrabajadorId || '' });
   }, [editData, isOpen, preselectedTrabajadorId]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -3386,13 +3451,15 @@ function AusenciaModal({ isOpen, onClose, editData, trabajadores, preselectedTra
     }
     setSaving(true);
     try {
-      const payload = {
-        ...form,
-        dias: Number(form.dias) || 0,
-        horas: Number(form.horas) || 0,
-        minutos: Number(form.minutos) || 0,
-        updatedAt: serverTimestamp(),
-      };
+      const payload = Object.fromEntries(
+        Object.entries({
+          ...form,
+          dias: Number(form.dias) || 0,
+          horas: Number(form.horas) || 0,
+          minutos: Number(form.minutos) || 0,
+          updatedAt: serverTimestamp(),
+        }).filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+      );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'ausencias', editData.id), payload);
       } else {

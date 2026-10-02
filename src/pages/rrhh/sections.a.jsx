@@ -14,7 +14,7 @@ import CargaMasivaModal from './CargaMasivaModal';
 import ItemsPagoModal from './ItemsPagoModal';
 import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
 import ReliquidacionModal from './ReliquidacionModal';
-import { fueReliquidada, liquidacionesVigentes } from './calculo';
+import { fueReliquidada, liquidacionesVigentes, ausenciasDePeriodo } from './calculo';
 import { paramsDe } from './parametros';
 import { lineaDePago } from './nominaBanco';
 // Se usaba sin importar: pulsar "acuse de recibo" lanzaba ReferenceError.
@@ -1212,6 +1212,7 @@ function RemuneracionesSection() {
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [contratos, setContratos] = useState([]);
+  const [ausencias, setAusencias] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generando, setGenerando] = useState(false);
   const [resultadoGen, setResultadoGen] = useState(null);
@@ -1234,6 +1235,15 @@ function RemuneracionesSection() {
       ? totalAnticipos(anticipos, trabajadorId, mes, anio)
       : undefined,
     [anticipos]);
+
+  // Ausencias del trabajador recortadas al período. Devuelve undefined cuando
+  // no hay ninguna, igual que los anticipos: así el motor no sobrescribe nada.
+  const ausenciasDelPeriodo = useCallback((trabajadorId, mes, anio) => {
+    const suyas = ausencias.filter(a => a.trabajadorId === trabajadorId);
+    if (!suyas.length) return undefined;
+    const delMes = ausenciasDePeriodo(suyas, mes, anio);
+    return delMes.length ? delMes : undefined;
+  }, [ausencias]);
   const [pagina, setPagina] = useState(1);
   const POR_PAGINA = 10;
 
@@ -1241,11 +1251,16 @@ function RemuneracionesSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const [lSnap, tSnap, cSnap] = await Promise.all([
+      const [lSnap, tSnap, cSnap, aSnap] = await Promise.all([
         getDocs(query(collection(db, 'empresas', empresaId, 'remuneraciones'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'empresas', empresaId, 'trabajadores')),
         getDocs(collection(db, 'empresas', empresaId, 'contratos')),
+        // Las ausencias entran al cálculo: los permisos sin goce y las faltas
+        // injustificadas descuentan días. Antes se registraban en Asistencia y
+        // la liquidación no se enteraba.
+        getDocs(collection(db, 'empresas', empresaId, 'ausencias')).catch(() => ({ docs: [] })),
       ]);
+      setAusencias((aSnap.docs || []).map(d => ({ id: d.id, ...d.data() })));
       setLiquidaciones(lSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setTrabajadores(tSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -1346,11 +1361,16 @@ function RemuneracionesSection() {
     const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
     const contrato = contratos.find(c => c.id === l.contratoId);
     const anticipoReg = anticiposDelPeriodo(l.trabajadorId, l.mes, l.anio);
+    const ausenciaReg = ausenciasDelPeriodo(l.trabajadorId, l.mes, l.anio);
     const calc = contrato
-      ? liquidacionDe(trabajador, contrato, l, { anticiposRegistrados: anticipoReg })
+      ? liquidacionDe(trabajador, contrato, l, {
+          anticiposRegistrados: anticipoReg,
+          ausenciasRegistradas: ausenciaReg,
+        })
       : null;
     return {
-      ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc, _anticipoReg: anticipoReg,
+      ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc,
+      _anticipoReg: anticipoReg, _ausenciaReg: ausenciaReg,
       // Una liquidación reemplazada sigue en la tabla como registro de lo que
       // se transfirió, pero marcada: ya no es la cifra vigente del mes.
       _reemplazada: fueReliquidada(l, liquidaciones),
@@ -1649,7 +1669,7 @@ function RemuneracionesSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa, anticiposRegistrados: row._anticipoReg })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
+                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa, anticiposRegistrados: row._anticipoReg, ausenciasRegistradas: row._ausenciaReg })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </button>
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
