@@ -3,6 +3,11 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, VistoBueno, FechaHoja,
+  GraficoBarras, BarraProporcion, MarcaAviso,
+  IconoActualizar, casoTitulo,
+} from "./cuaderno";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const MESES_FULL = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -28,92 +33,9 @@ function diasRestantes(fecha) {
   return Math.ceil((new Date(fecha) - new Date()) / 86400000);
 }
 
-// ─── Utilidad eje ────────────────────────────────────────────────────────────
-function fmtAxis(n) {
-  const a = Math.abs(n);
-  if (a >= 1e9) return (n/1e9).toFixed(1).replace(".",",") + "B";
-  if (a >= 1e6) return (n/1e6).toFixed(1).replace(".",",") + "M";
-  if (a >= 1e3) return (n/1e3).toFixed(0) + "K";
-  return String(Math.round(n));
-}
-
-// ─── Mini bar chart SVG inline ────────────────────────────────────────────────
-function MiniBarChart({ data, height = 140 }) {
-  if (!data?.length) return <div style={{ height }} className="flex items-center justify-center text-slate-300 text-xs">Sin datos</div>;
-
-  const VW    = 620;
-  const PAD_L = 48;
-  const PAD_R = 8;
-  const PAD_T = 10;
-  const PAD_B = 28;
-  const chartW = VW - PAD_L - PAD_R;
-  const chartH = height - PAD_T - PAD_B;
-
-  const maxVal = Math.max(...data.map(d => Math.max(d.ingresos || 0, d.egresos || 0)), 1);
-  const TICKS  = 3;
-  const ticks  = Array.from({ length: TICKS + 1 }, (_, i) => (maxVal / TICKS) * i);
-
-  const colW = chartW / data.length;
-  const barW = Math.max(colW * 0.3, 5);
-  const gap  = Math.max(colW * 0.05, 2);
-  const toY  = (v) => PAD_T + chartH - ((Math.max(v, 0) / maxVal) * chartH);
-
-  return (
-    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
-      {/* Líneas de referencia */}
-      {ticks.map((t, i) => {
-        const y = PAD_T + chartH - (t / maxVal) * chartH;
-        return (
-          <g key={i}>
-            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
-              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.2 : 0.7} />
-            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
-              {fmtAxis(t)}
-            </text>
-          </g>
-        );
-      })}
-
-      {/* Barras */}
-      {data.map((d, i) => {
-        const cx = PAD_L + i * colW + colW / 2;
-        const ih = toY(d.ingresos || 0);
-        const eh = toY(d.egresos  || 0);
-        const baseY = PAD_T + chartH;
-        const ihH = baseY - ih;
-        const ehH = baseY - eh;
-        return (
-          <g key={i}>
-            {ihH > 0 && <rect x={cx - barW - gap/2} y={ih} width={barW} height={ihH} rx="2" fill="#6d28d9" opacity="0.85"/>}
-            {ehH > 0 && <rect x={cx + gap/2}        y={eh} width={barW} height={ehH} rx="2" fill="#f59e0b" opacity="0.80"/>}
-            <text x={cx} y={baseY + 16} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
-              {d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-// ─── KPI Card ────────────────────────────────────────────────────────────────
-function KpiCard({ icon, label, value, sub, gradient, tag, tagColor }) {
-  return (
-    <div className="glass-card rounded-xl p-4 sm:p-5 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-md text-xl`}>{icon}</div>
-        {tag && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tagColor}`}>{tag}</span>}
-      </div>
-      <div className="text-xl sm:text-2xl font-black text-slate-900 break-words">{value}</div>
-      <div className="text-xs sm:text-sm font-semibold text-slate-600 mt-0.5">{label}</div>
-      {sub && <div className="text-[11px] text-slate-400 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
 // ─── Componente principal ─────────────────────────────────────────────────────
-export default function FinanzasDashboard() {
-  const { proyectoId } = useFinanzas();
+export default function FinanzasDashboard({ onNavigate } = {}) {
+  const { proyectoId, setDrawerOpen } = useFinanzas();
   const hoy   = new Date();
   const [mes,  setMes]  = useState(hoy.getMonth());      // 0-11
   const [anio, setAnio] = useState(hoy.getFullYear());
@@ -318,193 +240,149 @@ export default function FinanzasDashboard() {
   const totalEgrVar = data ? (data.egresosPorFuente.rendicion + data.egresosPorFuente.subcontrato + data.egresosPorFuente.oc) : 0;
   const totalEgr    = data ? data.egresosMes : 0;
 
+  const alertasUrgentes = data.alertas.filter(a => a.tipo !== "info").length;
+  const etiquetaMes = `${MESES_FULL[mes].toLowerCase()} de ${anio}`;
+
   return (
-    <div className="space-y-4 sm:space-y-5 p-4 sm:p-6">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* Header + selector mes/año */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              Dashboard <span className="text-purple-700">Financiero</span>
-            </h1>
-            <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Resumen ejecutivo en tiempo real</p>
-          </div>
+      <FechaHoja />
 
-          {/* Selector mes + año */}
-          <div className="flex items-center gap-2">
-            <select value={mes} onChange={e => setMes(Number(e.target.value))}
-              className="px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm font-bold bg-white text-slate-700">
-              {MESES_FULL.map((m, i) => <option key={i} value={i}>{m}</option>)}
-            </select>
-            <select value={anio} onChange={e => setAnio(Number(e.target.value))}
-              className="px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm font-bold bg-white text-slate-700">
-              {anios.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <button onClick={cargar} disabled={loading}
-              className="w-10 h-10 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center transition-all disabled:opacity-40" title="Actualizar">
-              <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-            </button>
-          </div>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Resumen financiero</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Cómo va {etiquetaMes}, de un vistazo.</p>
         </div>
-
-        {/* Pill mes actual + filtro proyecto */}
-        <div className="mt-3 flex items-center flex-wrap gap-2">
-          <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-black rounded-full">
-            {MESES_FULL[mes]} {anio}
-          </span>
-          <ProyectoSelector />
-          {loading && <span className="text-xs text-slate-400 animate-pulse">Cargando datos...</span>}
+        <div className="flex flex-wrap items-end gap-3">
+          <Campo as="select" etiqueta="Mes" value={mes} onChange={e => setMes(Number(e.target.value))}>
+            {MESES_FULL.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </Campo>
+          <Campo as="select" etiqueta="Año" value={anio} onChange={e => setAnio(Number(e.target.value))}>
+            {anios.map(a => <option key={a} value={a}>{a}</option>)}
+          </Campo>
+          <ProyectoSelector variante="cuaderno" />
+          <Boton onClick={cargar} disabled={loading}>
+            <IconoActualizar tamano={15} className={loading ? "animate-spin" : ""} />
+            {loading ? "Actualizando…" : "Actualizar"}
+          </Boton>
         </div>
-      </div>
+      </header>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="spinner w-10 h-10 border-purple-600" />
-        </div>
+        <p className="m-0 py-16 text-center text-[18px] text-cuaderno-grafito">Sumando las cuentas de {etiquetaMes}…</p>
       ) : (
         <>
-          {/* ── KPIs principales ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <KpiCard icon="💰" label="Ingresos del mes"  value={fmtM(data.ingresosMes)}  gradient="from-purple-700 to-violet-600" sub={`${MESES_SHORT[mes]} ${anio}`} />
-            <KpiCard icon="📤" label="Egresos del mes"   value={fmtM(data.egresosMes)}   gradient="from-amber-500 to-orange-600"  sub="OC + rend. + sub. + fijos" />
-            <KpiCard
-              icon={flujoNeto >= 0 ? "📈" : "📉"}
-              label="Flujo neto"
-              value={fmtM(Math.abs(flujoNeto))}
-              gradient={flujoNeto >= 0 ? "from-emerald-500 to-teal-600" : "from-red-500 to-red-600"}
-              tag={flujoNeto >= 0 ? "▲ Positivo" : "▼ Negativo"}
-              tagColor={flujoNeto >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}
-            />
-            <KpiCard icon="🔒" label="Costos fijos / mes" value={fmtM(data.costosFijosMes)} gradient="from-blue-500 to-blue-700" sub={`${((data.costosFijosMes / (data.egresosMes || 1)) * 100).toFixed(1)}% del egreso total`} />
+          {/* ── Cuentas del mes + gráfico ── */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Hoja titulo="Cuentas del mes">
+              <LineaGuia etiqueta="Ingresos"><Cifra valor={data.ingresosMes} escala="pesos" vacio="$0" color="tinta" /></LineaGuia>
+              <LineaGuia etiqueta="Egresos"><Cifra valor={-data.egresosMes} escala="pesos" vacio="$0" /></LineaGuia>
+              <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">compras, rendiciones, subcontratos y costos fijos</p>
+              <LineaGuia etiqueta="Neto"><Cifra valor={flujoNeto} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
+              <LineaGuia etiqueta="Margen">
+                <span className={flujoNeto >= 0 ? "" : "text-cuaderno-roja"}>
+                  {data.ingresosMes > 0 ? ((flujoNeto / data.ingresosMes) * 100).toFixed(1).replace(".", ",") + "%" : "—"}
+                </span>
+              </LineaGuia>
+              <div className="border-t border-cuaderno-renglon mt-2 pt-1">
+                <LineaGuia etiqueta="Costos fijos al mes"><Cifra valor={data.costosFijosMes} escala="pesos" vacio="$0" color="tinta" /></LineaGuia>
+                <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">
+                  {((data.costosFijosMes / (data.egresosMes || 1)) * 100).toFixed(1).replace(".", ",")}% del egreso
+                </p>
+                <LineaGuia etiqueta="Activos en uso"><span>{data.activosTotal}</span></LineaGuia>
+              </div>
+            </Hoja>
+
+            <Hoja titulo="Últimos seis meses" className="lg:col-span-2"
+              extra={
+                <div className="flex items-center gap-4 text-[15px]">
+                  <Resaltado color="menta">ingresos</Resaltado>
+                  <Resaltado color="rosa">egresos</Resaltado>
+                </div>
+              }>
+              <GraficoBarras data={data.flujoPorMes} height={190} />
+              {onNavigate && (
+                <div className="flex justify-end mt-1">
+                  <Boton variante="texto" className="text-[16px]" onClick={() => onNavigate("flujo")}>Abrir el flujo de caja</Boton>
+                </div>
+              )}
+            </Hoja>
           </div>
 
-          {/* ── Fila 2: gráfico + alertas ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-            {/* Gráfico flujo 6 meses */}
-            <div className="glass-card rounded-xl p-4 sm:p-5 lg:col-span-2">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-black text-slate-700">Flujo de Caja — últimos 6 meses</p>
-                <div className="flex gap-3 text-xs text-slate-400">
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-purple-600 inline-block opacity-85"/>Ingresos</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block opacity-75"/>Egresos</span>
-                </div>
-              </div>
-              <MiniBarChart data={data.flujoPorMes} height={150} />
-              {/* Totales bajo el gráfico */}
-              <div className="flex gap-4 mt-3 pt-3 border-t border-slate-100">
-                <div><p className="text-xs text-slate-400">Ing. {MESES_SHORT[mes]}</p><p className="text-base font-black text-purple-700">{fmtM(data.ingresosMes)}</p></div>
-                <div><p className="text-xs text-slate-400">Egr. {MESES_SHORT[mes]}</p><p className="text-base font-black text-amber-600">{fmtM(data.egresosMes)}</p></div>
-                <div><p className="text-xs text-slate-400">Neto</p><p className={`text-base font-black ${flujoNeto >= 0 ? "text-emerald-600" : "text-red-500"}`}>{flujoNeto >= 0 ? "+" : "-"}{fmtM(Math.abs(flujoNeto))}</p></div>
-              </div>
-            </div>
-
-            {/* Alertas */}
-            <div className="glass-card rounded-xl p-4 sm:p-5">
-              <p className="text-sm font-black text-slate-700 mb-3">
-                Alertas
-                {data.alertas.length > 0 && <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 text-xs font-black rounded-full">{data.alertas.length}</span>}
-              </p>
+          {/* ── Alertas, proveedores y egresos ── */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Hoja titulo="Avisos"
+              extra={alertasUrgentes > 0 && <span className="text-[15px] text-cuaderno-roja">{alertasUrgentes} requieren atención</span>}>
               {data.alertas.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <span className="text-3xl mb-2">✅</span>
-                  <p className="text-xs font-bold text-emerald-600">Todo en orden</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Sin alertas activas</p>
-                </div>
+                <p className="m-0 py-6 flex items-center justify-center gap-2 text-[16px] text-cuaderno-verde">
+                  <VistoBueno tamano={15} titulo="" /> Todo en orden, sin avisos.
+                </p>
               ) : (
-                <div className="space-y-2 max-h-52 overflow-y-auto">
-                  {data.alertas.map((a, i) => {
-                    const s = { danger: "bg-red-50 border-red-200 text-red-700", warning: "bg-amber-50 border-amber-200 text-amber-700", info: "bg-blue-50 border-blue-200 text-blue-600" }[a.tipo];
-                    const ic = { danger: "⚠️", warning: "🔔", info: "ℹ️" }[a.tipo];
-                    return (
-                      <div key={i} className={`flex items-start gap-2 p-2.5 rounded-xl border ${s}`}>
-                        <span className="text-sm flex-shrink-0 mt-0.5">{ic}</span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold leading-snug">{a.texto}</p>
-                          {a.monto && <p className="text-xs font-black mt-0.5">{fmt(a.monto)}</p>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ── Fila 3: proveedores + distribución egresos ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-            {/* Top proveedores */}
-            <div className="glass-card rounded-xl p-4 sm:p-5">
-              <p className="text-sm font-black text-slate-700 mb-4">Top Proveedores del mes</p>
-              {data.proveedoresTop.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">Sin transacciones este mes</p>
-              ) : (
-                <div className="space-y-3">
-                  {data.proveedoresTop.map((p, i) => (
-                    <div key={i} className="flex items-center gap-3">
-                      <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0 ${i === 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-xs font-bold text-slate-700 truncate">{p.nombre}</p>
-                          <p className="text-xs font-black text-slate-900 ml-2 flex-shrink-0">{fmtM(p.total)}</p>
-                        </div>
-                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-purple-600 to-violet-500 rounded-full" style={{ width: `${(p.total / maxProv) * 100}%` }} />
-                        </div>
-                      </div>
-                    </div>
+                <ul className="m-0 p-0 list-none max-h-64 overflow-y-auto">
+                  {data.alertas.map((a, i) => (
+                    <li key={i} className="grid grid-cols-[4.5rem_1fr] items-start gap-2 py-2 border-b border-cuaderno-renglon">
+                      <span className="pt-0.5"><MarcaAviso tipo={a.tipo} /></span>
+                      <span className="text-[16px] leading-snug">
+                        {a.texto}
+                        {a.monto && <span className="block"><Cifra valor={a.monto} escala="pesos" color="tinta" /></span>}
+                      </span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
-            </div>
+              <div className="flex justify-end mt-1">
+                <Boton variante="texto" className="text-[16px]" onClick={() => setDrawerOpen(true)}>Ver todos los avisos</Boton>
+              </div>
+            </Hoja>
 
-            {/* Distribución egresos */}
-            <div className="glass-card rounded-xl p-4 sm:p-5">
-              <p className="text-sm font-black text-slate-700 mb-4">Distribución de Egresos</p>
+            <Hoja titulo="Proveedores del mes">
+              {data.proveedoresTop.length === 0 ? (
+                <p className="m-0 py-6 text-center text-[16px] text-cuaderno-grafito">Sin compras anotadas este mes.</p>
+              ) : (
+                <ol className="m-0 p-0 list-none space-y-3">
+                  {data.proveedoresTop.map((p, i) => (
+                    <li key={i}>
+                      <div className="flex items-baseline gap-2 text-[17px]">
+                        <span className="w-5 text-cuaderno-grafito">{i + 1}.</span>
+                        <span className="flex-1 min-w-0 truncate">{casoTitulo(p.nombre)}</span>
+                        <Cifra valor={p.total} escala="pesos" color="tinta" className="flex-shrink-0" />
+                      </div>
+                      <div className="pl-7"><BarraProporcion pct={(p.total / maxProv) * 100} /></div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Hoja>
+
+            <Hoja titulo="En qué se fue el egreso">
               <div className="space-y-3">
                 {[
-                  { label: "Costos Fijos",   val: data.costosFijosMes,                  color: "from-blue-500 to-blue-600",    bg: "bg-blue-50",   text: "text-blue-700"   },
-                  { label: "Rendiciones",     val: data.egresosPorFuente.rendicion,      color: "from-violet-500 to-purple-600",bg: "bg-violet-50", text: "text-violet-700" },
-                  { label: "Subcontratos",    val: data.egresosPorFuente.subcontrato,    color: "from-amber-400 to-orange-500", bg: "bg-amber-50",  text: "text-amber-700"  },
-                  { label: "Órdenes de Compra",val: data.egresosPorFuente.oc,            color: "from-emerald-400 to-teal-500", bg: "bg-emerald-50",text: "text-emerald-700"},
-                ].map(({ label, val, color, bg, text }) => (
-                  <div key={label}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-slate-600">{label}</span>
-                      <span className={`text-xs font-black ${text}`}>{fmtM(val)} {totalEgr > 0 ? `(${((val/totalEgr)*100).toFixed(0)}%)` : ""}</span>
+                  { label: "Costos fijos",      val: data.costosFijosMes },
+                  { label: "Rendiciones",       val: data.egresosPorFuente.rendicion },
+                  { label: "Subcontratos",      val: data.egresosPorFuente.subcontrato },
+                  { label: "Órdenes de compra", val: data.egresosPorFuente.oc },
+                ].map(({ label, val }) => {
+                  const pct = totalEgr > 0 ? (val / totalEgr) * 100 : 0;
+                  return (
+                    <div key={label}>
+                      <div className="flex items-baseline justify-between gap-3 text-[17px]">
+                        <span>{label}</span>
+                        <span className="flex items-baseline gap-3">
+                          <Cifra valor={val} escala="pesos" vacio="$0" color="tinta" />
+                          <span className="w-10 text-right text-[15px] text-cuaderno-grafito">{totalEgr > 0 ? `${pct.toFixed(0)}%` : ""}</span>
+                        </span>
+                      </div>
+                      <BarraProporcion pct={pct} />
                     </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className={`h-full bg-gradient-to-r ${color} rounded-full transition-all`} style={{ width: totalEgr > 0 ? `${(val/totalEgr)*100}%` : "0%" }} />
-                    </div>
-                  </div>
-                ))}
-                <div className="pt-2 border-t border-slate-100 flex justify-between">
-                  <span className="text-xs font-black text-slate-600">Total egresos</span>
-                  <span className="text-sm font-black text-slate-900">{fmtM(totalEgr)}</span>
+                  );
+                })}
+                <div className="pt-1">
+                  <LineaGuia etiqueta="Total egresos">
+                    <Cifra valor={totalEgr} escala="pesos" vacio="$0" color="tinta" raya="total" />
+                  </LineaGuia>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* ── KPI activos + margen ── */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-            <KpiCard icon="🏗️" label="Activos en uso"  value={data.activosTotal}  gradient="from-slate-500 to-slate-700" sub="Máquinas MPF activas" />
-            <KpiCard
-              icon="📊"
-              label="Margen bruto"
-              value={data.ingresosMes > 0 ? ((flujoNeto / data.ingresosMes) * 100).toFixed(1) + "%" : "—"}
-              gradient={flujoNeto >= 0 ? "from-emerald-500 to-teal-600" : "from-red-500 to-red-600"}
-              sub={`Ing. ${fmtM(data.ingresosMes)} — Egr. ${fmtM(data.egresosMes)}`}
-            />
-            <KpiCard
-              icon="📋"
-              label="Alertas activas"
-              value={data.alertas.filter(a => a.tipo !== "info").length}
-              gradient={data.alertas.filter(a => a.tipo !== "info").length > 0 ? "from-red-500 to-red-600" : "from-emerald-500 to-teal-600"}
-              sub={data.alertas.filter(a => a.tipo !== "info").length > 0 ? "Requieren atención" : "Sin alertas urgentes"}
-            />
+            </Hoja>
           </div>
         </>
       )}

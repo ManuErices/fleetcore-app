@@ -7,12 +7,19 @@ import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebas
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
+  ModalCuaderno, FechaHoja,
+  IconoMas, IconoLapiz, IconoBorrar, IconoDocumento, IconoActualizar, IconoSubir,
+} from "./cuaderno";
 
+// Tipos de activo. Los colores e íconos eran del diseño anterior: en el
+// cuaderno el tipo se escribe y el color queda para los estados.
 const TIPOS = [
-  { id: "maquinaria",  label: "Maquinaria",  color: "from-orange-500 to-amber-600",  badge: "bg-orange-100 text-orange-700",  dot: "bg-orange-500",  icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
-  { id: "vehiculo",    label: "Vehículo",    color: "from-blue-500 to-blue-700",      badge: "bg-blue-100 text-blue-700",      dot: "bg-blue-500",    icon: "M8 17a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4zM3 9l1.5-4.5A2 2 0 016.4 3h11.2a2 2 0 011.9 1.5L21 9M3 9h18M3 9l-1 6h20l-1-6" },
-  { id: "herramienta", label: "Herramienta", color: "from-slate-500 to-slate-700",    badge: "bg-slate-100 text-slate-700",    dot: "bg-slate-500",   icon: "M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" },
-  { id: "otro",        label: "Otro",        color: "from-purple-500 to-violet-600",  badge: "bg-purple-100 text-purple-700",  dot: "bg-purple-500",  icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
+  { id: "maquinaria",  label: "Maquinaria"  },
+  { id: "vehiculo",    label: "Vehículo"    },
+  { id: "herramienta", label: "Herramienta" },
+  { id: "otro",        label: "Otro"        },
 ];
 const TIPO_MAP = Object.fromEntries(TIPOS.map(t => [t.id, t]));
 const OWN_LABELS = { OWNED: "Propio", RENTED: "Arrendado", LEASING: "Leasing", CREDITO_AUTO: "Créd. Automotriz" };
@@ -63,47 +70,40 @@ function tieneAlerta(a) {
   return DOCS_DEF.some(({key})=>{ const e=estadoDoc(a[key]); return e==="vencido"||e==="urgente"; });
 }
 
-function BadgeDoc({fecha,label}) {
-  const e=estadoDoc(fecha); if(!e) return null;
-  const d=diasR(fecha);
-  const s={vencido:"bg-red-100 text-red-700",urgente:"bg-amber-100 text-amber-700",pronto:"bg-yellow-50 text-yellow-700",ok:"bg-emerald-50 text-emerald-600"}[e];
-  return (
-    <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${s}`}>
-      <span className="text-xs font-bold">{label}</span>
-      <span className="text-xs font-semibold">{e==="vencido"?"Vencido":`${d}d`}{e==="ok"&&<span className="ml-1">✓</span>}</span>
-    </div>
-  );
-}
-
 // ─── Editor inline de fecha de vencimiento (click para abrir date picker) ───
 function FechaDocEditor({ fecha, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState(fecha || "");
   const e = estadoDoc(fecha);
   const d = diasR(fecha);
-  const s = { vencido:"text-red-600", urgente:"text-amber-600", pronto:"text-yellow-700", ok:"text-emerald-600" }[e] || "text-slate-300";
+  // Estado del vencimiento, resaltado a mano
+  const marca = {
+    vencido: <Resaltado color="rosa">vencido</Resaltado>,
+    urgente: <Resaltado color="durazno">{d} días</Resaltado>,
+    pronto:  <span className="text-cuaderno-tinta">{d} días</span>,
+    ok:      <span className="inline-flex items-center gap-1 text-cuaderno-grafito">{d} días <VistoBueno tamano={11} titulo="" /></span>,
+  }[e];
 
   if (editing) {
     return (
       <div className="flex items-center gap-1">
         <input
           type="date" autoFocus value={draft}
+          aria-label="Fecha de vencimiento"
           onChange={ev => setDraft(ev.target.value)}
           onKeyDown={ev => { if (ev.key === "Enter") { onSave(draft); setEditing(false); } if (ev.key === "Escape") setEditing(false); }}
-          className="text-[10px] px-1 py-0.5 border-2 border-purple-400 rounded-md focus:outline-none"
+          className="min-h-[32px] text-[14px] bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta focus:outline-none"
         />
-        <button onClick={() => { onSave(draft); setEditing(false); }} className="w-4 h-4 rounded bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0">
-          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-        </button>
-        <button onClick={() => setEditing(false)} className="w-4 h-4 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0">
-          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
+        <Boton variante="texto" className="min-h-[32px] text-[14px]" onClick={() => { onSave(draft); setEditing(false); }}>listo</Boton>
+        <Boton variante="texto" className="min-h-[32px] text-[14px] text-cuaderno-grafito" onClick={() => setEditing(false)}>cancelar</Boton>
       </div>
     );
   }
   return (
-    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }} className={`text-[10px] font-semibold hover:underline ${s}`} title="Click para fijar/editar fecha de vencimiento">
-      {fecha ? (e === "vencido" ? "Vencido" : `${d}d${e==="ok"?" ✓":""}`) : "Sin fecha"}
+    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }}
+      className="min-h-[32px] text-[14px] underline decoration-dotted decoration-cuaderno-columna underline-offset-4 hover:decoration-cuaderno-tinta"
+      title="Fijar o cambiar la fecha de vencimiento">
+      {fecha ? marca : <span className="text-cuaderno-grafito">sin fecha</span>}
     </button>
   );
 }
@@ -153,55 +153,46 @@ function DocUploader({ label, docKey, activoId, empresaId, urlActual, onUploaded
   };
 
   return (
-    <div className="mt-2">
+    <div>
+      {label && <p className="m-0 mb-1 text-[14px] text-cuaderno-grafito">{label}</p>}
       {urlActual ? (
-        <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-          {/* Icono tipo archivo */}
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
-            {esImagen
-              ? <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-              : <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-            }
-          </div>
+        <div className="flex items-center gap-2 min-h-[44px] border-b border-cuaderno-azul">
+          <IconoDocumento tamano={15} className="text-cuaderno-grafito" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-emerald-700 truncate">{nombreArchivo || "Archivo subido"}</p>
-            <p className="text-[10px] text-emerald-500">✓ Documento respaldado</p>
+            <a href={urlActual} target="_blank" rel="noopener noreferrer" title="Abrir el archivo"
+              className="block text-[15px] text-cuaderno-tinta truncate underline decoration-cuaderno-azul underline-offset-4 hover:decoration-cuaderno-tinta">
+              {nombreArchivo || "Archivo subido"}
+            </a>
+            <span className="inline-flex items-center gap-1 text-[13px] text-cuaderno-verde">
+              <VistoBueno tamano={11} titulo="" /> respaldado{esImagen ? ", imagen" : ""}
+            </span>
           </div>
-          {/* Acciones */}
-          <a href={urlActual} target="_blank" rel="noopener noreferrer"
-            className="w-7 h-7 rounded-lg bg-emerald-100 hover:bg-emerald-200 flex items-center justify-center transition-all flex-shrink-0" title="Ver / Descargar">
-            <svg className="w-3.5 h-3.5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-          </a>
-          <button onClick={handleEliminarArchivo}
-            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-all flex-shrink-0" title="Eliminar archivo">
-            <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          <button onClick={() => inputRef.current?.click()} aria-label="Reemplazar archivo" title="Reemplazar archivo"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-papel flex-shrink-0">
+            <IconoActualizar tamano={14} />
           </button>
-          <button onClick={() => inputRef.current?.click()}
-            className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="Reemplazar archivo">
-            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <button onClick={handleEliminarArchivo} aria-label="Quitar archivo" title="Quitar archivo"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 flex-shrink-0">
+            <IconoBorrar tamano={14} />
           </button>
         </div>
       ) : uploading ? (
-        <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-xs font-bold text-purple-700">Subiendo...</p>
-            <p className="text-xs font-black text-purple-600">{progress}%</p>
-          </div>
-          <div className="w-full bg-purple-100 rounded-full h-1.5">
-            <div className="bg-gradient-to-r from-purple-600 to-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+        <div className="min-h-[44px] flex flex-col justify-center gap-1">
+          <p className="m-0 text-[14px] text-cuaderno-grafito">Subiendo… {progress}%</p>
+          <div className="h-[2px] bg-cuaderno-renglon">
+            <div className="h-full bg-cuaderno-tinta" style={{ width: `${progress}%` }} />
           </div>
         </div>
       ) : (
-        <button
-          onClick={() => inputRef.current?.click()}
-          className="w-full flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-xl text-xs font-semibold text-slate-400 hover:text-purple-600 transition-all group"
-        >
-          <svg className="w-4 h-4 flex-shrink-0 group-hover:text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-          Subir archivo (PDF, JPG, PNG — máx. 10MB)
+        <button onClick={() => inputRef.current?.click()}
+          className="w-full min-h-[44px] flex items-center justify-center gap-2 rounded-md border-[1.5px] border-dashed border-cuaderno-columna hover:border-cuaderno-tinta hover:bg-cuaderno-papel text-[14px] text-cuaderno-tinta">
+          <IconoSubir tamano={14} />
+          Subir archivo
+          <span className="text-cuaderno-grafito">(PDF o imagen, hasta 10 MB)</span>
         </button>
       )}
-      {error && <p className="text-xs text-red-500 font-semibold mt-1">{error}</p>}
-      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+      {error && <p className="m-0 mt-1 text-[13px] text-cuaderno-roja">{error}</p>}
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="sr-only"
         onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
     </div>
   );
@@ -221,236 +212,194 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
     setSaving(true); await onSave(form); setSaving(false); onClose();
   };
   const depEst=depAnual(form); const vlEst=valorLibros(form);
+  const PASOS = [{ id: 1, label: "1. Identificación" }, { id: 2, label: "2. Valor" }, { id: 3, label: "3. Documentos" }];
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto overflow-hidden">
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 p-6 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={tipo.icon}/></svg>
-              </div>
-              <div>
-                <h2 className="text-lg font-black">{editando?"Editar Activo":"Nuevo Activo"}</h2>
-                <p className="text-white/70 text-sm">{editando?editando.nombre:"Registra un activo de la empresa"}</p>
-              </div>
-            </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-          <div className="flex items-center gap-2 mt-5">
-            {["Identificación","Financiero","Documentos"].map((label,i)=>{
-              const s=i+1;
-              return (<React.Fragment key={s}>
-                <button onClick={()=>step>s?setStep(s):null} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${step===s?"bg-white text-slate-800 shadow-md":step>s?"bg-white/30 text-white":"bg-white/10 text-white/50"}`}>
-                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs font-black ${step===s?"bg-purple-700 text-white":step>s?"bg-white/60 text-slate-700":"bg-white/20 text-white/60"}`}>{s}</span>
-                  {label}
-                </button>
-                {s<3&&<div className={`flex-1 h-0.5 rounded ${step>s?"bg-white/50":"bg-white/20"}`}/>}
-              </React.Fragment>);
-            })}
-          </div>
+    <ModalCuaderno
+      titulo={editando ? "Editar activo" : "Nuevo activo"}
+      subtitulo={editando ? editando.nombre : "Una máquina, vehículo o equipo de la empresa"}
+      ancho="max-w-2xl"
+      onClose={onClose}
+      bloqueado={saving}
+      pie={
+        <div className="flex flex-wrap items-center gap-2">
+          {step > 1 && <Boton variante="texto" onClick={() => setStep(s => s - 1)}>Volver</Boton>}
+          <div className="flex-1" />
+          <Boton onClick={onClose} disabled={saving}>Cancelar</Boton>
+          {step < 3
+            ? <Boton variante="primario" onClick={() => setStep(s => s + 1)} disabled={step === 1 && !form.nombre}>Siguiente</Boton>
+            : <Boton variante="primario" onClick={submit} disabled={saving || !form.nombre}>
+                {saving ? "Guardando…" : editando ? "Guardar cambios" : "Crear activo"}
+              </Boton>}
         </div>
+      }>
 
-        <div className="p-6 space-y-5">
-          {step===1&&(<>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Tipo de activo</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {TIPOS.map(t=>(
-                  <button key={t.id} onClick={()=>set("tipo",t.id)} className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all ${form.tipo===t.id?"border-purple-700 bg-purple-50 shadow-md":"border-slate-200 hover:border-slate-300"}`}>
-                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${t.color} flex items-center justify-center`}><svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={t.icon}/></svg></div>
-                    <span className="text-xs font-bold text-slate-700">{t.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">Nombre <span className="text-red-500">*</span></label>
-              <input value={form.nombre} onChange={e=>set("nombre",e.target.value)} placeholder="Ej: Excavadora Caterpillar 320..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Código</label><input value={form.code} onChange={e=>set("code",e.target.value)} placeholder="MN-02" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Marca</label><input value={form.marca} onChange={e=>set("marca",e.target.value)} placeholder="Caterpillar" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Modelo</label><input value={form.modelo} onChange={e=>set("modelo",e.target.value)} placeholder="320" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Patente</label><input value={form.patente} onChange={e=>set("patente",e.target.value.toUpperCase())} placeholder="TYRH70" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm uppercase"/></div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Propiedad</label>
-                <select value={form.ownership} onChange={e=>set("ownership",e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                  <option value="OWNED">Propio</option><option value="RENTED">Arrendado</option><option value="LEASING">Leasing</option><option value="CREDITO_AUTO">Crédito Automotriz</option>
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Propietario</label><input value={form.propietario} onChange={e=>set("propietario",e.target.value)} placeholder="Nombre propietario" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Proyecto asignado</label>
-                <select value={form.projectId} onChange={e=>set("projectId",e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                  <option value="">Sin proyecto</option>
-                  {projects.map(p=><option key={p.id} value={p.id}>{p.name||p.nombre}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border-2 border-slate-200">
-              <div><p className="text-sm font-bold text-slate-700">Activo en uso</p><p className="text-xs text-slate-500 mt-0.5">Los inactivos se excluyen del valor total</p></div>
-              <button onClick={()=>set("activo",!form.activo)} className={`relative w-12 h-6 rounded-full transition-colors ${form.activo?"bg-purple-600":"bg-slate-300"}`}>
-                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.activo?"translate-x-7":"translate-x-1"}`}/>
-              </button>
-            </div>
-          </>)}
-
-          {step===2&&(<>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Moneda</label>
-                <select value={form.moneda} onChange={e=>set("moneda",e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                  <option value="CLP">CLP $</option><option value="UF">UF</option><option value="USD">USD</option>
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Valor de compra</label>
-                <input type="number" value={form.valorCompra} onChange={e=>set("valorCompra",e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Fecha de compra</label><input type="date" value={form.fechaCompra} onChange={e=>set("fechaCompra",e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-              <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Vida útil (años)</label><input type="number" min="1" max="50" value={form.vidaUtilAnios} onChange={e=>set("vidaUtilAnios",e.target.value)} placeholder="10" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Dep. anual <span className="text-xs font-normal text-slate-400">(opcional)</span></label>
-                <input type="number" value={form.depreciacionAnual} onChange={e=>set("depreciacionAnual",e.target.value)} placeholder="Auto" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Valor libros actual <span className="text-xs font-normal text-slate-400">(opcional)</span></label>
-                <input type="number" value={form.valorLibros} onChange={e=>set("valorLibros",e.target.value)} placeholder="Auto" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
-              </div>
-            </div>
-            {form.valorCompra&&form.vidaUtilAnios&&(
-              <div className="rounded-xl p-4 bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-100">
-                <p className="text-xs font-black text-purple-600 uppercase tracking-wider mb-2">Estimación depreciación</p>
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div><p className="text-xs text-slate-500">Dep. anual</p><p className="font-black text-slate-800">{fmt(depEst,form.moneda)}</p></div>
-                  <div><p className="text-xs text-slate-500">Dep. mensual</p><p className="font-black text-slate-800">{fmt(depEst/12,form.moneda)}</p></div>
-                  <div><p className="text-xs text-slate-500">Valor libros hoy</p><p className="font-black text-purple-700">{fmt(vlEst,form.moneda)}</p></div>
-                </div>
-              </div>
-            )}
-            <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Notas</label><textarea value={form.notas} onChange={e=>set("notas",e.target.value)} rows={2} placeholder="Condiciones de financiamiento, garantías..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none"/></div>
-          </>)}
-
-          {step===3&&(<>
-            <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Vencimientos de documentos</p>
-            <div className="grid grid-cols-2 gap-3">
-              {DOCS_DEF.map(({key,label})=>(
-                <div key={key}>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">{label}</label>
-                  <input type="date" value={form[key]||""} onChange={e=>set(key,e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm"/>
-                  {form[key]&&(()=>{const d=diasR(form[key]); if(d<0) return <p className="text-xs text-red-600 font-bold mt-1">⚠ Vencido hace {Math.abs(d)}d</p>; if(d<=30) return <p className="text-xs text-amber-600 font-bold mt-1">⚠ Vence en {d}d</p>; return <p className="text-xs text-emerald-600 font-semibold mt-1">✓ Vigente ({d}d)</p>;})()}
-                  <DocUploader
-                    label={label}
-                    docKey={key}
-                    activoId={editando?.id || "nuevo"}
-                    empresaId={empresaId}
-                    urlActual={form.archivosDoc?.[key] || ""}
-                    onUploaded={(k, url) => set("archivosDoc", { ...(form.archivosDoc||{}), [k]: url })}
-                  />
-                </div>
-              ))}
-            </div>
-            <div><label className="block text-sm font-bold text-slate-700 mb-1.5">Notas de documentos</label><textarea value={form.notasDoc} onChange={e=>set("notasDoc",e.target.value)} rows={2} placeholder="N° de póliza, observaciones..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none"/></div>
-            <div className="rounded-xl p-4 bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-100">
-              <p className="text-xs font-black text-purple-600 uppercase tracking-wider mb-2">Resumen</p>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-slate-500">Nombre:</span><span className="font-bold text-slate-800 ml-1">{form.nombre||"—"}</span></div>
-                <div><span className="text-slate-500">Tipo:</span><span className="font-bold text-slate-800 ml-1">{TIPO_MAP[form.tipo]?.label}</span></div>
-                <div><span className="text-slate-500">Valor compra:</span><span className="font-bold text-slate-800 ml-1">{fmt(form.valorCompra,form.moneda)}</span></div>
-                <div><span className="text-slate-500">Valor libros:</span><span className="font-bold text-purple-700 ml-1">{fmt(vlEst,form.moneda)}</span></div>
-              </div>
-            </div>
-          </>)}
-        </div>
-
-        <div className="px-6 pb-6 flex gap-3">
-          {step>1&&<button onClick={()=>setStep(s=>s-1)} className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">← Anterior</button>}
-          <button onClick={onClose} className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">Cancelar</button>
-          <div className="flex-1"/>
-          {step<3
-            ?<button onClick={()=>setStep(s=>s+1)} disabled={step===1&&!form.nombre} className="px-6 py-3 bg-gradient-to-r from-purple-700 to-violet-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm">Siguiente →</button>
-            :<button onClick={submit} disabled={saving||!form.nombre} className="px-6 py-3 bg-gradient-to-r from-purple-700 to-violet-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-lg">
-              {saving?<><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Guardando...</>:<><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>{editando?"Guardar cambios":"Crear activo"}</>}
-            </button>}
-        </div>
+      <div role="tablist" className="flex flex-wrap gap-x-5 border-b border-cuaderno-azul -mt-1">
+        {PASOS.map(p => (
+          <button key={p.id} role="tab" aria-selected={step === p.id}
+            onClick={() => step > p.id ? setStep(p.id) : null}
+            disabled={step < p.id}
+            className={`min-h-[40px] -mb-px border-b-2 text-[17px] ${
+              step === p.id ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-transparent text-cuaderno-grafito disabled:opacity-50"}`}>
+            {p.label}
+          </button>
+        ))}
       </div>
-    </div>
+
+      {step === 1 && (<>
+        <Segmentado etiqueta="Tipo de activo" opciones={TIPOS.map(t => ({ id: t.id, label: t.label }))}
+          valor={form.tipo} onCambiar={id => set("tipo", id)} />
+        <Campo etiqueta="Nombre" value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: excavadora Caterpillar 320" />
+        <div className="grid grid-cols-3 gap-4">
+          <Campo etiqueta="Código" value={form.code} onChange={e => set("code", e.target.value)} placeholder="MN-02" />
+          <Campo etiqueta="Marca" value={form.marca} onChange={e => set("marca", e.target.value)} placeholder="Caterpillar" />
+          <Campo etiqueta="Modelo" value={form.modelo} onChange={e => set("modelo", e.target.value)} placeholder="320" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Patente" value={form.patente} onChange={e => set("patente", e.target.value.toUpperCase())} placeholder="TYRH70" />
+          <Campo as="select" etiqueta="Propiedad" value={form.ownership} onChange={e => set("ownership", e.target.value)}>
+            <option value="OWNED">Propio</option><option value="RENTED">Arrendado</option>
+            <option value="LEASING">Leasing</option><option value="CREDITO_AUTO">Crédito automotriz</option>
+          </Campo>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Propietario" value={form.propietario} onChange={e => set("propietario", e.target.value)} placeholder="Nombre del propietario" />
+          <Campo as="select" etiqueta="Proyecto asignado" value={form.projectId} onChange={e => set("projectId", e.target.value)}>
+            <option value="">Sin proyecto</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name || p.nombre}</option>)}
+          </Campo>
+        </div>
+        <div className="border-t border-cuaderno-azul pt-4">
+          <Casilla marcada={form.activo} onCambiar={v => set("activo", v)} descripcion="Los inactivos no se suman al valor total">
+            Activo en uso
+          </Casilla>
+        </div>
+      </>)}
+
+      {step === 2 && (<>
+        <div className="grid grid-cols-[6rem_1fr] gap-4 items-end">
+          <Campo as="select" etiqueta="Moneda" value={form.moneda} onChange={e => set("moneda", e.target.value)}>
+            <option value="CLP">CLP</option><option value="UF">UF</option><option value="USD">USD</option>
+          </Campo>
+          <Campo etiqueta="Valor de compra" type="number" inputMode="decimal" value={form.valorCompra} onChange={e => set("valorCompra", e.target.value)} placeholder="0" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Fecha de compra" type="date" value={form.fechaCompra} onChange={e => set("fechaCompra", e.target.value)} />
+          <Campo etiqueta="Vida útil, en años" type="number" min="1" max="50" value={form.vidaUtilAnios} onChange={e => set("vidaUtilAnios", e.target.value)} placeholder="10" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Depreciación anual" type="number" value={form.depreciacionAnual} onChange={e => set("depreciacionAnual", e.target.value)}
+            placeholder="Se calcula sola" ayuda="Opcional" />
+          <Campo etiqueta="Valor libro actual" type="number" value={form.valorLibros} onChange={e => set("valorLibros", e.target.value)}
+            placeholder="Se calcula solo" ayuda="Opcional" />
+        </div>
+        {form.valorCompra && form.vidaUtilAnios && (
+          <div className="border border-cuaderno-azul rounded-md px-4 py-2">
+            <Titulo as="h3" tamano="sm">Depreciación estimada</Titulo>
+            <LineaGuia etiqueta="Al año"><span>{fmt(depEst, form.moneda)}</span></LineaGuia>
+            <LineaGuia etiqueta="Al mes"><span>{fmt(depEst / 12, form.moneda)}</span></LineaGuia>
+            <LineaGuia etiqueta="Valor libro hoy"><span className="border-b-[3px] border-double border-current">{fmt(vlEst, form.moneda)}</span></LineaGuia>
+          </div>
+        )}
+        <Campo as="textarea" rows={2} etiqueta="Notas" value={form.notas} onChange={e => set("notas", e.target.value)} placeholder="Financiamiento, garantías" />
+      </>)}
+
+      {step === 3 && (<>
+        <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          {DOCS_DEF.map(({ key, label }) => (
+            <div key={key}>
+              <Campo etiqueta={`Vencimiento: ${label.toLowerCase()}`} type="date" value={form[key] || ""} onChange={e => set(key, e.target.value)} />
+              {form[key] && (() => {
+                const d = diasR(form[key]);
+                if (d < 0) return <p className="m-0 mt-1 text-[14px] text-cuaderno-roja">Vencido hace {Math.abs(d)} días</p>;
+                if (d <= 30) return <p className="m-0 mt-1 text-[14px]"><Resaltado color="durazno">vence en {d} días</Resaltado></p>;
+                return <p className="m-0 mt-1 flex items-center gap-1 text-[14px] text-cuaderno-verde"><VistoBueno tamano={12} titulo="" /> vigente, {d} días</p>;
+              })()}
+              <div className="mt-2">
+                <DocUploader
+                  label="" docKey={key}
+                  activoId={editando?.id || "nuevo"}
+                  empresaId={empresaId}
+                  urlActual={form.archivosDoc?.[key] || ""}
+                  onUploaded={(k, url) => set("archivosDoc", { ...(form.archivosDoc || {}), [k]: url })}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <Campo as="textarea" rows={2} etiqueta="Notas de documentos" value={form.notasDoc} onChange={e => set("notasDoc", e.target.value)} placeholder="N° de póliza u observaciones" />
+        <div className="border-t border-cuaderno-azul pt-3">
+          <Titulo as="h3" tamano="sm">Antes de guardar, revisa</Titulo>
+          <LineaGuia etiqueta="Nombre"><span>{form.nombre || "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Tipo"><span>{TIPO_MAP[form.tipo]?.label}</span></LineaGuia>
+          <LineaGuia etiqueta="Valor de compra"><span>{fmt(form.valorCompra, form.moneda)}</span></LineaGuia>
+          <LineaGuia etiqueta="Valor libro"><span>{fmt(vlEst, form.moneda)}</span></LineaGuia>
+        </div>
+      </>)}
+    </ModalCuaderno>
   );
 }
 
-function PanelDetalle({activo,onClose,onEdit,projects,empresaId,onDocUploaded,onFechaUpdated}) {
-  if(!activo) return null;
-  const tipo=TIPO_MAP[activo.tipo]||TIPOS[3];
-  const vl=valorLibros(activo); const dep=depAnual(activo);
-  const proyecto=projects.find(p=>p.id===activo.projectId);
+function PanelDetalle({ activo, onClose, onEdit, projects, empresaId, onDocUploaded, onFechaUpdated }) {
+  if (!activo) return null;
+  const vl = valorLibros(activo); const dep = depAnual(activo);
+  const proyecto = projects.find(p => p.id === activo.projectId);
+  const subtitulo = [TIPO_MAP[activo.tipo]?.label, activo.code, [activo.marca, activo.modelo].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   return (
-    <div className="glass-card rounded-xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col animate-fadeInUp">
-      <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-6 py-4 flex items-center justify-between flex-shrink-0">
+    <ModalCuaderno
+      titulo={activo.nombre}
+      subtitulo={subtitulo}
+      ancho="max-w-4xl"
+      capa="z-50"
+      cerrarAlClicFuera
+      onClose={onClose}
+      pie={<div className="flex justify-end"><Boton onClick={onEdit}><IconoLapiz tamano={14} /> Editar activo</Boton></div>}>
+      <div className="grid gap-x-12 md:grid-cols-2">
         <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[10px] font-black ${tipo.badge}`}>{tipo.label}</span>
-            <h3 className="text-white font-black text-lg">{activo.nombre}</h3>
-          </div>
-          <p className="text-white/70 text-sm">{activo.code&&`${activo.code} · `}{activo.marca} {activo.modelo}</p>
+          <Titulo as="h3" tamano="sm">Identificación</Titulo>
+          <LineaGuia etiqueta="Patente"><span>{activo.patente || "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Propiedad"><span>{OWN_LABELS[activo.ownership] || activo.ownership || "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Propietario"><span>{activo.propietario || "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Proyecto"><span>{proyecto ? (proyecto.name || proyecto.nombre) : "sin proyecto"}</span></LineaGuia>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onEdit} className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg flex items-center gap-1">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-            Editar
-          </button>
-          <button onClick={onClose} className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center">
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
+        <div>
+          <Titulo as="h3" tamano="sm">Valor</Titulo>
+          <LineaGuia etiqueta="Valor de compra"><span>{fmt(activo.valorCompra, activo.moneda)}</span></LineaGuia>
+          <LineaGuia etiqueta="Valor libro"><span className="border-b-[3px] border-double border-current">{fmt(vl, activo.moneda)}</span></LineaGuia>
+          <LineaGuia etiqueta="Depreciación al año"><span>{dep > 0 ? fmt(dep, activo.moneda) : "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Depreciación al mes"><span>{dep > 0 ? fmt(dep / 12, activo.moneda) : "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Vida útil"><span>{activo.vidaUtilAnios ? `${activo.vidaUtilAnios} años` : "—"}</span></LineaGuia>
+          <LineaGuia etiqueta="Fecha de compra"><span>{activo.fechaCompra || "—"}</span></LineaGuia>
         </div>
       </div>
-      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto bg-white">
-        <div className="space-y-3">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Identificación</p>
-          {[["Tipo",TIPO_MAP[activo.tipo]?.label||"—"],["Patente",activo.patente||"—"],["Propiedad",OWN_LABELS[activo.ownership]||activo.ownership||"—"],["Propietario",activo.propietario||"—"],["Proyecto",proyecto?(proyecto.name||proyecto.nombre):"Sin proyecto"]].map(([l,v])=>(
-            <div key={l}><p className="text-xs text-slate-400 font-semibold">{l}</p><p className="font-bold text-slate-800 text-sm">{v}</p></div>
-          ))}
-        </div>
-        <div className="space-y-3">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Financiero</p>
-          {[["Valor compra",fmt(activo.valorCompra,activo.moneda)],["Valor libros",fmt(vl,activo.moneda)],["Dep. anual",dep>0?fmt(dep,activo.moneda):"—"],["Dep. mensual",dep>0?fmt(dep/12,activo.moneda):"—"],["Vida útil",activo.vidaUtilAnios?`${activo.vidaUtilAnios} años`:"—"],["Fecha compra",activo.fechaCompra||"—"]].map(([l,v])=>(
-            <div key={l}><p className="text-xs text-slate-400 font-semibold">{l}</p><p className="font-bold text-slate-800 text-sm">{v}</p></div>
-          ))}
-        </div>
-        <div className="space-y-4">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-wider">Documentos</p>
-          {DOCS_DEF.map(({key,label})=>{
-            const url = activo.archivosDoc?.[key];
-            return (
-              <div key={key}>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs text-slate-500 font-semibold">{label}</p>
-                  <FechaDocEditor fecha={activo[key]} onSave={(val)=>onFechaUpdated(activo,key,val)} />
-                </div>
-                <DocUploader
-                  label="" docKey={key}
-                  activoId={activo.id} empresaId={empresaId}
-                  urlActual={url || ""}
-                  onUploaded={(docKey,url)=>onDocUploaded(activo,docKey,url)}
-                />
+
+      <div>
+        <Titulo as="h3" tamano="sm" className="border-b border-cuaderno-azul">Documentos</Titulo>
+        <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 mt-2">
+          {DOCS_DEF.map(({ key, label }) => (
+            <div key={key}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="m-0 text-[16px]">{label}</p>
+                <FechaDocEditor fecha={activo[key]} onSave={(val) => onFechaUpdated(activo, key, val)} />
               </div>
-            );
-          })}
-          {activo.notasDoc&&<p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">{activo.notasDoc}</p>}
+              <DocUploader
+                label="" docKey={key}
+                activoId={activo.id} empresaId={empresaId}
+                urlActual={activo.archivosDoc?.[key] || ""}
+                onUploaded={(docKey, url) => onDocUploaded(activo, docKey, url)}
+              />
+            </div>
+          ))}
         </div>
+        {activo.notasDoc && <p className="m-0 mt-3 text-[15px] text-cuaderno-grafito">Nota: {activo.notasDoc}</p>}
       </div>
-      {activo.notas&&<div className="px-6 pb-5 bg-white"><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{activo.notas}</p></div>}
-    </div>
+
+      {activo.notas && (
+        <div>
+          <Titulo as="h3" tamano="sm">Notas</Titulo>
+          <p className="m-0 text-[17px] whitespace-pre-line leading-relaxed">{activo.notas}</p>
+        </div>
+      )}
+    </ModalCuaderno>
   );
 }
 
@@ -610,221 +559,184 @@ export default function FinanzasActivos() {
   const depTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+depAnual(a),0),[activosActivos]);
   const conAlertas=useMemo(()=>activosActivos.filter(tieneAlerta).length,[activosActivos]);
 
-  const SortIcon=({col})=>{
-    if(sortCol!==col) return <svg className="w-3 h-3 text-white/30 ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>;
-    return sortDir==="asc"
-      ?<svg className="w-3 h-3 text-white ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7"/></svg>
-      :<svg className="w-3 h-3 text-white ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/></svg>;
-  };
+  // ── Solo presentación ─────────────────────────────────────────────────────
+  const COLS = [
+    { col: "nombre", label: "Activo",              align: "text-left",  cls: "" },
+    { col: "tipo",   label: "Tipo",                align: "text-left",  cls: "" },
+    { col: "valor",  label: "Valor libro",         align: "text-right", cls: "" },
+    { col: "dep",    label: "Depreciación al año", align: "text-right", cls: "hidden md:table-cell" },
+  ];
 
-  if(loading) return <div className="flex items-center justify-center h-64"><div className="spinner w-10 h-10 border-purple-600"/></div>;
+  if (loading) return (
+    <div className="cuaderno flex items-center justify-center h-64 text-[18px] text-cuaderno-grafito">Buscando los activos…</div>
+  );
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-      {/* Header */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Activos <span className="text-purple-700">MPF</span></h1>
-              <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Maquinaria, vehículos y equipos — valorización y documentos</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <ProyectoSelector />
-            <button onClick={()=>{setEditando(null);setShowModal(true);}} className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-              Nuevo Activo
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          {icon:"🏗️",label:"Activos en uso",value:activosActivos.length,sub:`${activos.filter(a=>!a.activo).length} inactivos`,gradient:"from-purple-700 to-violet-600"},
-          {icon:"💰",label:"Valor Libros Total",value:fmtM(valorTotal),sub:"Suma activos activos",gradient:"from-violet-600 to-purple-500"},
-          {icon:"📉",label:"Dep. Anual Total",value:fmtM(depTotal),sub:`${fmtM(depTotal/12)}/mes`,gradient:"from-purple-600 to-violet-500"},
-          {icon:"⚠️",label:"Doc. con alerta",value:conAlertas,sub:conAlertas>0?"Revisar urgente":"Todo al día",gradient:conAlertas>0?"from-red-500 to-red-600":"from-emerald-500 to-teal-600"},
-        ].map((k,i)=>(
-          <div key={i} className="glass-card rounded-xl p-4 sm:p-5 hover:shadow-lg transition-shadow">
-            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${k.gradient} flex items-center justify-center shadow-md text-xl mb-3`}>{k.icon}</div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 break-words">{k.value}</div>
-            <div className="text-xs sm:text-sm font-semibold text-slate-600 mt-0.5">{k.label}</div>
-            <div className="text-[11px] text-slate-400 mt-1">{k.sub}</div>
-          </div>
-        ))}
-      </div>
+      <FechaHoja />
 
-      {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-          <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar por nombre, código, patente..." className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm bg-white"/>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Activos</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Maquinaria, vehículos y equipos: cuánto valen y sus documentos al día.</p>
         </div>
-        <div className="flex gap-1 bg-white rounded-xl border-2 border-slate-200 p-1">
-          {[["todos","Todos"],["activos","Activos"],["inactivos","Inactivos"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setFiltroEstado(v)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filtroEstado===v?"bg-purple-700 text-white shadow":"text-slate-500 hover:text-slate-700"}`}>{l}</button>
-          ))}
+        <div className="flex flex-wrap items-end gap-3">
+          <ProyectoSelector variante="cuaderno" />
+          <Boton variante="primario" onClick={() => { setEditando(null); setShowModal(true); }}>
+            <IconoMas tamano={14} /> Nuevo activo
+          </Boton>
         </div>
-        <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)} className="px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm bg-white font-semibold text-slate-700">
-          <option value="todos">Todos los tipos</option>
-          {TIPOS.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
-        <div className="flex gap-1 bg-white rounded-xl border-2 border-slate-200 p-1">
-          {[["todos","Todos"],["alertas","⚠ Alertas"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setFiltroDoc(v)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filtroDoc===v?(v==="alertas"?"bg-amber-500 text-white shadow":"bg-purple-700 text-white shadow"):"text-slate-500 hover:text-slate-700"}`}>{l}</button>
-          ))}
-        </div>
-      </div>
+      </header>
 
-      {/* Tabla */}
-      <div className="glass-card rounded-xl overflow-hidden">
-        {activosFiltrados.length===0?(
-          <div className="py-16 text-center">
-            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg className="w-7 h-7 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-            </div>
-            <p className="font-bold text-slate-600">No hay activos registrados</p>
-            <p className="text-sm text-slate-400 mt-1">{busqueda||filtroTipo!=="todos"?"Ajusta los filtros":"Haz click en 'Nuevo Activo' para comenzar"}</p>
+      <Hoja titulo="Resumen" cuerpo="px-6 pb-4">
+        <div className="grid gap-x-12 md:grid-cols-2">
+          <div>
+            <LineaGuia etiqueta="Activos en uso"><span>{activosActivos.length}</span></LineaGuia>
+            <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{activos.filter(a => !a.activo).length} inactivos</p>
+            <LineaGuia etiqueta="Documentos por vencer o vencidos">
+              <span className={conAlertas > 0 ? "text-cuaderno-roja" : "text-cuaderno-verde"}>{conAlertas > 0 ? conAlertas : "ninguno"}</span>
+            </LineaGuia>
           </div>
-        ):(
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-purple-700 to-violet-600 text-white">
-                <tr>
-                  {[{col:"nombre",label:"Activo",align:"text-left",cls:"px-5 py-4"},{col:"tipo",label:"Tipo",align:"text-left",cls:"px-4 py-4"},{col:"valor",label:"Valor libros",align:"text-right",cls:"px-4 py-4"},{col:"dep",label:"Dep. anual",align:"text-right",cls:"px-4 py-4 hidden md:table-cell"}].map(({col,label,align,cls})=>(
-                    <th key={col} onClick={()=>handleSort(col)} className={`${cls} ${align} text-xs font-black uppercase tracking-wider cursor-pointer hover:bg-white/10 select-none transition-colors`}>{label}<SortIcon col={col}/></th>
-                  ))}
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider hidden lg:table-cell">Documentos</th>
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider hidden sm:table-cell">Propiedad</th>
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider">Estado</th>
-                  <th className="px-4 py-4 text-center text-xs font-black uppercase tracking-wider">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {activosFiltrados.map((a,idx)=>{
-                  const tipo=TIPO_MAP[a.tipo]||TIPOS[3];
-                  const vl=valorLibros(a); const dep=depAnual(a); const alerta=tieneAlerta(a);
-                  const esMachine=a._source==="machines";
-                  return (
-                    <tr key={a.id} onClick={()=>setDetalle(detalle?.id===a.id?null:a)} className={`cursor-pointer hover:bg-purple-50/40 transition-colors ${idx%2===0?"bg-white":"bg-slate-50/30"} ${!a.activo?"opacity-60":""}`}>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${tipo.color} flex items-center justify-center flex-shrink-0`}>
-                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={tipo.icon}/></svg>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <p className="font-bold text-slate-900 text-sm">{a.nombre}</p>
-                              {esMachine&&<span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold">FleetCore</span>}
-                            </div>
-                            <p className="text-xs text-slate-400">{[a.code,a.patente].filter(Boolean).join(" · ")||(a.marca&&`${a.marca} ${a.modelo||""}`)}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4"><span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${tipo.badge}`}>{tipo.label}</span></td>
-                      <td className="px-4 py-4 text-right">{vl>0?<span className="text-sm font-bold text-slate-800">{fmt(vl,a.moneda)}</span>:<span className="text-xs text-slate-300">—</span>}</td>
-                      <td className="px-4 py-4 text-right hidden md:table-cell">{dep>0?<span className="text-sm text-slate-500">{fmt(dep,a.moneda)}/año</span>:<span className="text-xs text-slate-300">—</span>}</td>
-                      <td className="px-4 py-4 text-center hidden lg:table-cell">
-                        {alerta?<span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full">⚠ Vence pronto</span>:<span className="text-emerald-500 text-xs font-semibold">✓ Al día</span>}
-                      </td>
-                      <td className="px-4 py-4 text-center hidden sm:table-cell">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${a.ownership==="OWNED"?"bg-purple-100 text-purple-700":a.ownership==="RENTED"?"bg-amber-100 text-amber-700":a.ownership==="CREDITO_AUTO"?"bg-sky-100 text-sky-700":"bg-blue-100 text-blue-700"}`}>{OWN_LABELS[a.ownership]||a.ownership||"—"}</span>
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${a.activo?"bg-purple-100 text-purple-700":"bg-slate-100 text-slate-500"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${a.activo?"bg-purple-600":"bg-slate-400"}`}/>
-                          {a.activo?"Activo":"Inactivo"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-center" onClick={e=>e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button onClick={()=>{setEditando(a);setShowModal(true);}} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all" title="Editar">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          <div>
+            <LineaGuia etiqueta="Valor libro total"><Cifra valor={valorTotal} escala="pesos" color="tinta" vacio="$0" raya="doble" /></LineaGuia>
+            <LineaGuia etiqueta="Depreciación al año"><Cifra valor={depTotal} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+            <p className="m-0 -mt-1 text-right text-[13px] text-cuaderno-grafito"><Cifra valor={depTotal / 12} escala="pesos" color="heredar" vacio="$0" /> al mes</p>
+          </div>
+        </div>
+      </Hoja>
+
+      <Hoja titulo="Detalle"
+        extra={
+          <>
+            <Campo etiqueta="Buscar" type="search" className="w-56"
+              value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Nombre, código o patente" />
+            <Segmentado opciones={[{ id: "todos", label: "Todos" }, { id: "activos", label: "Activos" }, { id: "inactivos", label: "Inactivos" }]}
+              valor={filtroEstado} onCambiar={setFiltroEstado} />
+            <Campo as="select" etiqueta="Tipo" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+              <option value="todos">Todos</option>
+              {TIPOS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </Campo>
+            <Casilla marcada={filtroDoc === "alertas"} onCambiar={v => setFiltroDoc(v ? "alertas" : "todos")} className="pb-2">
+              Solo con documentos por vencer
+            </Casilla>
+          </>
+        }>
+        {activosFiltrados.length === 0 ? (
+          <div className="py-12 text-center space-y-1">
+            <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">
+              {busqueda || filtroTipo !== "todos" ? "Nada coincide con los filtros" : "Aún no hay activos anotados"}
+            </p>
+            <p className="m-0 text-[16px] text-cuaderno-grafito">
+              {busqueda || filtroTipo !== "todos" ? "Prueba con otra búsqueda o tipo." : "Agrega el primero con el botón Nuevo activo."}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    {COLS.map(({ col, label, align, cls }) => {
+                      const activa = sortCol === col;
+                      return (
+                        <th key={col} className={`${cls} ${align} font-normal text-[15px] px-2 py-2 whitespace-nowrap`}
+                          aria-sort={activa ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+                          <button onClick={() => handleSort(col)} className="min-h-[36px] text-cuaderno-grafito hover:text-cuaderno-tinta">
+                            {label}{activa && <span aria-hidden="true">{sortDir === "asc" ? " ↑" : " ↓"}</span>}
                           </button>
-                          <button onClick={()=>handleEliminar(a)} disabled={deletingId===a.id} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
-                            {deletingId===a.id?<div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"/>:<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <div className="px-5 py-4 bg-gradient-to-r from-purple-700 to-violet-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-white/70">{activosFiltrados.length} activos mostrados</span>
-              <div className="text-right">
-                <p className="text-xs text-white/60">Valor libros total (filtro)</p>
-                <p className="text-lg font-black text-white">{fmtM(activosFiltrados.filter(a=>a.activo).reduce((s,a)=>s+valorLibros(a),0))}</p>
-              </div>
+                        </th>
+                      );
+                    })}
+                    <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-2 py-2 hidden lg:table-cell">Documentos</th>
+                    <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-2 py-2 hidden sm:table-cell">Propiedad</th>
+                    <th className="font-normal text-[15px] text-center text-cuaderno-grafito px-2 py-2">Estado</th>
+                    <th className="w-20"><span className="sr-only">Acciones</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activosFiltrados.map(a => {
+                    const vl = valorLibros(a); const dep = depAnual(a); const alerta = tieneAlerta(a);
+                    return (
+                      <tr key={a.id} tabIndex={0}
+                        onClick={() => setDetalle(detalle?.id === a.id ? null : a)}
+                        onKeyDown={e => { if (e.key === "Enter") setDetalle(a); }}
+                        className={`group border-b border-cuaderno-renglon cursor-pointer hover:bg-cuaderno-papel focus:outline-none focus-visible:bg-cuaderno-papel ${!a.activo ? "opacity-60" : ""}`}>
+                        <td className="px-2 py-2">
+                          <p className="m-0 text-[17px] leading-tight">{a.nombre}</p>
+                          <p className="m-0 text-[13px] text-cuaderno-grafito">{[a.code, a.patente].filter(Boolean).join(", ") || (a.marca && `${a.marca} ${a.modelo || ""}`)}</p>
+                        </td>
+                        <td className="px-2 py-2 text-[15px] text-cuaderno-grafito">{TIPO_MAP[a.tipo]?.label || "Otro"}</td>
+                        <td className="px-2 py-2 text-right text-[16px] whitespace-nowrap">
+                          {vl > 0 ? (a.moneda && a.moneda !== "CLP" ? fmt(vl, a.moneda) : <Cifra valor={vl} escala="pesos" color="tinta" />) : <span className="text-cuaderno-grafito">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-right text-[15px] text-cuaderno-grafito whitespace-nowrap hidden md:table-cell">
+                          {dep > 0 ? (a.moneda && a.moneda !== "CLP" ? fmt(dep, a.moneda) : <Cifra valor={dep} escala="pesos" color="heredar" />) : "—"}
+                        </td>
+                        <td className="px-2 py-2 text-[15px] hidden lg:table-cell whitespace-nowrap">
+                          {alerta ? <Resaltado color="rosa">por vencer</Resaltado> : <span className="inline-flex items-center gap-1 text-cuaderno-verde"><VistoBueno tamano={12} titulo="" /> al día</span>}
+                        </td>
+                        <td className="px-2 py-2 text-[15px] text-cuaderno-grafito hidden sm:table-cell">{(OWN_LABELS[a.ownership] || a.ownership || "—").toLowerCase()}</td>
+                        <td className="px-2 py-2 text-center text-[15px]">
+                          {a.activo ? <Resaltado color="menta">activo</Resaltado> : <span className="text-cuaderno-grafito">inactivo</span>}
+                        </td>
+                        <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                            <button onClick={() => { setEditando(a); setShowModal(true); }} aria-label={`Editar ${a.nombre}`} title="Editar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                              <IconoLapiz tamano={14} />
+                            </button>
+                            <button onClick={() => handleEliminar(a)} disabled={deletingId === a.id} aria-label={`Eliminar ${a.nombre}`} title="Eliminar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 disabled:opacity-50">
+                              {deletingId === a.id ? <span className="text-[12px]">…</span> : <IconoBorrar tamano={14} />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
+            <div className="flex flex-wrap items-end justify-between gap-3 pt-3">
+              <span className="text-[15px] text-cuaderno-grafito">{activosFiltrados.length} activos en la lista</span>
+              <LineaGuia etiqueta="Valor libro de los activos en uso" className="w-full max-w-md">
+                <Cifra valor={activosFiltrados.filter(a => a.activo).reduce((s, a) => s + valorLibros(a), 0)} escala="pesos" color="tinta" vacio="$0" raya="doble" />
+              </LineaGuia>
+            </div>
+          </>
         )}
-      </div>
+      </Hoja>
 
       {detalle && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={()=>setDetalle(null)}>
-          <div className="w-full max-w-4xl my-8" onClick={e=>e.stopPropagation()}>
-            <PanelDetalle activo={detalle} onClose={()=>setDetalle(null)} onEdit={()=>{setEditando(detalle);setShowModal(true);setDetalle(null);}} projects={projects} empresaId={empresaId} onDocUploaded={handleDocUploaded} onFechaUpdated={handleFechaDocUpdated}/>
-          </div>
-        </div>
+        <PanelDetalle activo={detalle} onClose={() => setDetalle(null)}
+          onEdit={() => { setEditando(detalle); setShowModal(true); setDetalle(null); }}
+          projects={projects} empresaId={empresaId} onDocUploaded={handleDocUploaded} onFechaUpdated={handleFechaDocUpdated} />
       )}
 
-      <ModalActivo isOpen={showModal} onClose={()=>{setShowModal(false);setEditando(null);}} onSave={handleSave} editando={editando} projects={projects}/>
+      <ModalActivo isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }} onSave={handleSave} editando={editando} projects={projects} />
 
-      {/* Modal confirmación eliminar */}
       {confirmEliminar && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-            <div className="bg-gradient-to-r from-red-500 to-red-600 p-5 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-white font-black text-sm">Eliminar activo</h3>
-                <p className="text-red-200 text-xs">Esta acción no se puede deshacer</p>
-              </div>
+        <ModalCuaderno
+          titulo="Eliminar activo"
+          subtitulo="No se puede deshacer"
+          ancho="max-w-sm"
+          capa="z-[80]"
+          onClose={() => setConfirmEliminar(null)}
+          pie={
+            <div className="flex gap-2">
+              <Boton className="flex-1" onClick={() => setConfirmEliminar(null)}>Cancelar</Boton>
+              <Boton variante="primario" className="flex-1 !bg-cuaderno-roja !border-cuaderno-roja hover:!bg-cuaderno-roja/90" onClick={confirmarEliminar}>Sí, eliminar</Boton>
             </div>
-            <div className="p-5">
-              <p className="text-sm text-slate-700 font-semibold">
-                ¿Estás seguro que deseas eliminar <span className="font-black text-slate-900">"{confirmEliminar.nombre || confirmEliminar.code || "este activo"}"</span>?
-              </p>
-              {confirmEliminar._source === "machines" && (
-                <div className="mt-3 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  <p className="text-xs text-amber-700 font-semibold">
-                    Este activo está sincronizado con FleetCore. Se eliminará también de la flota principal.
-                  </p>
-                </div>
-              )}
-              <p className="text-xs text-slate-400 mt-3">Se eliminarán también los documentos y datos financieros asociados.</p>
-            </div>
-            <div className="px-5 pb-5 flex gap-3">
-              <button
-                onClick={() => setConfirmEliminar(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmarEliminar}
-                className="flex-1 py-2.5 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white font-black rounded-xl text-sm transition-all shadow-md"
-              >
-                Sí, eliminar
-              </button>
-            </div>
-          </div>
-        </div>
+          }>
+          <p className="m-0 text-[17px]">
+            ¿Eliminar «{confirmEliminar.nombre || confirmEliminar.code || "este activo"}»?
+          </p>
+          {confirmEliminar._source === "machines" && (
+            <Nota etiqueta="Ojo:">este activo viene de la flota de FleetCore. Se va a eliminar también de la flota principal.</Nota>
+          )}
+          <p className="m-0 text-[15px] text-cuaderno-grafito">Se borran también sus documentos y datos de valor.</p>
+        </ModalCuaderno>
       )}
     </div>
   );

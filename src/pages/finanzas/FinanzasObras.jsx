@@ -2,6 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, FechaHoja, GraficoBarras, BarraProporcion,
+  IconoActualizar, IconoBajar, casoTitulo,
+} from "./cuaderno";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 const MESES_FULL  = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -23,46 +27,7 @@ function mesKey(fecha) {
   } catch { return null; }
 }
 
-// ─── Gráfico barras SVG ───────────────────────────────────────────────────────
-function BarChart({ data, height=110 }) {
-  if (!data?.length) return (
-    <div style={{height}} className="flex items-center justify-center text-slate-300 text-xs">Sin datos</div>
-  );
-  const maxVal = Math.max(...data.map(d => Math.max(d.ingresos||0, d.egresos||0)), 1);
-  const W = 100 / data.length;
-  return (
-    <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="w-full" style={{height}}>
-      {data.map((d,i) => {
-        const ih = ((d.ingresos||0)/maxVal)*(height-18);
-        const eh = ((d.egresos ||0)/maxVal)*(height-18);
-        return (
-          <g key={i}>
-            <rect x={i*W+W*0.05} y={height-18-ih} width={W*0.42} height={Math.max(ih,0)} rx="1" fill="#7c3aed" opacity="0.85"/>
-            <rect x={i*W+W*0.52} y={height-18-eh} width={W*0.42} height={Math.max(eh,0)} rx="1" fill="#f59e0b" opacity="0.75"/>
-            <text x={i*W+W/2} y={height-4} textAnchor="middle" fontSize="3.8" fill="#94a3b8">{d.label}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ icon, label, value, sub, gradient, tag, tagColor }) {
-  return (
-    <div className="glass-card rounded-xl p-4 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-md text-xl`}>{icon}</div>
-        {tag && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tagColor}`}>{tag}</span>}
-      </div>
-      <div className="text-xl font-black text-slate-900 break-words">{value}</div>
-      <div className="text-xs font-semibold text-slate-600 mt-0.5">{label}</div>
-      {sub && <div className="text-[11px] text-slate-400 mt-1">{sub}</div>}
-    </div>
-  );
-}
-
-// ─── Panel de un proyecto ─────────────────────────────────────────────────────
+// ─── Hoja de una obra ─────────────────────────────────────────────────────────
 function ProyectoPanel({ proyecto, datos, mes, anio }) {
   const { ingresos, egresos, egrPorFuente, proveedores, flujoPorMes } = datos;
   const neto   = ingresos - egresos;
@@ -70,116 +35,89 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
   const maxProv = proveedores[0]?.total || 1;
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      {/* Header del proyecto */}
-      <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-5 py-4 flex items-center justify-between">
+    <section className="bg-cuaderno-hoja border border-cuaderno-columna rounded-md">
+      <header className="flex flex-wrap items-end justify-between gap-3 px-6 pt-3 pb-2 border-b-[3px] border-double border-cuaderno-margen">
         <div>
-          <h2 className="text-white font-black text-base leading-tight">
-            {proyecto.name || proyecto.nombre || proyecto.id}
-          </h2>
-          {proyecto.code && <p className="text-purple-200 text-xs mt-0.5">{proyecto.code}</p>}
+          <Titulo as="h2" tamano="lg">{proyecto.name || proyecto.nombre || proyecto.id}</Titulo>
+          {proyecto.code && <p className="m-0 -mt-1 text-[15px] text-cuaderno-grafito">{proyecto.code}</p>}
         </div>
-        <div className={`px-3 py-1.5 rounded-xl text-xs font-black ${
-          neto >= 0 ? "bg-emerald-400/20 text-emerald-100" : "bg-red-400/20 text-red-100"
-        }`}>
-          {neto >= 0 ? "▲" : "▼"} {fmtM(Math.abs(neto))} neto
-        </div>
-      </div>
+        <p className="m-0 pb-1 text-[17px]">
+          Neto de {MESES_FULL[mes].toLowerCase()}: <Cifra valor={neto} escala="pesos" vacio="$0" raya="doble" />
+        </p>
+      </header>
 
-      <div className="p-5 space-y-5">
-        {/* KPIs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <KpiCard icon="💰" label="Ingresos"  value={fmtM(ingresos)} gradient="from-purple-700 to-violet-600" sub={`${MESES_SHORT[mes]} ${anio}`} />
-          <KpiCard icon="📤" label="Egresos"   value={fmtM(egresos)}  gradient="from-amber-500 to-orange-600"  sub="Rend + OC + Sub" />
-          <KpiCard
-            icon={neto>=0?"📈":"📉"}
-            label="Flujo neto"
-            value={fmtM(Math.abs(neto))}
-            gradient={neto>=0?"from-emerald-500 to-teal-600":"from-red-500 to-red-600"}
-            tag={neto>=0?"▲":"▼"}
-            tagColor={neto>=0?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-700"}
-          />
-          <KpiCard
-            icon="📊"
-            label="Margen bruto"
-            value={margen !== null ? `${margen}%` : "—"}
-            gradient={margen===null?"from-slate-400 to-slate-500":parseFloat(margen)>=0?"from-emerald-500 to-teal-600":"from-red-500 to-red-600"}
-            sub={ingresos===0?"Sin ingresos registrados":undefined}
-          />
-        </div>
+      <div className="px-6 py-4 grid gap-x-12 gap-y-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <div>
+          <LineaGuia etiqueta="Ingresos"><Cifra valor={ingresos} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <LineaGuia etiqueta="Egresos"><Cifra valor={-egresos} escala="pesos" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">rendiciones, compras y subcontratos</p>
+          <LineaGuia etiqueta="Margen">
+            <span className={margen !== null && parseFloat(margen) < 0 ? "text-cuaderno-roja" : ""}>
+              {margen !== null ? `${margen.replace(".", ",")}%` : "—"}
+            </span>
+          </LineaGuia>
+          {ingresos === 0 && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">sin ingresos anotados</p>}
 
-        {/* Gráfico + Distribución egresos */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-          {/* Evolución mensual */}
-          <div className="bg-slate-50 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-black text-slate-700">Evolución 6 meses</p>
-              <div className="flex gap-3 text-[10px] text-slate-400">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-600 inline-block"/>Ing.</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-500 inline-block"/>Egr.</span>
-              </div>
-            </div>
-            <BarChart data={flujoPorMes} height={100} />
-          </div>
-
-          {/* Distribución egresos */}
-          <div className="bg-slate-50 rounded-xl p-4">
-            <p className="text-xs font-black text-slate-700 mb-3">Distribución egresos</p>
+          <div className="mt-4">
+            <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">En qué se fue el egreso</p>
             {egresos === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-4">Sin egresos este período</p>
+              <p className="m-0 text-[15px] text-cuaderno-grafito">Sin egresos este período.</p>
             ) : (
               <div className="space-y-2.5">
                 {[
-                  { label: "Rendiciones",      val: egrPorFuente.rendicion,  color: "from-violet-500 to-purple-600" },
-                  { label: "Órdenes de Compra",val: egrPorFuente.oc,         color: "from-amber-400 to-orange-500"  },
-                  { label: "Subcontratos",     val: egrPorFuente.subcontrato,color: "from-emerald-400 to-teal-500"  },
-                ].map(({ label, val, color }) => (
-                  <div key={label}>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[11px] font-semibold text-slate-600">{label}</span>
-                      <span className="text-[11px] font-black text-slate-800">
-                        {fmtM(val)} {egresos>0?`(${((val/egresos)*100).toFixed(0)}%)`:""}
-                      </span>
+                  { label: "Rendiciones",       val: egrPorFuente.rendicion },
+                  { label: "Órdenes de compra", val: egrPorFuente.oc },
+                  { label: "Subcontratos",      val: egrPorFuente.subcontrato },
+                ].map(({ label, val }) => {
+                  const pct = egresos > 0 ? (val / egresos) * 100 : 0;
+                  return (
+                    <div key={label}>
+                      <div className="flex items-baseline justify-between gap-3 text-[16px]">
+                        <span>{label}</span>
+                        <span className="flex items-baseline gap-3">
+                          <Cifra valor={val} escala="pesos" color="tinta" vacio="$0" />
+                          <span className="w-10 text-right text-[14px] text-cuaderno-grafito">{pct.toFixed(0)}%</span>
+                        </span>
+                      </div>
+                      <BarraProporcion pct={pct} />
                     </div>
-                    <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                      <div className={`h-full bg-gradient-to-r ${color} rounded-full`}
-                        style={{width: egresos>0?`${(val/egresos)*100}%`:"0%"}} />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
-        {/* Top proveedores */}
-        {proveedores.length > 0 && (
-          <div className="bg-slate-50 rounded-xl p-4">
-            <p className="text-xs font-black text-slate-700 mb-3">Top Proveedores</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {proveedores.slice(0,6).map((p,i) => (
-                <div key={i} className="flex items-center gap-2.5">
-                  <span className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
-                    i===0?"bg-amber-100 text-amber-700":"bg-slate-100 text-slate-500"
-                  }`}>{i+1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between mb-0.5">
-                      <p className="text-[11px] font-bold text-slate-700 truncate">{p.nombre}</p>
-                      <p className="text-[11px] font-black text-slate-900 ml-1 flex-shrink-0">{fmtM(p.total)}</p>
-                    </div>
-                    <div className="h-1 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-purple-600 to-violet-500 rounded-full"
-                        style={{width:`${(p.total/maxProv)*100}%`}}/>
-                    </div>
-                  </div>
-                </div>
-              ))}
+        <div>
+          <div className="flex items-end justify-between gap-3">
+            <p className="m-0 text-[16px] text-cuaderno-grafito">Últimos seis meses</p>
+            <div className="flex gap-3 text-[14px]">
+              <Resaltado color="menta">ingresos</Resaltado>
+              <Resaltado color="rosa">egresos</Resaltado>
             </div>
           </div>
-        )}
+          <GraficoBarras data={flujoPorMes} height={170} />
+
+          {proveedores.length > 0 && (
+            <div className="mt-3">
+              <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">Principales proveedores</p>
+              <ol className="m-0 p-0 list-none grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                {proveedores.slice(0, 6).map((p, i) => (
+                  <li key={i}>
+                    <div className="flex items-baseline gap-2 text-[15px]">
+                      <span className="w-4 text-cuaderno-grafito">{i + 1}.</span>
+                      <span className="flex-1 min-w-0 truncate">{casoTitulo(p.nombre)}</span>
+                      <Cifra valor={p.total} escala="pesos" color="tinta" className="flex-shrink-0" />
+                    </div>
+                    <div className="pl-6"><BarraProporcion pct={(p.total / maxProv) * 100} /></div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -307,123 +245,66 @@ export default function FinanzasObras() {
   const conActividad  = proyectosFiltrados.filter(p => p.actividad > 0);
 
   return (
-    <div className="space-y-4 sm:space-y-5 p-4 sm:p-6">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* Header */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              Resumen por <span className="text-purple-700">Obra</span>
-            </h1>
-            <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Ingresos, egresos y márgenes por proyecto</p>
-          </div>
+      <FechaHoja />
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Buscador */}
-            <div className="relative">
-              <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0" />
-              </svg>
-              <input
-                type="text" placeholder="Buscar obra…" value={busqueda}
-                onChange={e=>setBusqueda(e.target.value)}
-                className="pl-8 pr-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-xs bg-white w-40"
-              />
-            </div>
-            {/* Selector mes */}
-            <select value={mes} onChange={e=>setMes(Number(e.target.value))}
-              className="px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm font-bold bg-white text-slate-700">
-              {MESES_FULL.map((m,i)=><option key={i} value={i}>{m}</option>)}
-            </select>
-            {/* Selector año */}
-            <select value={anio} onChange={e=>setAnio(Number(e.target.value))}
-              className="px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm font-bold bg-white text-slate-700">
-              {anios.map(a=><option key={a} value={a}>{a}</option>)}
-            </select>
-            {/* Refresh */}
-            <button onClick={cargar} disabled={loading}
-              className="w-9 h-9 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center transition-all disabled:opacity-40">
-              <svg className={`w-4 h-4 ${loading?"animate-spin":""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Por obra</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">
+            Ingresos, egresos y margen de cada proyecto en {MESES_FULL[mes].toLowerCase()} de {anio}.
+            {!loading && ` ${conActividad.length} con movimientos, de ${proyectos.length}.`}
+          </p>
         </div>
-
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-black rounded-full">
-            {MESES_FULL[mes]} {anio}
-          </span>
-          {!loading && (
-            <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-semibold rounded-full">
-              {conActividad.length} obra{conActividad.length!==1?"s":""} con actividad · {proyectos.length} totales
-            </span>
-          )}
-          {loading && <span className="text-xs text-slate-400 animate-pulse">Cargando...</span>}
+        <div className="flex flex-wrap items-end gap-3">
+          <Campo etiqueta="Buscar" type="search" className="w-44" value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Nombre de la obra" />
+          <Campo as="select" etiqueta="Mes" value={mes} onChange={e => setMes(Number(e.target.value))}>
+            {MESES_FULL.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </Campo>
+          <Campo as="select" etiqueta="Año" value={anio} onChange={e => setAnio(Number(e.target.value))}>
+            {anios.map(a => <option key={a} value={a}>{a}</option>)}
+          </Campo>
+          <Boton onClick={cargar} disabled={loading}>
+            <IconoActualizar tamano={15} className={loading ? "animate-spin" : ""} />
+            {loading ? "Actualizando…" : "Actualizar"}
+          </Boton>
         </div>
-      </div>
+      </header>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="spinner w-10 h-10 border-purple-600" />
-        </div>
+        <p className="m-0 py-16 text-center text-[18px] text-cuaderno-grafito">Sumando las cuentas de cada obra…</p>
       ) : proyectosFiltrados.length === 0 ? (
-        <div className="glass-card rounded-xl p-12 flex flex-col items-center gap-3 text-center">
-          <span className="text-4xl">🏗️</span>
-          <p className="text-sm font-black text-slate-600">Sin proyectos</p>
-          <p className="text-xs text-slate-400">No se encontraron proyectos con los filtros actuales</p>
-        </div>
+        <Hoja cuerpo="px-6 py-10 text-center space-y-1">
+          <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">No hay obras que mostrar</p>
+          <p className="m-0 text-[16px] text-cuaderno-grafito">Prueba con otra búsqueda.</p>
+        </Hoja>
       ) : (
         <div className="space-y-5">
+          {conActividad.map(({ proyecto, datos }) => (
+            <ProyectoPanel key={proyecto.id} proyecto={proyecto} datos={procesarDatos(datos)} mes={mes} anio={anio} />
+          ))}
 
-          {/* Proyectos con actividad */}
-          {conActividad.length > 0 && (
-            <div className="space-y-4">
-              {conActividad.map(({proyecto, datos}) => (
-                <ProyectoPanel
-                  key={proyecto.id}
-                  proyecto={proyecto}
-                  datos={procesarDatos(datos)}
-                  mes={mes}
-                  anio={anio}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Proyectos sin actividad — colapsados */}
+          {/* Obras sin movimientos, plegadas */}
           {sinActividad.length > 0 && (
-            <details className="glass-card rounded-xl overflow-hidden group">
-              <summary className="px-5 py-3.5 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black text-slate-500">
-                    Sin actividad en {MESES_FULL[mes]}
-                  </span>
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 text-xs font-bold rounded-full">
-                    {sinActividad.length} proyecto{sinActividad.length!==1?"s":""}
-                  </span>
-                </div>
-                <svg className="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+            <details className="group bg-cuaderno-hoja border border-cuaderno-columna rounded-md">
+              <summary className="flex items-center justify-between gap-3 px-6 min-h-[52px] cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                <span className="text-[18px]">
+                  Sin movimientos en {MESES_FULL[mes].toLowerCase()}
+                  <span className="ml-2 text-[15px] text-cuaderno-grafito">{sinActividad.length} obra{sinActividad.length !== 1 ? "s" : ""}</span>
+                </span>
+                <IconoBajar tamano={15} className="text-cuaderno-grafito transition-transform group-open:rotate-180" />
               </summary>
-              <div className="px-5 pb-4 pt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {sinActividad.map(({proyecto}) => (
-                  <div key={proyecto.id} className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 rounded-xl">
-                    <div className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xs text-slate-500 font-black">{(proyecto.name||proyecto.nombre||"?")[0]}</span>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-600 truncate">{proyecto.name||proyecto.nombre||proyecto.id}</p>
-                      {proyecto.code && <p className="text-[10px] text-slate-400">{proyecto.code}</p>}
-                    </div>
-                  </div>
+              <ul className="m-0 px-6 pb-4 pt-1 list-none grid gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+                {sinActividad.map(({ proyecto }) => (
+                  <li key={proyecto.id} className="py-2 border-b border-cuaderno-renglon">
+                    <p className="m-0 text-[16px] truncate">{proyecto.name || proyecto.nombre || proyecto.id}</p>
+                    {proyecto.code && <p className="m-0 text-[13px] text-cuaderno-grafito">{proyecto.code}</p>}
+                  </li>
                 ))}
-              </div>
+              </ul>
             </details>
           )}
-
         </div>
       )}
     </div>

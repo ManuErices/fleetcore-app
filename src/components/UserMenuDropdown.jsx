@@ -15,6 +15,8 @@
  *  onAdminPanel     — () => void (opcional)
  *  theme            — 'light' | 'dark'  (default: 'light')
  *  placement        — 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
+ *  variante         — 'default' | 'cuaderno' (default: 'default'). 'cuaderno' es el
+ *                     diseño de Finanzas. Sin la prop, el menú se ve igual que siempre.
  */
 
 import React, { useState, useRef, useCallback } from 'react';
@@ -52,6 +54,159 @@ function UserAvatar({ user, size = 'md' }) {
 }
 
 
+// ════════════════════════════════════════════════════════════════════════════
+//  Variante "cuaderno" (Finanzas)
+//  Misma lógica que el menú por defecto; solo cambia el dibujo: una tarjeta
+//  índice con letra manuscrita, avatar a lápiz y doble línea roja bajo el perfil.
+//  Usa solo los tokens cuaderno-* de Tailwind, sin importar nada de Finanzas.
+// ════════════════════════════════════════════════════════════════════════════
+const TRAZOS = {
+  escudo:    "M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z M9 12l2 2 4-4",
+  engranaje: "M12 9a3 3 0 100 6 3 3 0 000-6z M19.4 13a7.5 7.5 0 000-2l2-1.5-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3.5h-4l-.4 2.5a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.5a7.5 7.5 0 000 2l-2 1.5 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.5h4l.4-2.5a7.5 7.5 0 001.7-1l2.3.9 2-3.4-2-1.5z",
+  invitar:   "M15 19v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1 M9 10a3 3 0 100-6 3 3 0 000 6z M19 8v6 M16 11h6",
+  lineas:    "M4 7h16 M4 12h16 M4 17h16",
+  apagar:    "M6.3 6.3a8 8 0 1011.4 0 M12 3v9",
+  check:     "M5 13l4 4L19 7",
+  chevron:   "M6 15l6-6 6 6",
+};
+
+function Trazo({ d, className = "w-4 h-4" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+function InicialCuaderno({ texto, grande = false }) {
+  return (
+    <span className={`${grande ? "w-11 h-11 text-[20px]" : "w-9 h-9 text-[16px]"} rounded-full border-[1.5px] border-cuaderno-tinta/70 text-cuaderno-tinta font-manuscrita flex items-center justify-center flex-shrink-0`}>
+      {texto}
+    </span>
+  );
+}
+
+function MenuCuaderno({
+  triggerRef, open, onToggle, close, estiloPanel,
+  user, displayName, rol, isOnline,
+  empresa, empresaId, empresasDisponibles, tieneMultiEmpresa, cambiandoEmpresa, errorCambio, onCambiarEmpresa,
+  acciones, onLogout,
+}) {
+  const inicial = (displayName || "?").trim()[0]?.toUpperCase() || "?";
+  const item = "w-full min-h-[40px] flex items-center gap-3 px-3 rounded-md text-left text-[16px] text-cuaderno-tinta hover:bg-cuaderno-hoja focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40";
+
+  return (
+    <div className="relative font-manuscrita" ref={triggerRef}>
+      {/* ── Botón en el pie de la barra ── */}
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md border text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+          open ? "bg-cuaderno-hoja border-cuaderno-columna" : "border-transparent hover:bg-cuaderno-hoja/70"}`}
+      >
+        <InicialCuaderno texto={inicial} />
+        <span className="flex-1 min-w-0 leading-tight">
+          <span className="block text-[17px] text-cuaderno-tinta truncate">{displayName}</span>
+          <span className={`block text-[13px] ${isOnline ? "text-cuaderno-verde" : "text-cuaderno-roja"}`}>
+            {isOnline ? "en línea" : "sin conexión"}
+          </span>
+        </span>
+        <Trazo d={TRAZOS.chevron} className={`w-4 h-4 flex-shrink-0 text-cuaderno-grafito transition-transform ${open ? "" : "rotate-180"}`} />
+      </button>
+
+      {/* ── Tarjeta del menú, en portal para escapar de cualquier contexto ── */}
+      {open && createPortal(
+        <>
+          <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={close} />
+
+          <div role="menu" style={{ zIndex: 9999, ...estiloPanel }}
+            className="cuaderno font-manuscrita w-72 bg-cuaderno-tarjeta border border-cuaderno-columna/70 rounded-md overflow-hidden shadow-[0_18px_40px_-18px_rgb(var(--cuaderno-tinta)/0.45)]">
+
+            {/* Perfil */}
+            <div className="px-4 pt-3.5 pb-3 border-b-[3px] border-double border-cuaderno-margen flex items-center gap-3">
+              <InicialCuaderno texto={inicial} grande />
+              <div className="min-w-0">
+                <p className="m-0 text-[18px] leading-tight text-cuaderno-tinta truncate">{displayName}</p>
+                <p className="m-0 text-[14px] text-cuaderno-grafito truncate">{user?.email}</p>
+                <p className="m-0 text-[13px] text-cuaderno-grafito">{rol}</p>
+              </div>
+            </div>
+
+            {/* Empresa */}
+            {empresasDisponibles.length > 0 && (
+              <div className="px-4 pt-2.5 pb-2 border-b border-cuaderno-azul">
+                <p className="m-0 mb-1 text-[14px] text-cuaderno-grafito">{tieneMultiEmpresa ? "Empresa activa" : "Empresa"}</p>
+                {!tieneMultiEmpresa ? (
+                  <p className="m-0 text-[16px] text-cuaderno-tinta truncate">{empresa?.nombre || "—"}</p>
+                ) : (
+                  <ul className="m-0 p-0 list-none">
+                    {empresasDisponibles.map(e => {
+                      const activa = e.id === empresaId;
+                      return (
+                        <li key={e.id}>
+                          <button
+                            role="menuitemradio"
+                            aria-checked={activa}
+                            disabled={cambiandoEmpresa}
+                            onClick={() => onCambiarEmpresa(e.id)}
+                            className={`w-full min-h-[46px] flex items-center gap-2.5 px-2 rounded-md text-left disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+                              activa ? "bg-cuaderno-hoja" : "hover:bg-cuaderno-hoja/70"}`}
+                          >
+                            <span className={`w-7 h-7 rounded-full border flex items-center justify-center text-[14px] flex-shrink-0 ${
+                              activa ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-cuaderno-columna text-cuaderno-grafito"}`}>
+                              {e.nombre?.[0]?.toUpperCase() || "?"}
+                            </span>
+                            <span className="min-w-0 flex-1 leading-tight">
+                              <span className={`block text-[16px] truncate ${activa ? "text-cuaderno-tinta" : "text-cuaderno-tinta/80"}`}>{e.nombre}</span>
+                              {e.rut && <span className="block text-[13px] text-cuaderno-grafito">{e.rut}</span>}
+                            </span>
+                            {activa && <Trazo d={TRAZOS.check} className="w-4 h-4 flex-shrink-0 text-cuaderno-verde" />}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {cambiandoEmpresa && <p className="m-0 px-2 pt-1 text-[13px] text-cuaderno-grafito">Cambiando de empresa…</p>}
+                {errorCambio && <p className="m-0 px-2 pt-1 text-[13px] text-cuaderno-roja">{errorCambio}</p>}
+              </div>
+            )}
+
+            {/* Conexión */}
+            <p className="m-0 px-4 py-2 border-b border-cuaderno-azul flex items-center gap-2 text-[14px]">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOnline ? "bg-cuaderno-verde" : "bg-cuaderno-roja animate-pulse motion-reduce:animate-none"}`} />
+              <span className="text-cuaderno-tinta">
+                {isOnline ? "Conectado" : "Sin conexión"}
+                <span className="text-cuaderno-grafito">, {isOnline ? "datos al día" : "los cambios se guardan aquí"}</span>
+              </span>
+            </p>
+
+            {/* Acciones */}
+            <div className="p-2">
+              {acciones.map(a => (
+                <button key={a.id} role="menuitem" onClick={() => { close(); a.onClick(); }} className={item}>
+                  <Trazo d={a.icono} className="w-4 h-4 flex-shrink-0 text-cuaderno-grafito" />
+                  {a.label}
+                </button>
+              ))}
+              {acciones.length > 0 && <div className="my-1 mx-3 border-t border-dashed border-cuaderno-columna" />}
+              <button role="menuitem" onClick={() => { close(); onLogout?.(); }}
+                className={`${item} !text-cuaderno-roja hover:!bg-cuaderno-rosa/40`}>
+                <Trazo d={TRAZOS.apagar} className="w-4 h-4 flex-shrink-0" />
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+
 export default function UserMenuDropdown({
   user,
   userRole = 'operador',
@@ -63,6 +218,7 @@ export default function UserMenuDropdown({
   onAdminEmpresaPanel,
   theme = 'light',
   placement = 'bottom-right',
+  variante = 'default',
 }) {
   const [open, setOpen] = useState(false);
   const [triggerRect, setTriggerRect] = useState(null);
@@ -142,6 +298,40 @@ export default function UserMenuDropdown({
   const itemRedHover = isDark ? 'hover:bg-red-500/10' : 'hover:bg-red-50';
 
   const displayName = user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+
+  if (variante === 'cuaderno') {
+    return (
+      <MenuCuaderno
+        triggerRef={triggerRef}
+        open={open}
+        onToggle={handleToggle}
+        close={close}
+        estiloPanel={getDropdownStyle()}
+        user={user}
+        displayName={displayName}
+        rol={ROLE_LABELS[userRole] || userRole}
+        isOnline={isOnline}
+        empresa={empresa}
+        empresaId={empresaId}
+        empresasDisponibles={empresasDisponibles}
+        tieneMultiEmpresa={tieneMultiEmpresa}
+        cambiandoEmpresa={cambiandoEmpresa}
+        errorCambio={errorCambio}
+        onCambiarEmpresa={handleCambiarEmpresa}
+        acciones={[
+          userRole === 'superadmin' && onAdminPanel && { id: 'super', label: 'Super Admin', icono: TRAZOS.escudo, onClick: onAdminPanel },
+          canAdmin && (userRole === 'superadmin' ? onAdminEmpresaPanel : onAdminPanel) && {
+            id: 'admin', label: 'Panel de administración', icono: TRAZOS.engranaje,
+            onClick: userRole === 'superadmin' ? onAdminEmpresaPanel : onAdminPanel,
+          },
+          canInvite && { id: 'invitar', label: 'Invitar usuarios', icono: TRAZOS.invitar, onClick: onInviteUsers },
+          canPricing && { id: 'plan', label: 'Gestionar plan', icono: TRAZOS.escudo, onClick: onGoToPricing },
+          onBackToSelector && { id: 'app', label: 'Cambiar de aplicación', icono: TRAZOS.lineas, onClick: onBackToSelector },
+        ].filter(Boolean)}
+        onLogout={onLogout}
+      />
+    );
+  }
 
   return (
     <div className="relative" ref={triggerRef}>

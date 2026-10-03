@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import FinanzasDashboard from "./FinanzasDashboard";
 import FinanzasFlujoCaja from "./FinanzasFlujoCaja";
 import FinanzasCostos from "./FinanzasCostos";
@@ -96,6 +96,14 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
   const [activeView, setActiveView] = useState("dashboard");
   const { alertas } = useFinanzas();
 
+  // Tema cuaderno: el papel también va bajo <html>, para que no asome el fondo
+  // gris de la app al desplazar más allá del borde. Se retira al salir del
+  // módulo, así RRHH o Maquinaria no lo heredan.
+  useEffect(() => {
+    document.documentElement.classList.add("cuaderno-activo");
+    return () => document.documentElement.classList.remove("cuaderno-activo");
+  }, []);
+
   // Contadores por ítem. El módulo los calcula y el shell solo los pinta: qué
   // cuenta como alerta de Costos es asunto de Finanzas, no de la cáscara.
   const badgeActivos = alertas.filter(a => a.categoria === "activo_sin_datos").length;
@@ -139,7 +147,8 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
         navGroups={navGroups}
         activeId={activeView}
         onSelect={setActiveView}
-        marca={{ titulo: "Fleet", resalte: "Core-F", subtitulo: "Finanzas", logoSrc: "/logo-fleetcore-f.png" }}
+        variante="cuaderno"
+        marca={{ titulo: "Fleet", resalte: "Core", subtitulo: "Finanzas", logoSrc: "/logo-fleetcore-f.png" }}
         footerSlot={<NotificacionesBtn />}
         user={user} userRole={userRole} onLogout={onLogout}
         onBackToSelector={onBackToSelector}
