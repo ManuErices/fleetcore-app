@@ -3,6 +3,9 @@ import { onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, set
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import { escucharProveedores } from "../../lib/proveedores";
+import SelectorProveedor from "./SelectorProveedor";
+import PanelDetalleCuenta from "./PanelDetalleCuenta";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
 // Paleta: blanco base + slate neutros + purple brand + verde/rojo funcionales
@@ -128,16 +131,32 @@ function getWeekColumns() {
 }
 
 // ─── Modal: Nueva / Editar Cuenta ──────────────────────────────────────────
-function ModalCuenta({ onSave, onClose, editando }) {
+function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
   const { empresaId } = useEmpresa();
   const { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat } = useSubcategorias(empresaId);
   const [form, setForm] = useState(editando || {
     categoria: "EGRESOS", nombre: "", subcategoria: "OPERACIONAL",
     detalle: "", proyectoId: "", cliente: "", presupuestoMensual: "",
     recurrente: false, frecuenciaRecurrente: "mensual", montoRecurrente: "",
+    proveedorId: "",
   });
   const [nuevaSubcat, setNuevaSubcat] = useState("");
   const [errorNombre, setErrorNombre] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [errorGuardar, setErrorGuardar] = useState(null);
+
+  const guardar = async () => {
+    if (!form.nombre.trim()) { setErrorNombre(true); return; }
+    setGuardando(true);
+    setErrorGuardar(null);
+    try {
+      await onSave(form);
+    } catch (e) {
+      console.error("Error guardando cuenta:", e);
+      setErrorGuardar("No se pudo guardar la cuenta. Revisa tu conexión e intenta de nuevo.");
+      setGuardando(false);
+    }
+  };
   const [agregandoSubcat, setAgregandoSubcat] = useState(false);
   const [gestionandoSubcat, setGestionandoSubcat] = useState(false);
   const [editandoSubcat, setEditandoSubcat] = useState(null);
@@ -172,9 +191,9 @@ function ModalCuenta({ onSave, onClose, editando }) {
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" style={{boxShadow:"0 24px 48px -12px rgba(0,0,0,0.18)"}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden" style={{boxShadow:"0 24px 48px -12px rgba(0,0,0,0.18)"}}>
         {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
           <div>
             <h3 className="text-sm font-bold text-slate-900">{editando ? "Editar cuenta" : "Nueva cuenta"}</h3>
             <p className="text-xs text-slate-400 mt-0.5">Completa los campos para continuar</p>
@@ -183,7 +202,7 @@ function ModalCuenta({ onSave, onClose, editando }) {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto">
           {/* Tipo */}
           <div>
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Tipo</label>
@@ -211,6 +230,17 @@ function ModalCuenta({ onSave, onClose, editando }) {
                   : "border-slate-200 focus:border-purple-400 focus:ring-purple-100"}`}/>
             {errorNombre && <p className="text-[10px] text-red-500 mt-1 font-medium">El nombre es obligatorio</p>}
           </div>
+          {/* Proveedor — solo egresos. Los datos de pago y contacto viven en el maestro */}
+          {!isIngreso && (
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Proveedor o beneficiario</label>
+              <SelectorProveedor empresaId={empresaId} proveedores={proveedores}
+                value={form.proveedorId || ""}
+                onChange={id => setForm(f => ({ ...f, proveedorId: id }))}
+                nombreSugerido={form.nombre} />
+              <p className="text-[10px] text-slate-400 mt-1">Guarda cómo se le paga y a quién contactar. Es opcional.</p>
+            </div>
+          )}
           {/* Subcategoría */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -388,13 +418,16 @@ function ModalCuenta({ onSave, onClose, editando }) {
             )}
           </div>
 
+          {errorGuardar && (
+            <p className="text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errorGuardar}</p>
+          )}
           <div className="flex gap-2 pt-1">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
+            <button onClick={onClose} disabled={guardando} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors disabled:opacity-50">
               Cancelar
             </button>
-            <button onClick={() => { if (!form.nombre.trim()) { setErrorNombre(true); return; } onSave(form); }}
-              className="flex-1 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold transition-colors shadow-sm">
-              {editando ? "Guardar" : "Crear cuenta"}
+            <button onClick={guardar} disabled={guardando}
+              className="flex-1 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold transition-colors shadow-sm disabled:opacity-60">
+              {guardando ? "Guardando…" : editando ? "Guardar" : "Crear cuenta"}
             </button>
           </div>
         </div>
@@ -542,9 +575,18 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
 function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas,
   onPayment, onTogglePaid, onNota, onEdit, onDelete, proyectoId,
   draggedPayment, dragOverKey, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
-  mesActualWeeks }) {
+  mesActualWeeks, onOpenDetalle }) {
 
   const isEgreso = account.categoria === "EGRESOS";
+  // Solo los egresos abren el panel de detalle (datos de pago y contacto)
+  const abreDetalle = isEgreso && !!onOpenDetalle;
+  const propsDetalle = abreDetalle ? {
+    role: "button",
+    tabIndex: 0,
+    title: "Ver cómo pagar y contacto",
+    onClick: () => onOpenDetalle(account),
+    onKeyDown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetalle(account); } },
+  } : {};
   if (proyectoId !== "todos" && account.proyectoId && account.proyectoId !== proyectoId) return null;
 
   const rowTotal = weekColumns.reduce((s, w) => s + (payments[`${account.id}-${w.key}`] || 0), 0);
@@ -564,9 +606,10 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
       {/* Nombre */}
       <td className="sticky left-0 z-10 border-r" style={{background:"white", borderRight:"0.5px solid #f1f5f9", minWidth:"220px", height:"36px", paddingLeft:"16px", paddingRight:"8px"}}>
         <div className="flex items-center justify-between gap-1 h-full">
-          <div className="min-w-0 flex-1">
+          <div className={`min-w-0 flex-1 ${abreDetalle ? "group/nombre cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300" : ""}`}
+            {...propsDetalle}>
             <div className="flex items-center gap-1.5">
-              <p className="text-[11px] font-medium text-slate-700 truncate leading-tight">{account.nombre}</p>
+              <p className={`text-[11px] font-medium text-slate-700 truncate leading-tight ${abreDetalle ? "group-hover/nombre:text-purple-700 transition-colors" : ""}`}>{account.nombre}</p>
               {account.recurrente && (
                 <span className="flex-shrink-0 text-[8px] font-bold px-1 rounded" style={{background:"#ede9fe",color:"#7c3aed"}} title={`Recurrente · ${account.frecuenciaRecurrente || "mensual"}`}>↺</span>
               )}
@@ -669,14 +712,23 @@ export default function FinanzasFlujoCaja() {
   const [showExportMenu,  setShowExportMenu]  = useState(false);
   const [exportando,      setExportando]      = useState(null); // null | "excel" | "pdf"
   const [expandido,       setExpandido]       = useState(false); // modo pantalla ampliada (oculta sidebar + KPIs)
+  const [proveedores,     setProveedores]     = useState([]);    // maestro de proveedores, en vivo
+  const [cuentaDetalleId, setCuentaDetalleId] = useState(null);  // cuenta abierta en el panel lateral
 
-  // Salir del modo expandido con Escape
+  // Salir del modo expandido con Escape — salvo que haya un panel o modal
+  // encima: en ese caso Escape cierra esa capa y no el modo ampliado.
   useEffect(() => {
     if (!expandido) return;
-    const fn = e => { if (e.key === "Escape") setExpandido(false); };
+    const fn = e => {
+      if (e.key === "Escape" && !cuentaDetalleId && !showModalCuenta && !showModalSaldo) setExpandido(false);
+    };
     document.addEventListener("keydown", fn);
     return () => document.removeEventListener("keydown", fn);
-  }, [expandido]);
+  }, [expandido, cuentaDetalleId, showModalCuenta, showModalSaldo]);
+
+  // Maestro de proveedores — suscripción en vivo para que el panel y el
+  // modal de cuenta reflejen al instante una ficha creada o editada.
+  useEffect(() => escucharProveedores(empresaId, setProveedores), [empresaId]);
 
   // ── Autorrelleno de recurrentes ────────────────────────────────────────────
   // Se ejecuta cuando hay cuentas o payments listos
@@ -799,16 +851,16 @@ export default function FinanzasFlujoCaja() {
   const handleDragEnd = useCallback(() => { setDraggedPayment(null); setDragOverKey(null); }, []);
 
   // ── CRUD ───────────────────────────────────────────────────────────────────
+  // Si Firestore falla, el error sube a ModalCuenta, que lo muestra y queda
+  // abierto. Antes se tragaba en silencio y el modal se cerraba igual.
   const handleSaveCuenta = useCallback(async (form) => {
-    try {
-      if (editandoCuenta) {
-        await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", editandoCuenta.id), form);
-        setCuentas(prev => prev.map(c => c.id === editandoCuenta.id ? { ...c, ...form } : c));
-      } else {
-        const ref = await addDoc(collection(db, "empresas", empresaId, "flujo_cuentas"), { ...form, creadoEn: new Date().toISOString() });
-        setCuentas(prev => [...prev, { id: ref.id, ...form }]);
-      }
-    } catch(e) {}
+    if (editandoCuenta) {
+      await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", editandoCuenta.id), form);
+      setCuentas(prev => prev.map(c => c.id === editandoCuenta.id ? { ...c, ...form } : c));
+    } else {
+      const ref = await addDoc(collection(db, "empresas", empresaId, "flujo_cuentas"), { ...form, creadoEn: new Date().toISOString() });
+      setCuentas(prev => [...prev, { id: ref.id, ...form }]);
+    }
     // Re-aplicar recurrentes después de guardar/editar
     setCuentas(prev => {
       setPayments(pm => {
@@ -824,6 +876,19 @@ export default function FinanzasFlujoCaja() {
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
     try { await deleteDoc(doc(db, "empresas", empresaId, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
   }, [empresaId]);
+
+  // Vincula (o desvincula con "") un proveedor del maestro a una cuenta.
+  // Lanza si falla, para que el panel muestre el error.
+  const handleVincularProveedor = useCallback(async (cuentaId, proveedorId) => {
+    await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", cuentaId), { proveedorId });
+    setCuentas(prev => prev.map(c => c.id === cuentaId ? { ...c, proveedorId } : c));
+  }, [empresaId]);
+
+  const cuentaDetalle = useMemo(
+    () => cuentas.find(c => c.id === cuentaDetalleId) || null,
+    [cuentas, cuentaDetalleId]
+  );
+  const abrirDetalle = useCallback(c => setCuentaDetalleId(c.id), []);
 
   const handleSaldoBanco = useCallback(async (val) => {
     setSaldoBanco(val); setShowModalSaldo(false);
@@ -1370,7 +1435,7 @@ export default function FinanzasFlujoCaja() {
                         draggedPayment={draggedPayment} dragOverKey={dragOverKey}
                         onDragStart={handleDragStart} onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
-                        mesActualWeeks={mesActualWeeks}/>
+                        mesActualWeeks={mesActualWeeks} onOpenDetalle={abrirDetalle}/>
                     ))}
                   </React.Fragment>
                 );
@@ -1386,7 +1451,7 @@ export default function FinanzasFlujoCaja() {
                   draggedPayment={draggedPayment} dragOverKey={dragOverKey}
                   onDragStart={handleDragStart} onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
-                  mesActualWeeks={mesActualWeeks}/>
+                  mesActualWeeks={mesActualWeeks} onOpenDetalle={abrirDetalle}/>
               ))}
 
               {/* Subtotal egresos */}
@@ -1637,9 +1702,25 @@ export default function FinanzasFlujoCaja() {
         </div>
       )}
 
+      {/* Panel lateral de detalle de cuenta (egresos) */}
+      {cuentaDetalle && (
+        <PanelDetalleCuenta
+          empresaId={empresaId}
+          cuenta={cuentaDetalle}
+          proveedor={proveedores.find(p => p.id === cuentaDetalle.proveedorId) || null}
+          proveedores={proveedores}
+          accent={subAccent(cuentaDetalle.subcategoria)}
+          weekColumns={weekColumns}
+          payments={payments} paymentsPaid={paymentsPaid} paymentNotas={paymentNotas}
+          bloqueado={showModalCuenta || showModalSaldo}
+          onClose={() => setCuentaDetalleId(null)}
+          onEditarCuenta={c => { setEditandoCuenta(c); setShowModalCuenta(true); }}
+          onVincularProveedor={handleVincularProveedor}/>
+      )}
+
       {/* Modales */}
       {showModalCuenta && (
-        <ModalCuenta editando={editandoCuenta} onSave={handleSaveCuenta}
+        <ModalCuenta editando={editandoCuenta} onSave={handleSaveCuenta} proveedores={proveedores}
           onClose={() => { setShowModalCuenta(false); setEditandoCuenta(null); }}/>
       )}
       {showModalSaldo && (
