@@ -7,6 +7,7 @@ import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebas
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
   ModalCuaderno, FechaHoja,
@@ -100,8 +101,16 @@ function cuotasEsperadas(c) {
 
 // Montos en pesos van alineados en casillas. UF y dólares se escriben con su
 // moneda: alinearlos con los pesos haría pensar que son la misma unidad.
-function MontoMoneda({ valor, moneda = "CLP" }) {
-  if (moneda && moneda !== "CLP") return <span className="whitespace-nowrap">{fmt(valor, moneda)}</span>;
+function MontoMoneda({ valor, moneda = "CLP", indicadores = null }) {
+  if (moneda && moneda !== "CLP") {
+    const pesos = aPesos(valor, moneda, indicadores);
+    return (
+      <span className="inline-flex flex-col items-end leading-tight">
+        <span className="whitespace-nowrap">{fmt(valor, moneda)}</span>
+        {pesos !== null && <span className="text-[12px] text-cuaderno-grafito whitespace-nowrap">unos <Cifra valor={pesos} escala="pesos" color="heredar" /></span>}
+      </span>
+    );
+  }
   return <Cifra valor={valor} escala="pesos" vacio="$0" color="tinta" />;
 }
 
@@ -233,6 +242,7 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
   const [form, setForm] = useState(EMPTY);
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [errorGuardado, setErrorGuardado] = useState("");
   const [activos, setActivos] = useState([]);
   const [loadingActivos, setLoadingActivos] = useState(false);
 
@@ -316,9 +326,17 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
       payload.cuotasTotales = "";
       payload.cuotasPagadas = "0";
     }
-    await onSave(payload);
-    setSaving(false);
-    onClose();
+    setErrorGuardado("");
+    try {
+      await onSave(payload);
+      onClose();
+    } catch (e) {
+      // Antes el error se perdía y el botón quedaba en "Guardando…".
+      console.error(e);
+      setErrorGuardado("No se pudo guardar. Revisa tu conexión e intenta de nuevo; lo escrito sigue aquí.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Activos filtrados según categoría seleccionada
@@ -340,6 +358,7 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
       bloqueado={saving}
       pie={
         <div className="flex flex-wrap items-center gap-2">
+          {errorGuardado && <Nota etiqueta="Ojo:" className="basis-full">{errorGuardado}</Nota>}
           {step > 1 && <Boton variante="texto" onClick={() => setStep(s => s - 1)}>Volver</Boton>}
           <div className="flex-1" />
           <Boton onClick={onClose} disabled={saving}>Cancelar</Boton>
@@ -509,6 +528,7 @@ export default function FinanzasCostos() {
   const { proyectoId } = useFinanzas();
   const { empresaId } = useEmpresa();
   const [costos, setCostos]                   = useState([]);
+  const [indicadores, setIndicadores]         = useState(null);
   const [loading, setLoading]                 = useState(true);
   const [showModal, setShowModal]             = useState(false);
   const [editando, setEditando]               = useState(null);
@@ -530,6 +550,7 @@ export default function FinanzasCostos() {
       setCostos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);
+    obtenerIndicadores(empresaId).then(setIndicadores).catch(() => {});
   };
   useEffect(() => { cargar(); }, [empresaId]);
 
@@ -621,12 +642,17 @@ export default function FinanzasCostos() {
   }, [costos, filtroEstado, filtroCategoria, busqueda, sortCol, sortDir]);
 
   const activos      = useMemo(() => costos.filter(c => c.activo), [costos]);
-  const totalMensual = useMemo(() => activos.reduce((s, c) => s + montoMensual(c), 0), [activos]);
+  // Totales siempre en pesos: UF y dólares se convierten al valor del día.
+  // Si no hay valor del día, ese costo queda fuera del total (y se avisa).
+  const mensualEnPesos = (c) => aPesos(montoMensual(c), c.moneda, indicadores);
+  const fueraDelTotal  = useMemo(() => activos.filter(c => mensualEnPesos(c) === null), [activos, indicadores]);
+  const totalMensual = useMemo(() => activos.reduce((s, c) => s + (mensualEnPesos(c) || 0), 0), [activos, indicadores]);
   const porCategoria = useMemo(() => {
     const res = {};
-    activos.forEach(c => { res[c.categoria] = (res[c.categoria] || 0) + montoMensual(c); });
+    activos.forEach(c => { const v = mensualEnPesos(c); if (v !== null) res[c.categoria] = (res[c.categoria] || 0) + v; });
     return res;
-  }, [activos]);
+  }, [activos, indicadores]);
+  const hayMonedaExtranjera = activos.some(c => c.moneda && c.moneda !== "CLP");
   const topCat = useMemo(() => {
     const entries = Object.entries(porCategoria);
     if (!entries.length) return null;
@@ -676,6 +702,14 @@ export default function FinanzasCostos() {
         <Hoja titulo="Resumen">
           <LineaGuia etiqueta="Costo al mes"><Cifra valor={totalMensual} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
           <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{activos.length} costos activos</p>
+          {hayMonedaExtranjera && indicadores && (
+            <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">
+              en pesos, con la UF a <Cifra valor={indicadores.uf} escala="pesos" color="heredar" /> y el dólar a <Cifra valor={indicadores.dolar} escala="pesos" color="heredar" />{indicadores.fuente === "guardado" ? " (último valor guardado)" : ""}
+            </p>
+          )}
+          {fueraDelTotal.length > 0 && (
+            <Nota etiqueta="Ojo:" className="mb-1">no hay valor del día para {fueraDelTotal.map(c => c.nombre).join(", ")}; queda{fueraDelTotal.length > 1 ? "n" : ""} fuera del total hasta que vuelva la conexión.</Nota>
+          )}
           <LineaGuia etiqueta="Proyección del año"><Cifra valor={totalMensual * 12} escala="pesos" vacio="$0" /></LineaGuia>
           <LineaGuia etiqueta="Mayor categoría">
             <span>{topCat ? (CAT_MAP[topCat[0]]?.label || "—") : "—"}</span>
@@ -776,7 +810,7 @@ export default function FinanzasCostos() {
                         <td className="px-2 py-2 text-[15px] hidden md:table-cell truncate max-w-[140px]">{c.proveedor || <span className="text-cuaderno-grafito">—</span>}</td>
                         <td className="px-2 py-2 text-right text-[16px] whitespace-nowrap">
                           {c.frecuencia !== "unico"
-                            ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} />
+                            ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} indicadores={indicadores} />
                             : <span className="text-[14px] text-cuaderno-grafito">pago único</span>}
                         </td>
                         <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
@@ -881,7 +915,7 @@ export default function FinanzasCostos() {
               <div>
                 <LineaGuia etiqueta="Monto"><MontoMoneda valor={parseFloat(c.monto) || 0} moneda={c.moneda} /></LineaGuia>
                 <LineaGuia etiqueta="Equivalente al mes">
-                  {c.frecuencia !== "unico" ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} /> : <span className="text-cuaderno-grafito">pago único</span>}
+                  {c.frecuencia !== "unico" ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} indicadores={indicadores} /> : <span className="text-cuaderno-grafito">pago único</span>}
                 </LineaGuia>
                 <LineaGuia etiqueta="Frecuencia"><span>{(FREC_MAP[c.frecuencia] || "").toLowerCase()}</span></LineaGuia>
                 <LineaGuia etiqueta="Proveedor"><span>{c.proveedor || "—"}</span></LineaGuia>

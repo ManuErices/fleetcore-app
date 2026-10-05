@@ -175,7 +175,8 @@ export default function FinanzasPlanPagos() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState(null);
-  const [mesInicio] = useState({ anio: 2026, mes: 5 }); // jun-26, ajustable luego con selector
+  // Parte en el mes en curso (antes estaba fijo en junio de 2026).
+  const [mesInicio] = useState(() => { const h = new Date(); return { anio: h.getFullYear(), mes: h.getMonth() }; });
 
   const mesesVisibles = useMemo(() => generarMeses(mesInicio, 12), [mesInicio]);
 

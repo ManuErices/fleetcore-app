@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import FinanzasDashboard from "./FinanzasDashboard";
 import FinanzasFlujoCaja from "./FinanzasFlujoCaja";
 import FinanzasCostos from "./FinanzasCostos";
 import FinanzasActivos from "./FinanzasActivos";
@@ -7,17 +6,28 @@ import FinanzasProveedores from "./FinanzasProveedores";
 import FinanzasObras from "./FinanzasObras";
 import FinanzasReportes from "./FinanzasReportes";
 import FinanzasDeuda from "./FinanzasDeuda";
+import FinanzasBancos from "./FinanzasBancos";
+import FinanzasSemana from "./FinanzasSemana";
+import FinanzasPagos from "./FinanzasPagos";
 import { FinanzasProvider, NotificacionesBtn, useFinanzas } from "./FinanzasContext";
 import NotificacionesDrawer from "./NotificacionesDrawer";
 import AppShellLayout from "../../components/AppShellLayout";
 
 const NAV_ITEMS = [
   {
-    id: "dashboard",
-    label: "Dashboard",
+    id: "semana",
+    label: "La semana",
     icon: (
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        d="M8 7V3m8 4V3M4 11h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1zm4 10l2 2 4-4" />
+    ),
+  },
+  {
+    id: "pagos",
+    label: "Pagos",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M3 7h18M3 7v10a1 1 0 001 1h16a1 1 0 001-1V7M3 7l2-3h14l2 3M7 14h4" />
     ),
   },
   {
@@ -26,6 +36,14 @@ const NAV_ITEMS = [
     icon: (
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
         d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+    ),
+  },
+  {
+    id: "bancos",
+    label: "Bancos",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18" />
     ),
   },
   {
@@ -82,8 +100,10 @@ const NAV_ITEMS = [
 // Mapa: vista activa (activeView) → valor `accion` que llevan las alertas.
 // Debe coincidir con los `accion` definidos en FinanzasContext (recalcularAlertas).
 const VIEW_TO_ACCION = {
-  dashboard:   null,            // el dashboard resume todo; no filtra
+  semana:      null,            // resume todo; no filtra
+  pagos:       null,
   flujo:       "Flujo de Caja",
+  bancos:      "Bancos",
   costos:      "Costos",
   activos:     "Activos",
   proveedores: "Proveedores",
@@ -93,7 +113,8 @@ const VIEW_TO_ACCION = {
 };
 
 function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
-  const [activeView, setActiveView] = useState("dashboard");
+  // Finanzas abre en "La semana": caja, programación de pagos y lo disponible.
+  const [activeView, setActiveView] = useState("semana");
   const { alertas } = useFinanzas();
 
   // Tema cuaderno: el papel también va bajo <html>, para que no asome el fondo
@@ -129,15 +150,17 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
 
   function renderView() {
     switch (activeView) {
-      case "dashboard":    return <FinanzasDashboard onNavigate={setActiveView} />;
+      case "semana":       return <FinanzasSemana />;
+      case "pagos":        return <FinanzasPagos />;
       case "flujo":        return <FinanzasFlujoCaja />;
+      case "bancos":       return <FinanzasBancos />;
       case "costos":       return <FinanzasCostos />;
       case "activos":      return <FinanzasActivos />;
       case "proveedores":  return <FinanzasProveedores />;
       case "deuda":        return <FinanzasDeuda />;
       case "obras":        return <FinanzasObras />;
       case "reportes":     return <FinanzasReportes />;
-      default:             return <FinanzasDashboard onNavigate={setActiveView} />;
+      default:             return <FinanzasSemana />;
     }
   }
 
@@ -164,8 +187,8 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
         seccionLabel={currentNav?.label}
         onNavegar={(vista) => {
           const mapa = {
-            "Dashboard":     "dashboard",
             "Flujo de Caja": "flujo",
+            "Bancos":        "bancos",
             "Costos":        "costos",
             "Activos":       "activos",
             "Proveedores":   "proveedores",

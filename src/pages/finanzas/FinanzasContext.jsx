@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
 
 const FinanzasContext = createContext(null);
 
@@ -28,7 +29,7 @@ function mesKey(fecha) {
 // categoria: "activo_doc" | "costo_fijo" | "proveedor" | "activo_sin_datos" | "ingreso_faltante" | "deuda_vencida"
 
 export function FinanzasProvider({ children }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa } = useEmpresa();
   const [proyectos, setProyectos]       = useState([]);
   const [proyectoId, setProyectoId]     = useState("todos");
   const [loadingProyectos, setLoading]  = useState(true);
@@ -51,12 +52,31 @@ export function FinanzasProvider({ children }) {
     setLoadingAlertas(true);
     const resultado = [];
 
+    // Valor del día de la UF y el dólar, para mostrar montos en pesos.
+    let indicadores = null;
+    try { indicadores = await obtenerIndicadores(empresaId); } catch (e) {}
+    const montoTexto = (monto, moneda) => {
+      const m = parseFloat(monto) || 0;
+      if (!moneda || moneda === "CLP") return `$${Math.round(m).toLocaleString("es-CL")}`;
+      const pesos = aPesos(m, moneda, indicadores);
+      const original = `${moneda} ${m.toLocaleString("es-CL", { maximumFractionDigits: 2 })}`;
+      return pesos === null ? original : `${original} (unos $${Math.round(pesos).toLocaleString("es-CL")})`;
+    };
+
+    // Máquinas de la flota: las usan las alertas de costos vehiculares y de activos.
+    let maquinas = [];
+    try {
+      const snapM = await getDocs(collection(db, "empresas", empresaId, "machines"));
+      maquinas = snapM.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {}
+
     // ── 1. Costos fijos con día de pago próximo (7 días) ──────────────────
+    let costos = [];
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
+      costos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const hoy = new Date();
-      snap.docs.forEach(d => {
-        const c = d.data();
+      costos.forEach(c => {
         if (c.activo === false || !c.diaPago) return;
         const diaPago = parseInt(c.diaPago);
         // Calcular próxima fecha de pago (este mes o el siguiente)
@@ -66,70 +86,72 @@ export function FinanzasProvider({ children }) {
         if (dias <= 7) {
           const monto = parseFloat(c.monto) || 0;
           resultado.push({
-            id: `costo_fijo_${d.id}`,
+            id: `costo_fijo_${c.id}`,
             tipo: dias <= 3 ? "danger" : "warning",
             categoria: "costo_fijo",
             titulo: `Pago próximo: ${c.nombre}`,
-            descripcion: `Vence el día ${diaPago} — $${Math.round(monto).toLocaleString("es-CL")}`,
+            descripcion: `Vence el día ${diaPago}, ${montoTexto(monto, c.moneda)}`,
             dias,
             accion: "Costos",
-            monto,
+            // En pesos, para que ningún total sume UF como si fueran pesos.
+            monto: aPesos(monto, c.moneda, indicadores) ?? undefined,
           });
         }
       });
     } catch (e) {}
 
-    // ── 2b. Documentos de costos fijos / créditos (faltantes / por vencer 30d / vencidos) ──
+    // ── 2. Documentos de costos fijos (faltantes, por vencer en 30 días, vencidos) ──
+    // Permiso de circulación, revisión técnica y SOAP son de vehículos: solo se
+    // piden a los créditos automotrices y a los leasing de un activo con
+    // patente. El contrato se pide a créditos, leasing y arriendos. Si alguien
+    // anotó una fecha de vencimiento en cualquier documento, se avisa igual.
     try {
-      const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
-      // Labels tal como se muestran en FinanzasCostos (difieren de Activos)
       const DOCS_COSTO = [
-        { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
-        { key: "vencSeguro",             label: "Contrato"             },
-        { key: "vencRevisionTecnica",    label: "Rev. Técnica"         },
-        { key: "vencSoapCivil",          label: "SOAP / Civil"         },
+        { key: "vencPermisoCirculacion", label: "Permiso Circulación", vehicular: true  },
+        { key: "vencSeguro",             label: "Contrato",            vehicular: false },
+        { key: "vencRevisionTecnica",    label: "Rev. Técnica",        vehicular: true  },
+        { key: "vencSoapCivil",          label: "SOAP / Civil",        vehicular: true  },
       ];
-      snap.docs.forEach(d => {
-        const c = d.data();
-        if (c.activo === false) return; // solo créditos/costos activos
+      const CON_CONTRATO = new Set(["credito", "leasing", "arriendo", "otro"]);
+      costos.forEach(c => {
+        if (c.activo === false) return;
         const nombre = c.nombre || "Crédito";
         const urls = c.archivosDoc || {};
-        DOCS_COSTO.forEach(({ key, label }) => {
-          const tieneArchivo = !!urls[key];
+        const activo = c.activoVinculadoId && maquinas.find(m => m.id === c.activoVinculadoId);
+        const esVehicular = c.categoria === "otro" || (c.categoria === "leasing" && !!activo?.patente);
+        DOCS_COSTO.forEach(({ key, label, vehicular }) => {
+          const aplica = vehicular ? esVehicular : CON_CONTRATO.has(c.categoria);
           const dias = diasHasta(c[key]); // fecha de vencimiento vive en la raíz (c[key])
 
-          // Documento sin archivo cargado → info
-          if (!tieneArchivo) {
+          if (aplica && !urls[key]) {
             resultado.push({
-              id: `costo_doc_falta_${d.id}_${key}`,
+              id: `costo_doc_falta_${c.id}_${key}`,
               tipo: "info",
               categoria: "costo_doc",
               titulo: `Documento faltante: ${label}`,
-              descripcion: `${nombre} — sin archivo cargado`,
+              descripcion: `${nombre}, sin archivo cargado`,
               dias: null,
               accion: "Costos",
             });
           }
-
-          // Vencimiento (aplica haya o no archivo, si hay fecha registrada)
           if (dias !== null) {
             if (dias < 0) {
               resultado.push({
-                id: `costo_doc_venc_${d.id}_${key}`,
+                id: `costo_doc_venc_${c.id}_${key}`,
                 tipo: "danger",
                 categoria: "costo_doc",
                 titulo: `${label} vencido`,
-                descripcion: `${nombre} — vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? "s" : ""}`,
+                descripcion: `${nombre}, vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? "s" : ""}`,
                 dias,
                 accion: "Costos",
               });
             } else if (dias <= 30) {
               resultado.push({
-                id: `costo_doc_venc_${d.id}_${key}`,
+                id: `costo_doc_venc_${c.id}_${key}`,
                 tipo: dias <= 7 ? "danger" : "warning",
                 categoria: "costo_doc",
                 titulo: `${label} por vencer`,
-                descripcion: `${nombre} — vence en ${dias} día${dias !== 1 ? "s" : ""}`,
+                descripcion: `${nombre}, vence en ${dias} día${dias !== 1 ? "s" : ""}`,
                 dias,
                 accion: "Costos",
               });
@@ -140,44 +162,69 @@ export function FinanzasProvider({ children }) {
     } catch (e) {}
 
     // ── 3. Proveedores con pagos pendientes/vencidos ───────────────────────
+    // Los registros manuales guardan "estado" y "fecha" (antes se leía
+    // estadoPago y fechaVencimiento, que no existen, y la alerta nunca salía).
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_proveedores"));
       snap.docs.forEach(d => {
         const p = d.data();
-        if (!["Pendiente", "Vencido", "Parcial"].includes(p.estadoPago)) return;
-        const dias = diasHasta(p.fechaVencimiento);
-        const tipo = p.estadoPago === "Vencido" || (dias !== null && dias < 0) ? "danger"
+        const estado = p.estado || p.estadoPago;
+        if (!["Pendiente", "Vencido", "Parcial"].includes(estado)) return;
+        const fecha = p.fechaVencimiento || p.fecha;
+        const dias = diasHasta(fecha);
+        const tipo = estado === "Vencido" || (dias !== null && dias < 0) ? "danger"
                    : dias !== null && dias <= 7 ? "warning" : "info";
+        const monto = parseFloat(p.monto) || 0;
         resultado.push({
           id: `proveedor_${d.id}`,
           tipo,
           categoria: "proveedor",
-          titulo: `Pago ${p.estadoPago.toLowerCase()}: ${p.razonSocial || p.nombre || "Proveedor"}`,
-          descripcion: p.fechaVencimiento
-            ? `Venc. ${p.fechaVencimiento} — $${Math.round(parseFloat(p.monto) || 0).toLocaleString("es-CL")}`
-            : `$${Math.round(parseFloat(p.monto) || 0).toLocaleString("es-CL")}`,
+          titulo: `Pago ${estado.toLowerCase()}: ${p.razonSocial || p.nombre || "Proveedor"}`,
+          descripcion: fecha ? `Fecha ${fecha}, ${montoTexto(monto, p.moneda)}` : montoTexto(monto, p.moneda),
           dias,
           accion: "Proveedores",
-          monto: parseFloat(p.monto) || 0,
+          monto: aPesos(monto, p.moneda, indicadores) ?? undefined,
         });
       });
     } catch (e) {}
 
-    // ── 4. Activos FleetCore sin datos financieros cargados ───────────────
+    // ── 4. Activos de la flota: documentos y datos de valor ───────────────
+    // Activos guarda todo en la ficha de la máquina (machines). Antes estas
+    // alertas leían finanzas_activos, que ya no se usa.
     try {
-      const snapM  = await getDocs(collection(db, "empresas", empresaId, "machines"));
-      const snapFA = await getDocs(collection(db, "empresas", empresaId, "finanzas_activos"));
-      const conDatos = new Set(snapFA.docs.map(d => d.data().machineId).filter(Boolean));
-      snapM.docs.forEach(d => {
-        const m = d.data();
-        if (m.empresa !== "MPF Ingeniería Civil" || m.active === false) return;
-        if (!conDatos.has(d.id)) {
+      const DOCS_ACTIVO = [
+        { key: "vencPermisoCirculacion", label: "Permiso Circulación" },
+        { key: "vencSeguro",             label: "Seguro"              },
+        { key: "vencRevisionTecnica",    label: "Rev. Técnica"        },
+        { key: "vencSoapCivil",          label: "SOAP / Civil"        },
+      ];
+      // Si la máquina indica a qué empresa pertenece, se compara con la empresa activa.
+      const normal = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+      const nombreEmpresa = normal(empresa?.nombre || empresa?.razonSocial).replace(/spa$|ltda$|sa$/, "");
+      maquinas.forEach(m => {
+        if (m.active === false || m.activo === false) return;
+        if (m.empresa && nombreEmpresa && !normal(m.empresa).startsWith(nombreEmpresa.slice(0, 12))) return;
+        const nombre = m.nombre || m.name || m.patente || m.code || m.id;
+        DOCS_ACTIVO.forEach(({ key, label }) => {
+          const dias = diasHasta(m[key]);
+          if (dias === null || dias > 30) return;
           resultado.push({
-            id: `activo_sin_datos_${d.id}`,
+            id: `activo_doc_${m.id}_${key}`,
+            tipo: dias < 0 || dias <= 7 ? "danger" : "warning",
+            categoria: "activo_doc",
+            titulo: dias < 0 ? `${label} vencido` : `${label} por vencer`,
+            descripcion: dias < 0 ? `${nombre}, vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? "s" : ""}` : `${nombre}, vence en ${dias} día${dias !== 1 ? "s" : ""}`,
+            dias,
+            accion: "Activos",
+          });
+        });
+        if (!m.valorCompra && !DOCS_ACTIVO.some(({ key }) => m[key])) {
+          resultado.push({
+            id: `activo_sin_datos_${m.id}`,
             tipo: "info",
             categoria: "activo_sin_datos",
             titulo: "Activo sin datos financieros",
-            descripcion: `${m.name || m.patente || d.id} — sin valorización ni documentos`,
+            descripcion: `${nombre}, sin valor de compra ni documentos`,
             dias: null,
             accion: "Activos",
           });
@@ -185,27 +232,26 @@ export function FinanzasProvider({ children }) {
       });
     } catch (e) {}
 
-    // ── 5. Meses sin ingresos registrados (últimos 3 meses) ───────────────
+    // ── 5. Cartolas sin subir hace más de 7 días ───────────────────────────
+    // (Reemplaza "meses sin ingresos": leía finanzas_ingresos, que nunca se
+    // llenó, y salía todos los meses. Los ingresos viven en el flujo.)
     try {
-      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_ingresos"));
-      const mesesConIngreso = new Set(snap.docs.map(d => mesKey(d.data().fecha)).filter(Boolean));
-      const hoy = new Date();
-      for (let i = 1; i <= 3; i++) {
-        const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        const label = d.toLocaleString("es-CL", { month: "long", year: "numeric" });
-        if (!mesesConIngreso.has(key)) {
-          resultado.push({
-            id: `ingreso_faltante_${key}`,
-            tipo: "info",
-            categoria: "ingreso_faltante",
-            titulo: "Sin ingresos registrados",
-            descripcion: `No hay ingresos manuales en ${label}`,
-            dias: null,
-            accion: "Flujo de Caja",
-          });
-        }
-      }
+      const snap = await getDocs(collection(db, "empresas", empresaId, "banco_cuentas"));
+      const nombresBanco = { bancochile: "Banco de Chile", bice: "BICE" };
+      snap.docs.forEach(d => {
+        const b = d.data();
+        const dias = diasHasta(b.saldoAl);
+        if (dias === null || dias >= -7) return;
+        resultado.push({
+          id: `banco_cartola_${d.id}`,
+          tipo: dias < -14 ? "warning" : "info",
+          categoria: "banco_cartola",
+          titulo: `Sube la cartola de ${nombresBanco[b.banco] || b.banco}`,
+          descripcion: `El último saldo es de hace ${Math.abs(dias)} días: la proyección de caja parte de ese saldo`,
+          dias: null,
+          accion: "Bancos",
+        });
+      });
     } catch (e) {}
 
     // ── 6. Deuda de proveedores/factoring/financieras vencida ──────────────
