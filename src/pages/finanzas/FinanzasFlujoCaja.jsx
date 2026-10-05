@@ -6,6 +6,7 @@ import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
+import { cargarReales, cargarSaldosBancos } from "../../lib/banco/importacion.js";
 import {
   Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
   ModalCuaderno, Segmentado, Casilla,
@@ -86,45 +87,49 @@ function fmtCompact(n) {
   return fmtCLP(n);
 }
 
+// Horizonte móvil: parte en la primera semana del mes en curso (para revisar
+// y marcar lo recién pasado) y llega siempre a 13 semanas por delante de la
+// semana actual, igual que la proyección de "La semana". Cada semana pertenece
+// al mes de su lunes; la primera, si su lunes cae en el mes anterior, cuenta
+// como del mes en curso. monthIndex numera los meses a la vista (0 = en curso).
+const SEMANAS_ADELANTE = 13;
+
 function getWeekColumns() {
-  const cols = [], seen = new Set();
+  const cols = [];
   const today = new Date();
+  const lunesDe = (d) => {
+    const x = new Date(d); x.setHours(0, 0, 0, 0);
+    const dow = x.getDay();
+    x.setDate(x.getDate() + (dow === 0 ? -6 : 1 - dow));
+    return x;
+  };
+  const primeroDelMes = new Date(today.getFullYear(), today.getMonth(), 1);
+  const inicio = lunesDe(primeroDelMes);
+  const fin = lunesDe(today); fin.setDate(fin.getDate() + 7 * (SEMANAS_ADELANTE - 1));
+  const meses = [];
   let wNum = 1;
-  const months = [
-    new Date(today.getFullYear(), today.getMonth(),     1), // mes actual   → monthIndex 0
-    new Date(today.getFullYear(), today.getMonth() + 1, 1),  // mes siguiente → monthIndex 1
-  ];
-  months.forEach((monthDate, monthIdx) => {
-    const first = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-    const last  = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
-    const start = new Date(first);
-    const dow = start.getDay();
-    start.setDate(first.getDate() + (dow === 0 ? -6 : 1 - dow));
-    start.setHours(0, 0, 0, 0);
-    let cur = new Date(start);
-    while (cur <= last) {
-      const ws = new Date(cur);
-      const we = new Date(ws); we.setDate(ws.getDate() + 6);
-      const key = `${ws.getFullYear()}-${String(ws.getMonth()+1).padStart(2,"0")}-${String(ws.getDate()).padStart(2,"0")}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        // Comparación inclusiva: la semana cubre desde ws 00:00 hasta el final del día de we
-        const weEnd = new Date(we); weEnd.setHours(23, 59, 59, 999);
-        const isCurrentWeek = today >= ws && today <= weEnd;
-        cols.push({
-          key, label: `S${wNum}`,
-          monthLabel: MESES[monthDate.getMonth()],
-          monthIndex: monthIdx,
-          monthName: MESES_FULL[monthDate.getMonth()],
-          startDate: ws, endDate: we,
-          dateRange: `${ws.getDate()}/${ws.getMonth()+1}–${we.getDate()}/${we.getMonth()+1}`,
-          isCurrentWeek,
-        });
-        wNum++;
-      }
-      cur.setDate(cur.getDate() + 7);
-    }
-  });
+  for (let cur = new Date(inicio); cur <= fin; cur.setDate(cur.getDate() + 7)) {
+    const ws = new Date(cur);
+    const we = new Date(ws); we.setDate(ws.getDate() + 6);
+    const mesRef = ws < primeroDelMes ? primeroDelMes : ws;
+    const claveMes = `${mesRef.getFullYear()}-${mesRef.getMonth()}`;
+    if (!meses.includes(claveMes)) meses.push(claveMes);
+    const key = `${ws.getFullYear()}-${String(ws.getMonth()+1).padStart(2,"0")}-${String(ws.getDate()).padStart(2,"0")}`;
+    // Comparación inclusiva: la semana cubre desde ws 00:00 hasta el final del día de we
+    const weEnd = new Date(we); weEnd.setHours(23, 59, 59, 999);
+    const isCurrentWeek = today >= ws && today <= weEnd;
+    cols.push({
+      key, label: `S${wNum}`,
+      monthLabel: MESES[mesRef.getMonth()],
+      monthIndex: meses.indexOf(claveMes),
+      monthName: MESES_FULL[mesRef.getMonth()],
+      monthYear: mesRef.getFullYear(),
+      startDate: ws, endDate: we,
+      dateRange: `${ws.getDate()}/${ws.getMonth()+1}–${we.getDate()}/${we.getMonth()+1}`,
+      isCurrentWeek,
+    });
+    wNum++;
+  }
   return cols;
 }
 
@@ -402,7 +407,7 @@ function bordeSemana(i, weeks) {
 }
 
 // ─── Celda editable ─────────────────────────────────────────────────────────
-function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek, borde,
+function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
   onSave, onTogglePaid, onNota,
   isDragging, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
 
@@ -449,7 +454,16 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek, borde,
             className="w-full min-w-0 text-right text-[16px] bg-cuaderno-tarjeta border-0 border-b-[1.5px] border-cuaderno-tinta text-cuaderno-tinta focus:outline-none px-1"/>
         </div>
       ) : (
-        <div className="group/celda relative flex items-center justify-end h-full px-2 cursor-pointer hover:bg-cuaderno-hoja/80" onClick={startEdit}>
+        <div className={`group/celda relative flex items-center justify-end h-full px-2 cursor-pointer hover:bg-cuaderno-hoja/80 ${real !== undefined ? "pt-2" : ""}`} onClick={startEdit}>
+          {/* Lo real del banco: ✓ si calza con lo planeado (diferencia bajo $1.000), si no el monto */}
+          {real !== undefined && (
+            Math.abs(real - (value || 0)) < 1000
+              ? <span className="absolute top-1 left-1.5 leading-none" title="Calza con el banco"><VistoBueno tamano={10} titulo="Calza con el banco" /></span>
+              : <span className="absolute top-1 left-1.5 text-[11px] leading-none text-cuaderno-grafito whitespace-nowrap"
+                  title={`En el banco: $${Math.round(real).toLocaleString("es-CL")}`}>
+                  banco <Cifra valor={real} color="heredar" />
+                </span>
+          )}
           {!isEmpty && (
             <span className="inline-flex items-center gap-0.5 text-[16px]">
               {nota && <span className="text-[14px] text-cuaderno-grafito" title={nota}>*</span>}
@@ -500,7 +514,7 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek, borde,
 }
 
 // ─── Fila de cuenta ─────────────────────────────────────────────────────────
-function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas,
+function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas, reales = {},
   onPayment, onTogglePaid, onNota, onEdit, onDelete, proyectoId,
   draggedPayment, dragOverKey, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
   mesActualWeeks, onOpenDetalle, sangria = "pl-8" }) {
@@ -577,6 +591,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
         return (
           <PaymentCell key={key}
             value={payments[key] || 0}
+            real={reales[key]}
             paid={!!paymentsPaid[key]}
             nota={paymentNotas[key] || ""}
             isEgreso={isEgreso}
@@ -608,7 +623,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function FinanzasFlujoCaja() {
   const { proyectoId } = useFinanzas();
-  const { empresaId } = useEmpresa();
+  const { empresaId, empresa } = useEmpresa();
   const { subcatsEgreso, subcatsIngreso, eliminarSubcat } = useSubcategorias(empresaId);
   const weekColumns = useMemo(() => getWeekColumns(), []);
   const tableRef = useRef(null);
@@ -618,6 +633,9 @@ export default function FinanzasFlujoCaja() {
   const [paymentsPaid, setPaymentsPaid] = useState({});
   const [paymentNotas, setPaymentNotas] = useState({});
   const [saldoBanco,   setSaldoBanco]   = useState(0);
+  // Lo que de verdad pasó en el banco (pantalla Bancos): por cuenta y semana, y los saldos.
+  const [reales,       setReales]       = useState({});
+  const [bancos,       setBancos]       = useState(null);
   const [loading,      setLoading]      = useState(true);
 
   const [showModalCuenta, setShowModalCuenta] = useState(false);
@@ -702,6 +720,15 @@ export default function FinanzasFlujoCaja() {
       const paidMap = {}; snapPaid.docs.forEach(d => { paidMap[d.id] = true; }); setPaymentsPaid(paidMap);
       const notaMap = {}; snapNotas.docs.forEach(d => { notaMap[d.id] = d.data().texto || ""; }); setPaymentNotas(notaMap);
       snapCfg.docs.forEach(d => { if (d.id === "saldo_banco") setSaldoBanco(d.data().valor || 0); });
+      // Lo real del banco. Va aparte: si todavía no hay cartolas, el flujo sigue igual.
+      try {
+        const semanas = weeksSnap.map(w => w.key);
+        const [r, b] = await Promise.all([
+          cargarReales(empresaId, semanas[0], semanas[semanas.length - 1]),
+          cargarSaldosBancos(empresaId),
+        ]);
+        setReales(r); setBancos(b.cuentas.length ? b : null);
+      } catch (e) { console.warn("Flujo sin datos del banco:", e); }
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
   }, [empresaId, applyRecurrentes]);
@@ -881,10 +908,10 @@ export default function FinanzasFlujoCaja() {
       // ── Hoja 2: Resumen mensual ────────────────────────────────────────────
       const header2 = ["MES", "SEMANA", "RANGO", "INGRESOS", "EGRESOS", "NETO"];
       const rows2 = [];
-      [0, 1].forEach(mIdx => {
+      [...new Set(weekColumns.map(w => w.monthIndex))].forEach(mIdx => {
         const sems = weekColumns.filter(w => w.monthIndex === mIdx);
         if (!sems.length) return;
-        const mesNombre = sems[0].monthName + " " + sems[0].startDate.getFullYear();
+        const mesNombre = sems[0].monthName + " " + sems[0].monthYear;
         sems.forEach(w => {
           const wIng = weekTotal(w.key, ingresos);
           const wEgr = weekTotal(w.key, egresos);
@@ -944,13 +971,13 @@ export default function FinanzasFlujoCaja() {
     ).join("");
 
     // Resumen KPIs
-    const resumenHtml = [0,1].map(mIdx => {
+    const resumenHtml = [...new Set(weekColumns.map(w => w.monthIndex))].map(mIdx => {
       const sems = weekColumns.filter(w => w.monthIndex === mIdx);
       if (!sems.length) return "";
       const mIng = sems.reduce((s,w) => s + weekTotal(w.key, ingresos), 0);
       const mEgr = sems.reduce((s,w) => s + weekTotal(w.key, egresos), 0);
       const mNeto = mIng + mEgr;
-      const mesNombre = sems[0].monthName + " " + sems[0].startDate.getFullYear();
+      const mesNombre = sems[0].monthName + " " + sems[0].monthYear;
       return `<tr>
         <td style="padding:4px 8px;font-size:10px;font-weight:600;color:#1e293b;border:0.5px solid #e2e8f0">${mesNombre}</td>
         <td style="padding:4px 8px;font-size:10px;font-family:monospace;color:#059669;text-align:right;border:0.5px solid #e2e8f0">${fmtCLP(mIng)}</td>
@@ -970,7 +997,7 @@ export default function FinanzasFlujoCaja() {
       table { width: 100%; border-collapse: collapse; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style></head><body>
-    <h1>Flujo de Caja — MPF Ingeniería Civil SPA</h1>
+    <h1>Flujo de Caja${empresa?.nombre || empresa?.razonSocial ? " — " + (empresa.nombre || empresa.razonSocial) : ""}</h1>
     <p class="sub">Generado el ${hoy.toLocaleDateString("es-CL", {weekday:"long", year:"numeric", month:"long", day:"numeric"})}</p>
 
     <div class="section">Resumen mensual</div>
@@ -995,7 +1022,7 @@ export default function FinanzasFlujoCaja() {
     w.document.close();
     w.onload = () => { w.print(); setExportando(null); };
     setTimeout(() => setExportando(null), 2000);
-  }, [ingresos, egresos, weekColumns, payments]);
+  }, [ingresos, egresos, weekColumns, payments, empresa]);
 
   const acumulados = useMemo(() => {
     const acc = {};
@@ -1021,6 +1048,9 @@ export default function FinanzasFlujoCaja() {
     weekColumns.filter(w => weekTotal(w.key, ingresos) + weekTotal(w.key, egresos) < 0).length,
   // eslint-disable-next-line
   [weekColumns, ingresos, egresos, payments]);
+  // Lo que de verdad importa: la primera semana en que la caja (saldo del banco
+  // más lo acumulado) queda bajo cero.
+  const semanaBajoCero = useMemo(() => weekColumns.find(w => (acumulados[w.key] ?? 0) < 0) || null, [weekColumns, acumulados]);
 
   const toggleCollapse = (key) => setCollapsed(p => ({ ...p, [key]: !p[key] }));
   const scrollToMonth  = (idx) => {
@@ -1038,7 +1068,9 @@ export default function FinanzasFlujoCaja() {
   // ── Datos solo de presentación ─────────────────────────────────────────────
   const fechaHoy = casoOracion(new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", ""));
   const mesesVisibles = weekColumns.filter((w, i, arr) => arr.findIndex(x => x.monthIndex === w.monthIndex) === i);
-  const nombresMeses = mesesVisibles.map(w => w.monthName.toLowerCase()).join(" y ");
+  const nombresMeses = mesesVisibles.length > 2
+    ? `de ${mesesVisibles[0].monthName.toLowerCase()} a ${mesesVisibles[mesesVisibles.length - 1].monthName.toLowerCase()}`
+    : mesesVisibles.map(w => w.monthName.toLowerCase()).join(" y ");
   const gruposMes = [];
   weekColumns.forEach((w, i) => {
     const last = gruposMes[gruposMes.length - 1];
@@ -1049,7 +1081,7 @@ export default function FinanzasFlujoCaja() {
   const totalIngresos  = weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
   const totalEgresos   = weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0);
   const filaProps = {
-    weekColumns, payments, paymentsPaid, paymentNotas,
+    weekColumns, payments, paymentsPaid, paymentNotas, reales,
     onPayment: handlePayment, onTogglePaid: handleTogglePaid, onNota: handleNota,
     onEdit: c => { setEditandoCuenta(c); setShowModalCuenta(true); },
     onDelete: handleDeleteCuenta, proyectoId,
@@ -1130,11 +1162,22 @@ export default function FinanzasFlujoCaja() {
             <LineaGuia etiqueta="Neto del período"><Cifra valor={kpiNeto} vacio="0" raya="doble" /></LineaGuia>
           </div>
           <div className="flex-[1_1_260px] max-w-sm flex flex-col gap-2.5 sm:pt-12">
-            {!saldoBanco && (
+            {bancos && Math.round(bancos.total) !== Math.round(saldoBanco) ? (
+              <Nota etiqueta="Banco:" tono="grafito">
+                las cartolas dicen <Cifra valor={bancos.total} escala="pesos" color="heredar" /> en total
+                {bancos.alMasAntiguo && ` al ${new Date(bancos.alMasAntiguo + "T12:00").toLocaleDateString("es-CL", { day: "numeric", month: "short" }).replace(".", "")}`}.{" "}
+                <Boton variante="texto" className="min-h-0 text-[inherit] align-baseline" onClick={() => handleSaldoBanco(Math.round(bancos.total))}>Usar ese saldo</Boton>
+              </Nota>
+            ) : !saldoBanco && (
               <Nota>falta anotar el saldo del banco. El acumulado está partiendo de cero.</Nota>
             )}
+            {semanaBajoCero && (
+              <Nota etiqueta="Ojo:">
+                la caja queda bajo cero la semana del {semanaBajoCero.startDate.getDate()}/{semanaBajoCero.startDate.getMonth() + 1}, en <Cifra valor={acumulados[semanaBajoCero.key]} escala="pesos" color="heredar" />.
+              </Nota>
+            )}
             {semanasNegativas > 0 && (
-              <Nota etiqueta="Ojo:" tono="grafito">
+              <Nota etiqueta="Nota:" tono="grafito">
                 {semanasNegativas === 1
                   ? "una semana cierra con más egresos que ingresos."
                   : `${semanasNegativas} semanas cierran con más egresos que ingresos.`}
@@ -1346,7 +1389,7 @@ export default function FinanzasFlujoCaja() {
       {/* ── Resumen mensual ─────────────────────────────────────────────────── */}
       {tabActiva === "resumen" && (
         <div className={`flex-1 overflow-y-auto pb-8 space-y-5 ${expandido ? "px-4" : "px-8"}`}>
-          {[0, 1].map(mIdx => {
+          {[...new Set(weekColumns.map(w => w.monthIndex))].map(mIdx => {
             const semsMes = weekColumns.filter(w => w.monthIndex === mIdx);
             if (!semsMes.length) return null;
             const mesIng  = semsMes.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
@@ -1358,7 +1401,7 @@ export default function FinanzasFlujoCaja() {
                 {/* Mes */}
                 <header className="flex flex-wrap items-end justify-between gap-3 px-6 pt-3 pb-2 border-b-[3px] border-double border-cuaderno-margen">
                   <div className="flex items-baseline gap-3">
-                    <Titulo as="h2" tamano="lg">{semsMes[0].monthName} {semsMes[0].startDate.getFullYear()}</Titulo>
+                    <Titulo as="h2" tamano="lg">{semsMes[0].monthName} {semsMes[0].monthYear}</Titulo>
                     {isActual && <Resaltado color="durazno" className="text-[15px]">mes en curso</Resaltado>}
                     <span className="text-[14px] text-cuaderno-grafito">{semsMes.length} semanas</span>
                   </div>

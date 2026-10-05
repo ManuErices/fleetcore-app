@@ -8,7 +8,8 @@ const CATEGORIA = {
   costo_doc:        "documento de crédito",
   proveedor:        "proveedores",
   activo_sin_datos: "activos",
-  ingreso_faltante: "ingresos",
+  activo_doc:       "documentos de activos",
+  banco_cartola:    "bancos",
   deuda_vencida:    "deuda",
 };
 

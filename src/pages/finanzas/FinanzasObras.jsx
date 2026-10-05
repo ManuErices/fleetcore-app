@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, FechaHoja, GraficoBarras, BarraProporcion,
   IconoActualizar, IconoBajar, casoTitulo,
@@ -56,7 +57,7 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
               {margen !== null ? `${margen.replace(".", ",")}%` : "—"}
             </span>
           </LineaGuia>
-          {ingresos === 0 && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">sin ingresos anotados</p>}
+          {ingresos === 0 && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">sin ingresos en el flujo para esta obra</p>}
 
           <div className="mt-4">
             <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">En qué se fue el egreso</p>
@@ -161,15 +162,21 @@ export default function FinanzasObras() {
       });
       const get = (pid) => { if (!acum[pid]) acum[pid]=init(); return acum[pid]; };
 
-      // Ingresos
-      const snapI = await getDocs(collection(db,"empresas",empresaId,"finanzas_ingresos"));
-      snapI.docs.forEach(d => {
-        const r=d.data(); if(!r.projectId) return;
-        const a=get(r.projectId); const k=mesKey(r.fecha);
-        const m=parseFloat(r.monto)||0;
-        if(k===keyActual) a.ingresos+=m;
-        if(ultimos6.includes(k)) a.flujo[k].ingresos+=m;
-      });
+      // Ingresos: de las cuentas de ingreso del flujo de caja, asignadas a cada
+      // obra por su campo "Proyecto". (Antes se leía finanzas_ingresos, que
+      // nunca se llenó, y todas las obras salían con ingresos en cero.)
+      try {
+        const { porCuenta } = await cargarIngresosDelFlujo(empresaId);
+        for (const { cuenta, porMes } of porCuenta) {
+          const obra = listaP.find(p => cuentaEsDeObra(cuenta, p));
+          if (!obra) continue;
+          const a = get(obra.id);
+          for (const [k, m] of Object.entries(porMes)) {
+            if (k === keyActual) a.ingresos += m;
+            if (ultimos6.includes(k)) a.flujo[k].ingresos += m;
+          }
+        }
+      } catch (e) { console.warn("Sin ingresos del flujo:", e); }
 
       // Rendiciones
       const snapR = await getDocs(collection(db,"empresas",empresaId,"rendiciones"));

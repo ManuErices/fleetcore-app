@@ -514,7 +514,11 @@ export default function FinanzasDeuda() {
           </Hoja>
         </>
       )}
+      </>
+      )}
 
+      {/* Fuera de las pestañas: se abre desde Consolidado y desde Historial
+          (antes solo existía dentro de Consolidado y el Historial no lo abría). */}
       {acreedorSeleccionado && (
         <PanelDetalleAcreedor
           acreedor={acreedorSeleccionado}
@@ -523,8 +527,6 @@ export default function FinanzasDeuda() {
           empresaId={empresaId}
           onDocumentoActualizado={handleDocumentoActualizado}
         />
-      )}
-      </>
       )}
     </div>
   );

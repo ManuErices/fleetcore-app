@@ -3,6 +3,8 @@ import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
+import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
 import {
   Cifra, Hoja, Titulo, LineaGuia, Boton, Campo, Resaltado, Nota, FechaHoja,
   GraficoBarras, GraficoLinea, BarraProporcion, casoOracion, casoTitulo,
@@ -33,7 +35,8 @@ function parseFecha(f) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasReportes() {
-  const { proyectoId } = useFinanzas();
+  const { proyectoId, proyecto } = useFinanzas();
+  const [indicadores, setIndicadores] = useState(null);
   const { empresaId } = useEmpresa();
   const [loading, setLoading]   = useState(true);
   const [anio, setAnio]         = useState(new Date().getFullYear());
@@ -46,15 +49,16 @@ export default function FinanzasReportes() {
     setLoading(true);
     const resultado = { ingresos: [], egresos: [], costosFijos: [], proveedores: [] };
 
-    // 1. Ingresos manuales
+    // 1. Ingresos: de las cuentas de ingreso del flujo de caja, donde se anotan.
+    //    (Antes se leía finanzas_ingresos, que nunca se llenó.) Con un proyecto
+    //    elegido, solo las cuentas de esa obra.
     try {
-      const snap = await getDocs(collection(db, "empresas", empresaId, "finanzas_ingresos"));
-      snap.docs.forEach(d => {
-        const r = { ...d.data(), id: d.id };
-        if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
-        resultado.ingresos.push(r);
-      });
-    } catch (e) {}
+      const { porCuenta } = await cargarIngresosDelFlujo(empresaId);
+      porCuenta
+        .filter(({ cuenta }) => proyectoId === "todos" || (proyecto && cuentaEsDeObra(cuenta, proyecto)))
+        .forEach(({ porMes }) => Object.entries(porMes).forEach(([mes, monto]) => resultado.ingresos.push({ mes, monto })));
+    } catch (e) { console.warn("Sin ingresos del flujo:", e); }
+    try { setIndicadores(await obtenerIndicadores(empresaId)); } catch (e) {}
 
     // 2. Egresos: rendiciones
     try {
@@ -104,47 +108,44 @@ export default function FinanzasReportes() {
 
     setRawData(resultado);
     setLoading(false);
-  }, [empresaId, proyectoId]);
+  }, [empresaId, proyectoId, proyecto]);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Costo fijo llevado a mes y a pesos. Si está en UF o dólares y no hay valor
+  // del día, vale 0 (mejor fuera que mal sumado).
+  const cfMensualEnPesos = useCallback((c) => {
+    const m = parseFloat(c.monto) || 0;
+    const div = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 }[c.frecuencia];
+    if (!div) return 0;
+    return aPesos(m / div, c.moneda, indicadores) ?? 0;
+  }, [indicadores]);
 
   // ── Datos por mes del año seleccionado ────────────────────────────────────
   const mesesData = useMemo(() => {
     return Array.from({ length: 12 }, (_, m) => {
       const key = `${anio}-${String(m + 1).padStart(2, "0")}`;
       const ing = rawData.ingresos
-        .filter(i => mesKey(i.fecha) === key)
-        .reduce((s, i) => s + (parseFloat(i.monto) || 0), 0);
+        .filter(i => i.mes === key)
+        .reduce((s, i) => s + (i.monto || 0), 0);
       const egr = rawData.egresos
         .filter(e => mesKey(e.fecha) === key)
         .reduce((s, e) => s + e.monto, 0);
       // costos fijos mensualizados
       const cfMes = rawData.costosFijos
         .filter(c => c.activo !== false)
-        .reduce((s, c) => {
-          if (c.frecuencia === "mensual") return s + (parseFloat(c.monto) || 0);
-          if (c.frecuencia === "trimestral") return s + (parseFloat(c.monto) || 0) / 3;
-          if (c.frecuencia === "semestral") return s + (parseFloat(c.monto) || 0) / 6;
-          if (c.frecuencia === "anual") return s + (parseFloat(c.monto) || 0) / 12;
-          return s;
-        }, 0);
+        .reduce((s, c) => s + cfMensualEnPesos(c), 0);
       const totalEgr = egr + cfMes;
       return { mes: m, key, label: MESES[m], ingresos: ing, egresos: totalEgr, margen: ing - totalEgr, costosFijos: cfMes, egresosVar: egr };
     });
-  }, [rawData, anio]);
+  }, [rawData, anio, cfMensualEnPesos]);
 
   // ── Proyección próximos 6 meses ───────────────────────────────────────────
   const proyeccion = useMemo(() => {
     const hoy = new Date();
     const promIngresos = mesesData.filter(m => m.ingresos > 0).reduce((s, m) => s + m.ingresos, 0) / (mesesData.filter(m => m.ingresos > 0).length || 1);
     const promEgresos  = mesesData.filter(m => m.egresos > 0).reduce((s, m) => s + m.egresos, 0)  / (mesesData.filter(m => m.egresos > 0).length || 1);
-    const cfFijo = rawData.costosFijos.filter(c => c.activo !== false).reduce((s, c) => {
-      if (c.frecuencia === "mensual") return s + (parseFloat(c.monto) || 0);
-      if (c.frecuencia === "trimestral") return s + (parseFloat(c.monto) || 0) / 3;
-      if (c.frecuencia === "semestral") return s + (parseFloat(c.monto) || 0) / 6;
-      if (c.frecuencia === "anual") return s + (parseFloat(c.monto) || 0) / 12;
-      return s;
-    }, 0);
+    const cfFijo = rawData.costosFijos.filter(c => c.activo !== false).reduce((s, c) => s + cfMensualEnPesos(c), 0);
     return Array.from({ length: 6 }, (_, i) => {
       const d = new Date(hoy.getFullYear(), hoy.getMonth() + i + 1, 1);
       return {
@@ -156,7 +157,7 @@ export default function FinanzasReportes() {
         value: promIngresos - Math.max(promEgresos, cfFijo),
       };
     });
-  }, [mesesData, rawData]);
+  }, [mesesData, rawData, cfMensualEnPesos]);
 
   // ── Ranking proveedores ───────────────────────────────────────────────────
   const rankingProveedores = useMemo(() => {
@@ -177,18 +178,11 @@ export default function FinanzasReportes() {
     const mapa = {};
     rawData.costosFijos.filter(c => c.activo !== false).forEach(c => {
       const cat = c.categoria || "otro";
-      const mensual = (() => {
-        const m = parseFloat(c.monto) || 0;
-        if (c.frecuencia === "mensual") return m;
-        if (c.frecuencia === "trimestral") return m / 3;
-        if (c.frecuencia === "semestral") return m / 6;
-        if (c.frecuencia === "anual") return m / 12;
-        return 0;
-      })();
+      const mensual = cfMensualEnPesos(c);
       mapa[cat] = (mapa[cat] || 0) + mensual;
     });
     return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
-  }, [rawData]);
+  }, [rawData, cfMensualEnPesos]);
 
   const totalCF  = useMemo(() => cfPorCategoria.reduce((s, [, v]) => s + v, 0), [cfPorCategoria]);
   const totalVar = useMemo(() => rawData.egresos.reduce((s, e) => s + e.monto, 0), [rawData]);

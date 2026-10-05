@@ -79,6 +79,7 @@ const COLOR_CIFRA = {
   tinta:   "text-cuaderno-tinta",
   roja:    "text-cuaderno-roja",
   grafito: "text-cuaderno-grafito",
+  verde:   "text-cuaderno-verde",
   heredar: "",
 };
 
@@ -483,8 +484,13 @@ export function GraficoBarras({ data, height = 180, ancho = 620, ticks: nTicks =
   );
 }
 
-/** Línea trazada a pluma, con puntos huecos. data: [{ label, value }] */
-export function GraficoLinea({ data, height = 140, ancho = 700 }) {
+/**
+ * Línea trazada a pluma, con puntos huecos. data: [{ label, value }]
+ * referencia (opcional): { valor, etiqueta } dibuja una raya roja punteada,
+ *   por ejemplo el colchón mínimo de caja.
+ * destacar (opcional): índice del punto a marcar en durazno (la semana más baja).
+ */
+export function GraficoLinea({ data, height = 140, ancho = 700, referencia = null, destacar = null }) {
   if (!data?.length) {
     return <p className="m-0 flex items-center justify-center text-[16px] text-cuaderno-grafito" style={{ height }}>Sin datos para graficar.</p>;
   }
@@ -492,7 +498,8 @@ export function GraficoLinea({ data, height = 140, ancho = 700 }) {
   const chartW = ancho - PAD_L - PAD_R;
   const chartH = height - PAD_T - PAD_B;
   const vals = data.map(d => d.value || 0);
-  const maxV = Math.max(...vals, 1), minV = Math.min(...vals, 0);
+  const ref = referencia && typeof referencia.valor === "number" ? referencia.valor : null;
+  const maxV = Math.max(...vals, ref ?? 0, 1), minV = Math.min(...vals, ref ?? 0, 0);
   const rango = maxV - minV || 1;
   const ticks = Array.from({ length: 4 }, (_, i) => minV + i * ((maxV - minV) / 3));
   const toX = (i) => PAD_L + (i / Math.max(data.length - 1, 1)) * chartW;
@@ -517,11 +524,21 @@ export function GraficoLinea({ data, height = 140, ancho = 700 }) {
       {minV < 0 && maxV > 0 && (
         <line x1={PAD_L} y1={toY(0)} x2={ancho - PAD_R} y2={toY(0)} stroke="rgb(var(--cuaderno-margen))" strokeWidth="1" />
       )}
+      {ref !== null && (
+        <g>
+          <line x1={PAD_L} y1={toY(ref)} x2={ancho - PAD_R} y2={toY(ref)} stroke="rgb(var(--cuaderno-roja))" strokeWidth="1.2" strokeDasharray="6 4" />
+          {referencia.etiqueta && (
+            <text x={ancho - PAD_R} y={toY(ref) - 5} textAnchor="end" fontSize="12" fill="rgb(var(--cuaderno-roja))">{referencia.etiqueta}</text>
+          )}
+        </g>
+      )}
       <polyline points={vals.map((v, i) => `${toX(i)},${toY(v)}`).join(" ")} fill="none" stroke={trazo}
         strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
       {data.map((d, i) => (
         <g key={i}>
-          <circle cx={toX(i)} cy={toY(vals[i])} r="3.5" fill="rgb(var(--cuaderno-hoja))" stroke={trazo} strokeWidth="1.6" />
+          <circle cx={toX(i)} cy={toY(vals[i])} r={destacar === i ? 5 : 3.5}
+            fill={destacar === i ? "rgb(var(--cuaderno-durazno))" : "rgb(var(--cuaderno-hoja))"}
+            stroke={destacar === i ? "rgb(var(--cuaderno-roja))" : trazo} strokeWidth="1.6" />
           <text x={toX(i)} y={PAD_T + chartH + 18} textAnchor="middle" fontSize="14" fill="rgb(var(--cuaderno-tinta))">{d.label}</text>
         </g>
       ))}
