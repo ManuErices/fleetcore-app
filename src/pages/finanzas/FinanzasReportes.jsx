@@ -3,6 +3,10 @@ import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import {
+  Cifra, Hoja, Titulo, LineaGuia, Boton, Campo, Resaltado, Nota, FechaHoja,
+  GraficoBarras, GraficoLinea, BarraProporcion, casoOracion, casoTitulo,
+} from "./cuaderno";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 const fmt  = (n) => "$" + Math.round(n || 0).toLocaleString("es-CL");
@@ -25,173 +29,6 @@ function parseFecha(f) {
   if (f?.toDate) return f.toDate();
   const d = new Date(f.includes("T") ? f : f + "T12:00:00");
   return isNaN(d) ? null : d;
-}
-
-// ─── Utilidad: formatear número corto para ejes ───────────────────────────────
-function fmtAxis(n) {
-  const a = Math.abs(n);
-  if (a >= 1e9) return (n/1e9).toFixed(1).replace(".",",") + "B";
-  if (a >= 1e6) return (n/1e6).toFixed(1).replace(".",",") + "M";
-  if (a >= 1e3) return (n/1e3).toFixed(0) + "K";
-  return String(Math.round(n));
-}
-
-// ─── Bar Chart ────────────────────────────────────────────────────────────────
-// data: [{ label, ingresos, egresos }]
-function BarChart({ data, height = 160 }) {
-  if (!data?.length) return <div style={{height}} className="flex items-center justify-center text-slate-400 text-xs">Sin datos</div>;
-
-  const VW = 700;          // ancho lógico del viewBox
-  const PAD_L = 52;        // espacio eje Y
-  const PAD_R = 8;
-  const PAD_T = 12;
-  const PAD_B = 32;        // espacio etiquetas X
-  const chartW = VW - PAD_L - PAD_R;
-  const chartH = height - PAD_T - PAD_B;
-
-  const maxVal = Math.max(...data.map(d => Math.max(d.ingresos || 0, d.egresos || 0)), 1);
-
-  // 4 líneas de referencia
-  const TICKS = 4;
-  const tickStep = maxVal / TICKS;
-  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => i * tickStep);
-
-  const colW = chartW / data.length;
-  const barW = Math.max(colW * 0.28, 4);
-  const gap  = Math.max(colW * 0.06, 2);
-
-  const toY = (v) => PAD_T + chartH - (Math.max(v, 0) / maxVal) * chartH;
-
-  return (
-    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
-      {/* Líneas de referencia horizontales */}
-      {ticks.map((t, i) => {
-        const y = PAD_T + chartH - (t / maxVal) * chartH;
-        return (
-          <g key={i}>
-            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
-              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.5 : 0.8} />
-            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
-              {fmtAxis(t)}
-            </text>
-          </g>
-        );
-      })}
-
-      {/* Barras */}
-      {data.map((d, i) => {
-        const cx  = PAD_L + i * colW + colW / 2;
-        const ih  = ((d.ingresos || 0) / maxVal) * chartH;
-        const eh  = ((d.egresos  || 0) / maxVal) * chartH;
-        const iy  = toY(d.ingresos || 0);
-        const ey  = toY(d.egresos  || 0);
-        const baseY = PAD_T + chartH;
-
-        return (
-          <g key={i}>
-            {/* Barra ingresos */}
-            {ih > 0 && (
-              <rect x={cx - barW - gap / 2} y={iy} width={barW} height={ih}
-                rx="2" fill="#6d28d9" opacity="0.85" />
-            )}
-            {/* Barra egresos */}
-            {eh > 0 && (
-              <rect x={cx + gap / 2} y={ey} width={barW} height={eh}
-                rx="2" fill="#f59e0b" opacity="0.80" />
-            )}
-            {/* Etiqueta mes */}
-            <text x={cx} y={baseY + 14} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
-              {d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-// ─── Line Chart ───────────────────────────────────────────────────────────────
-// data: [{ label, value }]
-function LineChart({ data, height = 110, color = "#7c3aed" }) {
-  if (!data?.length) return <div style={{height}} className="flex items-center justify-center text-slate-400 text-xs">Sin datos</div>;
-
-  const VW = 700;
-  const PAD_L = 52;
-  const PAD_R = 12;
-  const PAD_T = 12;
-  const PAD_B = 28;
-  const chartW = VW - PAD_L - PAD_R;
-  const chartH = height - PAD_T - PAD_B;
-
-  const vals = data.map(d => d.value || 0);
-  const maxV = Math.max(...vals, 1);
-  const minV = Math.min(...vals, 0);
-  const range = maxV - minV || 1;
-
-  const TICKS = 3;
-  const tickStep = (maxV - minV) / TICKS;
-  const ticks = Array.from({ length: TICKS + 1 }, (_, i) => minV + i * tickStep);
-
-  const toX = (i) => PAD_L + (i / Math.max(data.length - 1, 1)) * chartW;
-  const toY = (v) => PAD_T + chartH - ((v - minV) / range) * chartH;
-
-  const pts = vals.map((v, i) => `${toX(i)},${toY(v)}`).join(" ");
-
-  // Área bajo la curva
-  const areaPath = [
-    `M ${toX(0)},${PAD_T + chartH}`,
-    ...vals.map((v, i) => `L ${toX(i)},${toY(v)}`),
-    `L ${toX(vals.length - 1)},${PAD_T + chartH}`,
-    "Z"
-  ].join(" ");
-
-  const areaId = `area-${color.replace("#","")}`;
-
-  return (
-    <svg viewBox={`0 0 ${VW} ${height}`} className="w-full" style={{ height, display: "block" }}>
-      <defs>
-        <linearGradient id={areaId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.01" />
-        </linearGradient>
-      </defs>
-
-      {/* Líneas de referencia */}
-      {ticks.map((t, i) => {
-        const y = toY(t);
-        return (
-          <g key={i}>
-            <line x1={PAD_L} y1={y} x2={VW - PAD_R} y2={y}
-              stroke={i === 0 ? "#cbd5e1" : "#e2e8f0"} strokeWidth={i === 0 ? 1.5 : 0.8} />
-            <text x={PAD_L - 4} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">
-              {fmtAxis(t)}
-            </text>
-          </g>
-        );
-      })}
-
-      {/* Área */}
-      <path d={areaPath} fill={`url(#${areaId})`} />
-
-      {/* Línea */}
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2"
-        strokeLinejoin="round" strokeLinecap="round" />
-
-      {/* Puntos y etiquetas */}
-      {data.map((d, i) => {
-        const x = toX(i);
-        const y = toY(vals[i]);
-        return (
-          <g key={i}>
-            <circle cx={x} cy={y} r="3" fill="white" stroke={color} strokeWidth="1.8" />
-            <text x={x} y={PAD_T + chartH + 14} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
-              {d.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -392,261 +229,186 @@ export default function FinanzasReportes() {
   const anios = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="spinner w-10 h-10 border-purple-600" />
-    </div>
+    <div className="cuaderno flex items-center justify-center h-64 text-[18px] text-cuaderno-grafito">Preparando el informe…</div>
   );
 
+  const pctIng = (m) => m.ingresos > 0 ? ((m.margen / m.ingresos) * 100).toFixed(1).replace(".", ",") + "%" : "—";
+
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6" ref={reportRef}>
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5" ref={reportRef}>
 
-      {/* Header */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Reportes <span className="text-purple-700">Financieros</span></h1>
-              <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Resumen ejecutivo, proyección y análisis de costos</p>
-            </div>
+      <FechaHoja className="no-print" />
+
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Informe del año {anio}</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Resultados mes a mes, proveedores, costos y una proyección de referencia.</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3 no-print">
+          <ProyectoSelector variante="cuaderno" />
+          <Campo as="select" etiqueta="Año" value={anio} onChange={e => setAnio(Number(e.target.value))}>
+            {anios.map(a => <option key={a} value={a}>{a}</option>)}
+          </Campo>
+          <Boton variante="primario" onClick={exportPDF} disabled={exporting}>
+            {exporting ? "Preparando…" : "Imprimir o guardar en PDF"}
+          </Boton>
+        </div>
+      </header>
+
+      {/* ── 1. Resultados del año ── */}
+      <Hoja titulo={`1. Resultados de ${anio}`}
+        extra={
+          <div className="flex items-center gap-4 text-[15px]">
+            <Resaltado color="menta">ingresos</Resaltado>
+            <Resaltado color="rosa">egresos</Resaltado>
           </div>
-          <div className="flex items-center gap-3 no-print">
-            <ProyectoSelector />
-            <select value={anio} onChange={e => setAnio(Number(e.target.value))}
-              className="px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm font-bold bg-white">
-              {anios.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <button onClick={exportPDF} disabled={exporting}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md disabled:opacity-50">
-              {exporting
-                ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Exportando...</>
-                : <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Exportar PDF</>
-              }
-            </button>
+        }>
+        <div className="grid gap-x-12 gap-y-4 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
+          <div>
+            <LineaGuia etiqueta="Ingresos"><Cifra valor={totalIngresos} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+            <LineaGuia etiqueta="Egresos"><Cifra valor={-totalEgresos} escala="pesos" vacio="$0" /></LineaGuia>
+            <LineaGuia etiqueta="Margen"><Cifra valor={margenTotal} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
+            <LineaGuia etiqueta="Margen sobre ingresos">
+              <span>{totalIngresos > 0 ? ((margenTotal / totalIngresos) * 100).toFixed(1).replace(".", ",") + "%" : "—"}</span>
+            </LineaGuia>
           </div>
-        </div>
-      </div>
-
-      {/* ── 1. RESUMEN EJECUTIVO ── */}
-      <div className="glass-card rounded-xl p-5 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center text-white text-xs font-black">1</span>
-            Resumen Ejecutivo {anio}
-          </h2>
-          <span className="text-xs text-slate-400 font-semibold">Ingresos vs Egresos mensuales</span>
+          <GraficoBarras data={mesesData.map(m => ({ label: m.label, ingresos: m.ingresos, egresos: m.egresos }))} height={190} ancho={700} ticks={4} />
         </div>
 
-        {/* KPIs anuales */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-          {[
-            { label: "Ingresos totales",  value: fmtM(totalIngresos), color: "text-purple-700",  bg: "bg-purple-50"  },
-            { label: "Egresos totales",   value: fmtM(totalEgresos),  color: "text-amber-600",   bg: "bg-amber-50"   },
-            { label: "Margen neto",       value: fmtM(margenTotal),   color: margenTotal >= 0 ? "text-emerald-600" : "text-red-600", bg: margenTotal >= 0 ? "bg-emerald-50" : "bg-red-50" },
-            { label: "Margen %",          value: totalIngresos > 0 ? ((margenTotal / totalIngresos) * 100).toFixed(1) + "%" : "—", color: "text-slate-700", bg: "bg-slate-50" },
-          ].map((k, i) => (
-            <div key={i} className={`rounded-xl p-3 ${k.bg}`}>
-              <p className="text-xs text-slate-500 font-semibold mb-1">{k.label}</p>
-              <p className={`text-lg sm:text-xl font-black ${k.color}`}>{k.value}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Gráfico */}
-        <div className="mb-3">
-          <BarChart data={mesesData.map(m => ({ label: m.label, ingresos: m.ingresos, egresos: m.egresos }))} height={170} />
-        </div>
-        <div className="flex gap-4 justify-center">
-          <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-purple-600 opacity-85"/><span className="text-xs text-slate-500">Ingresos</span></div>
-          <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-500 opacity-75"/><span className="text-xs text-slate-500">Egresos</span></div>
-        </div>
-
-        {/* Tabla mes a mes */}
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b-2 border-slate-100">
-                <th className="text-left py-2 text-xs font-black text-slate-500 uppercase">Mes</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Ingresos</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Egresos</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Margen</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase hidden sm:table-cell">%</th>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                <th className="font-normal text-[15px] text-left text-cuaderno-grafito py-2 pr-3">Mes</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">Ingresos</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">Egresos</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">Margen</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 pl-3 hidden sm:table-cell">%</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
-              {mesesData.map(m => (
-                <tr key={m.mes} className="hover:bg-slate-50 transition-colors">
-                  <td className="py-2.5 font-semibold text-slate-700">{MESES_FULL[m.mes]}</td>
-                  <td className="py-2.5 text-right font-bold text-purple-700">{m.ingresos > 0 ? fmt(m.ingresos) : <span className="text-slate-300">—</span>}</td>
-                  <td className="py-2.5 text-right font-bold text-amber-600">{m.egresos > 0 ? fmt(m.egresos) : <span className="text-slate-300">—</span>}</td>
-                  <td className={`py-2.5 text-right font-black ${m.margen >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                    {m.ingresos > 0 || m.egresos > 0 ? fmt(m.margen) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="py-2.5 text-right text-slate-500 text-xs hidden sm:table-cell">
-                    {m.ingresos > 0 ? ((m.margen / m.ingresos) * 100).toFixed(1) + "%" : "—"}
-                  </td>
-                </tr>
-              ))}
+            <tbody>
+              {mesesData.map(m => {
+                const hay = m.ingresos > 0 || m.egresos > 0;
+                return (
+                  <tr key={m.mes} className="border-b border-cuaderno-renglon">
+                    <td className="py-2 pr-3 text-[16px]">{MESES_FULL[m.mes]}</td>
+                    <td className="py-2 px-3 text-right text-[16px]">{m.ingresos > 0 ? <Cifra valor={m.ingresos} escala="pesos" color="tinta" /> : <span className="text-cuaderno-grafito">—</span>}</td>
+                    <td className="py-2 px-3 text-right text-[16px]">{m.egresos > 0 ? <Cifra valor={-m.egresos} escala="pesos" /> : <span className="text-cuaderno-grafito">—</span>}</td>
+                    <td className="py-2 px-3 text-right text-[16px]">{hay ? <Cifra valor={m.margen} escala="pesos" vacio="0" /> : <span className="text-cuaderno-grafito">—</span>}</td>
+                    <td className="py-2 pl-3 text-right text-[14px] text-cuaderno-grafito hidden sm:table-cell">{pctIng(m)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
-            <tfoot className="border-t-2 border-slate-200">
+            <tfoot>
               <tr>
-                <td className="py-2.5 font-black text-slate-900">TOTAL</td>
-                <td className="py-2.5 text-right font-black text-purple-700">{fmt(totalIngresos)}</td>
-                <td className="py-2.5 text-right font-black text-amber-600">{fmt(totalEgresos)}</td>
-                <td className={`py-2.5 text-right font-black ${margenTotal >= 0 ? "text-emerald-600" : "text-red-500"}`}>{fmt(margenTotal)}</td>
-                <td className="py-2.5 text-right text-xs font-bold text-slate-500 hidden sm:table-cell">
-                  {totalIngresos > 0 ? ((margenTotal / totalIngresos) * 100).toFixed(1) + "%" : "—"}
+                <td className="pt-2.5 pr-3 text-[17px]">Total del año</td>
+                <td className="pt-2.5 px-3 text-right text-[16px]"><Cifra valor={totalIngresos} escala="pesos" color="tinta" vacio="$0" raya="total" /></td>
+                <td className="pt-2.5 px-3 text-right text-[16px]"><Cifra valor={-totalEgresos} escala="pesos" vacio="$0" raya="total" /></td>
+                <td className="pt-2.5 px-3 text-right text-[16px]"><Cifra valor={margenTotal} escala="pesos" vacio="$0" raya="total" /></td>
+                <td className="pt-2.5 pl-3 text-right text-[14px] text-cuaderno-grafito hidden sm:table-cell">
+                  {totalIngresos > 0 ? ((margenTotal / totalIngresos) * 100).toFixed(1).replace(".", ",") + "%" : "—"}
                 </td>
               </tr>
             </tfoot>
           </table>
         </div>
-      </div>
+      </Hoja>
 
-      {/* ── 2. RANKING PROVEEDORES ── */}
-      <div className="glass-card rounded-xl p-5 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white text-xs font-black">2</span>
-            Ranking de Proveedores
-          </h2>
-          <span className="text-xs text-slate-400 font-semibold">Top 10 por gasto acumulado</span>
-        </div>
-
-        {rankingProveedores.length === 0 ? (
-          <p className="text-sm text-slate-400 py-8 text-center">Sin datos de proveedores</p>
-        ) : (
-          <div className="space-y-3">
-            {rankingProveedores.map((p, i) => {
-              const maxTotal = rankingProveedores[0].total || 1;
-              const pct = (p.total / maxTotal) * 100;
-              return (
-                <div key={p.nombre} className="flex items-center gap-3">
-                  <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black flex-shrink-0 ${i === 0 ? "bg-amber-100 text-amber-700" : i === 1 ? "bg-slate-100 text-slate-600" : i === 2 ? "bg-orange-50 text-orange-600" : "bg-slate-50 text-slate-400"}`}>{i + 1}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-sm font-bold text-slate-800 truncate">{p.nombre}</p>
-                      <p className="text-sm font-black text-slate-900 ml-2 flex-shrink-0">{fmtM(p.total)}</p>
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* ── 2. Proveedores ── */}
+        <Hoja titulo="2. Diez proveedores principales"
+          extra={<span className="text-[15px] text-cuaderno-grafito">por gasto acumulado</span>}>
+          {rankingProveedores.length === 0 ? (
+            <p className="m-0 py-8 text-center text-[16px] text-cuaderno-grafito">Sin compras anotadas.</p>
+          ) : (
+            <ol className="m-0 p-0 list-none space-y-3">
+              {rankingProveedores.map((p, i) => {
+                const maxTotal = rankingProveedores[0].total || 1;
+                return (
+                  <li key={p.nombre}>
+                    <div className="flex items-baseline gap-2 text-[16px]">
+                      <span className="w-6 text-cuaderno-grafito">{i + 1}.</span>
+                      <span className="flex-1 min-w-0 truncate">{casoTitulo(p.nombre)}</span>
+                      <Cifra valor={p.total} escala="pesos" color="tinta" className="flex-shrink-0" />
                     </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-purple-600 to-violet-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                    <div className="pl-8"><BarraProporcion pct={(p.total / maxTotal) * 100} /></div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Hoja>
 
-      {/* ── 3. COSTOS FIJOS VS VARIABLES ── */}
-      <div className="glass-card rounded-xl p-5 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xs font-black">3</span>
-            Costos Fijos vs Variables
-          </h2>
-          <span className="text-xs text-slate-400 font-semibold">Mensualizado</span>
-        </div>
+        {/* ── 3. Costos fijos y variables ── */}
+        <Hoja titulo="3. Costos fijos y variables"
+          extra={<span className="text-[15px] text-cuaderno-grafito">llevados a mes</span>}>
+          <LineaGuia etiqueta="Costos fijos al mes"><Cifra valor={totalCF} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{rawData.costosFijos.filter(c => c.activo !== false).length} registros activos</p>
+          <LineaGuia etiqueta="Egresos variables del año"><Cifra valor={totalVar} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-2 text-right text-[13px] text-cuaderno-grafito">compras, rendiciones y subcontratos</p>
 
-        <div className="grid grid-cols-2 gap-4 mb-5">
-          <div className="rounded-xl p-4 bg-blue-50">
-            <p className="text-xs font-semibold text-blue-500 mb-1">Costos Fijos / mes</p>
-            <p className="text-2xl font-black text-blue-700">{fmtM(totalCF)}</p>
-            <p className="text-xs text-blue-400 mt-1">{rawData.costosFijos.filter(c => c.activo !== false).length} registros activos</p>
-          </div>
-          <div className="rounded-xl p-4 bg-amber-50">
-            <p className="text-xs font-semibold text-amber-500 mb-1">Egresos Variables</p>
-            <p className="text-2xl font-black text-amber-700">{fmtM(totalVar)}</p>
-            <p className="text-xs text-amber-400 mt-1">OC + rendiciones + subcontratos</p>
-          </div>
-        </div>
-
-        {/* Barra proporcional */}
-        {(totalCF + totalVar) > 0 && (
-          <div className="mb-5">
-            <div className="flex h-4 rounded-full overflow-hidden gap-0.5 mb-2">
-              <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-l-full" style={{ width: `${(totalCF / (totalCF + totalVar)) * 100}%` }} />
-              <div className="bg-gradient-to-r from-amber-400 to-orange-500 rounded-r-full flex-1" />
+          {(totalCF + totalVar) > 0 && (
+            <div className="mb-4">
+              <div className="flex h-2.5 rounded-sm overflow-hidden">
+                <div className="bg-cuaderno-lavanda" style={{ width: `${(totalCF / (totalCF + totalVar)) * 100}%` }} />
+                <div className="bg-cuaderno-durazno flex-1" />
+              </div>
+              <div className="flex gap-6 mt-1.5 text-[14px]">
+                <span><Resaltado color="lavanda">fijos</Resaltado> {((totalCF / (totalCF + totalVar)) * 100).toFixed(1).replace(".", ",")}%</span>
+                <span><Resaltado color="durazno">variables</Resaltado> {((totalVar / (totalCF + totalVar)) * 100).toFixed(1).replace(".", ",")}%</span>
+              </div>
             </div>
-            <div className="flex gap-6 text-xs text-slate-500">
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500" /><span>Fijos {((totalCF / (totalCF + totalVar)) * 100).toFixed(1)}%</span></div>
-              <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-500" /><span>Variables {((totalVar / (totalCF + totalVar)) * 100).toFixed(1)}%</span></div>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Desglose costos fijos por categoría */}
-        {cfPorCategoria.length > 0 && (
-          <div>
-            <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Desglose costos fijos por categoría</p>
-            <div className="space-y-2">
+          {cfPorCategoria.length > 0 && (
+            <div>
+              <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">Costos fijos por categoría</p>
               {cfPorCategoria.map(([cat, val]) => (
-                <div key={cat} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                  <span className="text-sm font-semibold text-slate-700 capitalize">{cat}</span>
-                  <div className="flex items-center gap-3">
-                    <div className="w-24 h-2 bg-slate-100 rounded-full overflow-hidden hidden sm:block">
-                      <div className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" style={{ width: `${(val / totalCF) * 100}%` }} />
-                    </div>
-                    <span className="text-sm font-black text-slate-900">{fmt(val)}/mes</span>
-                  </div>
-                </div>
+                <LineaGuia key={cat} etiqueta={casoOracion(cat)} className="text-[16px] min-h-[30px]">
+                  <span><Cifra valor={val} escala="pesos" color="tinta" /> <span className="text-[14px] text-cuaderno-grafito">al mes</span></span>
+                </LineaGuia>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </Hoja>
       </div>
 
-      {/* ── 4. PROYECCIÓN ── */}
-      <div className="glass-card rounded-xl p-5 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-xs font-black">4</span>
-            Flujo de Caja Proyectado
-          </h2>
-          <span className="text-xs text-slate-400 font-semibold">Próximos 6 meses (promedio histórico)</span>
-        </div>
+      {/* ── 4. Proyección ── */}
+      <Hoja titulo="4. Proyección de los próximos seis meses"
+        extra={<span className="text-[15px] text-cuaderno-grafito">promedio de los meses con datos</span>}>
+        <GraficoLinea data={proyeccion.map(p => ({ label: p.label, value: p.value }))} height={150} />
 
-        <div className="mb-4">
-          <LineChart data={proyeccion.map(p => ({ label: p.label, value: p.value }))} height={130} color={proyeccion[0]?.value >= 0 ? "#10b981" : "#ef4444"} />
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b-2 border-slate-100">
-                <th className="text-left py-2 text-xs font-black text-slate-500 uppercase">Mes</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Ing. estimado</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Egr. estimado</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">CF incluido</th>
-                <th className="text-right py-2 text-xs font-black text-slate-500 uppercase">Saldo</th>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                <th className="font-normal text-[15px] text-left text-cuaderno-grafito py-2 pr-3">Mes</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">Ingreso estimado</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">Egreso estimado</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 px-3">De ellos, fijos</th>
+                <th className="font-normal text-[15px] text-right text-cuaderno-grafito py-2 pl-3">Saldo</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody>
               {proyeccion.map((p, i) => (
-                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                  <td className="py-2.5 font-semibold text-slate-700">{p.mes}</td>
-                  <td className="py-2.5 text-right text-purple-700 font-bold">{fmtM(p.ingresos)}</td>
-                  <td className="py-2.5 text-right text-amber-600 font-bold">{fmtM(p.egresos)}</td>
-                  <td className="py-2.5 text-right text-blue-600 font-semibold text-xs">{fmtM(p.costosFijos)}</td>
-                  <td className={`py-2.5 text-right font-black ${p.value >= 0 ? "text-emerald-600" : "text-red-500"}`}>{fmtM(p.value)}</td>
+                <tr key={i} className="border-b border-cuaderno-renglon">
+                  <td className="py-2 pr-3 text-[16px]">{p.mes}</td>
+                  <td className="py-2 px-3 text-right text-[16px]"><Cifra valor={p.ingresos} escala="pesos" color="tinta" vacio="$0" /></td>
+                  <td className="py-2 px-3 text-right text-[16px]"><Cifra valor={-p.egresos} escala="pesos" vacio="$0" /></td>
+                  <td className="py-2 px-3 text-right text-[15px]"><Cifra valor={p.costosFijos} escala="pesos" color="grafito" vacio="$0" /></td>
+                  <td className="py-2 pl-3 text-right text-[16px]"><Cifra valor={p.value} escala="pesos" vacio="$0" /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="mt-4 p-3 bg-slate-50 rounded-xl">
-          <p className="text-xs text-slate-500 leading-relaxed">
-            <span className="font-bold text-slate-600">Metodología:</span> La proyección usa el promedio de meses con datos del año {anio}. Los costos fijos se incluyen íntegros en los egresos estimados. Los valores son referenciales.
-          </p>
-        </div>
-      </div>
-
+        <Nota etiqueta="Ojo:" tono="grafito" className="mt-4 text-[16px]">
+          esta proyección repite el promedio de los meses de {anio} que tienen datos, con los costos fijos completos.
+          Es solo una referencia: la proyección real está en el flujo de caja.
+        </Nota>
+      </Hoja>
     </div>
   );
 }

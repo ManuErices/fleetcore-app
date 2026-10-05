@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { MEDIOS_PAGO, textoTransferencia, hrefTelefono } from "../../lib/proveedores";
+import { textoTransferencia, hrefTelefono } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import ModalProveedor from "./ModalProveedor";
+import {
+  Cifra, Titulo, Resaltado, LineaGuia, Boton, VistoBueno,
+  IconoCerrar, IconoCopiar, IconoExterno, casoOracion, casoTitulo,
+} from "./cuaderno";
 
 /*
  * Panel lateral con el detalle de una cuenta de egreso del flujo de caja:
  * cómo se paga, a quién contactar y qué montos tiene en las semanas
  * visibles. Los datos de pago y contacto viven en el maestro de
  * proveedores; la cuenta solo guarda `proveedorId`.
+ *
+ * Se ve como una tarjeta índice: papel claro, doble línea roja bajo el
+ * título y renglones azules.
  *
  * Capas: este panel va en z-[65], sobre el modo ampliado del flujo (z-[60])
  * y bajo ModalCuenta (z-[70]) y ModalProveedor (z-[80]). Mientras alguno de
@@ -17,24 +24,17 @@ import ModalProveedor from "./ModalProveedor";
  * Props:
  *  - empresaId
  *  - cuenta, proveedor (ficha resuelta o null), proveedores (lista del maestro)
- *  - accent: color de la subcategoría, el mismo de la tabla
  *  - weekColumns, payments, paymentsPaid, paymentNotas
  *  - bloqueado: true si hay un modal del flujo abierto encima
  *  - onClose(), onEditarCuenta(cuenta)
  *  - onVincularProveedor(cuentaId, proveedorId): async, lanza si falla
  */
 
-const MEDIO_LABEL = Object.fromEntries(MEDIOS_PAGO.map(m => [m.id, m.label]));
-
-function fmtCLP(n) {
-  const abs = Math.abs(Math.round(n || 0));
-  return (n < 0 ? "−$" : "$") + abs.toLocaleString("es-CL");
-}
-
-function casoOracion(s) {
-  const t = String(s || "").trim().toLowerCase();
-  return t ? t[0].toUpperCase() + t.slice(1) : "";
-}
+const MEDIO_ETIQUETA = {
+  transferencia: "por transferencia",
+  web: "por portal web",
+  automatico: "cargo automático",
+};
 
 async function copiarTexto(texto) {
   try {
@@ -54,24 +54,12 @@ async function copiarTexto(texto) {
   }
 }
 
-// ─── Íconos ───────────────────────────────────────────────────────────────────
-const Icono = {
-  copiar: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />,
-  check:  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />,
-  cerrar: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />,
-  externo:<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />,
-  tarjeta:<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />,
-};
-function Svg({ children, className = "w-3.5 h-3.5" }) {
-  return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">{children}</svg>;
-}
-
 // ─── Piezas ───────────────────────────────────────────────────────────────────
 function Seccion({ titulo, extra, children }) {
   return (
-    <section className="px-6 py-5 border-t border-slate-100 first:border-t-0">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h3 className="text-[13px] font-bold text-slate-800">{titulo}</h3>
+    <section className="px-6 py-4 border-t border-cuaderno-azul first:border-t-0">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <Titulo as="h3" tamano="sm">{titulo}</Titulo>
         {extra}
       </div>
       {children}
@@ -79,37 +67,46 @@ function Seccion({ titulo, extra, children }) {
   );
 }
 
-function BotonCopiar({ id, texto, copiado, onCopiar, label }) {
+function BotonCopiar({ id, texto, copiado, onCopiar, etiqueta }) {
   const hecho = copiado === id;
   return (
     <button type="button" onClick={() => onCopiar(id, texto)}
-      aria-label={hecho ? "Copiado" : `Copiar ${label}`} title={hecho ? "Copiado" : "Copiar"}
-      className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
-        hecho ? "text-emerald-600 bg-emerald-50" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`}>
-      <Svg>{hecho ? Icono.check : Icono.copiar}</Svg>
+      aria-label={hecho ? "Copiado" : `Copiar ${etiqueta}`} title={hecho ? "Copiado" : "Copiar"}
+      className={`w-11 h-11 rounded-md flex items-center justify-center flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+        hecho ? "text-cuaderno-verde" : "text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja"}`}>
+      {hecho ? <VistoBueno tamano={16} titulo="Copiado" /> : <IconoCopiar />}
     </button>
   );
 }
 
-// Fila etiqueta / valor, con enlace opcional y botón de copiar
-function Fila({ label, valor, href, mono, copiable = true, id, copiado, onCopiar }) {
+// Renglón etiqueta / valor, con enlace opcional y botón de copiar
+function Fila({ etiqueta, valor, href, copiable = true, id, copiado, onCopiar }) {
   if (!valor) return null;
   return (
-    <div className="flex items-center gap-3 min-h-[36px]">
-      <dt className="w-28 flex-shrink-0 text-xs text-slate-400">{label}</dt>
-      <dd className={`flex-1 min-w-0 text-sm text-slate-800 truncate ${mono ? "font-mono text-[13px]" : ""}`}>
+    <div className="grid grid-cols-[7.5rem_1fr_2.75rem] items-center min-h-[44px] border-b border-cuaderno-azul">
+      <dt className="text-[15px] text-cuaderno-grafito">{etiqueta}</dt>
+      <dd className="m-0 min-w-0 text-[17px] truncate">
         {href
-          ? <a href={href} className="text-purple-700 hover:underline underline-offset-2">{valor}</a>
+          ? <a href={href} className="text-cuaderno-tinta underline decoration-cuaderno-azul underline-offset-4 hover:decoration-cuaderno-tinta">{valor}</a>
           : valor}
       </dd>
-      {copiable && <BotonCopiar id={id} texto={valor} copiado={copiado} onCopiar={onCopiar} label={label.toLowerCase()} />}
+      {copiable ? <BotonCopiar id={id} texto={valor} copiado={copiado} onCopiar={onCopiar} etiqueta={etiqueta.toLowerCase()} /> : <span />}
     </div>
+  );
+}
+
+function Pendiente({ children, accion, onAccion }) {
+  return (
+    <p className="m-0 text-[16px] text-cuaderno-grafito">
+      {children}{" "}
+      <Boton variante="texto" className="min-h-0 text-[16px]" onClick={onAccion}>{accion}</Boton>
+    </p>
   );
 }
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 export default function PanelDetalleCuenta({
-  empresaId, cuenta, proveedor, proveedores, accent = "#94a3b8",
+  empresaId, cuenta, proveedor, proveedores,
   weekColumns, payments, paymentsPaid, paymentNotas,
   bloqueado = false, onClose, onEditarCuenta, onVincularProveedor,
 }) {
@@ -179,59 +176,40 @@ export default function PanelDetalleCuenta({
 
   const p = proveedor;
   const t = p?.transferencia || {};
-  const subtitulo = [casoOracion(cuenta.subcategoria), casoOracion(cuenta.detalle)].filter(Boolean).join(" · ");
+  const subtitulo = [casoOracion(cuenta.subcategoria), cuenta.detalle && cuenta.detalle.toLowerCase()].filter(Boolean).join(", ");
   const tieneContacto = p && (p.contacto?.email || p.contacto?.telefono || p.ejecutivo?.nombre || p.ejecutivo?.email || p.ejecutivo?.telefono);
 
   return (
-    <div className="fixed inset-0 z-[65]" role="presentation">
+    <div className="cuaderno fixed inset-0 z-[65]" role="presentation">
       {/* Fondo */}
       <div onClick={cerrar}
-        className={`absolute inset-0 bg-slate-900/25 backdrop-blur-[2px] transition-opacity duration-200 motion-reduce:transition-none ${visible ? "opacity-100" : "opacity-0"}`} />
+        className={`absolute inset-0 bg-cuaderno-tinta/25 backdrop-blur-[2px] transition-opacity duration-200 motion-reduce:transition-none ${visible ? "opacity-100" : "opacity-0"}`} />
 
-      {/* Panel */}
+      {/* Tarjeta */}
       <aside role="dialog" aria-modal="true" aria-labelledby="panel-cuenta-titulo"
-        className={`absolute top-0 right-0 h-full w-full sm:w-[440px] bg-white flex flex-col transition-transform duration-200 ease-out motion-reduce:transition-none ${visible ? "translate-x-0" : "translate-x-full"}`}
-        style={{ boxShadow: "-16px 0 40px -12px rgba(15,23,42,0.18)" }}>
+        className={`absolute top-0 right-0 h-full w-full sm:w-[460px] bg-cuaderno-tarjeta border-l border-cuaderno-columna/70 flex flex-col transition-transform duration-200 ease-out motion-reduce:transition-none shadow-[-20px_0_40px_-20px_rgb(var(--cuaderno-tinta)/0.35)] ${visible ? "translate-x-0" : "translate-x-full"}`}>
 
-        {/* Header */}
-        <header className="px-6 pt-5 pb-4 border-b border-slate-100 flex-shrink-0">
+        {/* Encabezado */}
+        <header className="px-6 pt-5 pb-3 border-b-[3px] border-double border-cuaderno-margen flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              {subtitulo && (
-                <p className="flex items-center gap-1.5 text-xs text-slate-400 mb-1">
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: accent }} />
-                  <span className="truncate">{subtitulo}</span>
-                </p>
-              )}
-              <h2 id="panel-cuenta-titulo" className="text-base font-bold text-slate-900 leading-snug break-words">{cuenta.nombre}</h2>
+              {subtitulo && <p className="m-0 text-[15px] text-cuaderno-grafito truncate">{subtitulo}</p>}
+              <Titulo as="h2" tamano="lg" id="panel-cuenta-titulo" className="break-words">{casoTitulo(cuenta.nombre)}</Titulo>
             </div>
-            <button ref={botonCerrar} onClick={cerrar} aria-label="Cerrar detalle"
-              className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300">
-              <Svg className="w-4 h-4">{Icono.cerrar}</Svg>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mt-4">
-            <div className="rounded-xl bg-slate-50 px-3.5 py-2.5">
-              <p className="text-[11px] text-slate-400">Próximo pago</p>
-              {proximo ? (
-                <>
-                  <p className="text-sm font-bold font-mono text-rose-600 mt-0.5">{fmtCLP(proximo.monto)}</p>
-                  <p className="text-[11px] text-slate-400">{proximo.label} · {proximo.dateRange}</p>
-                </>
-              ) : (
-                <p className="text-sm font-semibold text-slate-400 mt-0.5">Sin pagos pendientes</p>
-              )}
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3.5 py-2.5">
-              <p className="text-[11px] text-slate-400">Total en el flujo</p>
-              <p className={`text-sm font-bold font-mono mt-0.5 ${totalFlujo ? "text-slate-800" : "text-slate-400"}`}>
-                {totalFlujo ? fmtCLP(totalFlujo) : "$0"}
-              </p>
-              <p className="text-[11px] text-slate-400">{weekColumns.length} semanas visibles</p>
-            </div>
+            <Boton ref={botonCerrar} variante="icono" onClick={cerrar} aria-label="Cerrar detalle"><IconoCerrar /></Boton>
           </div>
         </header>
+
+        {/* Resumen */}
+        <div className="px-6 py-3 border-b border-cuaderno-azul flex-shrink-0">
+          <LineaGuia etiqueta="Próximo pago" className="text-[18px]">
+            {proximo ? <Cifra valor={proximo.monto} escala="pesos" /> : <span className="text-cuaderno-grafito">sin pendientes</span>}
+          </LineaGuia>
+          {proximo && <p className="m-0 -mt-1.5 text-right text-[14px] text-cuaderno-grafito">{proximo.label}, del {proximo.dateRange}</p>}
+          <LineaGuia etiqueta="Total en el flujo" className="text-[18px]">
+            <Cifra valor={totalFlujo} escala="pesos" vacio="$0" raya="doble" />
+          </LineaGuia>
+        </div>
 
         {/* Cuerpo */}
         <div className="flex-1 overflow-y-auto">
@@ -239,98 +217,83 @@ export default function PanelDetalleCuenta({
           {/* Proveedor */}
           <Seccion titulo="Proveedor"
             extra={p && !cambiando && (
-              <div className="flex items-center gap-3">
-                <button onClick={() => setCambiando(true)} className="text-xs font-semibold text-slate-400 hover:text-slate-600">Cambiar</button>
-                <button onClick={() => setEditandoFicha(true)} className="text-xs font-semibold text-purple-700 hover:text-purple-800">Editar ficha</button>
+              <div className="flex items-center gap-4">
+                <Boton variante="texto" className="text-[16px] text-cuaderno-grafito" onClick={() => setCambiando(true)}>Cambiar</Boton>
+                <Boton variante="texto" className="text-[16px]" onClick={() => setEditandoFicha(true)}>Editar ficha</Boton>
               </div>
             )}>
             {p && !cambiando ? (
-              <div>
-                <p className="text-sm font-semibold text-slate-800">{p.razonSocial}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{p.rut || "Sin RUT"}</p>
+              <div className="pb-1">
+                <p className="m-0 text-[19px]">{p.razonSocial}</p>
+                <p className="m-0 text-[15px] text-cuaderno-grafito">{p.rut ? `RUT ${p.rut}` : "Sin RUT"}</p>
               </div>
             ) : (
               <div className="space-y-2.5">
                 {!p && (
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="m-0 text-[16px] text-cuaderno-grafito leading-snug">
                     Vincula un proveedor para tener a mano cómo pagarle y a quién contactar.
                   </p>
                 )}
                 <div className={vinculando ? "opacity-60 pointer-events-none" : ""}>
                   <SelectorProveedor empresaId={empresaId} proveedores={proveedores}
                     value={cambiando ? (cuenta.proveedorId || "") : ""}
-                    onChange={id => (id ? vincular(id) : vincular(""))}
-                    nombreSugerido={casoOracion(cuenta.nombre)}
+                    onChange={id => vincular(id || "")}
+                    nombreSugerido={casoTitulo(cuenta.nombre)}
                     autoFocus={cambiando} />
                 </div>
                 {cambiando && (
-                  <button onClick={() => setCambiando(false)} className="text-xs font-semibold text-slate-400 hover:text-slate-600">
-                    Cancelar
-                  </button>
+                  <Boton variante="texto" className="text-[16px] text-cuaderno-grafito" onClick={() => setCambiando(false)}>Cancelar</Boton>
                 )}
               </div>
             )}
-            {errorVincular && <p className="text-xs font-medium text-red-600 mt-2">{errorVincular}</p>}
+            {errorVincular && <p className="m-0 mt-2 text-[15px] text-cuaderno-roja">{errorVincular}</p>}
           </Seccion>
 
           {/* Cómo pagar */}
           {p && (
             <Seccion titulo="Cómo pagar"
-              extra={p.medioPago && (
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
-                  {MEDIO_LABEL[p.medioPago]}
-                </span>
-              )}>
+              extra={p.medioPago && <Resaltado color="lavanda" className="text-[16px]">{MEDIO_ETIQUETA[p.medioPago]}</Resaltado>}>
               {p.medioPago === "transferencia" && (
                 <>
-                  <dl>
-                    <Fila label="Titular"       valor={t.titular || p.razonSocial} id="titular" copiado={copiado} onCopiar={onCopiar} />
-                    <Fila label="RUT"           valor={t.rutTitular || p.rut} mono id="rut" copiado={copiado} onCopiar={onCopiar} />
-                    <Fila label="Banco"         valor={t.banco} copiable={false} />
-                    <Fila label="Tipo de cuenta" valor={t.tipoCuenta} copiable={false} />
-                    <Fila label="N° de cuenta"  valor={t.numeroCuenta} mono id="numero" copiado={copiado} onCopiar={onCopiar} />
-                    <Fila label="Comprobante a" valor={t.emailComprobante} href={`mailto:${t.emailComprobante}`} id="emailComp" copiado={copiado} onCopiar={onCopiar} />
+                  <dl className="m-0">
+                    <Fila etiqueta="Titular"        valor={t.titular || p.razonSocial} id="titular" copiado={copiado} onCopiar={onCopiar} />
+                    <Fila etiqueta="RUT"            valor={t.rutTitular || p.rut} id="rut" copiado={copiado} onCopiar={onCopiar} />
+                    <Fila etiqueta="Banco"          valor={t.banco} copiable={false} />
+                    <Fila etiqueta="Tipo de cuenta" valor={t.tipoCuenta} copiable={false} />
+                    <Fila etiqueta="N° de cuenta"   valor={t.numeroCuenta} id="numero" copiado={copiado} onCopiar={onCopiar} />
+                    <Fila etiqueta="Comprobante a"  valor={t.emailComprobante} href={`mailto:${t.emailComprobante}`} id="emailComp" copiado={copiado} onCopiar={onCopiar} />
                   </dl>
-                  <button onClick={() => onCopiar("todo", textoTransferencia(p))}
-                    className={`mt-3 w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 ${
-                      copiado === "todo" ? "bg-emerald-50 text-emerald-700" : "bg-purple-700 hover:bg-purple-600 text-white shadow-sm"}`}>
-                    <Svg>{copiado === "todo" ? Icono.check : Icono.copiar}</Svg>
-                    {copiado === "todo" ? "Datos copiados" : "Copiar datos de transferencia"}
-                  </button>
+                  <Boton variante={copiado === "todo" ? "secundario" : "primario"} className="w-full mt-4"
+                    onClick={() => onCopiar("todo", textoTransferencia(p))}>
+                    {copiado === "todo" ? <><VistoBueno tamano={16} titulo="" /> Datos copiados</> : <><IconoCopiar /> Copiar datos de transferencia</>}
+                  </Boton>
                 </>
               )}
 
               {p.medioPago === "web" && (
                 <>
-                  <dl>
-                    <Fila label="Portal" valor={(() => { try { return new URL(p.web?.url).hostname; } catch { return p.web?.url; } })()} copiable={false} />
-                    <Fila label="N° de cliente" valor={p.web?.numeroCliente} mono id="cliente" copiado={copiado} onCopiar={onCopiar} />
+                  <dl className="m-0">
+                    <Fila etiqueta="Portal" valor={(() => { try { return new URL(p.web?.url).hostname; } catch { return p.web?.url; } })()} copiable={false} />
+                    <Fila etiqueta="N° de cliente" valor={p.web?.numeroCliente} id="cliente" copiado={copiado} onCopiar={onCopiar} />
                   </dl>
                   {p.web?.url && (
                     <a href={p.web.url} target="_blank" rel="noopener noreferrer"
-                      className="mt-3 w-full py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300">
-                      Ir a pagar
-                      <Svg>{Icono.externo}</Svg>
+                      className="mt-4 w-full min-h-[46px] rounded-md bg-cuaderno-tinta text-cuaderno-hoja text-[18px] flex items-center justify-center gap-2 hover:bg-cuaderno-tinta/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 focus-visible:ring-offset-2">
+                      Ir a pagar <IconoExterno />
                     </a>
                   )}
                 </>
               )}
 
               {p.medioPago === "automatico" && (
-                <div className="flex gap-3 rounded-xl bg-slate-50 px-4 py-3">
-                  <span className="text-slate-400 mt-0.5"><Svg className="w-4 h-4">{Icono.tarjeta}</Svg></span>
-                  <div>
-                    <p className="text-sm text-slate-800">Se carga en <span className="font-semibold">{p.automatico?.cargoEn}</span></p>
-                    <p className="text-xs text-slate-500 mt-0.5">No hay que pagarlo a mano. Revisa que el cargo aparezca en la cartola.</p>
-                  </div>
+                <div className="py-1">
+                  <p className="m-0 text-[17px]">Se carga en {p.automatico?.cargoEn}.</p>
+                  <p className="m-0 text-[15px] text-cuaderno-grafito">No hay que pagarlo a mano. Revisa que el cargo aparezca en la cartola.</p>
                 </div>
               )}
 
               {!p.medioPago && (
-                <div className="text-xs text-slate-500">
-                  La ficha no tiene un medio de pago.{" "}
-                  <button onClick={() => setEditandoFicha(true)} className="font-semibold text-purple-700 hover:underline underline-offset-2">Agregar medio de pago</button>
-                </div>
+                <Pendiente accion="Agregar medio de pago" onAccion={() => setEditandoFicha(true)}>La ficha no tiene un medio de pago.</Pendiente>
               )}
             </Seccion>
           )}
@@ -339,29 +302,26 @@ export default function PanelDetalleCuenta({
           {p && (
             <Seccion titulo="Contacto">
               {tieneContacto ? (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {(p.contacto?.email || p.contacto?.telefono) && (
-                    <dl>
-                      <Fila label="Correo"   valor={p.contacto?.email} href={`mailto:${p.contacto?.email}`} id="cEmail" copiado={copiado} onCopiar={onCopiar} />
-                      <Fila label="Teléfono" valor={p.contacto?.telefono} href={hrefTelefono(p.contacto?.telefono)} id="cTel" copiado={copiado} onCopiar={onCopiar} />
+                    <dl className="m-0">
+                      <Fila etiqueta="Correo"   valor={p.contacto?.email} href={`mailto:${p.contacto?.email}`} id="cEmail" copiado={copiado} onCopiar={onCopiar} />
+                      <Fila etiqueta="Teléfono" valor={p.contacto?.telefono} href={hrefTelefono(p.contacto?.telefono)} id="cTel" copiado={copiado} onCopiar={onCopiar} />
                     </dl>
                   )}
                   {(p.ejecutivo?.nombre || p.ejecutivo?.email || p.ejecutivo?.telefono) && (
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 mb-1">Ejecutivo de cuenta</p>
-                      <dl>
-                        <Fila label="Nombre"   valor={p.ejecutivo?.nombre} copiable={false} />
-                        <Fila label="Correo"   valor={p.ejecutivo?.email} href={`mailto:${p.ejecutivo?.email}`} id="eEmail" copiado={copiado} onCopiar={onCopiar} />
-                        <Fila label="Teléfono" valor={p.ejecutivo?.telefono} href={hrefTelefono(p.ejecutivo?.telefono)} id="eTel" copiado={copiado} onCopiar={onCopiar} />
+                      <p className="m-0 text-[16px] underline decoration-cuaderno-azul underline-offset-[5px]">Ejecutivo de cuenta</p>
+                      <dl className="m-0">
+                        <Fila etiqueta="Nombre"   valor={p.ejecutivo?.nombre} copiable={false} />
+                        <Fila etiqueta="Correo"   valor={p.ejecutivo?.email} href={`mailto:${p.ejecutivo?.email}`} id="eEmail" copiado={copiado} onCopiar={onCopiar} />
+                        <Fila etiqueta="Teléfono" valor={p.ejecutivo?.telefono} href={hrefTelefono(p.ejecutivo?.telefono)} id="eTel" copiado={copiado} onCopiar={onCopiar} />
                       </dl>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-xs text-slate-500">
-                  Sin datos de contacto.{" "}
-                  <button onClick={() => setEditandoFicha(true)} className="font-semibold text-purple-700 hover:underline underline-offset-2">Agregar contacto</button>
-                </div>
+                <Pendiente accion="Agregar contacto" onAccion={() => setEditandoFicha(true)}>Sin datos de contacto.</Pendiente>
               )}
             </Seccion>
           )}
@@ -369,44 +329,40 @@ export default function PanelDetalleCuenta({
           {/* Pagos en el flujo */}
           <Seccion titulo="Pagos en el flujo">
             {semanas.length ? (
-              <ul className="divide-y divide-slate-100">
+              <ul className="m-0 p-0 list-none">
                 {semanas.map(w => (
-                  <li key={w.key} className="py-2 flex items-start gap-3">
-                    <div className="w-32 flex-shrink-0">
-                      <p className={`text-xs font-semibold ${w.isCurrentWeek ? "text-purple-700" : "text-slate-600"}`}>
-                        {w.label}{w.isCurrentWeek && " · esta semana"}
-                      </p>
-                      <p className="text-[11px] text-slate-400">{w.dateRange}</p>
+                  <li key={w.key} className={`grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 min-h-[50px] border-b border-cuaderno-azul ${w.isCurrentWeek ? "bg-cuaderno-durazno/40 -mx-2 px-2" : ""}`}>
+                    <div className="leading-tight">
+                      <div className="text-[17px]">{w.label}</div>
+                      <div className="text-[13px] text-cuaderno-grafito">{w.isCurrentWeek ? "esta semana" : w.dateRange}</div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      {w.nota && <p className="text-[11px] text-amber-700 leading-snug">{w.nota}</p>}
+                    <div className="min-w-0">
+                      {w.pagado && <Resaltado color="menta" className="text-[15px]">pagado</Resaltado>}
+                      {w.nota && <p className="m-0 text-[14px] text-cuaderno-grafito leading-snug">* {w.nota}</p>}
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className={`text-sm font-mono font-semibold ${w.pagado ? "text-slate-300 line-through" : "text-rose-600"}`}>{fmtCLP(w.monto)}</p>
-                      {w.pagado && <p className="text-[11px] font-semibold text-emerald-600">Pagado</p>}
-                    </div>
+                    <span className="inline-flex items-center gap-1 text-[17px]">
+                      <Cifra valor={w.monto} escala="pesos" color={w.pagado ? "grafito" : "auto"} />
+                      {w.pagado && <VistoBueno tamano={13} />}
+                    </span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-slate-400">Esta cuenta no tiene montos en las semanas visibles.</p>
+              <p className="m-0 text-[16px] text-cuaderno-grafito">Esta cuenta no tiene montos en las semanas visibles.</p>
             )}
           </Seccion>
 
           {/* Notas del proveedor */}
           {p?.notas && (
             <Seccion titulo="Notas">
-              <p className="text-sm text-slate-600 whitespace-pre-line leading-relaxed">{p.notas}</p>
+              <p className="m-0 text-[17px] text-cuaderno-tinta whitespace-pre-line leading-relaxed">{p.notas}</p>
             </Seccion>
           )}
         </div>
 
-        {/* Footer */}
-        <footer className="px-6 py-4 border-t border-slate-100 flex-shrink-0">
-          <button onClick={() => onEditarCuenta(cuenta)}
-            className="w-full py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
-            Editar cuenta
-          </button>
+        {/* Pie */}
+        <footer className="px-6 py-4 border-t border-cuaderno-azul flex-shrink-0">
+          <Boton className="w-full" onClick={() => onEditarCuenta(cuenta)}>Editar cuenta</Boton>
         </footer>
       </aside>
 

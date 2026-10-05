@@ -7,6 +7,11 @@ import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebas
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
+  ModalCuaderno, FechaHoja,
+  IconoMas, IconoLapiz, IconoBorrar, IconoDocumento, IconoActualizar, IconoSubir,
+} from "./cuaderno";
 
 // ─── Documentos ────────────────────────────────────────────────────────────
 const DOCS_DEF_COSTO = [
@@ -17,13 +22,15 @@ const DOCS_DEF_COSTO = [
 ];
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
+// Los colores e íconos por categoría eran del diseño anterior. En el cuaderno la
+// categoría se escribe, sin color: el color queda reservado para los estados.
 const CATEGORIAS = [
-  { id: "credito",  label: "Crédito Bancario",       short: "CB", color: "from-blue-500 to-blue-700",    badge: "bg-blue-100 text-blue-700",      dot: "bg-blue-500",    icon: "M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" },
-  { id: "leasing",  label: "Leasing",                short: "CL", color: "from-violet-500 to-purple-700", badge: "bg-violet-100 text-violet-700",  dot: "bg-violet-500",  icon: "M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" },
-  { id: "arriendo", label: "Arriendo",               short: "AR", color: "from-emerald-500 to-teal-700",  badge: "bg-emerald-100 text-emerald-700",dot: "bg-emerald-500", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
-  { id: "seguro",   label: "Seguro",                 short: "SE", color: "from-amber-500 to-orange-600",  badge: "bg-amber-100 text-amber-700",    dot: "bg-amber-500",   icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
-  { id: "servicio", label: "Servicio / Suscripción", short: "SU", color: "from-sky-500 to-cyan-600",      badge: "bg-sky-100 text-sky-700",         dot: "bg-sky-500",     icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
-  { id: "otro",     label: "Crédito Automotriz",     short: "CA", color: "from-slate-500 to-slate-700",   badge: "bg-slate-100 text-slate-700",    dot: "bg-slate-400",   icon: "M8 17a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4zM3 9l1.5-4.5A2 2 0 016.4 3h11.2a2 2 0 011.9 1.5L21 9M3 9h18M3 9l-1 6h20l-1-6" },
+  { id: "credito",  label: "Crédito Bancario",       short: "CB" },
+  { id: "leasing",  label: "Leasing",                short: "CL" },
+  { id: "arriendo", label: "Arriendo",               short: "AR" },
+  { id: "seguro",   label: "Seguro",                 short: "SE" },
+  { id: "servicio", label: "Servicio / Suscripción", short: "SU" },
+  { id: "otro",     label: "Crédito Automotriz",     short: "CA" },
 ];
 const CAT_MAP = Object.fromEntries(CATEGORIAS.map(c => [c.id, c]));
 // Categorías que llevan seguimiento de cuotas (créditos y leasing)
@@ -91,36 +98,47 @@ function cuotasEsperadas(c) {
   return Math.min(Math.max(periodos, 0), total);
 }
 
-// ─── Modal ────────────────────────────────────────────────────────────────────
+// Montos en pesos van alineados en casillas. UF y dólares se escriben con su
+// moneda: alinearlos con los pesos haría pensar que son la misma unidad.
+function MontoMoneda({ valor, moneda = "CLP" }) {
+  if (moneda && moneda !== "CLP") return <span className="whitespace-nowrap">{fmt(valor, moneda)}</span>;
+  return <Cifra valor={valor} escala="pesos" vacio="$0" color="tinta" />;
+}
+
 // ─── Editor inline de fecha de vencimiento (click para abrir date picker) ───
 function FechaDocEditor({ fecha, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState(fecha || "");
   const e = estadoDoc(fecha);
   const d = diasRestantes(fecha);
-  const s = { vencido:"text-red-600", urgente:"text-amber-600", pronto:"text-yellow-700", ok:"text-emerald-600" }[e] || "text-slate-300";
+  // Estado del vencimiento, resaltado a mano
+  const marca = {
+    vencido: <Resaltado color="rosa">vencido</Resaltado>,
+    urgente: <Resaltado color="durazno">{d} días</Resaltado>,
+    pronto:  <span className="text-cuaderno-tinta">{d} días</span>,
+    ok:      <span className="inline-flex items-center gap-1 text-cuaderno-grafito">{d} días <VistoBueno tamano={11} titulo="" /></span>,
+  }[e];
 
   if (editing) {
     return (
       <div className="flex items-center gap-1">
         <input
           type="date" autoFocus value={draft}
+          aria-label="Fecha de vencimiento"
           onChange={ev => setDraft(ev.target.value)}
           onKeyDown={ev => { if (ev.key === "Enter") { onSave(draft); setEditing(false); } if (ev.key === "Escape") setEditing(false); }}
-          className="text-[10px] px-1 py-0.5 border-2 border-purple-400 rounded-md focus:outline-none"
+          className="min-h-[32px] text-[14px] bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta focus:outline-none"
         />
-        <button onClick={() => { onSave(draft); setEditing(false); }} className="w-4 h-4 rounded bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0">
-          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-        </button>
-        <button onClick={() => setEditing(false)} className="w-4 h-4 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0">
-          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
+        <Boton variante="texto" className="min-h-[32px] text-[14px]" onClick={() => { onSave(draft); setEditing(false); }}>listo</Boton>
+        <Boton variante="texto" className="min-h-[32px] text-[14px] text-cuaderno-grafito" onClick={() => setEditing(false)}>cancelar</Boton>
       </div>
     );
   }
   return (
-    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }} className={`text-[10px] font-semibold hover:underline ${s}`} title="Click para fijar/editar fecha de vencimiento">
-      {fecha ? (e === "vencido" ? "Vencido" : `${d}d${e==="ok"?" ✓":""}`) : "Sin fecha"}
+    <button onClick={() => { setDraft(fecha || ""); setEditing(true); }}
+      className="min-h-[32px] text-[14px] underline decoration-dotted decoration-cuaderno-columna underline-offset-4 hover:decoration-cuaderno-tinta"
+      title="Fijar o cambiar la fecha de vencimiento">
+      {fecha ? marca : <span className="text-cuaderno-grafito">sin fecha</span>}
     </button>
   );
 }
@@ -167,48 +185,45 @@ function DocUploaderCosto({ label, docKey, costoId, empresaId, urlActual, onUplo
 
   return (
     <div>
-      <p className="text-xs text-slate-400 font-semibold mb-1">{label}</p>
+      {label && <p className="m-0 mb-1 text-[14px] text-cuaderno-grafito">{label}</p>}
       {urlActual ? (
-        <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
-            {esImagen
-              ? <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-              : <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>}
-          </div>
+        <div className="flex items-center gap-2 min-h-[44px] border-b border-cuaderno-azul">
+          <IconoDocumento tamano={15} className="text-cuaderno-grafito" />
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-emerald-700 truncate">{nombreArchivo || "Archivo subido"}</p>
-            <p className="text-[10px] text-emerald-500">✓ Documento respaldado</p>
+            <a href={urlActual} target="_blank" rel="noopener noreferrer" title="Abrir el archivo"
+              className="block text-[15px] text-cuaderno-tinta truncate underline decoration-cuaderno-azul underline-offset-4 hover:decoration-cuaderno-tinta">
+              {nombreArchivo || "Archivo subido"}
+            </a>
+            <span className="inline-flex items-center gap-1 text-[13px] text-cuaderno-verde">
+              <VistoBueno tamano={11} titulo="" /> respaldado{esImagen ? ", imagen" : ""}
+            </span>
           </div>
-          <a href={urlActual} target="_blank" rel="noopener noreferrer"
-            className="w-7 h-7 rounded-lg bg-emerald-100 hover:bg-emerald-200 flex items-center justify-center transition-all flex-shrink-0" title="Ver / Descargar">
-            <svg className="w-3.5 h-3.5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-          </a>
-          <button onClick={handleEliminarArchivo} className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-all flex-shrink-0" title="Eliminar archivo">
-            <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          <button onClick={() => inputRef.current?.click()} aria-label="Reemplazar archivo" title="Reemplazar archivo"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-papel flex-shrink-0">
+            <IconoActualizar tamano={14} />
           </button>
-          <button onClick={() => inputRef.current?.click()} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="Reemplazar archivo">
-            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          <button onClick={handleEliminarArchivo} aria-label="Quitar archivo" title="Quitar archivo"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 flex-shrink-0">
+            <IconoBorrar tamano={14} />
           </button>
         </div>
       ) : uploading ? (
-        <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-xs font-bold text-purple-700">Subiendo...</p>
-            <p className="text-xs font-black text-purple-600">{progress}%</p>
-          </div>
-          <div className="w-full bg-purple-100 rounded-full h-1.5">
-            <div className="bg-gradient-to-r from-purple-600 to-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+        <div className="min-h-[44px] flex flex-col justify-center gap-1">
+          <p className="m-0 text-[14px] text-cuaderno-grafito">Subiendo… {progress}%</p>
+          <div className="h-[2px] bg-cuaderno-renglon">
+            <div className="h-full bg-cuaderno-tinta" style={{ width: `${progress}%` }} />
           </div>
         </div>
       ) : (
         <button onClick={() => inputRef.current?.click()}
-          className="w-full flex items-center gap-2 px-3 py-2 border-2 border-dashed border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 rounded-xl text-xs font-semibold text-slate-400 hover:text-purple-600 transition-all group">
-          <svg className="w-4 h-4 flex-shrink-0 group-hover:text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-          Subir archivo (PDF, JPG, PNG — máx. 10MB)
+          className="w-full min-h-[44px] flex items-center justify-center gap-2 rounded-md border-[1.5px] border-dashed border-cuaderno-columna hover:border-cuaderno-tinta hover:bg-cuaderno-papel text-[14px] text-cuaderno-tinta">
+          <IconoSubir tamano={14} />
+          Subir archivo
+          <span className="text-cuaderno-grafito">(PDF o imagen, hasta 10 MB)</span>
         </button>
       )}
-      {error && <p className="text-xs text-red-500 font-semibold mt-1">{error}</p>}
-      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden"
+      {error && <p className="m-0 mt-1 text-[13px] text-cuaderno-roja">{error}</p>}
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="sr-only"
         onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ""; }} />
     </div>
   );
@@ -313,265 +328,179 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
     return false;
   });
 
+  const PASOS = [{ id: 1, label: "1. Lo básico" }, { id: 2, label: "2. Fechas y cuotas" }, { id: 3, label: "3. Contrato" }];
+  const activoElegido = form.activoVinculadoId ? activosFiltrados.find(x => x.id === form.activoVinculadoId) : null;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto overflow-hidden">
-
-        {/* Header */}
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 p-6 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d={cat.icon} />
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-lg font-black">{editando ? "Editar Costo" : "Nuevo Costo Fijo"}</h2>
-                <p className="text-white/70 text-sm">{editando ? editando.nombre : "Registra un nuevo costo recurrente"}</p>
-              </div>
-            </div>
-            <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-          {/* Steps */}
-          <div className="flex items-center gap-2 mt-5">
-            {[1,2,3].map(s => (
-              <React.Fragment key={s}>
-                <button
-                  onClick={() => (step > s || s === 1) ? setStep(s) : null}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${step === s ? "bg-white text-slate-800 shadow-md" : step > s ? "bg-white/30 text-white" : "bg-white/10 text-white/50"}`}
-                >
-                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs font-black ${step === s ? "bg-purple-700 text-white" : step > s ? "bg-white/60 text-slate-700" : "bg-white/20 text-white/60"}`}>{s}</span>
-                  {s === 1 ? "Básico" : s === 2 ? "Detalles" : "Contrato"}
-                </button>
-                {s < 3 && <div className={`flex-1 h-0.5 rounded ${step > s ? "bg-white/50" : "bg-white/20"}`} />}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-6 space-y-5">
-          {step === 1 && (
-            <>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">Categoría</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {CATEGORIAS.map(c => (
-                    <button key={c.id} onClick={() => set("categoria", c.id)}
-                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-center ${form.categoria === c.id ? "border-purple-700 bg-purple-50 shadow-md" : "border-slate-200 hover:border-slate-300"}`}
-                    >
-                      <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${c.color} flex items-center justify-center`}>
-                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={c.icon} /></svg>
-                      </div>
-                      <span className="text-xs font-bold text-slate-700 leading-tight">{c.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* ── Selector de activo vinculado (solo para Leasing y Crédito Automotriz) ── */}
-              {(form.categoria === "leasing" || form.categoria === "otro") && (
-                <div className="rounded-xl border-2 border-purple-200 bg-purple-50 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 rounded-lg bg-purple-700 flex items-center justify-center flex-shrink-0">
-                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-purple-800">Vincular a un activo</p>
-                      <p className="text-[11px] text-purple-500">
-                        {form.categoria === "leasing"
-                          ? "Activos registrados con financiamiento Leasing"
-                          : "Vehículos registrados en FleetCore"}
-                      </p>
-                    </div>
-                  </div>
-                  {loadingActivos ? (
-                    <div className="flex items-center gap-2 py-2">
-                      <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-xs text-purple-500">Cargando activos...</span>
-                    </div>
-                  ) : activosFiltrados.length === 0 ? (
-                    <p className="text-xs text-purple-400 italic">
-                      {form.categoria === "leasing"
-                        ? "No hay activos con Leasing registrados"
-                        : "No hay vehículos registrados"}
-                    </p>
-                  ) : (
-                    <div className="relative">
-                      <svg className="w-3.5 h-3.5 text-purple-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5" />
-                      </svg>
-                      <select
-                        value={form.activoVinculadoId || ""}
-                        onChange={e => handleVincularActivo(e.target.value)}
-                        className="w-full pl-8 pr-4 py-2.5 border-2 border-purple-200 bg-white text-slate-700 rounded-xl focus:outline-none focus:border-purple-500 text-sm font-semibold appearance-none cursor-pointer"
-                      >
-                        <option value="">— Sin activo vinculado —</option>
-                        {activosFiltrados.map(a => {
-                          const label = a.nombre
-                            ? [a.nombre, a.patente || a.code].filter(Boolean).join(" · ")
-                            : (a.patente || a.code || a.id);
-                          return <option key={a.id} value={a.id}>{label}</option>;
-                        })}
-                      </select>
-                      <svg className="w-3 h-3 text-purple-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  )}
-                  {form.activoVinculadoId && (() => {
-                    const a = activosFiltrados.find(x => x.id === form.activoVinculadoId);
-                    return a ? (
-                      <div className="mt-2 flex items-center gap-2 text-[11px] text-purple-700 font-semibold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block" />
-                        Vinculado: {a.nombre}{a.patente ? ` · ${a.patente}` : ""}
-                        <button onClick={() => set("activoVinculadoId", "")} className="ml-auto text-purple-400 hover:text-purple-700 transition-colors" title="Desvincular">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Nombre <span className="text-red-500">*</span></label>
-                <input value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: Crédito Caterpillar D8..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Monto <span className="text-red-500">*</span></label>
-                  <div className="flex gap-2">
-                    <select value={form.moneda} onChange={e => set("moneda", e.target.value)} className="px-2 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm font-bold bg-slate-50 w-24">
-                      {MONEDAS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                    </select>
-                    <input type="number" value={form.monto} onChange={e => set("monto", e.target.value)} placeholder="0" className="flex-1 px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Frecuencia</label>
-                  <select value={form.frecuencia} onChange={e => set("frecuencia", e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                    {FRECUENCIAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Descripción</label>
-                <textarea value={form.descripcion} onChange={e => set("descripcion", e.target.value)} rows={2} placeholder="Describe brevemente este costo..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none" />
-              </div>
-            </>
-          )}
-
-          {step === 2 && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Fecha inicio <span className="text-red-500">*</span></label>
-                  <input type="date" value={form.fechaInicio} onChange={e => set("fechaInicio", e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">Fecha término</label>
-                  <input type="date" value={form.fechaTermino} onChange={e => set("fechaTermino", e.target.value)} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Día de pago <span className="ml-2 text-xs font-normal text-slate-400">(1–31)</span></label>
-                <div className="flex items-center gap-3">
-                  <input type="number" min="1" max="31" value={form.diaPago} onChange={e => set("diaPago", e.target.value)} placeholder="—" className="w-28 px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm text-center font-bold" />
-                  {form.diaPago && <span className="text-sm text-slate-500">Vence el <strong className="text-purple-700">día {form.diaPago}</strong> de cada {form.frecuencia === "mensual" ? "mes" : "período"}</span>}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Proveedor / Institución</label>
-                <input value={form.proveedor} onChange={e => set("proveedor", e.target.value)} placeholder="Ej: Banco BCI, Inmobiliaria X..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-              </div>
-              {TIENE_CUOTAS.includes(form.categoria) && (
-                <div className="rounded-xl border-2 border-purple-200 bg-purple-50 p-4">
-                  <p className="text-xs font-black text-purple-800 mb-3">Seguimiento de cuotas</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-purple-700 mb-1.5">N° total de cuotas</label>
-                      <input type="number" min="0" value={form.cuotasTotales} onChange={e => set("cuotasTotales", e.target.value)} placeholder="Ej: 48" className="w-full px-4 py-2.5 border-2 border-purple-200 bg-white rounded-xl focus:outline-none focus:border-purple-500 text-sm font-bold" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-purple-700 mb-1.5">Cuotas pagadas</label>
-                      <input type="number" min="0" max={form.cuotasTotales || undefined} value={form.cuotasPagadas} onChange={e => set("cuotasPagadas", e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border-2 border-purple-200 bg-white rounded-xl focus:outline-none focus:border-purple-500 text-sm font-bold" />
-                    </div>
-                  </div>
-                  {form.cuotasTotales && (() => {
-                    const esperadas = cuotasEsperadas(form);
-                    const pagadas = parseInt(form.cuotasPagadas) || 0;
-                    if (esperadas === null) return null;
-                    const atraso = esperadas - pagadas;
-                    return atraso > 0
-                      ? <p className="text-xs text-red-600 font-bold mt-2">⚠ Van atrasadas {atraso} cuota{atraso > 1 ? "s" : ""} (deberían ir {esperadas}/{form.cuotasTotales})</p>
-                      : <p className="text-xs text-emerald-600 font-bold mt-2">✓ Al día (esperado {esperadas}/{form.cuotasTotales})</p>;
-                  })()}
-                </div>
-              )}
-              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border-2 border-slate-200">
-                <div>
-                  <p className="text-sm font-bold text-slate-700">Estado del costo</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Los inactivos se excluyen del resumen mensual</p>
-                </div>
-                <button onClick={() => set("activo", !form.activo)} className={`relative w-12 h-6 rounded-full transition-colors ${form.activo ? "bg-purple-600" : "bg-slate-300"}`}>
-                  <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.activo ? "translate-x-7" : "translate-x-1"}`} />
-                </button>
-              </div>
-            </>
-          )}
-
-          {step === 3 && (
-            <>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">N° de contrato / referencia</label>
-                <input value={form.numeroContrato} onChange={e => set("numeroContrato", e.target.value)} placeholder="Ej: CTR-2024-0123" className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Notas adicionales</label>
-                <textarea value={form.notas} onChange={e => set("notas", e.target.value)} rows={4} placeholder="Condiciones especiales, observaciones..." className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none" />
-              </div>
-              <div className="rounded-xl p-4 bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-100">
-                <p className="text-xs font-black text-purple-600 uppercase tracking-wider mb-3">Resumen</p>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="text-slate-500">Nombre:</span><span className="font-bold text-slate-800 ml-1">{form.nombre || "—"}</span></div>
-                  <div><span className="text-slate-500">Categoría:</span><span className="font-bold text-slate-800 ml-1">{cat.label}</span></div>
-                  {(form.categoria === "leasing" || form.categoria === "otro") && form.activoVinculadoId && (() => {
-                    const a = activosFiltrados.find(x => x.id === form.activoVinculadoId);
-                    return a ? (
-                      <div className="col-span-2"><span className="text-slate-500">Activo vinculado:</span><span className="font-bold text-purple-700 ml-1">{a.nombre}{a.patente ? ` · ${a.patente}` : ""}</span></div>
-                    ) : null;
-                  })()}
-                  <div><span className="text-slate-500">Monto:</span><span className="font-bold text-slate-800 ml-1">{form.moneda} {Number(form.monto || 0).toLocaleString("es-CL")}</span></div>
-                  <div><span className="text-slate-500">Frecuencia:</span><span className="font-bold text-slate-800 ml-1">{FREC_MAP[form.frecuencia]}</span></div>
-                  <div><span className="text-slate-500">Inicio:</span><span className="font-bold text-slate-800 ml-1">{form.fechaInicio || "—"}</span></div>
-                  <div><span className="text-slate-500">Día pago:</span><span className="font-bold text-slate-800 ml-1">{form.diaPago ? `Día ${form.diaPago}` : "—"}</span></div>
-                  {TIENE_CUOTAS.includes(form.categoria) && form.cuotasTotales && (
-                    <div><span className="text-slate-500">Cuotas:</span><span className="font-bold text-purple-700 ml-1">{form.cuotasPagadas || 0}/{form.cuotasTotales}</span></div>
-                  )}
-                  <div><span className="text-slate-500">Estado:</span><span className={`font-bold ml-1 ${form.activo ? "text-purple-600" : "text-slate-400"}`}>{form.activo ? "Activo" : "Inactivo"}</span></div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="px-6 pb-6 flex gap-3">
-          {step > 1 && <button onClick={() => setStep(s => s-1)} className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-all">← Anterior</button>}
-          <button onClick={onClose} className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-all">Cancelar</button>
+    <ModalCuaderno
+      titulo={editando ? "Editar costo" : "Nuevo costo fijo"}
+      subtitulo={editando ? editando.nombre : "Un compromiso que se paga de forma recurrente"}
+      ancho="max-w-2xl"
+      onClose={onClose}
+      bloqueado={saving}
+      pie={
+        <div className="flex flex-wrap items-center gap-2">
+          {step > 1 && <Boton variante="texto" onClick={() => setStep(s => s - 1)}>Volver</Boton>}
           <div className="flex-1" />
+          <Boton onClick={onClose} disabled={saving}>Cancelar</Boton>
           {step < 3
-            ? <button onClick={() => setStep(s => s+1)} disabled={step === 1 && (!form.nombre || !form.monto)} className="px-6 py-3 bg-gradient-to-r from-purple-700 to-violet-600 hover:from-purple-600 hover:to-violet-500 disabled:opacity-40 text-white font-bold rounded-xl text-sm transition-all">Siguiente →</button>
-            : <button onClick={handleSubmit} disabled={saving || !form.nombre || !form.monto || !form.fechaInicio} className="px-6 py-3 bg-gradient-to-r from-purple-700 to-violet-600 hover:from-purple-600 hover:to-violet-500 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-lg transition-all">
-                {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>{editando ? "Guardar cambios" : "Crear costo"}</>}
-              </button>
-          }
+            ? <Boton variante="primario" onClick={() => setStep(s => s + 1)} disabled={step === 1 && (!form.nombre || !form.monto)}>Siguiente</Boton>
+            : <Boton variante="primario" onClick={handleSubmit} disabled={saving || !form.nombre || !form.monto || !form.fechaInicio}>
+                {saving ? "Guardando…" : editando ? "Guardar cambios" : "Crear costo"}
+              </Boton>}
         </div>
+      }>
+
+      {/* Pasos: es una secuencia de verdad, por eso van numerados */}
+      <div role="tablist" className="flex flex-wrap gap-x-5 border-b border-cuaderno-azul -mt-1">
+        {PASOS.map(p => {
+          const alcanzable = step > p.id || p.id === 1;
+          return (
+            <button key={p.id} role="tab" aria-selected={step === p.id}
+              onClick={() => alcanzable ? setStep(p.id) : null}
+              disabled={!alcanzable && step !== p.id}
+              className={`min-h-[40px] -mb-px border-b-2 text-[17px] ${
+                step === p.id ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-transparent text-cuaderno-grafito disabled:opacity-50"}`}>
+              {p.label}
+            </button>
+          );
+        })}
       </div>
-    </div>
+
+      {step === 1 && (
+        <>
+          <Segmentado
+            etiqueta="Categoría"
+            opciones={CATEGORIAS.map(c => ({ id: c.id, label: c.label }))}
+            valor={form.categoria}
+            onCambiar={id => set("categoria", id)}
+          />
+
+          {/* Activo vinculado (solo leasing y crédito automotriz) */}
+          {(form.categoria === "leasing" || form.categoria === "otro") && (
+            <div className="border border-cuaderno-azul rounded-md px-4 py-3 space-y-2">
+              <p className="m-0 text-[17px]">Vincular a un activo</p>
+              <p className="m-0 -mt-1 text-[14px] text-cuaderno-grafito">
+                {form.categoria === "leasing" ? "Activos registrados con financiamiento leasing" : "Vehículos registrados en FleetCore"}
+              </p>
+              {loadingActivos ? (
+                <p className="m-0 text-[15px] text-cuaderno-grafito">Buscando activos…</p>
+              ) : activosFiltrados.length === 0 ? (
+                <p className="m-0 text-[15px] text-cuaderno-grafito">
+                  {form.categoria === "leasing" ? "No hay activos con leasing registrados." : "No hay vehículos registrados."}
+                </p>
+              ) : (
+                <Campo as="select" etiqueta="Activo" value={form.activoVinculadoId || ""} onChange={e => handleVincularActivo(e.target.value)}>
+                  <option value="">Sin activo vinculado</option>
+                  {activosFiltrados.map(a => {
+                    const label = a.nombre
+                      ? [a.nombre, a.patente || a.code].filter(Boolean).join(", ")
+                      : (a.patente || a.code || a.id);
+                    return <option key={a.id} value={a.id}>{label}</option>;
+                  })}
+                </Campo>
+              )}
+              {activoElegido && (
+                <p className="m-0 flex items-center gap-2 text-[15px]">
+                  <VistoBueno tamano={13} titulo="" />
+                  Vinculado a {activoElegido.nombre}{activoElegido.patente ? `, ${activoElegido.patente}` : ""}
+                  <Boton variante="texto" className="ml-auto min-h-[32px] text-[14px] text-cuaderno-grafito" onClick={() => set("activoVinculadoId", "")}>desvincular</Boton>
+                </p>
+              )}
+            </div>
+          )}
+
+          <Campo etiqueta="Nombre" value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: crédito Caterpillar D8" />
+
+          <div className="grid grid-cols-[6rem_1fr_1fr] gap-4 items-end">
+            <Campo as="select" etiqueta="Moneda" value={form.moneda} onChange={e => set("moneda", e.target.value)}>
+              {MONEDAS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </Campo>
+            <Campo etiqueta="Monto" type="number" inputMode="decimal" value={form.monto} onChange={e => set("monto", e.target.value)} placeholder="0" />
+            <Campo as="select" etiqueta="Frecuencia" value={form.frecuencia} onChange={e => set("frecuencia", e.target.value)}>
+              {FRECUENCIAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </Campo>
+          </div>
+
+          <Campo as="textarea" rows={2} etiqueta="Descripción" value={form.descripcion} onChange={e => set("descripcion", e.target.value)}
+            placeholder="En pocas palabras, de qué se trata" />
+        </>
+      )}
+
+      {step === 2 && (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <Campo etiqueta="Fecha de inicio" type="date" value={form.fechaInicio} onChange={e => set("fechaInicio", e.target.value)} />
+            <Campo etiqueta="Fecha de término" type="date" value={form.fechaTermino} onChange={e => set("fechaTermino", e.target.value)} />
+          </div>
+
+          <div className="flex items-end gap-4">
+            <Campo etiqueta="Día de pago" type="number" min="1" max="31" className="w-28"
+              value={form.diaPago} onChange={e => set("diaPago", e.target.value)} placeholder="1 a 31" />
+            {form.diaPago && (
+              <p className="m-0 pb-2 text-[16px] text-cuaderno-grafito">
+                Se paga el día {form.diaPago} de cada {form.frecuencia === "mensual" ? "mes" : "período"}.
+              </p>
+            )}
+          </div>
+
+          <Campo etiqueta="Proveedor o institución" value={form.proveedor} onChange={e => set("proveedor", e.target.value)}
+            placeholder="Ej: Banco BCI, inmobiliaria" />
+
+          {TIENE_CUOTAS.includes(form.categoria) && (
+            <div className="border border-cuaderno-azul rounded-md px-4 py-3 space-y-3">
+              <p className="m-0 text-[17px]">Cuotas</p>
+              <div className="grid grid-cols-2 gap-4">
+                <Campo etiqueta="Total de cuotas" type="number" min="0" value={form.cuotasTotales}
+                  onChange={e => set("cuotasTotales", e.target.value)} placeholder="Ej: 48" />
+                <Campo etiqueta="Cuotas pagadas" type="number" min="0" max={form.cuotasTotales || undefined} value={form.cuotasPagadas}
+                  onChange={e => set("cuotasPagadas", e.target.value)} placeholder="0" />
+              </div>
+              {form.cuotasTotales && (() => {
+                const esperadas = cuotasEsperadas(form);
+                const pagadas = parseInt(form.cuotasPagadas) || 0;
+                if (esperadas === null) return null;
+                const atraso = esperadas - pagadas;
+                return atraso > 0
+                  ? <Nota etiqueta="Ojo:">van atrasadas {atraso} cuota{atraso > 1 ? "s" : ""}; a la fecha deberían ir {esperadas} de {form.cuotasTotales}.</Nota>
+                  : <p className="m-0 flex items-center gap-1.5 text-[16px] text-cuaderno-verde"><VistoBueno tamano={14} titulo="" /> Al día: se esperan {esperadas} de {form.cuotasTotales}.</p>;
+              })()}
+            </div>
+          )}
+
+          <div className="border-t border-cuaderno-azul pt-4">
+            <Casilla marcada={form.activo} onCambiar={v => set("activo", v)}
+              descripcion="Los costos inactivos no se suman al resumen mensual">
+              Costo activo
+            </Casilla>
+          </div>
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <Campo etiqueta="N° de contrato o referencia" value={form.numeroContrato} onChange={e => set("numeroContrato", e.target.value)}
+            placeholder="Ej: CTR-2024-0123" />
+          <Campo as="textarea" rows={3} etiqueta="Notas" value={form.notas} onChange={e => set("notas", e.target.value)}
+            placeholder="Condiciones especiales u observaciones" />
+
+          <div className="border-t border-cuaderno-azul pt-3">
+            <Titulo as="h3" tamano="sm">Antes de guardar, revisa</Titulo>
+            <LineaGuia etiqueta="Nombre"><span>{form.nombre || "—"}</span></LineaGuia>
+            <LineaGuia etiqueta="Categoría"><span>{cat.label}</span></LineaGuia>
+            {activoElegido && <LineaGuia etiqueta="Activo vinculado"><span>{activoElegido.nombre}</span></LineaGuia>}
+            <LineaGuia etiqueta="Monto"><MontoMoneda valor={parseFloat(form.monto) || 0} moneda={form.moneda} /></LineaGuia>
+            <LineaGuia etiqueta="Frecuencia"><span>{FREC_MAP[form.frecuencia]}</span></LineaGuia>
+            <LineaGuia etiqueta="Inicio"><span>{form.fechaInicio || "—"}</span></LineaGuia>
+            <LineaGuia etiqueta="Día de pago"><span>{form.diaPago ? `día ${form.diaPago}` : "—"}</span></LineaGuia>
+            {TIENE_CUOTAS.includes(form.categoria) && form.cuotasTotales && (
+              <LineaGuia etiqueta="Cuotas"><span>{form.cuotasPagadas || 0} de {form.cuotasTotales}</span></LineaGuia>
+            )}
+            <LineaGuia etiqueta="Estado"><span className={form.activo ? "" : "text-cuaderno-grafito"}>{form.activo ? "activo" : "inactivo"}</span></LineaGuia>
+          </div>
+        </>
+      )}
+    </ModalCuaderno>
   );
 }
 
@@ -704,330 +633,326 @@ export default function FinanzasCostos() {
     return entries.sort((a,b) => b[1]-a[1])[0];
   }, [porCategoria]);
 
-  const SortIcon = ({ col }) => {
-    if (sortCol !== col) return <svg className="w-3 h-3 text-white/30 ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" /></svg>;
-    return sortDir === "asc"
-      ? <svg className="w-3 h-3 text-white ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
-      : <svg className="w-3 h-3 text-white ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>;
-  };
+  // ── Solo presentación ─────────────────────────────────────────────────────
+  const COLUMNAS = [
+    { col: "nombre", label: "Costo",       align: "text-left",   cls: "min-w-[210px]" },
+    { col: "cat",    label: "Categoría",   align: "text-left",   cls: "" },
+    { col: "prov",   label: "Proveedor",   align: "text-left",   cls: "hidden md:table-cell" },
+    { col: "mens",   label: "Al mes",      align: "text-right",  cls: "" },
+    { col: "cuotas", label: "Cuotas",      align: "text-center", cls: "" },
+    { col: "frec",   label: "Frecuencia",  align: "text-left",   cls: "hidden sm:table-cell" },
+    { col: "venc",   label: "Término",     align: "text-left",   cls: "hidden lg:table-cell" },
+    { col: "dia",    label: "Día de pago", align: "text-center", cls: "hidden lg:table-cell" },
+  ];
+  const distribucion = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
+  const totalFiltrado = costosFiltrados.filter(c => c.activo).reduce((s, c) => s + montoMensual(c), 0);
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="spinner w-10 h-10 border-purple-600" />
+    <div className="cuaderno flex items-center justify-center h-64 text-[18px] text-cuaderno-grafito">
+      Buscando los costos…
     </div>
   );
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* Header */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-purple-700 to-violet-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
+      <FechaHoja />
+
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Costos fijos</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Créditos, leasing, arriendos y compromisos que se repiten.</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <ProyectoSelector variante="cuaderno" />
+          <Boton variante="primario" onClick={() => { setEditando(null); setShowModal(true); }}>
+            <IconoMas tamano={14} /> Nuevo costo
+          </Boton>
+        </div>
+      </header>
+
+      {/* Resumen y distribución */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Hoja titulo="Resumen">
+          <LineaGuia etiqueta="Costo al mes"><Cifra valor={totalMensual} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{activos.length} costos activos</p>
+          <LineaGuia etiqueta="Proyección del año"><Cifra valor={totalMensual * 12} escala="pesos" vacio="$0" /></LineaGuia>
+          <LineaGuia etiqueta="Mayor categoría">
+            <span>{topCat ? (CAT_MAP[topCat[0]]?.label || "—") : "—"}</span>
+          </LineaGuia>
+          {topCat && <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito"><Cifra valor={topCat[1]} escala="pesos" color="heredar" /> al mes</p>}
+          <LineaGuia etiqueta="Registros"><span>{costos.length}</span></LineaGuia>
+          <p className="m-0 -mt-1 text-right text-[13px] text-cuaderno-grafito">{costos.filter(c => !c.activo).length} inactivos</p>
+        </Hoja>
+
+        <Hoja titulo="Por categoría, al mes">
+          {activos.length > 0 && totalMensual > 0 ? (
+            <div className="space-y-3">
+              {distribucion.map(([cat, monto]) => {
+                const pct = (monto / totalMensual) * 100;
+                return (
+                  <div key={cat}>
+                    <div className="flex items-baseline justify-between gap-3 text-[17px]">
+                      <span>{CAT_MAP[cat]?.label || cat}</span>
+                      <span className="flex items-baseline gap-3">
+                        <Cifra valor={monto} escala="pesos" />
+                        <span className="w-12 text-right text-[15px] text-cuaderno-grafito">{pct.toFixed(1).replace(".", ",")}%</span>
+                      </span>
+                    </div>
+                    <div className="mt-1 h-2.5 bg-cuaderno-renglon/60 rounded-sm overflow-hidden">
+                      <div className="h-full bg-cuaderno-lavanda rounded-sm" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Costos <span className="text-purple-700">Fijos</span></h1>
-              <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Créditos, leasings, arriendos y compromisos recurrentes</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <ProyectoSelector />
-            <button
-              onClick={() => { setEditando(null); setShowModal(true); }}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white text-sm font-bold rounded-xl hover:from-purple-600 hover:to-violet-500 transition-all shadow-md"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Nuevo Costo
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          { icon: "📋", label: "Costo Mensual Total", value: fmtM(totalMensual),      sub: `${activos.length} costos activos`,                          gradient: "from-purple-700 to-violet-600" },
-          { icon: "📅", label: "Proyección Anual",    value: fmtM(totalMensual * 12), sub: "En base a activos",                                          gradient: "from-violet-600 to-purple-500" },
-          { icon: "🏆", label: "Mayor Categoría",     value: topCat ? (CAT_MAP[topCat[0]]?.label || "—") : "—", sub: topCat ? fmtM(topCat[1]) + "/mes" : "Sin datos", gradient: "from-purple-600 to-violet-500" },
-          { icon: "🗂️", label: "Total Registros",    value: costos.length,            sub: `${costos.filter(c => !c.activo).length} inactivos`,           gradient: "from-slate-600 to-slate-500"   },
-        ].map((k, i) => (
-          <div key={i} className="glass-card rounded-xl p-4 sm:p-5 hover:shadow-lg transition-shadow">
-            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${k.gradient} flex items-center justify-center shadow-md text-xl mb-3`}>{k.icon}</div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 break-words">{k.value}</div>
-            <div className="text-xs sm:text-sm font-semibold text-slate-600 mt-0.5">{k.label}</div>
-            <div className="text-[11px] text-slate-400 mt-1">{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Barra distribución */}
-      {activos.length > 0 && totalMensual > 0 && (
-        <div className="glass-card rounded-xl p-4 sm:p-5">
-          <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Distribución mensual por categoría</p>
-          <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
-            {Object.entries(porCategoria).sort((a,b) => b[1]-a[1]).map(([cat, monto]) => (
-              <div key={cat} className={`bg-gradient-to-r ${CAT_MAP[cat]?.color || "from-slate-400 to-slate-500"} rounded-full`}
-                style={{ width: `${(monto/totalMensual)*100}%` }} title={`${CAT_MAP[cat]?.label}: ${fmtM(monto)}/mes`} />
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-3 mt-3">
-            {Object.entries(porCategoria).sort((a,b) => b[1]-a[1]).map(([cat, monto]) => (
-              <div key={cat} className="flex items-center gap-1.5">
-                <div className={`w-2 h-2 rounded-full ${CAT_MAP[cat]?.dot || "bg-slate-400"}`} />
-                <span className="text-xs text-slate-500">{CAT_MAP[cat]?.label}</span>
-                <span className="text-xs font-bold text-slate-700">{((monto/totalMensual)*100).toFixed(1)}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por nombre, proveedor..." className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm bg-white" />
-        </div>
-        <div className="flex gap-1 bg-white rounded-xl border-2 border-slate-200 p-1">
-          {[["todos","Todos"],["activos","Activos"],["inactivos","Inactivos"]].map(([v,l]) => (
-            <button key={v} onClick={() => setFiltroEstado(v)} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${filtroEstado===v ? "bg-purple-700 text-white shadow" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
-          ))}
-        </div>
-        <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} className="px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm bg-white font-semibold text-slate-700">
-          <option value="todos">Todas las categorías</option>
-          {CATEGORIAS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-        </select>
+          ) : (
+            <p className="m-0 py-6 text-center text-[16px] text-cuaderno-grafito">Sin costos activos todavía.</p>
+          )}
+        </Hoja>
       </div>
 
       {/* Tabla */}
-      <div className="glass-card rounded-xl overflow-hidden">
+      <Hoja titulo="Detalle"
+        extra={
+          <>
+            <Campo etiqueta="Buscar" type="search" className="w-56"
+              value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Nombre, proveedor o descripción" />
+            <Segmentado
+              opciones={[{ id: "todos", label: "Todos" }, { id: "activos", label: "Activos" }, { id: "inactivos", label: "Inactivos" }]}
+              valor={filtroEstado}
+              onCambiar={setFiltroEstado}
+            />
+            <Campo as="select" etiqueta="Categoría" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}>
+              <option value="todos">Todas</option>
+              {CATEGORIAS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </Campo>
+          </>
+        }>
         {costosFiltrados.length === 0 ? (
-          <div className="py-16 text-center">
-            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg className="w-7 h-7 text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-            </div>
-            <p className="font-bold text-slate-600">No hay costos registrados</p>
-            <p className="text-sm text-slate-400 mt-1">{busqueda || filtroCategoria !== "todos" ? "Ajusta los filtros" : "Haz click en 'Nuevo Costo' para comenzar"}</p>
+          <div className="py-12 text-center space-y-2">
+            <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">
+              {busqueda || filtroCategoria !== "todos" ? "Nada coincide con los filtros" : "Aún no hay costos anotados"}
+            </p>
+            <p className="m-0 text-[16px] text-cuaderno-grafito">
+              {busqueda || filtroCategoria !== "todos" ? "Prueba con otra búsqueda o categoría." : "Agrega el primero con el botón Nuevo costo."}
+            </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-purple-700 to-violet-600 text-white">
-                <tr>
-                  {[
-                    { col:"nombre", label:"Costo",          align:"text-left",   cls:"px-3 py-3 min-w-[210px]"          },
-                    { col:"cat",    label:"Cat.",            align:"text-center", cls:"px-1.5 py-3"                      },
-                    { col:"prov",   label:"Proveedor",       align:"text-left",   cls:"px-2 py-3 hidden md:table-cell"   },
-                    { col:"mens",   label:"Mensual",         align:"text-right",  cls:"px-2 py-3"                        },
-                    { col:"cuotas", label:"Cuotas",          align:"text-center", cls:"px-2 py-3"                        },
-                    { col:"frec",   label:"Frec.",           align:"text-center", cls:"px-2 py-3 hidden sm:table-cell"   },
-                    { col:"venc",   label:"Vencim.",         align:"text-center", cls:"px-2 py-3 hidden lg:table-cell"   },
-                    { col:"dia",    label:"Día pago",        align:"text-center", cls:"px-2 py-3 hidden lg:table-cell"   },
-                  ].map(({ col, label, align, cls }) => (
-                    <th key={col} onClick={() => handleSort(col)} className={`${cls} ${align} text-[10px] font-black uppercase tracking-wider cursor-pointer hover:bg-white/10 select-none transition-colors whitespace-nowrap`}>
-                      {label}<SortIcon col={col} />
-                    </th>
-                  ))}
-                  <th className="px-2 py-3 text-center text-[10px] font-black uppercase tracking-wider whitespace-nowrap">Estado</th>
-                  <th className="px-2 py-3 text-center text-[10px] font-black uppercase tracking-wider whitespace-nowrap">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {costosFiltrados.map((c, idx) => {
-                  const meta = CAT_MAP[c.categoria] || CATEGORIAS[5];
-                  const dias = diasRestantes(c.fechaTermino);
-                  return (
-                    <tr key={c.id} onClick={() => setVistaDetalle(vistaDetalle?.id===c.id ? null : c)}
-                      className={`cursor-pointer hover:bg-purple-50/40 transition-colors ${idx%2===0?"bg-white":"bg-slate-50/30"} ${!c.activo?"opacity-60":""}`}
-                    >
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-6 h-6 rounded-lg bg-gradient-to-br ${meta.color} flex items-center justify-center flex-shrink-0`}>
-                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d={meta.icon} /></svg>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-900 text-xs truncate">{c.nombre}</p>
-                            {c.descripcion && <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{c.descripcion}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-1.5 py-3 text-center">
-                        <span title={meta.label} className={`inline-flex items-center justify-center w-7 h-6 rounded-lg text-[10px] font-black cursor-help ${meta.badge}`}>{meta.short || meta.label.slice(0,2).toUpperCase()}</span>
-                      </td>
-                      <td className="px-2 py-3 text-xs text-slate-600 hidden md:table-cell truncate max-w-[100px]">{c.proveedor || "—"}</td>
-                      <td className="px-2 py-3 text-right whitespace-nowrap">
-                        {c.frecuencia !== "unico"
-                          ? <span className="text-xs font-semibold text-slate-700">{fmt(montoMensual(c), c.moneda)}</span>
-                          : <span className="text-[10px] text-slate-400">Único</span>}
-                      </td>
-                      <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        {!TIENE_CUOTAS.includes(c.categoria) || !c.cuotasTotales ? (
-                          <span className="text-slate-300 text-xs">—</span>
-                        ) : editingCuotasId === c.id ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <input
-                              autoFocus type="number" min="0" max={c.cuotasTotales}
-                              value={cuotasDraft}
-                              onChange={e => setCuotasDraft(e.target.value)}
-                              onKeyDown={e => { if (e.key === "Enter") guardarCuotas(c); if (e.key === "Escape") setEditingCuotasId(null); }}
-                              className="w-12 px-1 py-0.5 border-2 border-purple-400 rounded-lg text-center text-[11px] font-bold focus:outline-none"
-                            />
-                            <span className="text-[10px] text-slate-400">/{c.cuotasTotales}</span>
-                            <button onClick={() => guardarCuotas(c)} className="w-5 h-5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center flex-shrink-0" title="Guardar">
-                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                            </button>
-                            <button onClick={() => setEditingCuotasId(null)} className="w-5 h-5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center flex-shrink-0" title="Cancelar">
-                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </div>
-                        ) : (() => {
-                          const esperadas = cuotasEsperadas(c);
-                          const pagadas = parseInt(c.cuotasPagadas) || 0;
-                          const atraso = esperadas !== null ? esperadas - pagadas : 0;
-                          return (
-                            <button onClick={() => abrirEdicionCuotas(c)} className="group inline-flex flex-col items-center gap-0.5" title="Click para actualizar cuotas pagadas">
-                              <span className={`text-xs font-black px-2 py-0.5 rounded-lg whitespace-nowrap transition-colors ${atraso > 0 ? "bg-red-100 text-red-700 group-hover:bg-red-200" : "bg-emerald-50 text-emerald-700 group-hover:bg-emerald-100"}`}>
-                                {pagadas}/{c.cuotasTotales}
-                              </span>
-                              {atraso > 0 && <span className="text-[9px] font-bold text-red-500 whitespace-nowrap">atr. {atraso}</span>}
-                            </button>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-2 py-3 text-center hidden sm:table-cell"><span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-lg whitespace-nowrap">{FREC_MAP[c.frecuencia]||c.frecuencia}</span></td>
-                      <td className="px-2 py-3 text-center hidden lg:table-cell whitespace-nowrap">
-                        {c.fechaTermino
-                          ? dias < 0
-                            ? <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-lg">✓ Pagado</span>
-                            : dias <= 30
-                            ? <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded-lg">{dias}d</span>
-                            : <span className="text-[10px] text-slate-500">{new Date(c.fechaTermino).toLocaleDateString("es-CL")}</span>
-                          : <span className="text-slate-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-2 py-3 text-center hidden lg:table-cell whitespace-nowrap">
-                        {c.diaPago ? <span className="bg-purple-50 text-purple-700 font-black text-xs px-2 py-0.5 rounded-lg">Día {c.diaPago}</span> : <span className="text-slate-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-2 py-3 text-center whitespace-nowrap" onClick={e => { e.stopPropagation(); toggleActivo(c); }}>
-                        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-all ${c.activo ? "bg-purple-100 text-purple-700 hover:bg-purple-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${c.activo ? "bg-purple-600" : "bg-slate-400"}`} />
-                          {c.activo ? "Activo" : "Inactivo"}
-                        </div>
-                      </td>
-                      <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => { setEditando(c); setShowModal(true); }} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all" title="Editar">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    {COLUMNAS.map(({ col, label, align, cls }) => {
+                      const activa = sortCol === col;
+                      return (
+                        <th key={col} className={`${cls} ${align} font-normal text-[15px] px-2 py-2 whitespace-nowrap`}
+                          aria-sort={activa ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+                          <button onClick={() => handleSort(col)} className="min-h-[36px] text-cuaderno-grafito hover:text-cuaderno-tinta">
+                            {label}{activa && <span aria-hidden="true">{sortDir === "asc" ? " ↑" : " ↓"}</span>}
                           </button>
-                          <button onClick={() => handleEliminar(c.id)} disabled={deletingId===c.id} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-50" title="Eliminar">
-                            {deletingId===c.id ? <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                        </th>
+                      );
+                    })}
+                    <th className="font-normal text-[15px] text-center text-cuaderno-grafito px-2 py-2">Estado</th>
+                    <th className="w-20"><span className="sr-only">Acciones</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {costosFiltrados.map(c => {
+                    const meta = CAT_MAP[c.categoria] || CATEGORIAS[5];
+                    const dias = diasRestantes(c.fechaTermino);
+                    return (
+                      <tr key={c.id} tabIndex={0}
+                        onClick={() => setVistaDetalle(vistaDetalle?.id === c.id ? null : c)}
+                        onKeyDown={e => { if (e.key === "Enter") setVistaDetalle(c); }}
+                        className={`group border-b border-cuaderno-renglon cursor-pointer hover:bg-cuaderno-papel focus:outline-none focus-visible:bg-cuaderno-papel ${!c.activo ? "opacity-60" : ""}`}>
+                        <td className="px-2 py-2">
+                          <p className="m-0 text-[17px] leading-tight truncate">{c.nombre}</p>
+                          {c.descripcion && <p className="m-0 text-[13px] text-cuaderno-grafito truncate max-w-[240px]">{c.descripcion}</p>}
+                        </td>
+                        <td className="px-2 py-2 text-[15px] text-cuaderno-grafito whitespace-nowrap">{meta.label}</td>
+                        <td className="px-2 py-2 text-[15px] hidden md:table-cell truncate max-w-[140px]">{c.proveedor || <span className="text-cuaderno-grafito">—</span>}</td>
+                        <td className="px-2 py-2 text-right text-[16px] whitespace-nowrap">
+                          {c.frecuencia !== "unico"
+                            ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} />
+                            : <span className="text-[14px] text-cuaderno-grafito">pago único</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
+                          {!TIENE_CUOTAS.includes(c.categoria) || !c.cuotasTotales ? (
+                            <span className="text-cuaderno-grafito">—</span>
+                          ) : editingCuotasId === c.id ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <input
+                                autoFocus type="number" min="0" max={c.cuotasTotales}
+                                aria-label="Cuotas pagadas"
+                                value={cuotasDraft}
+                                onChange={e => setCuotasDraft(e.target.value)}
+                                onKeyDown={e => { if (e.key === "Enter") guardarCuotas(c); if (e.key === "Escape") setEditingCuotasId(null); }}
+                                className="w-12 min-h-[32px] text-center text-[15px] bg-cuaderno-tarjeta border-0 border-b-[1.5px] border-cuaderno-tinta focus:outline-none"
+                              />
+                              <span className="text-[14px] text-cuaderno-grafito">de {c.cuotasTotales}</span>
+                              <Boton variante="texto" className="min-h-[32px] text-[14px]" onClick={() => guardarCuotas(c)}>listo</Boton>
+                            </div>
+                          ) : (() => {
+                            const esperadas = cuotasEsperadas(c);
+                            const pagadas = parseInt(c.cuotasPagadas) || 0;
+                            const atraso = esperadas !== null ? esperadas - pagadas : 0;
+                            return (
+                              <button onClick={() => abrirEdicionCuotas(c)} title="Actualizar las cuotas pagadas"
+                                className="inline-flex flex-col items-center min-h-[36px] justify-center px-1 rounded-sm hover:bg-cuaderno-hoja">
+                                <span className="text-[15px] whitespace-nowrap underline decoration-dotted decoration-cuaderno-columna underline-offset-4">
+                                  {pagadas} de {c.cuotasTotales}
+                                </span>
+                                {atraso > 0 && <Resaltado color="rosa" className="text-[12px] whitespace-nowrap">{atraso} atrasada{atraso > 1 ? "s" : ""}</Resaltado>}
+                              </button>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-2 py-2 text-[15px] text-cuaderno-grafito hidden sm:table-cell whitespace-nowrap">{(FREC_MAP[c.frecuencia] || c.frecuencia || "").toLowerCase()}</td>
+                        <td className="px-2 py-2 text-[15px] hidden lg:table-cell whitespace-nowrap">
+                          {c.fechaTermino
+                            ? dias < 0
+                              ? <Resaltado color="menta">terminado</Resaltado>
+                              : dias <= 30
+                              ? <Resaltado color="durazno">en {dias} días</Resaltado>
+                              : <span className="text-cuaderno-grafito">{new Date(c.fechaTermino).toLocaleDateString("es-CL")}</span>
+                            : <span className="text-cuaderno-grafito">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center text-[15px] hidden lg:table-cell whitespace-nowrap">
+                          {c.diaPago ? `día ${c.diaPago}` : <span className="text-cuaderno-grafito">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => toggleActivo(c)} title={c.activo ? "Marcar como inactivo" : "Marcar como activo"}
+                            className="min-h-[36px] px-1 text-[15px] rounded-sm hover:bg-cuaderno-hoja">
+                            {c.activo ? <Resaltado color="menta">activo</Resaltado> : <span className="text-cuaderno-grafito px-[0.3em]">inactivo</span>}
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <div className="px-5 py-4 bg-gradient-to-r from-purple-700 to-violet-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-white/70">{costosFiltrados.length} registros mostrados</span>
-              <div className="text-right">
-                <p className="text-xs text-white/60">Total mensual equiv. (filtro activos)</p>
-                <p className="text-lg font-black text-white">{fmtM(costosFiltrados.filter(c=>c.activo).reduce((s,c)=>s+montoMensual(c),0))}</p>
-              </div>
+                        </td>
+                        <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                            <button onClick={() => { setEditando(c); setShowModal(true); }} aria-label={`Editar ${c.nombre}`} title="Editar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                              <IconoLapiz tamano={14} />
+                            </button>
+                            <button onClick={() => handleEliminar(c.id)} disabled={deletingId === c.id} aria-label={`Eliminar ${c.nombre}`} title="Eliminar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 disabled:opacity-50">
+                              {deletingId === c.id ? <span className="text-[12px]">…</span> : <IconoBorrar tamano={14} />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
+            <div className="flex flex-wrap items-end justify-between gap-3 pt-3">
+              <span className="text-[15px] text-cuaderno-grafito">{costosFiltrados.length} costos en la lista</span>
+              <LineaGuia etiqueta="Total al mes de los activos" className="w-full max-w-md">
+                <Cifra valor={totalFiltrado} escala="pesos" vacio="$0" raya="doble" />
+              </LineaGuia>
+            </div>
+          </>
         )}
-      </div>
+      </Hoja>
 
-      {/* Panel detalle */}
+      {/* Ficha del costo */}
       {vistaDetalle && (() => {
         const c = vistaDetalle;
         const meta = CAT_MAP[c.categoria] || CATEGORIAS[5];
         const dias = diasRestantes(c.fechaTermino);
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto" onClick={() => setVistaDetalle(null)}>
-            <div className="w-full max-w-4xl my-8" onClick={e => e.stopPropagation()}>
-              <div className="glass-card rounded-xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col animate-fadeInUp">
-                <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-6 py-4 flex items-center justify-between flex-shrink-0">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span title={meta.label} className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[10px] font-black ${meta.badge}`}>{meta.short || meta.label.slice(0,2).toUpperCase()}</span>
-                      <h3 className="text-white font-black text-lg">{c.nombre}</h3>
-                    </div>
-                    {c.descripcion && <p className="text-white/70 text-sm">{c.descripcion}</p>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => { setEditando(c); setShowModal(true); setVistaDetalle(null); }} className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg flex items-center gap-1">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                      Editar
-                    </button>
-                    <button onClick={() => setVistaDetalle(null)} className="w-7 h-7 bg-white/20 hover:bg-white/30 rounded-lg flex items-center justify-center transition-colors">
-                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  </div>
-                </div>
-                <div className="p-6 overflow-y-auto space-y-6 bg-white">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Monto</p><p className="font-black text-slate-900">{fmt(c.monto, c.moneda)}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Mensual equiv.</p><p className="font-black text-slate-900">{c.frecuencia!=="unico"?fmt(montoMensual(c)):"Pago único"}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Frecuencia</p><p className="font-bold text-slate-700">{FREC_MAP[c.frecuencia]}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Proveedor</p><p className="font-bold text-slate-700">{c.proveedor||"—"}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Inicio</p><p className="font-bold text-slate-700">{c.fechaInicio||"—"}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Término</p><p className={`font-bold ${dias!==null&&dias<0?"text-emerald-600":dias!==null&&dias<=30?"text-amber-600":"text-slate-700"}`}>{c.fechaTermino||"Sin fecha"}{dias!==null&&dias<0?" · Pagado":""}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Día de pago</p><p className="font-black text-purple-700 text-lg">{c.diaPago?`Día ${c.diaPago}`:"—"}</p></div>
-                    <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">N° Contrato</p><p className="font-bold text-slate-700 font-mono">{c.numeroContrato||"—"}</p></div>
-                  </div>
-
-                  {TIENE_CUOTAS.includes(c.categoria) && c.cuotasTotales && (() => {
-                    const esperadas = cuotasEsperadas(c);
-                    const pagadas = parseInt(c.cuotasPagadas) || 0;
-                    const total = parseInt(c.cuotasTotales) || 0;
-                    const atraso = esperadas !== null ? esperadas - pagadas : 0;
-                    const pct = total ? Math.min(100, (pagadas / total) * 100) : 0;
-                    return (
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-xs text-slate-400 font-semibold uppercase">Cuotas pagadas</p>
-                          <span className={`text-xs font-black ${atraso > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                            {pagadas}/{total} {atraso > 0 ? `· atrasado ${atraso} cuota${atraso>1?"s":""}` : "· al día"}
-                          </span>
-                        </div>
-                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${atraso > 0 ? "bg-red-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  <div>
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Documentos</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {DOCS_DEF_COSTO.map(({ key, label }) => (
-                        <div key={key}>
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-xs text-slate-500 font-semibold">{label}</p>
-                            <FechaDocEditor fecha={c[key]} onSave={(val) => handleFechaDocUpdated(c, key, val)} />
-                          </div>
-                          <DocUploaderCosto
-                            label="" docKey={key}
-                            costoId={c.id} empresaId={empresaId}
-                            urlActual={c.archivosDoc?.[key] || ""}
-                            onUploaded={(docKey, url) => handleDocUploaded(c, docKey, url)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {c.notas && <div><p className="text-xs text-slate-400 font-semibold uppercase mb-1">Notas</p><p className="text-slate-600 text-sm bg-slate-50 rounded-xl p-3">{c.notas}</p></div>}
-                </div>
+          <ModalCuaderno
+            titulo={c.nombre}
+            subtitulo={[meta.label, c.descripcion].filter(Boolean).join(", ")}
+            ancho="max-w-4xl"
+            capa="z-50"
+            cerrarAlClicFuera
+            onClose={() => setVistaDetalle(null)}
+            pie={
+              <div className="flex justify-end">
+                <Boton onClick={() => { setEditando(c); setShowModal(true); setVistaDetalle(null); }}>
+                  <IconoLapiz tamano={14} /> Editar costo
+                </Boton>
+              </div>
+            }>
+            <div className="grid gap-x-12 md:grid-cols-2">
+              <div>
+                <LineaGuia etiqueta="Monto"><MontoMoneda valor={parseFloat(c.monto) || 0} moneda={c.moneda} /></LineaGuia>
+                <LineaGuia etiqueta="Equivalente al mes">
+                  {c.frecuencia !== "unico" ? <MontoMoneda valor={montoMensual(c)} moneda={c.moneda} /> : <span className="text-cuaderno-grafito">pago único</span>}
+                </LineaGuia>
+                <LineaGuia etiqueta="Frecuencia"><span>{(FREC_MAP[c.frecuencia] || "").toLowerCase()}</span></LineaGuia>
+                <LineaGuia etiqueta="Proveedor"><span>{c.proveedor || "—"}</span></LineaGuia>
+              </div>
+              <div>
+                <LineaGuia etiqueta="Inicio"><span>{c.fechaInicio || "—"}</span></LineaGuia>
+                <LineaGuia etiqueta="Término">
+                  {c.fechaTermino
+                    ? (dias !== null && dias < 0
+                        ? <Resaltado color="menta">{c.fechaTermino}, terminado</Resaltado>
+                        : dias !== null && dias <= 30
+                        ? <Resaltado color="durazno">{c.fechaTermino}</Resaltado>
+                        : <span>{c.fechaTermino}</span>)
+                    : <span className="text-cuaderno-grafito">sin fecha</span>}
+                </LineaGuia>
+                <LineaGuia etiqueta="Día de pago"><span>{c.diaPago ? `día ${c.diaPago}` : "—"}</span></LineaGuia>
+                <LineaGuia etiqueta="N° de contrato"><span>{c.numeroContrato || "—"}</span></LineaGuia>
               </div>
             </div>
-          </div>
+
+            {TIENE_CUOTAS.includes(c.categoria) && c.cuotasTotales && (() => {
+              const esperadas = cuotasEsperadas(c);
+              const pagadas = parseInt(c.cuotasPagadas) || 0;
+              const total = parseInt(c.cuotasTotales) || 0;
+              const atraso = esperadas !== null ? esperadas - pagadas : 0;
+              const pct = total ? Math.min(100, (pagadas / total) * 100) : 0;
+              return (
+                <div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <Titulo as="h3" tamano="sm">Cuotas</Titulo>
+                    <span className="text-[16px]">
+                      {pagadas} de {total} pagadas{" "}
+                      {atraso > 0
+                        ? <Resaltado color="rosa">{atraso} atrasada{atraso > 1 ? "s" : ""}</Resaltado>
+                        : <span className="text-cuaderno-verde">al día</span>}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2.5 bg-cuaderno-renglon/60 rounded-sm overflow-hidden">
+                    <div className={`h-full rounded-sm ${atraso > 0 ? "bg-cuaderno-rosa" : "bg-cuaderno-menta"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div>
+              <Titulo as="h3" tamano="sm" className="border-b border-cuaderno-azul">Documentos</Titulo>
+              <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 mt-2">
+                {DOCS_DEF_COSTO.map(({ key, label }) => (
+                  <div key={key}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="m-0 text-[16px]">{label}</p>
+                      <FechaDocEditor fecha={c[key]} onSave={(val) => handleFechaDocUpdated(c, key, val)} />
+                    </div>
+                    <DocUploaderCosto
+                      label="" docKey={key}
+                      costoId={c.id} empresaId={empresaId}
+                      urlActual={c.archivosDoc?.[key] || ""}
+                      onUploaded={(docKey, url) => handleDocUploaded(c, docKey, url)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {c.notas && (
+              <div>
+                <Titulo as="h3" tamano="sm">Notas</Titulo>
+                <p className="m-0 text-[17px] whitespace-pre-line leading-relaxed">{c.notas}</p>
+              </div>
+            )}
+          </ModalCuaderno>
         );
       })()}
 

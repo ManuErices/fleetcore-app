@@ -1,9 +1,13 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useId } from "react";
 import * as XLSX from "xlsx";
 import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
+import {
+  ModalCuaderno, Hoja, Titulo, Campo, Boton, Segmentado, Casilla, Nota, LineaGuia, Cifra, VistoBueno,
+  IconoMas, IconoSubir,
+} from "./cuaderno";
 
 /*
  * ════════════════════════════════════════════════════════════════════════
@@ -273,101 +277,68 @@ function ModalDocumentoManual({ isOpen, onClose, onSave, guardando }) {
     });
   }
 
+  return <FormularioDocumento form={form} setForm={setForm} submit={submit} onClose={onClose} guardando={guardando} />;
+}
+
+function FormularioDocumento({ form, setForm, submit, onClose, guardando }) {
+  const idForm = useId();
+  const set = (campo) => (e) => setForm(f => ({ ...f, [campo]: e.target.value }));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <form onSubmit={submit} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-base font-black text-slate-800">Agregar documento de deuda</h3>
-        <p className="text-xs text-slate-400">
-          Para registrar un documento puntual sin esperar el próximo lote del Excel.
-        </p>
+    <ModalCuaderno
+      titulo="Agregar documento de deuda"
+      subtitulo="Para anotar un documento sin esperar el próximo Excel"
+      ancho="max-w-lg"
+      onClose={onClose}
+      bloqueado={guardando}
+      pie={
+        <div className="flex gap-2">
+          <Boton className="flex-1" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+          <Boton type="submit" form={idForm} variante="primario" className="flex-1" disabled={guardando}>
+            {guardando ? "Guardando…" : "Guardar documento"}
+          </Boton>
+        </div>
+      }>
+      <form id={idForm} onSubmit={submit} className="space-y-5">
+        <Campo etiqueta="Proveedor o acreedor" required value={form.proveedorNombre} onChange={set("proveedorNombre")} />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className="text-xs font-bold text-slate-500">Proveedor / Acreedor *</label>
-            <input required value={form.proveedorNombre}
-              onChange={e => setForm(f => ({ ...f, proveedorNombre: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">RUT</label>
-            <input value={form.rut} onChange={e => setForm(f => ({ ...f, rut: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">Tipo de deuda</label>
-            <select value={form.tipoDeuda} onChange={e => setForm(f => ({ ...f, tipoDeuda: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 bg-white">
-              <option value="proveedor">Proveedor</option>
-              <option value="factoring">Factoring</option>
-              <option value="financiera">Financiera</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">Obra</label>
-            <input value={form.obra} onChange={e => setForm(f => ({ ...f, obra: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">OC</label>
-            <input value={form.oc} onChange={e => setForm(f => ({ ...f, oc: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">N° Documento *</label>
-            <input required value={form.numeroDoc} onChange={e => setForm(f => ({ ...f, numeroDoc: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">Valor documento</label>
-            <input type="number" value={form.valorDoc} onChange={e => setForm(f => ({ ...f, valorDoc: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500">Monto pagado</label>
-            <input type="number" value={form.montoPagado} onChange={e => setForm(f => ({ ...f, montoPagado: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
-          <div className="col-span-2">
-            <label className="text-xs font-bold text-slate-500">Fecha de vencimiento</label>
-            <input type="date" value={form.fechaVencimiento} onChange={e => setForm(f => ({ ...f, fechaVencimiento: e.target.value }))}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-          </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="RUT" value={form.rut} onChange={set("rut")} />
+          <Campo etiqueta="N° de documento" required value={form.numeroDoc} onChange={set("numeroDoc")} />
+        </div>
 
-          <div className="col-span-2 flex items-center gap-2">
-            <input id="cedido" type="checkbox" checked={form.cedidoAFactoring}
-              onChange={e => setForm(f => ({ ...f, cedidoAFactoring: e.target.checked }))}
-              className="w-4 h-4" />
-            <label htmlFor="cedido" className="text-xs font-bold text-slate-600">Cedido a factoring</label>
-          </div>
+        <Segmentado
+          etiqueta="Tipo de deuda"
+          opciones={[{ id: "proveedor", label: "Proveedor" }, { id: "factoring", label: "Factoring" }, { id: "financiera", label: "Financiera" }]}
+          valor={form.tipoDeuda}
+          onCambiar={id => setForm(f => ({ ...f, tipoDeuda: id }))}
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Obra" value={form.obra} onChange={set("obra")} />
+          <Campo etiqueta="OC" value={form.oc} onChange={set("oc")} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Valor del documento" type="number" inputMode="numeric" value={form.valorDoc} onChange={set("valorDoc")} placeholder="$ 0" />
+          <Campo etiqueta="Monto ya pagado" type="number" inputMode="numeric" value={form.montoPagado} onChange={set("montoPagado")} placeholder="$ 0" />
+        </div>
+
+        <Campo etiqueta="Fecha de vencimiento" type="date" value={form.fechaVencimiento} onChange={set("fechaVencimiento")} />
+
+        <div className="border-t border-cuaderno-azul pt-4 space-y-4">
+          <Casilla marcada={form.cedidoAFactoring} onCambiar={v => setForm(f => ({ ...f, cedidoAFactoring: v }))}
+            descripcion="El documento se cedió y ahora se le paga a la entidad de factoring">
+            Cedido a factoring
+          </Casilla>
           {form.cedidoAFactoring && (
-            <div className="col-span-2">
-              <label className="text-xs font-bold text-slate-500">Entidad de factoring</label>
-              <input value={form.entidadFactoring} onChange={e => setForm(f => ({ ...f, entidadFactoring: e.target.value }))}
-                placeholder="Security, Interfactor, Eurocapital..."
-                className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400" />
-            </div>
+            <Campo etiqueta="Entidad de factoring" className="ml-9" value={form.entidadFactoring} onChange={set("entidadFactoring")}
+              placeholder="Security, Interfactor, Eurocapital…" />
           )}
-
-          <div className="col-span-2">
-            <label className="text-xs font-bold text-slate-500">Notas internas</label>
-            <textarea value={form.notasInternas} onChange={e => setForm(f => ({ ...f, notasInternas: e.target.value }))} rows={2}
-              className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 resize-none" />
-          </div>
         </div>
 
-        <div className="flex gap-2 pt-2">
-          <button type="button" onClick={onClose} disabled={guardando}
-            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold text-slate-600 transition-colors disabled:opacity-50">
-            Cancelar
-          </button>
-          <button type="submit" disabled={guardando}
-            className="flex-1 py-2.5 bg-purple-700 hover:bg-purple-800 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-50">
-            {guardando ? "Guardando..." : "Guardar documento"}
-          </button>
-        </div>
+        <Campo as="textarea" rows={2} etiqueta="Notas internas" value={form.notasInternas} onChange={set("notasInternas")} />
       </form>
-    </div>
+    </ModalCuaderno>
   );
 }
 
@@ -600,7 +571,7 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
       onImportComplete?.();
     } catch (err) {
       console.error("Error guardando documento manual:", err);
-      setMensajeManual({ ok: false, texto: "No se pudo guardar el documento. Revisa la consola para más detalle." });
+      setMensajeManual({ ok: false, texto: "No se pudo guardar el documento. Revisa tu conexión e intenta de nuevo." });
     }
     setGuardandoManual(false);
   }
@@ -609,168 +580,115 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
   const totalDescartadas = resultadoLectura?.descartadas?.length || 0;
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="space-y-5">
 
-      {/* ── Encabezado de la pestaña ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <p className="text-xs text-slate-500 max-w-xl">
-          Sube el mismo archivo de <b>Detalle proveedores</b> cada vez que tengas un lote nuevo
-          (ej. de 400 en 400). El sistema detecta automáticamente qué documentos son nuevos
-          y cuáles ya existen y solo cambiaron de saldo o estado.
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <p className="m-0 max-w-xl text-[17px] text-cuaderno-grafito leading-snug">
+          Sube el archivo de detalle de proveedores cada vez que tengas un lote nuevo. Se detecta solo
+          qué documentos son nuevos y cuáles ya existían y cambiaron de saldo o de estado.
         </p>
-        <button
-          onClick={() => setModalManualOpen(true)}
-          className="px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-sm font-bold transition-colors flex items-center gap-2 self-end sm:self-auto flex-shrink-0"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-          </svg>
-          Agregar documento manual
-        </button>
+        <Boton onClick={() => setModalManualOpen(true)}>
+          <IconoMas tamano={14} /> Agregar documento a mano
+        </Boton>
       </div>
 
-      {mensajeManual && (
-        <div className={`rounded-xl p-3 text-xs font-bold ${mensajeManual.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
-          {mensajeManual.texto}
-        </div>
-      )}
+      {mensajeManual && (mensajeManual.ok
+        ? <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-verde"><VistoBueno tamano={16} titulo="" /> {mensajeManual.texto}</p>
+        : <Nota etiqueta="Ojo:">{mensajeManual.texto}</Nota>)}
 
-      {/* ── Zona de carga de archivo ── */}
-      <div className="glass-card rounded-xl p-5 sm:p-6">
-        <p className="text-sm font-black text-slate-700 mb-3">1. Selecciona el archivo Excel</p>
-
-        <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-xl py-8 cursor-pointer hover:border-purple-400 hover:bg-purple-50/40 transition-colors">
-          <svg className="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
-          <span className="text-sm font-bold text-slate-600">
-            {archivo ? archivo.name : "Haz clic para elegir el archivo .xlsx"}
-          </span>
-          <span className="text-[11px] text-slate-400">Hoja "Detalle proveedores" · encabezados en la fila 3</span>
+      {/* ── Paso 1: archivo ── */}
+      <Hoja titulo="1. Elige el archivo Excel">
+        <label className="flex flex-col items-center justify-center gap-1.5 py-8 rounded-md border-[1.5px] border-dashed border-cuaderno-columna hover:border-cuaderno-tinta hover:bg-cuaderno-papel cursor-pointer text-center focus-within:ring-2 focus-within:ring-cuaderno-tinta/40">
+          <IconoSubir tamano={26} className="text-cuaderno-grafito" />
+          <span className="text-[18px]">{archivo ? archivo.name : "Haz clic para elegir el archivo .xlsx"}</span>
+          <span className="text-[14px] text-cuaderno-grafito">Hoja «Detalle proveedores», con los encabezados en la fila 3</span>
           <input
-            ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden"
+            ref={fileInputRef} type="file" accept=".xlsx,.xls" className="sr-only"
             onChange={handleArchivoSeleccionado}
           />
         </label>
 
-        {leyendo && (
-          <div className="flex items-center gap-2 mt-3 text-xs font-bold text-slate-500">
-            <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-            Leyendo archivo...
-          </div>
-        )}
-
-        {errorLectura && (
-          <div className="mt-3 rounded-xl p-3 text-xs font-bold bg-red-50 text-red-700 border border-red-200">
-            {errorLectura}
-          </div>
-        )}
+        {leyendo && <p className="m-0 mt-3 text-[16px] text-cuaderno-grafito">Leyendo el archivo…</p>}
+        {errorLectura && <Nota etiqueta="Ojo:" className="mt-3">{errorLectura}</Nota>}
 
         {resultadoLectura && !diff && (
-          <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="text-xs text-slate-600">
-              <span className="font-black text-slate-800">{totalParaRevisar}</span> documentos válidos leídos de la hoja "{resultadoLectura.hoja}"
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-cuaderno-renglon">
+            <p className="m-0 text-[17px]">
+              {totalParaRevisar} documentos válidos en la hoja «{resultadoLectura.hoja}».
               {totalDescartadas > 0 && (
-                <span className="text-slate-400"> · {totalDescartadas} filas descartadas (totales / excluidas / sin proveedor)</span>
+                <span className="block text-[14px] text-cuaderno-grafito">
+                  Se dejaron fuera {totalDescartadas} filas: totales, conceptos excluidos o sin proveedor.
+                </span>
               )}
-            </div>
-            <button
-              onClick={compararConFirestore}
-              disabled={comparando || totalParaRevisar === 0}
-              className="px-4 py-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors flex-shrink-0"
-            >
-              {comparando ? "Comparando..." : "Comparar con Firestore →"}
-            </button>
+            </p>
+            <Boton variante="primario" onClick={compararConFirestore} disabled={comparando || totalParaRevisar === 0}>
+              {comparando ? "Comparando…" : "Comparar con lo registrado"}
+            </Boton>
           </div>
         )}
-      </div>
+      </Hoja>
 
-      {/* ── Resultado de la comparación (preview antes de escribir) ── */}
+      {/* ── Paso 2: revisión antes de escribir ── */}
       {diff && !resultadoImport && (
-        <div className="glass-card rounded-xl p-5 sm:p-6 space-y-4">
-          <p className="text-sm font-black text-slate-700">2. Revisa los cambios antes de confirmar</p>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center">
-              <p className="text-2xl font-black text-emerald-700">{diff.nuevos.length}</p>
-              <p className="text-[11px] font-bold text-emerald-600 uppercase">Nuevos</p>
-            </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-center">
-              <p className="text-2xl font-black text-amber-700">{diff.actualizados.length}</p>
-              <p className="text-[11px] font-bold text-amber-600 uppercase">Actualizados</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
-              <p className="text-2xl font-black text-slate-500">{diff.sinCambios.length}</p>
-              <p className="text-[11px] font-bold text-slate-400 uppercase">Sin cambios</p>
-            </div>
+        <Hoja titulo="2. Revisa los cambios antes de confirmar">
+          <div className="max-w-md">
+            <LineaGuia etiqueta="Documentos nuevos"><span>{diff.nuevos.length}</span></LineaGuia>
+            <LineaGuia etiqueta="Documentos que cambian"><span>{diff.actualizados.length}</span></LineaGuia>
+            <LineaGuia etiqueta="Sin cambios"><span className="text-cuaderno-grafito">{diff.sinCambios.length}</span></LineaGuia>
           </div>
 
           {diff.actualizados.length > 0 && (
-            <div>
-              <p className="text-xs font-black text-slate-600 mb-2">Documentos que van a cambiar:</p>
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+            <div className="mt-4">
+              <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">Lo que va a cambiar:</p>
+              <ul className="m-0 p-0 list-none max-h-64 overflow-y-auto border-t border-cuaderno-renglon">
                 {diff.actualizados.slice(0, 50).map((item, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-700 truncate">{item.proveedorNombre} · Doc {item.numeroDoc}</p>
-                      <p className="text-[10px] text-slate-400">
-                        Saldo: {fmt(item._anterior.saldoPendiente)} → {fmt(item.saldoPendiente)}
-                        {" · "}Mora: {item._anterior.diasMora || 0}d → {item.diasMora}d
-                      </p>
-                    </div>
-                  </div>
+                  <li key={i} className="py-2 border-b border-cuaderno-renglon">
+                    <p className="m-0 text-[16px] leading-tight">{item.proveedorNombre}, documento {item.numeroDoc}</p>
+                    <p className="m-0 text-[14px] text-cuaderno-grafito">
+                      Saldo de {fmt(item._anterior.saldoPendiente)} a {fmt(item.saldoPendiente)}, mora de {item._anterior.diasMora || 0} a {item.diasMora} días
+                    </p>
+                  </li>
                 ))}
-                {diff.actualizados.length > 50 && (
-                  <p className="text-[11px] text-slate-400 text-center py-2">+{diff.actualizados.length - 50} más...</p>
-                )}
-              </div>
+              </ul>
+              {diff.actualizados.length > 50 && (
+                <p className="m-0 mt-2 text-[14px] text-cuaderno-grafito">Y {diff.actualizados.length - 50} más.</p>
+              )}
             </div>
           )}
 
           {importando && (
-            <div className="rounded-xl bg-purple-50 border border-purple-200 p-3 text-xs font-bold text-purple-700">
-              Importando {progreso.hecho} / {progreso.total}...
-            </div>
+            <p className="m-0 mt-4 text-[17px]">Importando {progreso.hecho} de {progreso.total}…</p>
           )}
 
-          <div className="flex gap-2 pt-1">
-            <button onClick={reiniciar} disabled={importando}
-              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold text-slate-600 transition-colors disabled:opacity-50">
-              Cancelar
-            </button>
-            <button
-              onClick={confirmarImportacion}
-              disabled={importando || (diff.nuevos.length === 0 && diff.actualizados.length === 0)}
-              className="flex-1 py-2.5 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 rounded-xl text-sm font-bold text-white transition-colors"
-            >
-              {importando ? "Importando..." : `Confirmar e importar ${diff.nuevos.length + diff.actualizados.length} documento(s)`}
-            </button>
+          <div className="flex flex-wrap gap-2 mt-5">
+            <Boton onClick={reiniciar} disabled={importando}>Cancelar</Boton>
+            <Boton variante="primario" onClick={confirmarImportacion}
+              disabled={importando || (diff.nuevos.length === 0 && diff.actualizados.length === 0)}>
+              {importando ? "Importando…" : `Confirmar e importar ${diff.nuevos.length + diff.actualizados.length} documento${diff.nuevos.length + diff.actualizados.length !== 1 ? "s" : ""}`}
+            </Boton>
           </div>
-        </div>
+        </Hoja>
       )}
 
-      {/* ── Resultado final ── */}
+      {/* ── Resultado ── */}
       {resultadoImport && (
-        <div className="glass-card rounded-xl p-6 flex flex-col items-center text-center gap-3">
+        <Hoja cuerpo="px-6 py-8 text-center space-y-2">
           {resultadoImport.ok ? (
             <>
-              <span className="text-4xl">✅</span>
-              <p className="text-sm font-black text-emerald-600">Importación completada</p>
-              <p className="text-xs text-slate-500">
-                {resultadoImport.creados} documento(s) nuevo(s) · {resultadoImport.actualizados} actualizado(s) · {resultadoImport.sinCambios} sin cambios
+              <VistoBueno tamano={30} titulo="Listo" className="mx-auto" />
+              <Titulo as="h2" tamano="md">Importación lista</Titulo>
+              <p className="m-0 text-[17px] text-cuaderno-grafito">
+                {resultadoImport.creados} nuevos, {resultadoImport.actualizados} actualizados y {resultadoImport.sinCambios} sin cambios.
               </p>
             </>
           ) : (
             <>
-              <span className="text-4xl">⚠️</span>
-              <p className="text-sm font-black text-red-600">Hubo un error al importar</p>
-              <p className="text-xs text-slate-500 max-w-sm">{resultadoImport.error}</p>
+              <Titulo as="h2" tamano="md" className="text-cuaderno-roja">No se pudo importar</Titulo>
+              <p className="m-0 text-[16px] text-cuaderno-grafito max-w-md mx-auto">{resultadoImport.error}</p>
             </>
           )}
-          <button onClick={reiniciar} className="mt-2 px-5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-sm font-bold transition-colors">
-            Subir otro lote
-          </button>
-        </div>
+          <Boton variante="primario" className="mt-2" onClick={reiniciar}>Subir otro lote</Boton>
+        </Hoja>
       )}
 
       <ModalDocumentoManual

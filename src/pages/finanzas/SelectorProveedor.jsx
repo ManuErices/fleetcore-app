@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useId } from "react";
 import { MEDIOS_PAGO, normalizarRut } from "../../lib/proveedores";
 import ModalProveedor from "./ModalProveedor";
+import { Boton, IconoBuscar, IconoMas } from "./cuaderno";
 
 /*
  * Buscador de proveedores del maestro, con opción de crear uno nuevo sin
@@ -15,7 +16,7 @@ import ModalProveedor from "./ModalProveedor";
  *  - autoFocus
  */
 
-const MEDIO_LABEL = Object.fromEntries(MEDIOS_PAGO.map(m => [m.id, m.label]));
+const MEDIO_LABEL = Object.fromEntries(MEDIOS_PAGO.map(m => [m.id, m.label.toLowerCase()]));
 
 function normalizarTexto(s) {
   return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -69,30 +70,31 @@ export default function SelectorProveedor({ empresaId, proveedores, value, onCha
     }
   }
 
+  const modalCrear = creando && (
+    <ModalProveedor empresaId={empresaId} nombreInicial={q.trim() || nombreSugerido}
+      onGuardado={elegir} onClose={() => setCreando(false)} />
+  );
+
   // ── Proveedor ya vinculado ────────────────────────────────────────────────
   if (seleccionado && !buscando) {
     return (
       <>
-        <div className="flex items-center gap-3 px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50/60">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-slate-800 truncate">{seleccionado.razonSocial}</p>
-            <p className="text-[11px] text-slate-400 truncate">
-              {[seleccionado.rut || "Sin RUT", MEDIO_LABEL[seleccionado.medioPago] || "Sin medio de pago"].join(" · ")}
+        <div className="flex items-center gap-3 min-h-[44px] border-b-[1.5px] border-cuaderno-tinta/70">
+          <div className="min-w-0 flex-1 py-1">
+            <p className="m-0 text-[18px] leading-tight truncate">{seleccionado.razonSocial}</p>
+            <p className="m-0 text-[13px] text-cuaderno-grafito truncate">
+              {seleccionado.rut || "sin RUT"}, {MEDIO_LABEL[seleccionado.medioPago] || "sin medio de pago"}
             </p>
           </div>
-          <button type="button" onClick={() => { setBuscando(true); setTimeout(() => inputRef.current?.focus(), 0); }}
-            className="text-xs font-semibold text-purple-700 hover:text-purple-800 flex-shrink-0">
+          <Boton variante="texto" className="text-[15px]"
+            onClick={() => { setBuscando(true); setTimeout(() => inputRef.current?.focus(), 0); }}>
             Cambiar
-          </button>
-          <button type="button" onClick={() => onChange("")}
-            className="text-xs font-semibold text-slate-400 hover:text-red-600 flex-shrink-0">
+          </Boton>
+          <Boton variante="texto" className="text-[15px] text-cuaderno-grafito hover:text-cuaderno-roja" onClick={() => onChange("")}>
             Quitar
-          </button>
+          </Boton>
         </div>
-        {creando && (
-          <ModalProveedor empresaId={empresaId} nombreInicial={q.trim() || nombreSugerido}
-            onGuardado={elegir} onClose={() => setCreando(false)} />
-        )}
+        {modalCrear}
       </>
     );
   }
@@ -101,58 +103,56 @@ export default function SelectorProveedor({ empresaId, proveedores, value, onCha
   return (
     <div className="relative">
       <div className="relative">
-        <svg className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0" />
-        </svg>
+        <IconoBuscar tamano={15} className="absolute left-1 top-1/2 -translate-y-1/2 text-cuaderno-grafito pointer-events-none" />
         <input ref={inputRef} value={q} autoFocus={autoFocus}
           role="combobox" aria-expanded={abierto} aria-controls={listaId} aria-autocomplete="list"
+          aria-label="Buscar proveedor por nombre o RUT"
           onChange={e => { setQ(e.target.value); setAbierto(true); setActivo(0); }}
           onFocus={() => setAbierto(true)}
           onBlur={() => setTimeout(() => setAbierto(false), 120)}
           onKeyDown={onKeyDown}
           placeholder="Buscar por nombre o RUT"
-          className="w-full pl-8 pr-16 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all placeholder:text-slate-300" />
+          className="w-full min-h-[40px] pl-7 pr-20 bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta/70 focus:border-cuaderno-tinta text-[18px] text-cuaderno-tinta focus:outline-none" />
         {value && (
-          <button type="button" onClick={() => { setBuscando(false); setQ(""); }}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 hover:text-slate-600">
+          <Boton variante="texto" className="absolute right-0 top-1/2 -translate-y-1/2 min-h-0 text-[15px] text-cuaderno-grafito"
+            onClick={() => { setBuscando(false); setQ(""); }}>
             Cancelar
-          </button>
+          </Boton>
         )}
       </div>
 
       {abierto && (
         <ul id={listaId} role="listbox"
-          className="absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-64 overflow-y-auto"
+          className="absolute z-10 left-0 right-0 mt-1 m-0 p-0 list-none bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md overflow-hidden max-h-64 overflow-y-auto shadow-[0_12px_28px_-12px_rgb(var(--cuaderno-tinta)/0.4)]"
           onMouseDown={e => e.preventDefault()}>
           {resultados.map((p, i) => (
             <li key={p.id} role="option" aria-selected={i === activo}
               onMouseEnter={() => setActivo(i)}
               onClick={() => elegir(p.id)}
-              className={`px-3.5 py-2 cursor-pointer ${i === activo ? "bg-purple-50" : ""}`}>
-              <p className="text-sm font-medium text-slate-800 truncate">{p.razonSocial}</p>
-              <p className="text-[11px] text-slate-400 truncate">
-                {[p.rut || "Sin RUT", MEDIO_LABEL[p.medioPago]].filter(Boolean).join(" · ")}
+              className={`px-4 py-2 cursor-pointer border-b border-cuaderno-azul ${i === activo ? "bg-cuaderno-hoja" : ""}`}>
+              <p className="m-0 text-[17px] leading-tight truncate">{p.razonSocial}</p>
+              <p className="m-0 text-[13px] text-cuaderno-grafito truncate">
+                {[p.rut || "sin RUT", MEDIO_LABEL[p.medioPago]].filter(Boolean).join(", ")}
               </p>
             </li>
           ))}
           {resultados.length === 0 && q.trim() && (
-            <li className="px-3.5 py-2 text-xs text-slate-400">Ningún proveedor coincide con «{q.trim()}»</li>
+            <li className="px-4 py-2.5 text-[15px] text-cuaderno-grafito border-b border-cuaderno-azul">Ningún proveedor coincide con «{q.trim()}»</li>
           )}
           <li role="option" aria-selected={activo === resultados.length}
             onMouseEnter={() => setActivo(resultados.length)}
             onClick={() => { setAbierto(false); setCreando(true); }}
-            className={`px-3.5 py-2.5 cursor-pointer border-t border-slate-100 flex items-center gap-2 text-sm font-semibold text-purple-700 ${
-              activo === resultados.length ? "bg-purple-50" : ""}`}>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-            <span className="truncate">{q.trim() ? `Crear «${q.trim()}»` : "Crear proveedor"}</span>
+            className={`px-4 py-2.5 cursor-pointer flex items-center gap-2 text-[17px] text-cuaderno-tinta ${
+              activo === resultados.length ? "bg-cuaderno-hoja" : ""}`}>
+            <IconoMas tamano={14} />
+            <span className="truncate underline decoration-cuaderno-columna underline-offset-[3px]">
+              {q.trim() ? `Crear «${q.trim()}»` : "Crear proveedor"}
+            </span>
           </li>
         </ul>
       )}
 
-      {creando && (
-        <ModalProveedor empresaId={empresaId} nombreInicial={q.trim() || nombreSugerido}
-          onGuardado={elegir} onClose={() => setCreando(false)} />
-      )}
+      {modalCrear}
     </div>
   );
 }

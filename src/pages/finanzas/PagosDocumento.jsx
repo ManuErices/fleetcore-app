@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useId } from "react";
 import {
   obtenerCuentasBancarias,
   agregarCuentaBancaria,
   obtenerPagos,
   registrarPago,
 } from "../../lib/pagosDeuda";
+import { ModalCuaderno, Campo, Boton, Nota, Cifra, VistoBueno, IconoSiguiente, IconoMas, casoTitulo } from "./cuaderno";
 
 /*
  * Sección de pagos de UN documento: lista de pagos ya registrados +
@@ -59,95 +60,61 @@ function ModalRegistrarPago({ documento, empresaId, cuentas, onClose, onGuardado
     onGuardado(resultado.documentoActualizado);
   }
 
+  const idForm = useId();
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <form onSubmit={submit} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3">
-        <h3 className="text-base font-black text-slate-800">Registrar pago</h3>
-        <p className="text-xs text-slate-400">
-          Doc {documento.numeroDoc} · {documento.proveedorNombre} — saldo actual: <b>{fmt(documento.saldoPendiente)}</b>
+    <ModalCuaderno
+      titulo="Registrar pago"
+      subtitulo={`Documento ${documento.numeroDoc}, ${casoTitulo(documento.proveedorNombre)}`}
+      onClose={onClose}
+      bloqueado={guardando}
+      pie={
+        <div className="space-y-3">
+          {error && <Nota etiqueta="Ojo:">{error}</Nota>}
+          <div className="flex gap-2">
+            <Boton className="flex-1" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+            <Boton type="submit" form={idForm} variante="primario" className="flex-1" disabled={guardando}>
+              {guardando ? "Guardando…" : "Registrar pago"}
+            </Boton>
+          </div>
+        </div>
+      }>
+      <form id={idForm} onSubmit={submit} className="space-y-5">
+        <p className="m-0 flex items-baseline justify-between text-[17px]">
+          <span className="text-cuaderno-grafito">Saldo actual</span>
+          <Cifra valor={documento.saldoPendiente} escala="pesos" vacio="$0" />
         </p>
 
-        <div>
-          <label className="text-xs font-bold text-slate-500">Monto pagado *</label>
-          <input
-            required type="number" min="1" value={monto}
-            onChange={e => setMonto(e.target.value)}
-            placeholder={`Máximo ${fmt(documento.saldoPendiente)}`}
-            className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400"
-          />
-        </div>
+        <Campo
+          etiqueta="Monto pagado, en pesos"
+          required type="number" min="1" inputMode="numeric"
+          value={monto} onChange={e => setMonto(e.target.value)}
+          placeholder={`Hasta ${fmt(documento.saldoPendiente)}`}
+        />
 
-        <div>
-          <label className="text-xs font-bold text-slate-500">Fecha del pago</label>
-          <input
-            type="date" value={fecha} onChange={e => setFecha(e.target.value)}
-            className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400"
-          />
-        </div>
+        <Campo etiqueta="Fecha del pago" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
 
-        <div>
-          <label className="text-xs font-bold text-slate-500">Cuenta de origen</label>
-          {!usarCuentaNueva && cuentas.length > 0 ? (
-            <div className="flex gap-2 mt-1">
-              <select
-                value={cuentaOrigen} onChange={e => setCuentaOrigen(e.target.value)}
-                className="flex-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 bg-white"
-              >
-                {cuentas.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={() => setUsarCuentaNueva(true)}
-                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 transition-colors flex-shrink-0"
-              >
-                + Nueva
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-2 mt-1">
-              <input
-                value={cuentaNueva} onChange={e => setCuentaNueva(e.target.value)}
-                placeholder="Ej: Cuenta Corriente Santander"
-                className="flex-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400"
-              />
-              {cuentas.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setUsarCuentaNueva(false)}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 transition-colors flex-shrink-0"
-                >
-                  Lista
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div>
-          <label className="text-xs font-bold text-slate-500">Nota (opcional)</label>
-          <textarea
-            value={nota} onChange={e => setNota(e.target.value)} rows={2}
-            className="w-full mt-1 px-3 py-2 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 resize-none"
-          />
-        </div>
-
-        {error && (
-          <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+        {!usarCuentaNueva && cuentas.length > 0 ? (
+          <div className="flex items-end gap-3">
+            <Campo as="select" etiqueta="Cuenta de origen" className="flex-1"
+              value={cuentaOrigen} onChange={e => setCuentaOrigen(e.target.value)}>
+              {cuentas.map(c => <option key={c} value={c}>{c}</option>)}
+            </Campo>
+            <Boton variante="texto" className="text-[16px]" onClick={() => setUsarCuentaNueva(true)}>Otra cuenta</Boton>
+          </div>
+        ) : (
+          <div className="flex items-end gap-3">
+            <Campo etiqueta="Cuenta de origen" className="flex-1"
+              value={cuentaNueva} onChange={e => setCuentaNueva(e.target.value)}
+              placeholder="Ej: cuenta corriente Santander" />
+            {cuentas.length > 0 && (
+              <Boton variante="texto" className="text-[16px]" onClick={() => setUsarCuentaNueva(false)}>Elegir de la lista</Boton>
+            )}
+          </div>
         )}
 
-        <div className="flex gap-2 pt-1">
-          <button type="button" onClick={onClose} disabled={guardando}
-            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-sm font-bold text-slate-600 transition-colors disabled:opacity-50">
-            Cancelar
-          </button>
-          <button type="submit" disabled={guardando}
-            className="flex-1 py-2.5 bg-purple-700 hover:bg-purple-800 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-50">
-            {guardando ? "Guardando..." : "Registrar pago"}
-          </button>
-        </div>
+        <Campo as="textarea" rows={2} etiqueta="Nota, si hace falta" value={nota} onChange={e => setNota(e.target.value)} />
       </form>
-    </div>
+    </ModalCuaderno>
   );
 }
 
@@ -189,39 +156,39 @@ export default function PagosDocumento({ empresaId, documento, onDocumentoActual
   }
 
   return (
-    <div className="mt-1.5">
-      <div className="flex items-center justify-between">
+    <div className="mt-1">
+      <div className="flex items-center justify-between gap-2">
         <button
           onClick={toggle}
-          className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-purple-600 transition-colors"
+          aria-expanded={abierto}
+          className="min-h-[36px] flex items-center gap-1 text-[15px] text-cuaderno-grafito hover:text-cuaderno-tinta"
         >
-          <svg className={`w-3 h-3 transition-transform ${abierto ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-          </svg>
+          <IconoSiguiente tamano={13} className={`transition-transform ${abierto ? "rotate-90" : ""}`} />
           Pagos registrados
         </button>
         {documento.saldoPendiente > 0 && (
-          <button
-            onClick={abrirModal}
-            className="text-[10px] font-bold text-purple-700 hover:underline"
-          >
-            + Registrar pago
-          </button>
+          <Boton variante="texto" className="min-h-[36px] text-[15px]" onClick={abrirModal}>
+            <IconoMas tamano={12} /> Registrar pago
+          </Boton>
         )}
       </div>
 
       {abierto && (
-        <div className="mt-1.5 pl-2 border-l-2 border-slate-100 space-y-1.5">
-          {cargando && <p className="text-[10px] text-slate-400">Cargando...</p>}
+        <div className="ml-1.5 pl-3 border-l border-cuaderno-columna space-y-1.5 pb-1">
+          {cargando && <p className="m-0 text-[14px] text-cuaderno-grafito">Buscando pagos…</p>}
           {pagos && pagos.length === 0 && (
-            <p className="text-[10px] text-slate-400 italic">Sin pagos registrados aún.</p>
+            <p className="m-0 text-[14px] text-cuaderno-grafito">Sin pagos anotados todavía.</p>
           )}
           {pagos && pagos.map((p) => (
-            <div key={p.id} className="text-[10px] text-slate-600">
-              <span className="font-bold text-emerald-700">{fmt(p.monto)}</span>
-              {p.cuentaOrigen && <span className="text-slate-400"> · {p.cuentaOrigen}</span>}
-              <span className="text-slate-400"> · {p.fecha}</span>
-              {p.nota && <div className="text-slate-400 italic">{p.nota}</div>}
+            <div key={p.id} className="text-[15px] leading-snug">
+              <div className="flex items-center gap-1.5">
+                <VistoBueno tamano={12} />
+                <Cifra valor={p.monto} escala="pesos" color="tinta" />
+                <span className="text-[13px] text-cuaderno-grafito">
+                  {p.fecha}{p.cuentaOrigen && `, desde ${p.cuentaOrigen}`}
+                </span>
+              </div>
+              {p.nota && <div className="text-[13px] text-cuaderno-grafito pl-5">{p.nota}</div>}
             </div>
           ))}
         </div>

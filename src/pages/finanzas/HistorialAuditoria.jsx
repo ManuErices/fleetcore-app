@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { IconoSiguiente } from "./cuaderno";
 
 /*
  * Historial de auditoría de UN documento. Colapsado por defecto — solo
@@ -65,48 +66,43 @@ export default function HistorialAuditoria({ empresaId, documentoId }) {
       setEntradas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       console.error("Error cargando historial de auditoría:", err);
-      setError("No se pudo cargar el historial.");
+      setError("No se pudo cargar el historial. Intenta abrirlo de nuevo.");
     }
     setCargando(false);
   }
 
   return (
-    <div className="mt-1.5">
+    <div className="mt-1">
       <button
         onClick={toggle}
-        className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-purple-600 transition-colors"
+        aria-expanded={abierto}
+        className="min-h-[36px] flex items-center gap-1 text-[15px] text-cuaderno-grafito hover:text-cuaderno-tinta"
       >
-        <svg className={`w-3 h-3 transition-transform ${abierto ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-        </svg>
+        <IconoSiguiente tamano={13} className={`transition-transform ${abierto ? "rotate-90" : ""}`} />
         Historial de cambios
       </button>
 
       {abierto && (
-        <div className="mt-1.5 pl-2 border-l-2 border-slate-100 space-y-1.5">
-          {cargando && (
-            <p className="text-[10px] text-slate-400">Cargando...</p>
-          )}
-          {error && (
-            <p className="text-[10px] text-red-500 font-bold">{error}</p>
-          )}
+        <div className="ml-1.5 pl-3 border-l border-cuaderno-columna space-y-2 pb-1">
+          {cargando && <p className="m-0 text-[14px] text-cuaderno-grafito">Buscando en el historial…</p>}
+          {error && <p className="m-0 text-[14px] text-cuaderno-roja">{error}</p>}
           {entradas && entradas.length === 0 && (
-            <p className="text-[10px] text-slate-400 italic">Sin cambios registrados aún.</p>
+            <p className="m-0 text-[14px] text-cuaderno-grafito">Sin cambios anotados todavía.</p>
           )}
           {entradas && entradas.map((e) => (
-            <div key={e.id} className="text-[10px] text-slate-500">
-              <span className="font-bold text-slate-600">{ETIQUETA_ACCION[e.accion] || e.accion}</span>
+            <div key={e.id} className="text-[14px] leading-snug text-cuaderno-tinta">
+              <span>{ETIQUETA_ACCION[e.accion] || e.accion}</span>
               {e.campo && ETIQUETA_CAMPO[e.campo] && (
-                <span> — {ETIQUETA_CAMPO[e.campo]}: {formatValor(e.valorAnterior)} → {formatValor(e.valorNuevo)}</span>
+                <span className="text-cuaderno-grafito">: {ETIQUETA_CAMPO[e.campo].toLowerCase()} de {formatValor(e.valorAnterior)} a {formatValor(e.valorNuevo)}</span>
               )}
               {e.campo && !ETIQUETA_CAMPO[e.campo] && e.accion !== "adjuntar_comprobante" && e.accion !== "eliminar_comprobante" && (
-                <span> — {e.campo}: {formatValor(e.valorAnterior)} → {formatValor(e.valorNuevo)}</span>
+                <span className="text-cuaderno-grafito">: {e.campo} de {formatValor(e.valorAnterior)} a {formatValor(e.valorNuevo)}</span>
               )}
               {(e.accion === "adjuntar_comprobante" || e.accion === "eliminar_comprobante") && (
-                <span> — {e.valorNuevo || e.valorAnterior}</span>
+                <span className="text-cuaderno-grafito">: {e.valorNuevo || e.valorAnterior}</span>
               )}
-              <div className="text-slate-400">
-                {e.usuarioEmail} · {formatFechaHora(e.fecha)}{e.origen === "importador" && " · vía importador"}
+              <div className="text-[13px] text-cuaderno-grafito">
+                {e.usuarioEmail}, {formatFechaHora(e.fecha)}{e.origen === "importador" && ", desde el importador"}
               </div>
             </div>
           ))}

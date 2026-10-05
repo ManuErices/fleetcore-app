@@ -19,6 +19,10 @@ import { useEmpresa } from '../lib/useEmpresa';
  *   marca       { titulo, resalte, subtitulo, logoSrc?, iconoPath?, gradiente? }
  *   headerSlot  nodo opcional bajo la empresa (filtro de proyecto, etc.)
  *   footerSlot  nodo opcional sobre el menú de usuario (campana, etc.)
+ *   variante    "default" | "cuaderno". "cuaderno" es el diseño de Finanzas:
+ *               la barra se dibuja como los separadores de un archivador y la
+ *               pestaña activa se une con la hoja. Sin la prop, todo queda
+ *               exactamente como siempre para el resto de los módulos.
  *   user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel
  *
  * La decisión desktop-vs-mobile se hace en JS por window.innerWidth y NO con
@@ -49,8 +53,12 @@ export default function AppShellLayout({
   activeId, onSelect, children,
   marca = MARCA_DEFAULT,
   headerSlot, footerSlot,
+  variante = 'default',
   user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel,
 }) {
+  // Variante "cuaderno" (Finanzas). Cada punto donde difiere del diseño por
+  // defecto pregunta por esta bandera; el camino por defecto no cambió.
+  const cuaderno = variante === 'cuaderno';
   // Dos modos de navegación, porque los módulos no llegaron todos al mismo
   // tiempo a react-router:
   //
@@ -92,7 +100,24 @@ export default function AppShellLayout({
   // El riel solo aplica en escritorio: el cajón móvil siempre va completo.
   const compacto = isDesktop && riel;
 
-  const logo = (
+  // En el cuaderno la marca va escrita en letra ligada, sin logo de color:
+  // un isotipo violeta con degradado rompería la hoja.
+  const logo = cuaderno ? (
+    <div className="min-w-0">
+      {compacto ? (
+        <span className="font-ligada font-light text-[26px] leading-[1.5] text-cuaderno-tinta" title={`${m.titulo}${m.resalte}`}>
+          {(m.titulo || 'F')[0]}
+        </span>
+      ) : (
+        <>
+          <div className="font-ligada font-light text-[22px] leading-[1.5] text-cuaderno-tinta truncate">{m.titulo}{m.resalte}</div>
+          {/* El módulo va pasado con destacador durazno, el color que en el
+              cuaderno marca "lo actual": dice en qué módulo se está. */}
+          {m.subtitulo && <div className="font-manuscrita text-[19px] leading-tight text-cuaderno-tinta truncate mt-0.5"><span className="resaltado resaltado-durazno">{m.subtitulo}</span></div>}
+        </>
+      )}
+    </div>
+  ) : (
     <div className="flex items-center gap-2.5 min-w-0">
       {m.logoSrc ? (
         <img src={m.logoSrc} alt={`${m.titulo}${m.resalte}`} className="h-9 w-auto object-contain flex-shrink-0" />
@@ -120,7 +145,7 @@ export default function AppShellLayout({
   );
 
   const cabecera = (
-    <div className={`border-b border-slate-100 flex-shrink-0 ${compacto ? 'px-2 py-3' : 'px-4 py-3'}`}>
+    <div className={`border-b flex-shrink-0 ${cuaderno ? 'border-cuaderno-columna/50' : 'border-slate-100'} ${compacto ? 'px-2 py-3' : 'px-4 py-3'}`}>
       <div className={`flex items-center ${compacto ? 'justify-center' : 'justify-between gap-2'}`}>
         {logo}
         {/* En riel el botón se va abajo del logo: al lado no cabe sin apretar
@@ -129,7 +154,9 @@ export default function AppShellLayout({
           <button
             onClick={() => setRiel(true)}
             aria-label="Colapsar menú" title="Colapsar menú"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
+            className={cuaderno
+              ? 'p-1.5 rounded-md text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja/70 flex-shrink-0'
+              : 'p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0'}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
@@ -153,7 +180,9 @@ export default function AppShellLayout({
         <button
           onClick={() => setRiel(false)}
           aria-label="Expandir menú" title="Expandir menú"
-          className="w-full mt-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-center"
+          className={cuaderno
+            ? 'w-full mt-2 py-1.5 rounded-md text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja/70 flex items-center justify-center'
+            : 'w-full mt-2 py-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-center'}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
@@ -164,7 +193,18 @@ export default function AppShellLayout({
       {/* Empresa activa. En riel se queda solo el cuadrito con la inicial: la
           caja con borde alrededor de un icono de 20px se ve desproporcionada
           en 64px de ancho, y el nombre no entra de ninguna forma. */}
-      {empresa && (compacto ? (
+      {empresa && cuaderno ? (compacto ? (
+        <div className="flex justify-center mt-3" title={empresa.nombre}>
+          <span className="w-8 h-8 rounded-full border-[1.5px] border-cuaderno-tinta/70 flex items-center justify-center font-manuscrita text-[15px] text-cuaderno-tinta">
+            {empresa.nombre?.[0]}
+          </span>
+        </div>
+      ) : (
+        <div className="mt-3 font-manuscrita" title={empresa.nombre}>
+          <div className="text-[13px] text-cuaderno-grafito">Empresa</div>
+          <div className="text-[17px] leading-tight text-cuaderno-tinta truncate">{empresa.nombre}</div>
+        </div>
+      )) : empresa && (compacto ? (
         <div className="flex justify-center mt-3" title={empresa.nombre}>
           {empresa.logoUrl
             ? <img src={empresa.logoUrl} alt="" className="w-8 h-8 rounded-lg object-contain" />
@@ -189,7 +229,8 @@ export default function AppShellLayout({
   );
 
   const nav = (
-    <nav className={`flex-1 overflow-y-auto overflow-x-hidden space-y-5 py-4 ${compacto ? 'px-2' : 'px-3'}`}>
+    <nav className={`flex-1 overflow-y-auto overflow-x-hidden space-y-5 py-4 ${
+      cuaderno ? (compacto ? 'pl-2 pr-0' : 'pl-3 pr-0') : (compacto ? 'px-2' : 'px-3')}`}>
       {navGroups.map((group, gi) => (
         <div key={group.label || gi}>
           {/* El título del grupo no cabe en 64px y truncado se lee peor que no
@@ -200,14 +241,28 @@ export default function AppShellLayout({
           {group.label && (compacto
             ? (gi > 0 && <div className="h-px bg-slate-200 mx-2 mb-2" aria-hidden />)
             : (
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-3 mb-1.5">
+              <p className={cuaderno
+                ? 'font-manuscrita text-[14px] text-cuaderno-grafito px-3 mb-1'
+                : 'text-[10px] font-black uppercase tracking-widest text-slate-400 px-3 mb-1.5'}>
                 {group.label}
               </p>
             ))}
 
           <div className="space-y-1">
             {group.tabs.map(tab => {
-              const clases = (activo) =>
+              // Cuaderno: la pestaña activa es un separador sacado del archivador.
+              // Lleva el fondo de la página y no tiene borde derecho; como el
+              // borde de la barra es una sombra interior (se pinta bajo los
+              // hijos), la pestaña lo tapa y queda unida a la hoja.
+              const clasesCuaderno = (activo) =>
+                `w-full flex items-center font-manuscrita text-[18px] relative min-h-[44px] border rounded-l-lg ${
+                  compacto ? 'justify-center px-0 py-2' : 'gap-3 pl-3 pr-4 py-1.5'
+                } ${
+                  activo
+                    ? 'bg-cuaderno-papel border-cuaderno-columna border-r-0 rounded-r-none text-cuaderno-tinta'
+                    : 'border-transparent text-cuaderno-tinta hover:bg-cuaderno-hoja/60'
+                } focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40`;
+              const clases = (activo) => cuaderno ? clasesCuaderno(activo) :
                 `w-full flex items-center rounded-xl text-sm font-semibold transition-all relative ${
                   compacto ? 'justify-center px-0 py-3' : 'gap-3 px-3 py-2.5'
                 } ${
@@ -215,6 +270,33 @@ export default function AppShellLayout({
                     ? 'bg-purple-700 text-white shadow-md shadow-purple-200'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`;
+
+              const activoTab = controlado ? activeId === tab.id : null;
+              const contenidoCuaderno = (activo) => (
+                <>
+                  {/* Sin íconos en la barra expandida: la etiqueta escrita basta.
+                      En riel se necesitan para orientarse, en trazo de grafito. */}
+                  {compacto && (
+                    <svg className="w-5 h-5 flex-shrink-0 text-cuaderno-grafito" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      {typeof tab.icon === 'string'
+                        ? <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
+                        : tab.icon}
+                    </svg>
+                  )}
+                  {!compacto && (
+                    <span className="flex-1 text-left truncate">
+                      <span className={activo ? 'resaltado resaltado-menta' : 'px-[0.3em]'}>{tab.label}</span>
+                    </span>
+                  )}
+                  {tab.badge > 0 && (
+                    <span className={`inline-flex items-center justify-center min-w-[1.6rem] px-1 rounded-full border-[1.5px] text-[13px] leading-5 flex-shrink-0 ${
+                      tab.badgeCritico ? 'border-cuaderno-roja text-cuaderno-roja' : 'border-cuaderno-grafito text-cuaderno-grafito'
+                    } ${compacto ? 'absolute top-0 right-1 bg-cuaderno-separador' : ''}`}>
+                      {tab.badge > 9 ? '9+' : tab.badge}
+                    </span>
+                  )}
+                </>
+              );
 
               const contenido = (
                 <>
@@ -253,7 +335,7 @@ export default function AppShellLayout({
                   <button key={tab.id} {...extras}
                     onClick={() => { onSelect(tab.id); if (!isDesktop) setOpen(false); }}
                     className={clases(activeId === tab.id)}>
-                    {contenido}
+                    {cuaderno ? contenidoCuaderno(activoTab) : contenido}
                   </button>
                 );
               }
@@ -263,7 +345,7 @@ export default function AppShellLayout({
                   to={`${basePath}/${tab.id}`}
                   onClick={() => { if (!isDesktop) setOpen(false); }}
                   className={({ isActive }) => clases(isActive)}>
-                  {contenido}
+                  {cuaderno ? ({ isActive }) => contenidoCuaderno(isActive) : contenido}
                 </NavLink>
               );
             })}
@@ -276,7 +358,7 @@ export default function AppShellLayout({
   const inicialUsuario = (user?.displayName || user?.email || '?').trim()[0]?.toUpperCase() || '?';
 
   const pie = (
-    <div className={`border-t border-slate-100 flex-shrink-0 py-3 ${compacto ? 'px-2' : 'px-3'}`}>
+    <div className={`border-t flex-shrink-0 py-3 ${cuaderno ? 'border-cuaderno-columna/50' : 'border-slate-100'} ${compacto ? 'px-2' : 'px-3'}`}>
       {footerSlot && (
         <div className={`flex items-center mb-2 ${compacto ? 'justify-center' : 'gap-2'}`}>{footerSlot}</div>
       )}
@@ -292,7 +374,9 @@ export default function AppShellLayout({
           aria-label="Expandir menú de usuario"
           className="w-full flex justify-center"
         >
-          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-sm hover:opacity-90 transition-opacity">
+          <span className={cuaderno
+            ? 'w-9 h-9 rounded-full border-[1.5px] border-cuaderno-tinta/70 text-cuaderno-tinta font-manuscrita text-[16px] flex items-center justify-center hover:bg-cuaderno-hoja'
+            : 'w-9 h-9 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-black text-xs flex items-center justify-center shadow-sm hover:opacity-90 transition-opacity'}>
             {inicialUsuario}
           </span>
         </button>
@@ -305,6 +389,7 @@ export default function AppShellLayout({
           onAdminPanel={onAdminPanel}
           onAdminEmpresaPanel={onAdminEmpresaPanel}
           placement="top-left"
+          variante={cuaderno ? 'cuaderno' : 'default'}
         />
       )}
     </div>
@@ -313,17 +398,19 @@ export default function AppShellLayout({
   const barra = <>{cabecera}{nav}{pie}</>;
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className={`flex min-h-screen ${cuaderno ? 'tema-cuaderno bg-cuaderno-papel' : 'bg-slate-50'}`}>
 
       {/* Botón flotante solo en MÓVIL: en escritorio la barra nunca desaparece. */}
       {!open && !isDesktop && (
         <button
           onClick={() => setOpen(true)}
           aria-label="Mostrar menú"
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-bold shadow-lg transition-transform active:scale-95"
+          className={cuaderno
+            ? 'flex items-center gap-2 px-3 min-h-[44px] rounded-md bg-cuaderno-hoja border-[1.5px] border-cuaderno-tinta text-cuaderno-tinta font-manuscrita text-[17px]'
+            : 'flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-bold shadow-lg transition-transform active:scale-95'}
           style={{ position: 'fixed', top: 10, left: 10, zIndex: 60 }}
         >
-          <svg className="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className={`w-5 h-5 ${cuaderno ? 'text-cuaderno-tinta' : 'text-slate-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
           Menú
@@ -333,7 +420,9 @@ export default function AppShellLayout({
       {/* ── Sidebar ── */}
       {isDesktop ? (
         <aside
-          className="flex flex-col flex-shrink-0 bg-white border-r border-slate-200 shadow-sm sticky top-0 h-screen"
+          className={cuaderno
+            ? 'flex flex-col flex-shrink-0 bg-cuaderno-separador shadow-[inset_-1px_0_0_rgb(var(--cuaderno-columna))] sticky top-0 h-screen'
+            : 'flex flex-col flex-shrink-0 bg-white border-r border-slate-200 shadow-sm sticky top-0 h-screen'}
           style={{
             width: compacto ? ANCHO_RIEL : ANCHO_EXPANDIDA,
             // Se anima solo el ancho. Animar `all` arrastraría la sombra del
@@ -346,7 +435,7 @@ export default function AppShellLayout({
       ) : open && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <aside className="absolute left-0 top-0 h-full w-64 bg-white shadow-2xl flex flex-col">
+          <aside className={`absolute left-0 top-0 h-full w-64 flex flex-col ${cuaderno ? 'bg-cuaderno-separador shadow-[inset_-1px_0_0_rgb(var(--cuaderno-columna))]' : 'bg-white shadow-2xl'}`}>
             {barra}
           </aside>
         </div>

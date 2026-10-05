@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&family=Handlee&family=Playwrite+CL:wght@100..400&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -354,3 +354,128 @@ button, a, input, select {
 }
 
 /* Agregar al final de index.css existente */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TEMA CUADERNO — módulo Finanzas
+   ══════════════════════════════════════════════════════════════════════════
+   Finanzas se ve como un cuaderno de cuentas llevado a mano, con cuidado:
+   papel columnar verde, tinta azul-negra, egresos en rojo entre paréntesis,
+   resaltadores pastel y cifras alineadas en casillas.
+
+   Dos clases, a propósito separadas:
+   · .tema-cuaderno  la pone AppShellLayout (variante "cuaderno"). Solo papel
+                     de fondo y barras de desplazamiento: las pantallas que aún
+                     no se rediseñan siguen viéndose bien encima.
+   · .cuaderno       la pone cada pantalla rediseñada en su raíz. Trae la letra
+                     y anula los títulos globales (Outfit, 700). Así se migra
+                     pantalla por pantalla sin estados intermedios rotos.
+
+   Las variables van en :root y no dentro del tema porque los modales y
+   paneles se montan con position: fixed y deben poder usarlas igual.
+   Formato de canales RGB para que Tailwind admita opacidad
+   (bg-cuaderno-hoja/60). tailwind.config.js las referencia: no repetir hex. */
+
+:root {
+  --cuaderno-papel:     238 242 230;  /* #EEF2E6 */
+  --cuaderno-hoja:      245 248 239;  /* #F5F8EF */
+  --cuaderno-tarjeta:   251 251 246;  /* #FBFBF6 */
+  --cuaderno-separador: 227 233 217;  /* #E3E9D9 */
+  --cuaderno-renglon:   214 225 206;  /* #D6E1CE */
+  --cuaderno-linea:     220 229 212;  /* #DCE5D4 */
+  --cuaderno-columna:   169 194 156;  /* #A9C29C */
+  --cuaderno-margen:    201 102  90;  /* #C9665A */
+  --cuaderno-tinta:      31  43  69;  /* #1F2B45 */
+  --cuaderno-roja:      163  48  42;  /* #A3302A */
+  --cuaderno-grafito:    95  99  91;  /* #5F635B */
+  --cuaderno-verde:      47 107  79;  /* #2F6B4F */
+  --cuaderno-azul:      201 214 230;  /* #C9D6E6 */
+  --cuaderno-menta:     207 232 213;  /* #CFE8D5 */
+  --cuaderno-rosa:      245 207 203;  /* #F5CFCB */
+  --cuaderno-durazno:   247 220 196;  /* #F7DCC4 */
+  --cuaderno-lavanda:   220 214 240;  /* #DCD6F0 */
+}
+
+/* Papel bajo todo el shell y bajo la página completa (incluido el rebote del
+   scroll). FinanzasApp pone .cuaderno-activo en <html> mientras está montado. */
+.tema-cuaderno,
+html.cuaderno-activo,
+html.cuaderno-activo body {
+  background-color: rgb(var(--cuaderno-papel));
+}
+
+/* Barras de desplazamiento sobrias: anulan el degradado violeta global */
+.tema-cuaderno ::-webkit-scrollbar-track,
+html.cuaderno-activo::-webkit-scrollbar-track {
+  background: rgb(var(--cuaderno-separador));
+}
+.tema-cuaderno ::-webkit-scrollbar-thumb,
+html.cuaderno-activo::-webkit-scrollbar-thumb {
+  background: rgb(var(--cuaderno-columna));
+  border-radius: 9999px;
+}
+.tema-cuaderno ::-webkit-scrollbar-thumb:hover,
+html.cuaderno-activo::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--cuaderno-grafito));
+}
+
+/* Raíz de cada pantalla rediseñada */
+.cuaderno {
+  font-family: 'Handlee', 'Segoe Print', cursive;
+  color: rgb(var(--cuaderno-tinta));
+  /* Handlee tiene un solo grosor. Sin esto, cualquier font-bold que quede
+     produce una negrita falsa, engrosada por el navegador. */
+  font-synthesis: none;
+}
+/* Reseteo de títulos y controles dentro del cuaderno. Va en @layer base y con
+   :where() a propósito: así le gana a la regla global de títulos (Outfit, 700),
+   pero pierde contra cualquier clase utilitaria (font-ligada, font-light). Con
+   :is() pesaba más que esas clases y los <h1> con <Titulo> salían en Handlee. */
+@layer base {
+  .cuaderno :where(h1, h2, h3, h4, h5, h6) {
+    font-family: inherit;
+    font-weight: 400;
+    letter-spacing: normal;
+  }
+  .cuaderno :where(input, select, textarea, button) {
+    font-family: inherit;
+  }
+}
+.cuaderno ::placeholder {
+  color: rgb(var(--cuaderno-grafito) / 0.6);
+}
+
+/* Resaltador: franja pastel en la mitad inferior del texto, como un trazo de
+   destacador. box-decoration-break repite el trazo si el texto salta de línea. */
+.resaltado {
+  background-image: linear-gradient(
+    transparent 28%,
+    rgb(var(--resalte) / 1) 28%,
+    rgb(var(--resalte) / 1) 72%,
+    transparent 72%
+  );
+  padding: 0 0.3em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.resaltado-menta   { --resalte: var(--cuaderno-menta); }
+.resaltado-rosa    { --resalte: var(--cuaderno-rosa); }
+.resaltado-durazno { --resalte: var(--cuaderno-durazno); }
+.resaltado-lavanda { --resalte: var(--cuaderno-lavanda); }
+
+/* Línea de puntos guía entre un concepto y su cifra (como un índice) */
+.puntos-guia {
+  flex: 1 1 auto;
+  min-width: 1.5rem;
+  margin: 0 0.6em;
+  border-bottom: 2px dotted rgb(var(--cuaderno-columna));
+  transform: translateY(-0.3em);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tema-cuaderno *,
+  .tema-cuaderno *::before,
+  .tema-cuaderno *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}

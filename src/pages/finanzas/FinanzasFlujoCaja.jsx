@@ -6,10 +6,16 @@ import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
+import {
+  Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
+  ModalCuaderno, Segmentado, Casilla,
+  IconoBajar, IconoMas, IconoLapiz, IconoBorrar, IconoNota,
+  casoOracion, casoTitulo,
+} from "./cuaderno";
 
-// ─── Design tokens ─────────────────────────────────────────────────────────
-// Paleta: blanco base + slate neutros + purple brand + verde/rojo funcionales
-// Regla: color solo comunica estado — nunca como decoración
+// ─── Diseño ─────────────────────────────────────────────────────────────────
+// Tema cuaderno: ver cuaderno.jsx y el bloque TEMA CUADERNO de index.css.
+// Toda cifra pasa por <Cifra>; los colores salen de los tokens cuaderno-*.
 
 // ─── Utilidades ─────────────────────────────────────────────────────────────
 const MESES      = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -58,14 +64,6 @@ function useSubcategorias(empresaId) {
 
   return { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat };
 }
-
-// Color de acento por subcategoría — solo borde izquierdo, muy sutil
-const SUBCAT_ACCENT = {
-  REMUNERACIONES: "#6366f1", AUTOMOTRIZ: "#f59e0b", OPERACIONAL: "#0ea5e9",
-  FINANCIERO: "#ef4444", ADMINISTRATIVO: "#8b5cf6", VENTAS: "#10b981",
-  CONTRATOS: "#14b8a6", ANTICIPOS: "#f97316", OTRO: "#94a3b8", DEFAULT: "#94a3b8",
-};
-function subAccent(sub) { return SUBCAT_ACCENT[sub] || SUBCAT_ACCENT.DEFAULT; }
 
 function fmtCLP(n) {
   if (!n && n !== 0) return "";
@@ -190,249 +188,173 @@ function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden" style={{boxShadow:"0 24px 48px -12px rgba(0,0,0,0.18)"}}>
-        {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">{editando ? "Editar cuenta" : "Nueva cuenta"}</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Completa los campos para continuar</p>
-          </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div className="p-6 space-y-4 overflow-y-auto">
-          {/* Tipo */}
-          <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Tipo</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: "INGRESOS", label: "Ingreso", color: "", activeStyle: {color:"#065f46",borderColor:"#6ee7b7",background:"#f0fdf4"} },
-                { id: "EGRESOS",  label: "Egreso",  color: "", activeStyle: {color:"#9f1239",borderColor:"#fda4af",background:"#fff1f2"} },
-              ].map(t => (
-                <button key={t.id} onClick={() => setForm(f => ({...f, categoria: t.id, subcategoria: t.id==="INGRESOS"?"VENTAS":"OPERACIONAL"}))}
-                  className="py-2.5 rounded-xl text-xs font-semibold border-2 transition-all" style={form.categoria===t.id ? t.activeStyle : {borderColor:"#e2e8f0",color:"#64748b",background:"white"}}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* Nombre */}
-          <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Nombre *</label>
-            <input value={form.nombre}
-              onChange={e => { setForm(f => ({...f, nombre: e.target.value.toUpperCase()})); if (errorNombre) setErrorNombre(false); }}
-              placeholder="Ej: SUELDO BASE, CONTRATO CLIENTE ABC…"
-              className={`w-full px-3.5 py-2.5 border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all placeholder:text-slate-300 ${
-                errorNombre
-                  ? "border-red-400 focus:border-red-400 focus:ring-red-100"
-                  : "border-slate-200 focus:border-purple-400 focus:ring-purple-100"}`}/>
-            {errorNombre && <p className="text-[10px] text-red-500 mt-1 font-medium">El nombre es obligatorio</p>}
-          </div>
-          {/* Proveedor — solo egresos. Los datos de pago y contacto viven en el maestro */}
-          {!isIngreso && (
-            <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Proveedor o beneficiario</label>
-              <SelectorProveedor empresaId={empresaId} proveedores={proveedores}
-                value={form.proveedorId || ""}
-                onChange={id => setForm(f => ({ ...f, proveedorId: id }))}
-                nombreSugerido={form.nombre} />
-              <p className="text-[10px] text-slate-400 mt-1">Guarda cómo se le paga y a quién contactar. Es opcional.</p>
-            </div>
-          )}
-          {/* Subcategoría */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Subcategoría</label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { setAgregandoSubcat(v => !v); setGestionandoSubcat(false); }}
-                  className="text-[10px] font-bold text-purple-600 hover:text-purple-700 flex items-center gap-1 transition-colors">
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
-                  Nueva
-                </button>
-                <span className="text-slate-300">|</span>
-                <button type="button" onClick={() => { setGestionandoSubcat(v => !v); setAgregandoSubcat(false); }}
-                  className="text-[10px] font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 transition-colors">
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                  Gestionar
-                </button>
-              </div>
-            </div>
-
-            {/* Agregar nueva */}
-            {agregandoSubcat && (
-              <div className="flex gap-2 mb-2">
-                <input value={nuevaSubcat} onChange={e => setNuevaSubcat(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === 'Enter' && handleAgregarSubcat()}
-                  placeholder="Ej: SUBCONTRATO"
-                  className="flex-1 px-3 py-2 border border-purple-300 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-purple-100 uppercase" />
-                <button onClick={handleAgregarSubcat}
-                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl transition-colors">
-                  Agregar
-                </button>
-                <button onClick={() => { setAgregandoSubcat(false); setNuevaSubcat(""); }}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-colors">
-                  ✕
-                </button>
-              </div>
-            )}
-
-            {/* Gestionar existentes */}
-            {gestionandoSubcat && (
-              <div className="mb-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                  {isIngreso ? "Subcategorías de ingreso" : "Subcategorías de egreso"}
-                </p>
-                {subcats.map(s => (
-                  <div key={s} className="flex items-center justify-between gap-2">
-                    {editandoSubcat === s ? (
-                      <>
-                        <input
-                          value={valorEditSubcat}
-                          onChange={e => setValorEditSubcat(e.target.value.toUpperCase())}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleGuardarEditSubcat(s);
-                            if (e.key === 'Escape') setEditandoSubcat(null);
-                          }}
-                          className="flex-1 px-2 py-1 border border-purple-300 rounded-lg text-xs font-medium focus:outline-none uppercase"
-                          autoFocus
-                        />
-                        <button onClick={() => handleGuardarEditSubcat(s)}
-                          className="px-2 py-1 bg-purple-600 text-white text-[10px] font-bold rounded-lg">✓</button>
-                        <button onClick={() => setEditandoSubcat(null)}
-                          className="px-2 py-1 bg-slate-200 text-slate-600 text-[10px] font-bold rounded-lg">✕</button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="flex-1 text-xs font-semibold text-slate-700">{s}</span>
-                        <button onClick={() => { setEditandoSubcat(s); setValorEditSubcat(s); }}
-                          className="p-1 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Editar">
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                        </button>
-                        <button onClick={() => handleEliminarSubcat(s)}
-                          className="p-1 hover:bg-red-100 text-red-500 rounded-lg transition-colors" title="Eliminar">
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <select value={form.subcategoria} onChange={e => setForm(f => ({...f, subcategoria: e.target.value}))}
-              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 bg-white transition-all">
-              {subcats.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          {/* Detalle */}
-          <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Detalle / Agrupador</label>
-            <input value={form.detalle} onChange={e => setForm(f => ({...f, detalle: e.target.value.toUpperCase()}))}
-              placeholder="Ej: SUELDOS, COMBUSTIBLE, EP01…"
-              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all placeholder:text-slate-300"/>
-          </div>
-          {!isIngreso && (
-            <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Presupuesto mensual</label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">$</span>
-                <input value={form.presupuestoMensual}
-                  onChange={e => setForm(f => ({...f, presupuestoMensual: fmtInput(e.target.value)}))}
-                  placeholder="0"
-                  className="w-full pl-7 pr-3.5 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all placeholder:text-slate-300"/>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1">Límite de gasto mensual para esta cuenta. Se mostrará como barra de progreso.</p>
-            </div>
-          )}
-          {isIngreso && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Proyecto</label>
-                <input value={form.proyectoId} onChange={e => setForm(f => ({...f, proyectoId: e.target.value.toUpperCase()}))}
-                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all"/>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Cliente</label>
-                <input value={form.cliente} onChange={e => setForm(f => ({...f, cliente: e.target.value}))}
-                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all"/>
-              </div>
-            </div>
-          )}
-          {/* Recurrencia */}
-          <div className="rounded-xl border overflow-hidden" style={{borderColor: form.recurrente ? "#ddd6fe" : "#e2e8f0"}}>
-            <button
-              onClick={() => setForm(f => ({...f, recurrente: !f.recurrente}))}
-              className="w-full flex items-center justify-between px-4 py-3 transition-colors"
-              style={{background: form.recurrente ? "#f5f3ff" : "#f8fafc"}}>
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{background: form.recurrente ? "#ede9fe" : "#f1f5f9"}}>
-                  <svg className="w-4 h-4" style={{color: form.recurrente ? "#7c3aed" : "#94a3b8"}} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                  </svg>
-                </div>
-                <div className="text-left">
-                  <p className="text-xs font-semibold" style={{color: form.recurrente ? "#5b21b6" : "#475569"}}>Cuenta recurrente</p>
-                  <p className="text-[10px]" style={{color: form.recurrente ? "#7c3aed" : "#94a3b8"}}>
-                    {form.recurrente ? "Autorrellena semanas futuras" : "Activa para autogenerar montos"}
-                  </p>
-                </div>
-              </div>
-              <div className="w-9 h-5 rounded-full flex items-center transition-all flex-shrink-0"
-                style={{background: form.recurrente ? "#7c3aed" : "#cbd5e1", padding:"2px"}}>
-                <div className="w-4 h-4 bg-white rounded-full transition-all"
-                  style={{transform: form.recurrente ? "translateX(16px)" : "translateX(0)"}}/>
-              </div>
-            </button>
-            {form.recurrente && (
-              <div className="px-4 pb-4 pt-3 space-y-3" style={{borderTop:"0.5px solid #ede9fe", background:"white"}}>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Frecuencia</label>
-                    <select value={form.frecuenciaRecurrente}
-                      onChange={e => setForm(f => ({...f, frecuenciaRecurrente: e.target.value}))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:border-purple-400 bg-white">
-                      <option value="semanal">Cada semana</option>
-                      <option value="quincenal">Cada 2 semanas</option>
-                      <option value="mensual">Mensual (1 vez)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">Monto fijo</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400">$</span>
-                      <input value={form.montoRecurrente}
-                        onChange={e => setForm(f => ({...f, montoRecurrente: fmtInput(e.target.value)}))}
-                        placeholder="0"
-                        className="w-full pl-6 pr-2 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:border-purple-400 placeholder:text-slate-300"/>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  El monto se autorrellena en semanas futuras vacías.
-                  Las celdas editadas manualmente no se sobreescriben.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {errorGuardar && (
-            <p className="text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{errorGuardar}</p>
-          )}
-          <div className="flex gap-2 pt-1">
-            <button onClick={onClose} disabled={guardando} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors disabled:opacity-50">
-              Cancelar
-            </button>
-            <button onClick={guardar} disabled={guardando}
-              className="flex-1 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold transition-colors shadow-sm disabled:opacity-60">
-              {guardando ? "Guardando…" : editando ? "Guardar" : "Crear cuenta"}
-            </button>
+    <ModalCuaderno
+      titulo={editando ? "Editar cuenta" : "Nueva cuenta"}
+      subtitulo="Qué es, cómo se agrupa y si se repite"
+      onClose={onClose}
+      bloqueado={guardando}
+      pie={
+        <div className="space-y-3">
+          {errorGuardar && <Nota etiqueta="Ojo:">{errorGuardar}</Nota>}
+          <div className="flex gap-2">
+            <Boton className="flex-1" onClick={onClose} disabled={guardando}>Cancelar</Boton>
+            <Boton variante="primario" className="flex-1" onClick={guardar} disabled={guardando}>
+              {guardando ? "Guardando…" : editando ? "Guardar cambios" : "Crear cuenta"}
+            </Boton>
           </div>
         </div>
+      }>
+
+      <Segmentado
+        etiqueta="Tipo"
+        opciones={[{ id: "INGRESOS", label: "Ingreso" }, { id: "EGRESOS", label: "Egreso" }]}
+        valor={form.categoria}
+        onCambiar={id => setForm(f => ({ ...f, categoria: id, subcategoria: id === "INGRESOS" ? "VENTAS" : "OPERACIONAL" }))}
+      />
+
+      <Campo
+        etiqueta="Nombre"
+        value={form.nombre}
+        onChange={e => { setForm(f => ({...f, nombre: e.target.value.toUpperCase()})); if (errorNombre) setErrorNombre(false); }}
+        placeholder="Ej: sueldo base, contrato cliente ABC"
+        error={errorNombre ? "Escribe el nombre de la cuenta" : null}
+      />
+
+      {/* Proveedor — solo egresos. Los datos de pago y contacto viven en el maestro */}
+      {!isIngreso && (
+        <div>
+          <div className="text-sm text-cuaderno-grafito mb-1">Proveedor o beneficiario</div>
+          <SelectorProveedor empresaId={empresaId} proveedores={proveedores}
+            value={form.proveedorId || ""}
+            onChange={id => setForm(f => ({ ...f, proveedorId: id }))}
+            nombreSugerido={casoTitulo(form.nombre)} />
+          <p className="m-0 mt-1 text-[13px] text-cuaderno-grafito">Guarda cómo se le paga y a quién contactar. Es opcional.</p>
+        </div>
+      )}
+
+      {/* Subcategoría */}
+      <div>
+        <div className="flex items-end justify-between gap-3">
+          <Campo as="select" etiqueta="Subcategoría" className="flex-1"
+            value={form.subcategoria} onChange={e => setForm(f => ({...f, subcategoria: e.target.value}))}>
+            {subcats.map(s => <option key={s} value={s}>{casoOracion(s)}</option>)}
+          </Campo>
+          <div className="flex gap-3 flex-shrink-0">
+            <Boton variante="texto" className="text-[16px]" onClick={() => { setAgregandoSubcat(v => !v); setGestionandoSubcat(false); }}>Nueva</Boton>
+            <Boton variante="texto" className="text-[16px]" onClick={() => { setGestionandoSubcat(v => !v); setAgregandoSubcat(false); }}>Ordenar</Boton>
+          </div>
+        </div>
+
+        {agregandoSubcat && (
+          <div className="flex items-end gap-2 mt-3">
+            <Campo etiqueta="Nombre de la subcategoría" className="flex-1" autoFocus
+              value={nuevaSubcat} onChange={e => setNuevaSubcat(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === "Enter" && handleAgregarSubcat()}
+              placeholder="Ej: subcontratos" />
+            <Boton variante="primario" className="min-h-[40px] text-[16px]" onClick={handleAgregarSubcat}>Agregar</Boton>
+            <Boton variante="texto" className="text-[16px]" onClick={() => { setAgregandoSubcat(false); setNuevaSubcat(""); }}>Cancelar</Boton>
+          </div>
+        )}
+
+        {gestionandoSubcat && (
+          <div className="mt-3 border border-cuaderno-azul rounded-md px-3 py-1">
+            <div className="text-[14px] text-cuaderno-grafito pt-1.5 pb-1">
+              {isIngreso ? "Subcategorías de ingreso" : "Subcategorías de egreso"}
+            </div>
+            {subcats.map(s => (
+              <div key={s} className="flex items-center gap-2 min-h-[44px] border-t border-cuaderno-azul">
+                {editandoSubcat === s ? (
+                  <>
+                    <input
+                      value={valorEditSubcat}
+                      onChange={e => setValorEditSubcat(e.target.value.toUpperCase())}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleGuardarEditSubcat(s);
+                        if (e.key === 'Escape') setEditandoSubcat(null);
+                      }}
+                      aria-label={`Nuevo nombre para ${casoOracion(s)}`}
+                      className="flex-1 min-h-[36px] bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta text-[17px] focus:outline-none"
+                      autoFocus
+                    />
+                    <Boton variante="texto" className="text-[16px]" onClick={() => handleGuardarEditSubcat(s)}>Guardar</Boton>
+                    <Boton variante="texto" className="text-[16px] text-cuaderno-grafito" onClick={() => setEditandoSubcat(null)}>Cancelar</Boton>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-[17px]">{casoOracion(s)}</span>
+                    <button type="button" aria-label={`Renombrar ${casoOracion(s)}`}
+                      onClick={() => { setEditandoSubcat(s); setValorEditSubcat(s); }}
+                      className="w-9 h-9 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                      <IconoLapiz tamano={15} />
+                    </button>
+                    <button type="button" aria-label={`Eliminar ${casoOracion(s)}`}
+                      onClick={() => handleEliminarSubcat(s)}
+                      className="w-9 h-9 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40">
+                      <IconoBorrar tamano={15} />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+
+      <Campo
+        etiqueta="Detalle o agrupador"
+        value={form.detalle}
+        onChange={e => setForm(f => ({...f, detalle: e.target.value.toUpperCase()}))}
+        placeholder="Ej: sueldos, combustible, EP01"
+      />
+
+      {!isIngreso && (
+        <Campo
+          etiqueta="Presupuesto mensual"
+          inputMode="numeric"
+          value={form.presupuestoMensual}
+          onChange={e => setForm(f => ({...f, presupuestoMensual: fmtInput(e.target.value)}))}
+          placeholder="$ 0"
+          ayuda="Tope de gasto del mes. En la tabla se ve como una línea bajo el nombre."
+        />
+      )}
+
+      {isIngreso && (
+        <div className="grid grid-cols-2 gap-4">
+          <Campo etiqueta="Proyecto" value={form.proyectoId}
+            onChange={e => setForm(f => ({...f, proyectoId: e.target.value.toUpperCase()}))} />
+          <Campo etiqueta="Cliente" value={form.cliente}
+            onChange={e => setForm(f => ({...f, cliente: e.target.value}))} />
+        </div>
+      )}
+
+      {/* Recurrencia */}
+      <div className="border-t border-cuaderno-azul pt-4">
+        <Casilla
+          marcada={form.recurrente}
+          onCambiar={v => setForm(f => ({...f, recurrente: v}))}
+          descripcion={form.recurrente ? "Se anota sola en las semanas futuras vacías" : "Márcala si el monto se repite"}>
+          Cuenta recurrente
+        </Casilla>
+        {form.recurrente && (
+          <div className="mt-4 ml-9 space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <Campo as="select" etiqueta="Frecuencia" value={form.frecuenciaRecurrente}
+                onChange={e => setForm(f => ({...f, frecuenciaRecurrente: e.target.value}))}>
+                <option value="semanal">Cada semana</option>
+                <option value="quincenal">Cada 2 semanas</option>
+                <option value="mensual">Una vez al mes</option>
+              </Campo>
+              <Campo etiqueta="Monto fijo" inputMode="numeric" value={form.montoRecurrente}
+                onChange={e => setForm(f => ({...f, montoRecurrente: fmtInput(e.target.value)}))}
+                placeholder="$ 0" />
+            </div>
+            <p className="m-0 text-[14px] text-cuaderno-grafito">
+              Solo llena semanas futuras sin monto. Lo que hayas escrito a mano no se toca.
+            </p>
+          </div>
+        )}
+      </div>
+    </ModalCuaderno>
   );
 }
 
@@ -440,33 +362,47 @@ function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
 function ModalSaldo({ saldo, onSave, onClose }) {
   const [val, setVal] = useState(fmtInput(saldo || ""));
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{background:"rgba(15,23,42,0.45)", backdropFilter:"blur(4px)"}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100">
-          <h3 className="text-sm font-bold text-slate-900">Saldo bancario inicial</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Punto de partida del acumulado</p>
+    <ModalCuaderno
+      titulo="Saldo del banco"
+      subtitulo="Desde aquí parte el saldo acumulado"
+      ancho="max-w-sm"
+      onClose={onClose}
+      cerrarAlClicFuera
+      pie={
+        <div className="flex gap-2">
+          <Boton className="flex-1" onClick={onClose}>Cancelar</Boton>
+          <Boton variante="primario" className="flex-1" onClick={() => onSave(parseInput(val))}>Guardar</Boton>
         </div>
-        <div className="p-6 space-y-4">
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-semibold">$</span>
-            <input value={val}
-              onChange={e => setVal(fmtInput(e.target.value))}
-              onKeyDown={e => e.key === "Enter" && onSave(parseInput(val))}
-              placeholder="0"
-              className="w-full pl-8 pr-4 py-3 border border-slate-200 rounded-xl text-sm font-semibold text-right focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all" autoFocus/>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">Cancelar</button>
-            <button onClick={() => onSave(parseInput(val))} className="flex-1 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-sm font-semibold transition-colors">Guardar</button>
-          </div>
-        </div>
-      </div>
-    </div>
+      }>
+      <Campo
+        etiqueta="Saldo disponible hoy, en pesos"
+        inputMode="numeric"
+        value={val}
+        onChange={e => setVal(fmtInput(e.target.value))}
+        onKeyDown={e => e.key === "Enter" && onSave(parseInput(val))}
+        placeholder="0"
+        autoFocus
+        className="[&_input]:text-right [&_input]:text-[22px]"
+      />
+    </ModalCuaderno>
   );
 }
 
+// ─── Columnas del libro ─────────────────────────────────────────────────────
+// Ancho de cada semana. Lo usa también scrollToMonth para saltar de mes.
+const ANCHO_SEMANA = 104;
+
+// Borde izquierdo de cada columna semanal: doble línea roja de margen antes de
+// la primera semana, línea de columna al cambiar de mes y línea fina entre
+// semanas del mismo mes.
+function bordeSemana(i, weeks) {
+  if (i === 0) return "border-l-[3px] border-double border-l-cuaderno-margen";
+  if (weeks[i].monthIndex !== weeks[i - 1].monthIndex) return "border-l border-l-cuaderno-columna";
+  return "border-l border-l-cuaderno-linea";
+}
+
 // ─── Celda editable ─────────────────────────────────────────────────────────
-function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
+function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek, borde,
   onSave, onTogglePaid, onNota,
   isDragging, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
 
@@ -489,8 +425,6 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
     setEditing(false);
   };
 
-  // valueColor ahora se aplica inline directamente en el span
-
   return (
     <td
       draggable={!isEmpty}
@@ -499,72 +433,66 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`relative border-r border-slate-100 transition-all select-none ${
-        isDragging ? "opacity-30" : ""
-      } ${paid && !isDragOver ? "bg-slate-50" : ""}`}
-      style={{ minWidth: "112px", height: "36px", cursor: editing ? "text" : "default", background: isDragOver ? "#ede9fe" : isCurrentWeek ? "rgba(237,233,254,0.25)" : "white", outline: isDragOver ? "2px solid #7c3aed" : "none", outlineOffset: "-2px", zIndex: isDragOver ? 10 : "auto" }}>
-
-      {/* Indicador semana actual — línea izquierda sutil */}
-      {isCurrentWeek && !isDragOver && (
-        <div style={{position:"absolute",left:0,top:"4px",bottom:"4px",width:"2px",background:"#7c3aed",opacity:0.5,borderRadius:"0 2px 2px 0"}}/>
-      )}
+      className={`relative ${borde} border-b border-b-cuaderno-renglon select-none ${isDragging ? "opacity-30" : ""} ${
+        isDragOver
+          ? "bg-cuaderno-durazno/60 outline-dashed outline-[1.5px] -outline-offset-2 outline-cuaderno-tinta z-10"
+          : isCurrentWeek ? "bg-cuaderno-durazno/40" : ""}`}
+      style={{ width: ANCHO_SEMANA, minWidth: ANCHO_SEMANA, height: 44, cursor: editing ? "text" : "default" }}>
 
       {editing ? (
-        <div className="flex items-center justify-center h-full px-1 gap-0.5">
-          <span className="text-slate-400 text-[11px] font-mono">$</span>
-          <input ref={inputRef} value={inputVal}
+        <div className="flex items-center h-full px-2">
+          <input ref={inputRef} value={inputVal} inputMode="numeric"
+            aria-label="Monto en pesos"
             onChange={e => setInputVal(fmtInput(e.target.value))}
             onBlur={commit}
             onKeyDown={e => { if(e.key==="Enter"||e.key==="Tab") { e.preventDefault(); commit(); } if(e.key==="Escape") setEditing(false); }}
-            className="flex-1 text-center text-[11px] font-mono font-semibold bg-transparent focus:outline-none text-slate-800 min-w-0"/>
+            className="w-full min-w-0 text-right text-[16px] bg-cuaderno-tarjeta border-0 border-b-[1.5px] border-cuaderno-tinta text-cuaderno-tinta focus:outline-none px-1"/>
         </div>
       ) : (
-        <div className="group flex items-center justify-center h-full cursor-pointer" onClick={startEdit}
-          style={{position:"relative"}}>
-          {/* Valor — siempre centrado, sin nada que lo desplace */}
-          <span className="text-[11px] font-mono font-semibold" style={{
-            color: paid ? "#cbd5e1" : isEgreso ? (isEmpty ? "#e2e8f0" : "#e11d48") : (isEmpty ? "#e2e8f0" : "#059669"),
-            textDecoration: paid ? "line-through" : "none",
-          }}>
-            {isEmpty ? "—" : fmtCompact(value)}
-          </span>
-          {/* Botones — overlay absoluto, no desplazan el número */}
+        <div className="group/celda relative flex items-center justify-end h-full px-2 cursor-pointer hover:bg-cuaderno-hoja/80" onClick={startEdit}>
           {!isEmpty && (
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{position:"absolute", bottom:"2px", left:"50%", transform:"translateX(-50%)", display:"flex", gap:"2px", background:"white", borderRadius:"4px", padding:"1px", boxShadow:"0 1px 4px rgba(0,0,0,0.1)"}}>
+            <span className="inline-flex items-center gap-0.5 text-[16px]">
+              {nota && <span className="text-[14px] text-cuaderno-grafito" title={nota}>*</span>}
+              <Cifra valor={value} color={paid ? "grafito" : "auto"} />
+              {paid && <VistoBueno tamano={12} />}
+            </span>
+          )}
+          {/* Acciones al pasar el mouse: no desplazan la cifra */}
+          {!isEmpty && (
+            <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5 opacity-0 group-hover/celda:opacity-100 focus-within:opacity-100">
               <button onClick={e => { e.stopPropagation(); onTogglePaid(); }}
-                title={paid ? "Marcar pendiente" : "Marcar pagado"}
-                className="w-4 h-4 rounded flex items-center justify-center" style={paid ? {background:"#d1fae5",color:"#059669"} : {background:"#f1f5f9",color:"#94a3b8"}}>
-                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                title={paid ? "Marcar pendiente" : "Marcar pagado"} aria-label={paid ? "Marcar pendiente" : "Marcar pagado"}
+                className={`w-[18px] h-[18px] rounded-[3px] border flex items-center justify-center bg-cuaderno-tarjeta ${
+                  paid ? "border-cuaderno-verde text-cuaderno-verde" : "border-cuaderno-renglon text-cuaderno-grafito hover:border-cuaderno-tinta"}`}>
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8.6 L6.4 12 L13 4.2"/></svg>
               </button>
               <button onClick={e => { e.stopPropagation(); setNotaVal(nota||""); setShowNota(true); }}
-                title="Nota"
-                className="w-4 h-4 rounded flex items-center justify-center" style={nota ? {background:"#fef3c7",color:"#d97706"} : {background:"#f1f5f9",color:"#94a3b8"}}>
-                <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h6"/></svg>
+                title="Nota" aria-label={nota ? "Editar nota" : "Agregar nota"}
+                className={`w-[18px] h-[18px] rounded-[3px] border flex items-center justify-center bg-cuaderno-tarjeta ${
+                  nota ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-cuaderno-renglon text-cuaderno-grafito hover:border-cuaderno-tinta"}`}>
+                <IconoNota tamano={10} />
               </button>
             </div>
           )}
-          {/* Dots indicadores — esquina superior derecha */}
-          {paid && <span style={{position:"absolute", top:"3px", right:"3px", width:"5px", height:"5px", borderRadius:"50%", background:"#34d399"}}/>}
-          {nota && !paid && <span style={{position:"absolute", top:"3px", right:"3px", width:"5px", height:"5px", borderRadius:"50%", background:"#fbbf24"}}/>}
         </div>
       )}
 
-      {/* Popup nota */}
+      {/* Nota de la celda */}
       {showNota && (
         <>
           <div className="fixed inset-0 z-30" onClick={e => { e.stopPropagation(); setShowNota(false); }}/>
-          <div className="absolute z-40 top-0 left-full ml-1 bg-white rounded-xl shadow-xl border border-slate-200 p-3 w-48" onClick={e => e.stopPropagation()}>
-          <p className="text-[10px] font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Nota</p>
-          <textarea value={notaVal} onChange={e => setNotaVal(e.target.value)}
-            rows={2} placeholder="Agrega una nota…" autoFocus
-            className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:border-purple-400"/>
-          <div className="flex gap-1.5 mt-2">
-            <button onClick={() => setShowNota(false)} className="flex-1 py-1 text-[10px] font-medium text-slate-500 hover:text-slate-700">Cancelar</button>
-            <button onClick={() => { onNota(notaVal); setShowNota(false); }}
-              className="flex-1 py-1 text-[10px] font-semibold bg-purple-700 text-white rounded-lg">Guardar</button>
+          <div className="absolute z-40 top-0 left-full ml-1 w-56 bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md p-3 shadow-[0_12px_28px_-12px_rgb(var(--cuaderno-tinta)/0.4)]" onClick={e => e.stopPropagation()}>
+            <label className="block text-[14px] text-cuaderno-grafito mb-1">
+              Nota
+              <textarea value={notaVal} onChange={e => setNotaVal(e.target.value)}
+                rows={2} placeholder="Escribe una nota…" autoFocus
+                className="mt-1 w-full text-[16px] text-cuaderno-tinta bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta/70 resize-none focus:outline-none focus:border-cuaderno-tinta"/>
+            </label>
+            <div className="flex justify-end gap-2 mt-2">
+              <Boton variante="texto" className="min-h-[36px] text-[15px] text-cuaderno-grafito" onClick={() => setShowNota(false)}>Cancelar</Boton>
+              <Boton variante="primario" className="min-h-[36px] px-3 text-[15px]" onClick={() => { onNota(notaVal); setShowNota(false); }}>Guardar</Boton>
+            </div>
           </div>
-        </div>
         </>
       )}
     </td>
@@ -575,7 +503,7 @@ function PaymentCell({ value, paid, nota, isEgreso, isCurrentWeek,
 function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas,
   onPayment, onTogglePaid, onNota, onEdit, onDelete, proyectoId,
   draggedPayment, dragOverKey, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
-  mesActualWeeks, onOpenDetalle }) {
+  mesActualWeeks, onOpenDetalle, sangria = "pl-8" }) {
 
   const isEgreso = account.categoria === "EGRESOS";
   // Solo los egresos abren el panel de detalle (datos de pago y contacto)
@@ -602,54 +530,49 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
   const showBudget  = isEgreso && budget > 0;
 
   return (
-    <tr className="group transition-colors" style={{background:"white"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="white"}>
+    <tr className="group">
       {/* Nombre */}
-      <td className="sticky left-0 z-10 border-r" style={{background:"white", borderRight:"0.5px solid #f1f5f9", minWidth:"220px", height:"36px", paddingLeft:"16px", paddingRight:"8px"}}>
+      <td className={`sticky left-0 z-10 bg-cuaderno-hoja group-hover:bg-cuaderno-papel border-b border-b-cuaderno-renglon ${sangria} pr-2`}
+        style={{ width: 248, minWidth: 248, height: 44 }}>
         <div className="flex items-center justify-between gap-1 h-full">
-          <div className={`min-w-0 flex-1 ${abreDetalle ? "group/nombre cursor-pointer rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300" : ""}`}
+          <div className={`group/nombre min-w-0 flex-1 py-1 ${abreDetalle ? "cursor-pointer rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40" : ""}`}
             {...propsDetalle}>
             <div className="flex items-center gap-1.5">
-              <p className={`text-[11px] font-medium text-slate-700 truncate leading-tight ${abreDetalle ? "group-hover/nombre:text-purple-700 transition-colors" : ""}`}>{account.nombre}</p>
+              <p className={`m-0 text-[17px] leading-tight truncate ${abreDetalle ? "decoration-cuaderno-columna underline-offset-4 group-hover/nombre:underline" : ""}`}>
+                {casoTitulo(account.nombre)}
+              </p>
               {account.recurrente && (
-                <span className="flex-shrink-0 text-[8px] font-bold px-1 rounded" style={{background:"#ede9fe",color:"#7c3aed"}} title={`Recurrente · ${account.frecuenciaRecurrente || "mensual"}`}>↺</span>
+                <span className="flex-shrink-0 text-[14px] text-cuaderno-grafito" title={`Recurrente, ${account.frecuenciaRecurrente || "mensual"}`}>↺</span>
               )}
-              {budgetOver && (
-                <span className="flex-shrink-0 text-[8px] font-bold px-1 rounded" style={{background:"#ffe4e6",color:"#e11d48"}}>EXCEDIDO</span>
-              )}
-              {budgetWarn && (
-                <span className="flex-shrink-0 text-[8px] font-bold px-1 rounded" style={{background:"#fef3c7",color:"#b45309"}}>80%</span>
-              )}
+              {budgetOver && <Resaltado color="rosa" className="flex-shrink-0 text-[13px]">excedido</Resaltado>}
+              {budgetWarn && <Resaltado color="durazno" className="flex-shrink-0 text-[13px]">80%</Resaltado>}
             </div>
-            {account.detalle && <p className="text-[9px] text-slate-400 truncate leading-tight">{account.detalle}</p>}
+            {account.detalle && <p className="m-0 text-[13px] leading-tight text-cuaderno-grafito truncate">{casoOracion(account.detalle)}</p>}
             {showBudget && (
-              <div className="mt-1 flex items-center gap-1.5">
-                <div className="flex-1 rounded-full overflow-hidden" style={{height:"3px",background:"#f1f5f9"}}>
-                  <div className="h-full rounded-full transition-all" style={{
-                    width:`${budgetPct}%`,
-                    background: budgetOver ? "#e11d48" : budgetWarn ? "#f59e0b" : "#059669",
-                  }}/>
+              <div className="mt-1 flex items-center gap-1.5" title={`Presupuesto del mes: ${Math.round(budgetPct)}%`}>
+                <div className="flex-1 h-[2px] bg-cuaderno-renglon">
+                  <div className={`h-full ${budgetOver ? "bg-cuaderno-roja" : budgetWarn ? "bg-cuaderno-roja/60" : "bg-cuaderno-verde"}`}
+                    style={{ width: `${budgetPct}%` }}/>
                 </div>
-                <span className="text-[8px] font-mono flex-shrink-0" style={{color: budgetOver ? "#e11d48" : budgetWarn ? "#b45309" : "#94a3b8"}}>
-                  {Math.round(budgetPct)}%
-                </span>
+                <span className={`text-[11px] flex-shrink-0 ${budgetOver ? "text-cuaderno-roja" : "text-cuaderno-grafito"}`}>{Math.round(budgetPct)}%</span>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-            <button onClick={() => onEdit(account)}
-              className="w-5 h-5 rounded-md bg-slate-100 hover:bg-purple-100 text-slate-400 hover:text-purple-600 flex items-center justify-center transition-colors">
-              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex-shrink-0">
+            <button onClick={() => onEdit(account)} aria-label={`Editar ${casoTitulo(account.nombre)}`} title="Editar cuenta"
+              className="w-7 h-7 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+              <IconoLapiz tamano={13} />
             </button>
-            <button onClick={() => onDelete(account.id)}
-              className="w-5 h-5 rounded-md flex items-center justify-center" style={{background:"#f1f5f9",color:"#94a3b8"}} onMouseEnter={e=>{e.currentTarget.style.background="#ffe4e6";e.currentTarget.style.color="#e11d48"}} onMouseLeave={e=>{e.currentTarget.style.background="#f1f5f9";e.currentTarget.style.color="#94a3b8"}}>
-              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            <button onClick={() => onDelete(account.id)} aria-label={`Eliminar ${casoTitulo(account.nombre)}`} title="Eliminar cuenta"
+              className="w-7 h-7 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40">
+              <IconoBorrar tamano={13} />
             </button>
           </div>
         </div>
       </td>
 
       {/* Celdas semanales */}
-      {weekColumns.map(week => {
+      {weekColumns.map((week, i) => {
         const key = `${account.id}-${week.key}`;
         return (
           <PaymentCell key={key}
@@ -658,6 +581,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
             nota={paymentNotas[key] || ""}
             isEgreso={isEgreso}
             isCurrentWeek={week.isCurrentWeek}
+            borde={bordeSemana(i, weekColumns)}
             onSave={val => onPayment(key, val)}
             onTogglePaid={() => onTogglePaid(key)}
             onNota={nota => onNota(key, nota)}
@@ -673,14 +597,9 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
       })}
 
       {/* Total fila */}
-      <td className="sticky right-0 border-l text-center" style={{background:"white", borderLeft:"0.5px solid #f1f5f9", minWidth:"96px"}}>
-        {rowTotal !== 0 ? (
-          <span className="text-[11px] font-mono font-semibold" style={{color: isEgreso ? "#e11d48" : "#059669"}}>
-            {fmtCompact(rowTotal)}
-          </span>
-        ) : (
-          <span className="text-[11px] text-slate-200">—</span>
-        )}
+      <td className="sticky right-0 z-10 bg-cuaderno-hoja group-hover:bg-cuaderno-papel border-b border-b-cuaderno-renglon border-l border-l-cuaderno-columna px-3 text-right text-[16px]"
+        style={{ width: 128, minWidth: 128 }}>
+        <Cifra valor={rowTotal} />
       </td>
     </tr>
   );
@@ -1107,335 +1026,263 @@ export default function FinanzasFlujoCaja() {
   const scrollToMonth  = (idx) => {
     const target = weekColumns.find(w => w.monthIndex === idx);
     if (!target || !tableRef.current) return;
-    tableRef.current.scrollTo({ left: weekColumns.indexOf(target) * 112, behavior: "smooth" });
+    tableRef.current.scrollTo({ left: weekColumns.indexOf(target) * ANCHO_SEMANA, behavior: "smooth" });
   };
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin"/>
+    <div className="cuaderno flex items-center justify-center h-64 text-[18px] text-cuaderno-grafito">
+      Abriendo el cuaderno…
     </div>
   );
+
+  // ── Datos solo de presentación ─────────────────────────────────────────────
+  const fechaHoy = casoOracion(new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).replace(",", ""));
+  const mesesVisibles = weekColumns.filter((w, i, arr) => arr.findIndex(x => x.monthIndex === w.monthIndex) === i);
+  const nombresMeses = mesesVisibles.map(w => w.monthName.toLowerCase()).join(" y ");
+  const gruposMes = [];
+  weekColumns.forEach((w, i) => {
+    const last = gruposMes[gruposMes.length - 1];
+    if (!last || last.name !== w.monthName) gruposMes.push({ name: w.monthName, idx: w.monthIndex, inicio: i, count: 1 });
+    else last.count++;
+  });
+  const acumuladoFinal = acumulados[weekColumns[weekColumns.length - 1]?.key] || 0;
+  const totalIngresos  = weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
+  const totalEgresos   = weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0);
+  const filaProps = {
+    weekColumns, payments, paymentsPaid, paymentNotas,
+    onPayment: handlePayment, onTogglePaid: handleTogglePaid, onNota: handleNota,
+    onEdit: c => { setEditandoCuenta(c); setShowModalCuenta(true); },
+    onDelete: handleDeleteCuenta, proyectoId,
+    draggedPayment, dragOverKey,
+    onDragStart: handleDragStart, onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave, onDrop: handleDrop, onDragEnd: handleDragEnd,
+    mesActualWeeks,
+  };
+
+  // Celdas comunes del libro
+  const celdaNombre = "sticky left-0 z-10 bg-cuaderno-hoja";
+  const celdaTotal  = "sticky right-0 z-10 bg-cuaderno-hoja border-l border-l-cuaderno-columna px-3 text-right";
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className={
       expandido
-        ? "fixed inset-0 z-[60] flex flex-col h-screen bg-white"
-        : "flex flex-col h-full bg-slate-50/40"
+        ? "cuaderno fixed inset-0 z-[60] flex flex-col h-screen bg-cuaderno-papel"
+        : "cuaderno flex flex-col h-full"
     }>
 
-      {/* ── Topbar ──────────────────────────────────────────────────────────── */}
+      {/* ── Encabezado de la hoja ───────────────────────────────────────────── */}
       {!expandido && (
-      <div className="bg-white border-b border-slate-100 px-5 py-4 flex-shrink-0">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="px-8 pt-5 pb-3 flex-shrink-0">
+        <div className="flex justify-end text-[16px] text-cuaderno-grafito">
+          <span className="border-b border-cuaderno-columna px-1 pb-0.5">{fechaHoy}</span>
+        </div>
+
+        <header className="flex flex-wrap justify-between items-end gap-5 mt-1">
           <div>
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-              Flujo de <span className="text-purple-700">Caja</span>
-            </h1>
-            <p className="text-slate-400 text-xs mt-0.5 font-medium">
-              Vista semanal · {weekColumns.length} semanas · 2 meses
+            <Titulo>Flujo de caja</Titulo>
+            <p className="m-0 text-[17px] text-cuaderno-grafito">
+              Semana a semana, {nombresMeses}. Cifras en miles de pesos.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ProyectoSelector />
-            {/* Saldo banco */}
-            <button onClick={() => setShowModalSaldo(true)}
-              style={saldoBanco ? {borderColor:"#6ee7b7",background:"#f0fdf4",color:"#065f46"} : {borderColor:"#e2e8f0",background:"white",color:"#64748b"}} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-                saldoBanco ? "border-slate-200" : "border-slate-200"}`}>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
-              {saldoBanco ? fmtCompact(saldoBanco) : "Saldo banco"}
-            </button>
-            {/* Buscador */}
+          <div className="flex flex-wrap items-end gap-3">
+            <ProyectoSelector variante="cuaderno" />
+            <Campo etiqueta="Buscar" type="search" className="w-44"
+              value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Nombre de la cuenta" />
+            <Boton onClick={() => setShowModalSaldo(true)}>
+              {saldoBanco ? <>Saldo <Cifra valor={saldoBanco} color="heredar" /></> : "Saldo del banco"}
+            </Boton>
             <div className="relative">
-              <svg className="w-3.5 h-3.5 text-slate-300 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
-              <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
-                placeholder="Buscar…"
-                className="pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 text-xs bg-white text-slate-700 w-32 transition-all placeholder:text-slate-300"/>
-            </div>
-            {/* Exportar — dropdown */}
-            <div className="relative">
-              <button onClick={() => setShowExportMenu(v => !v)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 text-xs font-semibold hover:bg-slate-50 transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              <Boton onClick={() => setShowExportMenu(v => !v)} aria-expanded={showExportMenu} aria-haspopup="menu">
                 {exportando ? "Exportando…" : "Exportar"}
-                <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-              </button>
+                <IconoBajar tamano={14} />
+              </Boton>
               {showExportMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden w-44"
-                  style={{boxShadow:"0 8px 24px -4px rgba(0,0,0,0.12)"}}>
-                  <button onClick={exportarExcel}
-                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors text-left">
-                    <svg className="w-4 h-4 flex-shrink-0" style={{color:"#059669"}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    <div>
-                      <p className="font-semibold">Excel (.xlsx)</p>
-                      <p className="text-[10px] text-slate-400">3 hojas con datos completos</p>
-                    </div>
+                <div role="menu" className="absolute right-0 top-full mt-1 z-50 w-60 bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md py-1 shadow-[0_12px_28px_-12px_rgb(var(--cuaderno-tinta)/0.4)]">
+                  <button role="menuitem" onClick={exportarExcel} className="w-full text-left px-4 py-2.5 hover:bg-cuaderno-hoja">
+                    <span className="block text-[17px]">Excel</span>
+                    <span className="block text-[13px] text-cuaderno-grafito">Tres hojas con todo el detalle</span>
                   </button>
-                  <div className="border-t border-slate-100"/>
-                  <button onClick={exportarPDF}
-                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors text-left">
-                    <svg className="w-4 h-4 flex-shrink-0" style={{color:"#e11d48"}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                    <div>
-                      <p className="font-semibold">PDF / Imprimir</p>
-                      <p className="text-[10px] text-slate-400">Resumen ejecutivo A4</p>
-                    </div>
+                  <div className="mx-4 border-t border-cuaderno-azul" />
+                  <button role="menuitem" onClick={exportarPDF} className="w-full text-left px-4 py-2.5 hover:bg-cuaderno-hoja">
+                    <span className="block text-[17px]">PDF o imprimir</span>
+                    <span className="block text-[13px] text-cuaderno-grafito">Resumen en una hoja A4</span>
                   </button>
                 </div>
               )}
             </div>
-            {/* Cerrar dropdown al hacer click afuera */}
+            {/* Cerrar el menú al hacer clic afuera */}
             {showExportMenu && <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)}/>}
-            {/* Nueva cuenta */}
-            <button onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/></svg>
-              Nueva cuenta
-            </button>
+            <Boton variante="primario" onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}>
+              <IconoMas tamano={14} /> Nueva cuenta
+            </Boton>
           </div>
-        </div>
+        </header>
 
-        {/* KPIs — 4 pills compactos */}
-        <div className="flex flex-wrap gap-2 mt-3">
-          {[
-            { label: "Ingresos", val: kpiIngresos,            color: "", dot: "", style: {background:"#f0fdf4",color:"#065f46"}, dotStyle: {background:"#34d399"} },
-            { label: "Egresos",  val: Math.abs(kpiEgresos),   color: "", dot: "", style: {background:"#fff1f2",color:"#9f1239"}, dotStyle: {background:"#f43f5e"} },
-            { label: "Neto",     val: kpiNeto,                color: "", dot: "", style: kpiNeto >= 0 ? {background:"#f0fdf4",color:"#065f46"} : {background:"#fff1f2",color:"#9f1239"}, dotStyle: kpiNeto >= 0 ? {background:"#34d399"} : {background:"#f43f5e"} },
-            { label: "Pendiente",val: kpiPendiente,            color: "", dot: "", style: {background:"#fffbeb",color:"#92400e"}, dotStyle: {background:"#fbbf24"} },
-          ].map(k => (
-            <div key={k.label} className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={k.style}>
-              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={k.dotStyle}/>
-              <span className="text-[10px] font-medium opacity-70">{k.label}</span>
-              <span className="text-xs font-bold font-mono">{fmtCompact(k.val)}</span>
-            </div>
-          ))}
-          {semanasNegativas > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-600">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-              <span className="text-[10px] font-semibold">{semanasNegativas} sem. negativa{semanasNegativas > 1 ? "s" : ""}</span>
-            </div>
-          )}
-        </div>
+        {/* Resumen con puntos guía y notas al margen */}
+        <section aria-label="Resumen del período" className="flex flex-wrap items-start gap-x-14 gap-y-4 mt-5">
+          <div className="flex-[0_1_430px] min-w-[280px]">
+            <Titulo as="h2" tamano="md"><Resaltado color="durazno">Resumen</Resaltado></Titulo>
+            <LineaGuia etiqueta="Ingresos"><Cifra valor={kpiIngresos} vacio="0" /></LineaGuia>
+            <LineaGuia etiqueta="Egresos"><Cifra valor={kpiEgresos} vacio="0" /></LineaGuia>
+            <LineaGuia etiqueta="Por pagar"><Cifra valor={-kpiPendiente} vacio="0" /></LineaGuia>
+            <LineaGuia etiqueta="Neto del período"><Cifra valor={kpiNeto} vacio="0" raya="doble" /></LineaGuia>
+          </div>
+          <div className="flex-[1_1_260px] max-w-sm flex flex-col gap-2.5 sm:pt-12">
+            {!saldoBanco && (
+              <Nota>falta anotar el saldo del banco. El acumulado está partiendo de cero.</Nota>
+            )}
+            {semanasNegativas > 0 && (
+              <Nota etiqueta="Ojo:" tono="grafito">
+                {semanasNegativas === 1
+                  ? "una semana cierra con más egresos que ingresos."
+                  : `${semanasNegativas} semanas cierran con más egresos que ingresos.`}
+              </Nota>
+            )}
+          </div>
+        </section>
       </div>
       )}
 
-      {/* ── Tabs + nav meses ────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b border-slate-100 flex-shrink-0">
-        <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg">
-          {[
-            { id: "tabla",   icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>, label: "Tabla" },
-            { id: "resumen", icon: <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>, label: "Resumen" },
-          ].map(t => (
-            <button key={t.id} onClick={() => setTabActiva(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                tabActiva === t.id ? "bg-white text-purple-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-              {t.icon}{t.label}
+      {/* ── Pestañas ────────────────────────────────────────────────────────── */}
+      <div className={`flex flex-wrap items-center justify-between gap-3 py-2 flex-shrink-0 ${expandido ? "px-4" : "px-8"}`}>
+        <div role="tablist" className="flex gap-6">
+          {[["tabla", "Tabla"], ["resumen", "Resumen mensual"]].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tabActiva === id} onClick={() => setTabActiva(id)}
+              className={`min-h-[44px] px-0.5 text-[20px] border-b-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+                tabActiva === id ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-transparent text-cuaderno-grafito hover:text-cuaderno-tinta"}`}>
+              {label}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex flex-wrap items-center gap-2 text-[15px] text-cuaderno-grafito">
           {tabActiva === "tabla" && (
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-slate-400 font-medium mr-1">Ir a</span>
-              {weekColumns.filter((w, i, arr) => arr.findIndex(x => x.monthIndex === w.monthIndex) === i).map(w => (
+            <>
+              <span>Ir a</span>
+              {mesesVisibles.map(w => (
                 <button key={w.monthIndex} onClick={() => scrollToMonth(w.monthIndex)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                    w.monthIndex === 0 ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-                  {w.monthLabel}
+                  className={`min-h-[38px] px-3 rounded-md border text-[16px] text-cuaderno-tinta ${
+                    w.monthIndex === 0 ? "border-cuaderno-columna bg-cuaderno-hoja" : "border-transparent hover:bg-cuaderno-hoja"}`}>
+                  {w.monthName.toLowerCase()}
                 </button>
               ))}
-            </div>
+            </>
           )}
 
-          {/* Nueva cuenta — solo en modo expandido (el del topbar queda oculto) */}
+          {/* Nueva cuenta — solo en vista ampliada (la del encabezado queda oculta) */}
           {expandido && (
-            <button onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-semibold rounded-md transition-colors">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4"/></svg>
-              Nueva cuenta
-            </button>
+            <Boton variante="primario" className="min-h-[38px] text-[16px]" onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}>
+              <IconoMas tamano={13} /> Nueva cuenta
+            </Boton>
           )}
 
-          {/* Expandir / contraer pantalla */}
-          <button
-            onClick={() => setExpandido(v => !v)}
-            title={expandido ? "Salir de pantalla ampliada (Esc)" : "Pantalla ampliada"}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors ${
-              expandido
-                ? "bg-purple-700 text-white hover:bg-purple-600"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-            {expandido ? (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0v4m0-4h4m7 5l5-5m0 0v4m0-4h-4M9 15l-5 5m0 0v-4m0 4h4m7-5l5 5m0 0v-4m0 4h-4"/></svg>
-                Salir
-              </>
-            ) : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
-                Ampliar
-              </>
-            )}
-          </button>
+          <Boton variante="texto" className="text-[16px]" onClick={() => setExpandido(v => !v)}
+            title={expandido ? "Volver a la vista normal (Esc)" : "Ver la tabla a pantalla completa"}>
+            {expandido ? "Salir de la vista ampliada" : "Ampliar"}
+          </Boton>
         </div>
       </div>
 
-      {/* ── Tabla semanal ────────────────────────────────────────────────────── */}
+      {/* ── Libro semanal ───────────────────────────────────────────────────── */}
       {tabActiva === "tabla" && (
-        <div ref={tableRef} className="flex-1 overflow-auto" style={{ overflowX: "auto" }}>
-          <table style={{ tableLayout: "fixed", borderCollapse: "collapse", minWidth: "100%" }}>
+        <div ref={tableRef} className={`flex-1 overflow-auto border border-cuaderno-columna bg-cuaderno-hoja ${expandido ? "mx-4 mb-4" : "mx-8 mb-6"}`}>
+          <table className="border-collapse" style={{ tableLayout: "fixed", minWidth: "100%" }}>
 
-            {/* ── Header ── */}
             <thead className="sticky top-0 z-20">
-              {/* Fila meses */}
+              {/* Meses */}
               <tr>
-                <th className="sticky left-0 z-30 bg-slate-800" style={{ minWidth: "220px", height: "22px" }}/>
-                {(() => {
-                  const grupos = [];
-                  weekColumns.forEach(w => {
-                    const last = grupos[grupos.length - 1];
-                    if (!last || last.name !== w.monthName) grupos.push({ name: w.monthName, label: w.monthLabel, idx: w.monthIndex, count: 1 });
-                    else last.count++;
-                  });
-                  return grupos.map((g, i) => (
-                    <th key={i} colSpan={g.count}
-                      className={`text-center border-x text-[9px] font-bold tracking-widest uppercase py-1 ${
-                        g.idx === 0
-                          ? "border-violet-600"
-                          : "bg-slate-700 text-slate-300 border-slate-600"}`}>
-                      {g.name}
-                    </th>
-                  ));
-                })()}
-                <th className="sticky right-0 z-30 bg-slate-800" style={{ minWidth: "96px" }}/>
-              </tr>
-              {/* Fila semanas */}
-              <tr>
-                <th className="sticky left-0 z-30 bg-slate-800 text-left border-r border-slate-700"
-                  style={{ minWidth: "220px", height: "38px", paddingLeft: "16px" }}>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Cuenta</span>
-                </th>
-                {weekColumns.map(w => (
-                  <th key={w.key} style={{minWidth:"112px", textAlign:"center", borderLeft: w.isCurrentWeek ? "0.5px solid #ddd6fe" : "0.5px solid #334155", borderRight: w.isCurrentWeek ? "0.5px solid #ddd6fe" : "0.5px solid #334155", background: w.isCurrentWeek ? "#faf5ff" : "#1e293b"}}>
-                    <div className="text-[11px] font-bold" style={{color: w.isCurrentWeek ? "#4c1d95" : "#e2e8f0"}}>{w.label}</div>
-                    <div className={`text-[9px] font-medium ${w.isCurrentWeek ? "text-slate-500" : "text-slate-500"}`}>{w.dateRange}</div>
+                <th className={`${celdaNombre} z-30`} style={{ width: 248, minWidth: 248 }}/>
+                {gruposMes.map(g => (
+                  <th key={g.name} colSpan={g.count}
+                    className={`bg-cuaderno-hoja font-ligada font-light text-[18px] leading-[1.8] text-center text-cuaderno-tinta ${bordeSemana(g.inicio, weekColumns)}`}>
+                    {g.name}
                   </th>
                 ))}
-                <th className="sticky right-0 z-30 bg-slate-800 border-l border-slate-700 text-center"
-                  style={{ minWidth: "96px" }}>
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Total</span>
-                </th>
+                <th className={`${celdaTotal} z-30`} style={{ width: 128, minWidth: 128 }}/>
+              </tr>
+              {/* Semanas */}
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                <th className={`${celdaNombre} z-30 text-left font-normal pl-4 py-2 text-[17px] shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]`}>Cuenta</th>
+                {weekColumns.map((w, i) => (
+                  <th key={w.key}
+                    className={`font-normal py-1.5 text-center shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno" : "bg-cuaderno-hoja"}`}
+                    style={{ width: ANCHO_SEMANA, minWidth: ANCHO_SEMANA }}>
+                    <div className="text-[16px] leading-tight">{w.label}</div>
+                    <div className="text-[12.5px] leading-tight text-cuaderno-grafito">{w.dateRange}</div>
+                  </th>
+                ))}
+                <th className={`${celdaTotal} z-30 font-normal text-[17px] shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]`}>Total</th>
               </tr>
             </thead>
 
             <tbody>
               {/* ────────── INGRESOS ────────── */}
-              {/* Cabecera sección */}
-              <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("INGRESOS")}>
-                <td className="sticky left-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderRight:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px", minWidth:"220px"}}>
+              <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("INGRESOS")} aria-expanded={!collapsed["INGRESOS"]}>
+                <td className={`${celdaNombre} border-b border-b-cuaderno-renglon pl-4 pr-3 pt-3 pb-1`}>
                   <div className="flex items-center gap-2">
-                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#10b981"}}/>
-                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Ingresos</span>
-                    <span className="text-[10px] text-slate-400 font-medium">{ingresos.length} cuenta{ingresos.length !== 1 ? "s" : ""}</span>
+                    <IconoBajar tamano={14} className={`text-cuaderno-grafito transition-transform ${collapsed["INGRESOS"] ? "-rotate-90" : ""}`} />
+                    <Titulo as="span" tamano="md"><Resaltado color="menta">Ingresos</Resaltado></Titulo>
+                    <span className="text-[14px] text-cuaderno-grafito">{ingresos.length} cuenta{ingresos.length !== 1 ? "s" : ""}</span>
                   </div>
                 </td>
-                <td colSpan={weekColumns.length} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", height:"30px"}}/>
-                <td className="sticky right-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderLeft:"0.5px solid #e2e8f0", paddingRight:"12px", height:"30px", minWidth:"96px"}}>
-                  <div className="flex items-center justify-end gap-3">
-                    <span className="text-[11px] font-mono font-semibold" style={{color:"#059669"}}>
-                      {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0))}
-                    </span>
-                    <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["INGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                  </div>
-                </td>
+                <td colSpan={weekColumns.length} className="border-b border-b-cuaderno-renglon border-l-[3px] border-double border-l-cuaderno-margen"/>
+                <td className={`${celdaTotal} border-b border-b-cuaderno-renglon text-[16.5px]`}><Cifra valor={totalIngresos} /></td>
               </tr>
 
               {!collapsed["INGRESOS"] && ingresos.map(c => (
-                <AccountRow key={c.id} account={c} weekColumns={weekColumns}
-                  payments={payments} paymentsPaid={paymentsPaid} paymentNotas={paymentNotas}
-                  onPayment={handlePayment} onTogglePaid={handleTogglePaid} onNota={handleNota}
-                  onEdit={c => { setEditandoCuenta(c); setShowModalCuenta(true); }}
-                  onDelete={handleDeleteCuenta} proyectoId={proyectoId}
-                  draggedPayment={draggedPayment} dragOverKey={dragOverKey}
-                  onDragStart={handleDragStart} onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
-                  mesActualWeeks={mesActualWeeks}/>
+                <AccountRow key={c.id} account={c} {...filaProps} />
               ))}
 
               {/* Subtotal ingresos */}
               {!collapsed["INGRESOS"] && (
-                <tr style={{background:"rgba(240,253,244,0.7)", borderTop:"0.5px solid #d1fae5", borderBottom:"0.5px solid #d1fae5"}}>
-                  <td className="sticky left-0 z-10 border-r" style={{background:"rgba(240,253,244,0.9)", borderRight:"0.5px solid #d1fae5", minWidth:"220px", height:"28px", paddingLeft:"16px"}}>
-                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{color:"#065f46"}}>Subtotal ingresos</span>
-                  </td>
-                  {weekColumns.map(w => {
+                <tr>
+                  <td className={`${celdaNombre} border-b border-b-cuaderno-renglon pl-8 py-2 text-[17px]`}>Subtotal ingresos</td>
+                  {weekColumns.map((w, i) => {
                     const t = weekTotal(w.key, ingresos);
                     return (
-                      <td key={w.key} style={{textAlign:"center", borderRight:"0.5px solid #d1fae5", background: w.isCurrentWeek ? "#f0fdf4" : "rgba(240,253,244,0.4)"}}>
-                        {t > 0 && <span className="text-[11px] font-mono font-semibold" style={{color:"#059669"}}>{fmtCompact(t)}</span>}
+                      <td key={w.key} className={`border-b border-b-cuaderno-renglon px-2 py-2 text-right text-[16px] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno/40" : ""}`}>
+                        {t > 0 && <Cifra valor={t} raya="total" />}
                       </td>
                     );
                   })}
-                  <td className="sticky right-0 text-center" style={{background:"rgba(240,253,244,0.9)", borderLeft:"0.5px solid #d1fae5"}}>
-                    <span className="text-[11px] font-mono font-bold" style={{color:"#065f46"}}>
-                      {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0))}
-                    </span>
-                  </td>
+                  <td className={`${celdaTotal} border-b border-b-cuaderno-renglon py-2 text-[16.5px]`}><Cifra valor={totalIngresos} raya="total" /></td>
                 </tr>
               )}
 
               {/* ────────── EGRESOS ────────── */}
-              <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGRESOS")}>
-                <td className="sticky left-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderRight:"0.5px solid #e2e8f0", paddingLeft:"16px", paddingRight:"12px", height:"30px", minWidth:"220px"}}>
+              <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGRESOS")} aria-expanded={!collapsed["EGRESOS"]}>
+                <td className={`${celdaNombre} border-b border-b-cuaderno-renglon pl-4 pr-3 pt-5 pb-1`}>
                   <div className="flex items-center gap-2">
-                    <div style={{width:"8px",height:"8px",borderRadius:"50%",background:"#f43f5e"}}/>
-                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Egresos</span>
-                    <span className="text-[10px] text-slate-400 font-medium">{egresos.length} cuenta{egresos.length !== 1 ? "s" : ""}</span>
+                    <IconoBajar tamano={14} className={`text-cuaderno-grafito transition-transform ${collapsed["EGRESOS"] ? "-rotate-90" : ""}`} />
+                    <Titulo as="span" tamano="md"><Resaltado color="rosa">Egresos</Resaltado></Titulo>
+                    <span className="text-[14px] text-cuaderno-grafito">{egresos.length} cuenta{egresos.length !== 1 ? "s" : ""}</span>
                   </div>
                 </td>
-                <td colSpan={weekColumns.length} style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", height:"30px"}}/>
-                <td className="sticky right-0 z-10" style={{background:"#f8fafc", borderTop:"0.5px solid #e2e8f0", borderBottom:"0.5px solid #e2e8f0", borderLeft:"0.5px solid #e2e8f0", paddingRight:"12px", height:"30px", minWidth:"96px"}}>
-                  <div className="flex items-center justify-end gap-3">
-                    <span className="text-[11px] font-mono font-semibold" style={{color:"#e11d48"}}>
-                      {fmtCompact(weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0))}
-                    </span>
-                    <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${collapsed["EGRESOS"] ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                  </div>
-                </td>
+                <td colSpan={weekColumns.length} className="border-b border-b-cuaderno-renglon border-l-[3px] border-double border-l-cuaderno-margen"/>
+                <td className={`${celdaTotal} border-b border-b-cuaderno-renglon text-[16.5px]`}><Cifra valor={totalEgresos} /></td>
               </tr>
 
               {!collapsed["EGRESOS"] && subcatsEgresoActivas.map(subcat => {
                 const cuentasSubcat = egresos.filter(c => c.subcategoria === subcat);
                 const totSubcat = weekColumns.reduce((s, w) => s + weekTotal(w.key, cuentasSubcat), 0);
-                const accent = subAccent(subcat);
                 return (
                   <React.Fragment key={subcat}>
-                    {/* Fila subcategoría */}
-                    <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGR-" + subcat)}>
-                      <td className="sticky left-0 z-10 border-y border-slate-100 bg-white"
-                        style={{ paddingLeft: "28px", paddingRight: "12px", height: "26px", borderLeft: `3px solid ${accent}`, borderRight:"0.5px solid #f1f5f9", minWidth:"220px" }}>
+                    {/* Subcategoría */}
+                    <tr className="cursor-pointer select-none" onClick={() => toggleCollapse("EGR-" + subcat)} aria-expanded={!collapsed["EGR-" + subcat]}>
+                      <td className={`${celdaNombre} border-b border-b-cuaderno-renglon pl-6 pr-3 pt-3 pb-0.5`}>
                         <div className="flex items-center gap-2">
-                          <svg className={`w-3 h-3 text-slate-300 transition-transform ${collapsed["EGR-"+subcat] ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: accent }}>{subcat}</span>
-                          <span className="text-[9px] text-slate-400">{cuentasSubcat.length} cta{cuentasSubcat.length !== 1 ? "s." : "."}</span>
+                          <IconoBajar tamano={12} className={`text-cuaderno-grafito transition-transform ${collapsed["EGR-"+subcat] ? "-rotate-90" : ""}`} />
+                          <span className="text-[18px] underline decoration-cuaderno-columna decoration-[1.5px] underline-offset-[5px]">{casoOracion(subcat)}</span>
+                          <span className="text-[13px] text-cuaderno-grafito">{cuentasSubcat.length} cuenta{cuentasSubcat.length !== 1 ? "s" : ""}</span>
                         </div>
                       </td>
-                      <td colSpan={weekColumns.length} className="border-y border-slate-100 bg-white" style={{ height: "26px" }}/>
-                      <td className="sticky right-0 z-10 border-y border-slate-100 bg-white" style={{ paddingRight: "12px", height: "26px", borderLeft:"0.5px solid #f1f5f9", minWidth:"96px", textAlign:"right" }}>
-                        <span className="text-[10px] font-mono font-semibold" style={{color:"#f43f5e"}}>
-                          {totSubcat < 0 ? fmtCLP(totSubcat) : ""}
-                        </span>
-                      </td>
+                      <td colSpan={weekColumns.length} className="border-b border-b-cuaderno-renglon border-l-[3px] border-double border-l-cuaderno-margen"/>
+                      <td className={`${celdaTotal} border-b border-b-cuaderno-renglon text-[15px]`}><Cifra valor={totSubcat} /></td>
                     </tr>
                     {!collapsed["EGR-" + subcat] && cuentasSubcat.map(c => (
-                      <AccountRow key={c.id} account={c} weekColumns={weekColumns}
-                        payments={payments} paymentsPaid={paymentsPaid} paymentNotas={paymentNotas}
-                        onPayment={handlePayment} onTogglePaid={handleTogglePaid} onNota={handleNota}
-                        onEdit={c => { setEditandoCuenta(c); setShowModalCuenta(true); }}
-                        onDelete={handleDeleteCuenta} proyectoId={proyectoId}
-                        draggedPayment={draggedPayment} dragOverKey={dragOverKey}
-                        onDragStart={handleDragStart} onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
-                        mesActualWeeks={mesActualWeeks} onOpenDetalle={abrirDetalle}/>
+                      <AccountRow key={c.id} account={c} {...filaProps} sangria="pl-11" onOpenDetalle={abrirDetalle} />
                     ))}
                   </React.Fragment>
                 );
@@ -1443,105 +1290,62 @@ export default function FinanzasFlujoCaja() {
 
               {/* Egresos sin subcategoría */}
               {!collapsed["EGRESOS"] && egresos.filter(c => !c.subcategoria).map(c => (
-                <AccountRow key={c.id} account={c} weekColumns={weekColumns}
-                  payments={payments} paymentsPaid={paymentsPaid} paymentNotas={paymentNotas}
-                  onPayment={handlePayment} onTogglePaid={handleTogglePaid} onNota={handleNota}
-                  onEdit={c => { setEditandoCuenta(c); setShowModalCuenta(true); }}
-                  onDelete={handleDeleteCuenta} proyectoId={proyectoId}
-                  draggedPayment={draggedPayment} dragOverKey={dragOverKey}
-                  onDragStart={handleDragStart} onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave} onDrop={handleDrop} onDragEnd={handleDragEnd}
-                  mesActualWeeks={mesActualWeeks} onOpenDetalle={abrirDetalle}/>
+                <AccountRow key={c.id} account={c} {...filaProps} onOpenDetalle={abrirDetalle} />
               ))}
 
               {/* Subtotal egresos */}
               {!collapsed["EGRESOS"] && (
-                <tr style={{background:"rgba(255,241,242,0.7)", borderTop:"0.5px solid #ffe4e6", borderBottom:"0.5px solid #ffe4e6"}}>
-                  <td className="sticky left-0 z-10 border-r" style={{background:"rgba(255,241,242,0.9)", borderRight:"0.5px solid #ffe4e6", minWidth:"220px", height:"28px", paddingLeft:"16px"}}>
-                    <span className="text-[10px] font-bold uppercase tracking-wider" style={{color:"#9f1239"}}>Subtotal egresos</span>
-                  </td>
-                  {weekColumns.map(w => {
+                <tr>
+                  <td className={`${celdaNombre} border-b border-b-cuaderno-renglon pl-8 py-2 text-[17px]`}>Subtotal egresos</td>
+                  {weekColumns.map((w, i) => {
                     const t = weekTotal(w.key, egresos);
                     return (
-                      <td key={w.key} style={{textAlign:"center", borderRight:"0.5px solid #ffe4e6", background: w.isCurrentWeek ? "#fff1f2" : "rgba(255,241,242,0.4)"}}>
-                        {t < 0 && <span className="text-[11px] font-mono font-semibold" style={{color:"#e11d48"}}>{fmtCompact(t)}</span>}
+                      <td key={w.key} className={`border-b border-b-cuaderno-renglon px-2 py-2 text-right text-[16px] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno/40" : ""}`}>
+                        {t < 0 && <Cifra valor={t} raya="total" />}
                       </td>
                     );
                   })}
-                  <td className="sticky right-0 text-center" style={{background:"rgba(255,241,242,0.9)", borderLeft:"0.5px solid #ffe4e6"}}>
-                    <span className="text-[11px] font-mono font-bold" style={{color:"#9f1239"}}>
-                      {fmtCLP(weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0))}
-                    </span>
-                  </td>
+                  <td className={`${celdaTotal} border-b border-b-cuaderno-renglon py-2 text-[16.5px]`}><Cifra valor={totalEgresos} raya="total" /></td>
                 </tr>
               )}
             </tbody>
 
-            {/* ── Footer sticky ── */}
+            {/* ── Cierre: queda pegado abajo al desplazar ── */}
             <tfoot className="sticky bottom-0 z-20">
-              {/* Neto semanal */}
-              <tr style={{ background: "#1e293b" }}>
-                <td className="sticky left-0 z-30 border-r border-slate-700"
-                  style={{ background: "#1e293b", minWidth: "220px", height: "34px", paddingLeft: "16px" }}>
-                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Neto semanal</span>
-                </td>
-                {weekColumns.map(w => {
+              <tr>
+                <td className={`${celdaNombre} z-30 pl-4 py-2.5 text-[18px] shadow-[inset_0_1.5px_0_rgb(var(--cuaderno-tinta))]`}>Neto de la semana</td>
+                {weekColumns.map((w, i) => {
                   const neto = weekTotal(w.key, ingresos) + weekTotal(w.key, egresos);
                   return (
-                    <td key={w.key} className="text-center border-x border-slate-700"
-                      style={{ paddingRight: "10px" }}>
-                      {neto !== 0 && (
-                        <span className="text-[11px] font-mono font-bold" style={{color: neto > 0 ? "#34d399" : "#f87171"}}>
-                          {fmtCompact(neto)}
-                        </span>
-                      )}
+                    <td key={w.key} className={`px-2 py-2.5 text-right text-[16px] shadow-[inset_0_1.5px_0_rgb(var(--cuaderno-tinta))] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno" : "bg-cuaderno-hoja"}`}>
+                      <Cifra valor={neto} />
                     </td>
                   );
                 })}
-                <td className="sticky right-0 z-30 border-l border-slate-700 text-right"
-                  style={{ background: "#1e293b", minWidth: "96px", textAlign:"center" }}>
-                  <span className="text-[11px] font-mono font-bold" style={{color: kpiNeto >= 0 ? "#34d399" : "#f87171"}}>
-                    {fmtCLP(kpiNeto)}
-                  </span>
-                </td>
+                <td className={`${celdaTotal} z-30 py-2.5 text-[16.5px] shadow-[inset_0_1.5px_0_rgb(var(--cuaderno-tinta))]`}><Cifra valor={kpiNeto} vacio="0" /></td>
               </tr>
-              {/* Acumulado */}
-              <tr style={{ background: "#0f172a" }}>
-                <td className="sticky left-0 z-30 border-r border-slate-800"
-                  style={{ background: "#0f172a", minWidth: "220px", height: "34px", paddingLeft: "16px" }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Acumulado</span>
-                    {saldoBanco > 0 && (
-                      <span className="text-[9px] text-slate-600 font-medium">desde {fmtCompact(saldoBanco)}</span>
-                    )}
-                  </div>
+              <tr>
+                <td className={`${celdaNombre} z-30 pl-4 pt-1.5 pb-3`}>
+                  <div className="text-[18px] leading-tight">Saldo acumulado</div>
+                  {saldoBanco > 0
+                    ? <div className="text-[13px] text-cuaderno-grafito">desde un saldo de <Cifra valor={saldoBanco} color="heredar" /></div>
+                    : <div className="text-[13px] text-cuaderno-roja">saldo inicial sin anotar</div>}
                 </td>
-                {weekColumns.map(w => {
-                  const ac = acumulados[w.key] || 0;
-                  return (
-                    <td key={w.key} className="text-center border-x border-slate-800"
-                      style={{ paddingRight: "10px" }}>
-                      <span className="text-[11px] font-mono font-bold" style={{color: ac >= 0 ? "#a78bfa" : "#f87171"}}>
-                        {fmtCompact(ac)}
-                      </span>
-                    </td>
-                  );
-                })}
-                <td className="sticky right-0 z-30 border-l border-slate-800 text-right"
-                  style={{ background: "#0f172a", minWidth: "96px", textAlign:"center" }}>
-                  <span className="text-[11px] font-mono font-bold" style={{color: (acumulados[weekColumns[weekColumns.length-1]?.key]||0) >= 0 ? "#a78bfa" : "#f87171"}}>
-                    {fmtCompact(acumulados[weekColumns[weekColumns.length - 1]?.key] || 0)}
-                  </span>
-                </td>
+                {weekColumns.map((w, i) => (
+                  <td key={w.key} className={`px-2 pt-1.5 pb-3 text-right text-[16px] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno" : "bg-cuaderno-hoja"}`}>
+                    <Cifra valor={acumulados[w.key] || 0} vacio="0" />
+                  </td>
+                ))}
+                <td className={`${celdaTotal} z-30 pt-1.5 pb-3 text-[16.5px]`}><Cifra valor={acumuladoFinal} vacio="0" raya="doble" /></td>
               </tr>
             </tfoot>
           </table>
         </div>
       )}
 
-      {/* ── Resumen mensual ──────────────────────────────────────────────────── */}
+      {/* ── Resumen mensual ─────────────────────────────────────────────────── */}
       {tabActiva === "resumen" && (
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+        <div className={`flex-1 overflow-y-auto pb-8 space-y-5 ${expandido ? "px-4" : "px-8"}`}>
           {[0, 1].map(mIdx => {
             const semsMes = weekColumns.filter(w => w.monthIndex === mIdx);
             if (!semsMes.length) return null;
@@ -1550,69 +1354,85 @@ export default function FinanzasFlujoCaja() {
             const mesNeto = mesIng + mesEgr;
             const isActual = mIdx === 0;
             return (
-              <div key={mIdx} className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
-                {/* Header mes */}
-                <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100" style={{background: isActual ? "#f5f3ff" : "transparent"}}>
-                  <div className="flex items-center gap-3">
-                    {isActual && <span className="text-[10px] font-bold bg-purple-700 text-white px-2 py-0.5 rounded-full uppercase tracking-wider">Actual</span>}
-                    <h2 className="text-sm font-bold" style={{color: isActual ? "#4c1d95" : "#1e293b"}}>
-                      {semsMes[0].monthName} {semsMes[0].startDate.getFullYear()}
-                    </h2>
-                    <span className="text-xs text-slate-400 font-medium">{semsMes.length} semanas</span>
+              <section key={mIdx} className="bg-cuaderno-hoja border border-cuaderno-columna rounded-md max-w-4xl">
+                {/* Mes */}
+                <header className="flex flex-wrap items-end justify-between gap-3 px-6 pt-3 pb-2 border-b-[3px] border-double border-cuaderno-margen">
+                  <div className="flex items-baseline gap-3">
+                    <Titulo as="h2" tamano="lg">{semsMes[0].monthName} {semsMes[0].startDate.getFullYear()}</Titulo>
+                    {isActual && <Resaltado color="durazno" className="text-[15px]">mes en curso</Resaltado>}
+                    <span className="text-[14px] text-cuaderno-grafito">{semsMes.length} semanas</span>
                   </div>
-                  <span className="text-sm font-mono font-bold" style={{color: mesNeto >= 0 ? "#059669" : "#e11d48"}}>
-                    {fmtCLP(mesNeto)}
-                  </span>
-                </div>
-                {/* KPIs mes */}
-                <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
-                  {[
-                    { label: "Ingresos", val: mesIng,              color: "#059669" },
-                    { label: "Egresos",  val: Math.abs(mesEgr),    color: "#e11d48" },
-                    { label: "Margen",   val: mesIng > 0 ? Math.round((mesNeto/mesIng)*100) : null, color: mesNeto >= 0 ? "#059669" : "#e11d48", suffix: "%" },
-                  ].map(k => (
-                    <div key={k.label} className="px-4 py-3 text-center">
-                      <p className="text-sm font-mono font-bold" style={{color:k.color}}>
-                        {k.val === null ? "—" : k.suffix ? `${k.val}${k.suffix}` : fmtCompact(k.val)}
-                      </p>
-                      <p className="text-[10px] text-slate-400 font-medium mt-0.5">{k.label}</p>
+                </header>
+
+                <div className="px-6 py-4 grid gap-x-12 gap-y-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+                  {/* Cuentas del mes */}
+                  <div>
+                    <LineaGuia etiqueta="Ingresos"><Cifra valor={mesIng} vacio="0" /></LineaGuia>
+                    <LineaGuia etiqueta="Egresos"><Cifra valor={mesEgr} vacio="0" /></LineaGuia>
+                    <LineaGuia etiqueta="Neto"><Cifra valor={mesNeto} vacio="0" raya="doble" /></LineaGuia>
+                    <LineaGuia etiqueta="Margen">
+                      <span className={mesNeto >= 0 ? "text-cuaderno-tinta" : "text-cuaderno-roja"}>
+                        {mesIng > 0 ? `${Math.round((mesNeto / mesIng) * 100)}%` : "—"}
+                      </span>
+                    </LineaGuia>
+                  </div>
+
+                  {/* Semana a semana */}
+                  <div>
+                    <div className="text-[15px] text-cuaderno-grafito">Semana a semana</div>
+                    <div className="flex items-end gap-3 px-1 pb-1 text-[13px] text-cuaderno-grafito">
+                      <span className="flex-1" />
+                      <span className="w-20 text-right">ingresos</span>
+                      <span className="w-20 text-right">egresos</span>
+                      <span className="w-24 text-right">neto</span>
                     </div>
-                  ))}
+                    {semsMes.map(w => {
+                      const wIng  = weekTotal(w.key, ingresos);
+                      const wEgr  = weekTotal(w.key, egresos);
+                      const wNeto = wIng + wEgr;
+                      return (
+                        <div key={w.key} className={`flex items-center gap-3 min-h-[38px] border-b border-cuaderno-renglon px-1 ${w.isCurrentWeek ? "bg-cuaderno-durazno/50" : ""}`}>
+                          <span className="w-9 text-[16px] flex-shrink-0">{w.label}</span>
+                          <span className="flex-1 min-w-0 text-[13px] text-cuaderno-grafito whitespace-nowrap">{w.dateRange}</span>
+                          <span className="w-20 text-right text-[15px]"><Cifra valor={wIng} /></span>
+                          <span className="w-20 text-right text-[15px]"><Cifra valor={wEgr} /></span>
+                          <span className="w-24 text-right text-[16px]"><Cifra valor={wNeto} vacio="0" /></span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                {/* Budget vs Real — solo mes actual y si hay cuentas con presupuesto */}
+
+                {/* Presupuesto contra real — solo mes en curso y si hay cuentas con presupuesto */}
                 {isActual && (() => {
                   const cuentasConBudget = egresos.filter(c => parseInput(c.presupuestoMensual || "0") > 0);
                   if (!cuentasConBudget.length) return null;
                   return (
-                    <div className="border-b border-slate-100">
-                      <div className="px-5 py-2.5 flex items-center gap-2" style={{background:"#f8fafc"}}>
-                        <svg className="w-3 h-3 flex-shrink-0" style={{color:"#7c3aed"}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Presupuesto vs Real</span>
-                      </div>
-                      <div className="px-5 py-2 space-y-2.5">
+                    <div className="px-6 pb-5">
+                      <Titulo as="h3" tamano="sm" className="border-t border-cuaderno-renglon pt-3">Presupuesto contra real</Titulo>
+                      <div className="space-y-3 mt-1">
                         {cuentasConBudget.map(c => {
                           const budget = parseInput(c.presupuestoMensual || "0");
                           const gasto  = Math.abs(semsMes.reduce((s, w) => s + (payments[`${c.id}-${w.key}`] || 0), 0));
                           const pct    = budget > 0 ? Math.min((gasto / budget) * 100, 100) : 0;
                           const over   = gasto > budget;
                           const warn   = pct >= 80 && !over;
-                          const barColor = over ? "#e11d48" : warn ? "#f59e0b" : "#059669";
                           return (
                             <div key={c.id}>
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[11px] font-medium text-slate-700">{c.nombre}</span>
-                                  {over && <span className="text-[8px] font-bold px-1 rounded" style={{background:"#ffe4e6",color:"#e11d48"}}>EXCEDIDO</span>}
-                                  {warn && <span className="text-[8px] font-bold px-1 rounded" style={{background:"#fef3c7",color:"#b45309"}}>80%</span>}
+                              <div className="flex items-center justify-between gap-3 text-[16px]">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="truncate">{casoTitulo(c.nombre)}</span>
+                                  {over && <Resaltado color="rosa" className="text-[13px]">excedido</Resaltado>}
+                                  {warn && <Resaltado color="durazno" className="text-[13px]">80%</Resaltado>}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono" style={{color:barColor}}>{fmtCompact(gasto)}</span>
-                                  <span className="text-[10px] text-slate-300">/</span>
-                                  <span className="text-[10px] font-mono text-slate-400">{fmtCompact(budget)}</span>
-                                </div>
+                                <span className="flex items-center gap-1.5 flex-shrink-0">
+                                  <Cifra valor={gasto} color={over ? "roja" : "tinta"} vacio="0" />
+                                  <span className="text-cuaderno-grafito">de</span>
+                                  <Cifra valor={budget} color="grafito" />
+                                </span>
                               </div>
-                              <div className="rounded-full overflow-hidden" style={{height:"4px",background:"#f1f5f9"}}>
-                                <div className="h-full rounded-full transition-all" style={{width:`${pct}%`,background:barColor}}/>
+                              <div className="mt-1 h-[2px] bg-cuaderno-renglon">
+                                <div className={`h-full ${over ? "bg-cuaderno-roja" : warn ? "bg-cuaderno-roja/60" : "bg-cuaderno-verde"}`} style={{ width: `${pct}%` }}/>
                               </div>
                             </div>
                           );
@@ -1621,17 +1441,11 @@ export default function FinanzasFlujoCaja() {
                     </div>
                   );
                 })()}
-                {/* Compromisos futuros — solo mes siguiente */}
+
+                {/* Compromisos que se repiten — solo mes siguiente */}
                 {mIdx === 1 && (() => {
                   const recurrentes = [...ingresos, ...egresos].filter(c => c.recurrente && c.montoRecurrente);
                   if (!recurrentes.length) return null;
-                  const totalProyectado = recurrentes.reduce((s, c) => {
-                    const freq = c.frecuenciaRecurrente || "mensual";
-                    const monto = Math.abs(parseInput(c.montoRecurrente));
-                    const semsFuturas = semsMes.length;
-                    const veces = freq === "semanal" ? semsFuturas : freq === "quincenal" ? Math.ceil(semsFuturas/2) : 1;
-                    return s + monto * veces;
-                  }, 0);
                   const totalEgr = recurrentes.filter(c=>c.categoria==="EGRESOS").reduce((s,c)=>{
                     const freq = c.frecuenciaRecurrente||"mensual";
                     const monto = Math.abs(parseInput(c.montoRecurrente));
@@ -1639,64 +1453,31 @@ export default function FinanzasFlujoCaja() {
                     return s+monto*v;
                   },0);
                   return (
-                    <div className="border-b border-slate-100">
-                      <div className="px-5 py-2.5 flex items-center justify-between" style={{background:"#f8fafc"}}>
-                        <div className="flex items-center gap-2">
-                          <svg className="w-3 h-3" style={{color:"#7c3aed"}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Compromisos proyectados</span>
-                        </div>
-                        <span className="text-[11px] font-mono font-bold" style={{color:"#e11d48"}}>-{fmtCompact(totalEgr)}</span>
+                    <div className="px-6 pb-5">
+                      <div className="flex items-end justify-between border-t border-cuaderno-renglon pt-3">
+                        <Titulo as="h3" tamano="sm">Compromisos que se repiten</Titulo>
+                        <span className="text-[16px] pb-1"><Cifra valor={-totalEgr} /></span>
                       </div>
-                      <div className="px-5 py-2 space-y-1.5">
-                        {recurrentes.map(c => {
-                          const freq = c.frecuenciaRecurrente || "mensual";
-                          const monto = Math.abs(parseInput(c.montoRecurrente));
-                          const veces = freq === "semanal" ? semsMes.length : freq === "quincenal" ? Math.ceil(semsMes.length/2) : 1;
-                          const total = monto * veces;
-                          const isEgr = c.categoria === "EGRESOS";
-                          const freqLabel = freq === "semanal" ? `×${veces} sem` : freq === "quincenal" ? `×${veces} quinc` : "×1 mes";
-                          return (
-                            <div key={c.id} className="flex items-center justify-between py-1">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="text-[8px] font-bold px-1 rounded flex-shrink-0" style={{background:"#ede9fe",color:"#7c3aed"}}>↺</span>
-                                <span className="text-[11px] text-slate-600 truncate">{c.nombre}</span>
-                                <span className="text-[9px] text-slate-400 flex-shrink-0">{freqLabel}</span>
-                              </div>
-                              <span className="text-[11px] font-mono font-semibold flex-shrink-0 ml-2" style={{color: isEgr ? "#e11d48" : "#059669"}}>
-                                {isEgr ? "-" : "+"}{fmtCompact(total)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      {recurrentes.map(c => {
+                        const freq = c.frecuenciaRecurrente || "mensual";
+                        const monto = Math.abs(parseInput(c.montoRecurrente));
+                        const veces = freq === "semanal" ? semsMes.length : freq === "quincenal" ? Math.ceil(semsMes.length/2) : 1;
+                        const total = monto * veces;
+                        const isEgr = c.categoria === "EGRESOS";
+                        const freqLabel = freq === "semanal" ? `${veces} semanas` : freq === "quincenal" ? `${veces} quincenas` : "una vez";
+                        return (
+                          <div key={c.id} className="flex items-center gap-3 min-h-[36px] border-b border-cuaderno-renglon text-[16px]">
+                            <span className="text-cuaderno-grafito text-[14px]" aria-hidden="true">↺</span>
+                            <span className="flex-1 min-w-0 truncate">{casoTitulo(c.nombre)}</span>
+                            <span className="text-[13px] text-cuaderno-grafito flex-shrink-0">{freqLabel}</span>
+                            <span className="w-24 text-right flex-shrink-0"><Cifra valor={isEgr ? -total : total} /></span>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
-                {/* Desglose semanas */}
-                <div className="px-5 py-3 space-y-1">
-                  {semsMes.map(w => {
-                    const wIng  = weekTotal(w.key, ingresos);
-                    const wEgr  = weekTotal(w.key, egresos);
-                    const wNeto = wIng + wEgr;
-                    return (
-                      <div key={w.key} className="flex items-center justify-between py-1.5 px-3 rounded-lg text-xs" style={{background: w.isCurrentWeek ? "#f5f3ff" : "transparent"}}>
-                        <div className="flex items-center gap-2">
-                          {w.isCurrentWeek && <span style={{width:"6px",height:"6px",borderRadius:"50%",background:"#7c3aed",flexShrink:0}}/>}
-                          <span className="font-bold text-slate-700">{w.label}</span>
-                          <span className="text-slate-400 text-[10px]">{w.dateRange}</span>
-                        </div>
-                        <div className="flex items-center gap-4 font-mono">
-                          {wIng > 0  && <span className="text-[11px] font-semibold" style={{color:"#059669"}}>+{fmtCompact(wIng)}</span>}
-                          {wEgr < 0  && <span className="text-[11px] font-semibold" style={{color:"#e11d48"}}>{fmtCompact(wEgr)}</span>}
-                          <span className="text-[11px] font-bold w-20 text-right" style={{color: wNeto >= 0 ? "#059669" : "#e11d48"}}>
-                            {wNeto !== 0 ? fmtCLP(wNeto) : <span className="text-slate-300">—</span>}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              </section>
             );
           })}
         </div>
@@ -1709,7 +1490,6 @@ export default function FinanzasFlujoCaja() {
           cuenta={cuentaDetalle}
           proveedor={proveedores.find(p => p.id === cuentaDetalle.proveedorId) || null}
           proveedores={proveedores}
-          accent={subAccent(cuentaDetalle.subcategoria)}
           weekColumns={weekColumns}
           payments={payments} paymentsPaid={paymentsPaid} paymentNotas={paymentNotas}
           bloqueado={showModalCuenta || showModalSaldo}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -7,6 +8,10 @@ import FinanzasDeudaImportador from "./FinanzasDeudaImportador";
 import ComprobantesUploader from "./ComprobantesUploader";
 import HistorialAuditoria from "./HistorialAuditoria";
 import PagosDocumento from "./PagosDocumento";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, Paginador, FechaHoja,
+  IconoActualizar, IconoCerrar, casoTitulo,
+} from "./cuaderno";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 function fmt(n)  { return "$" + Math.round(Math.abs(n || 0)).toLocaleString("es-CL"); }
@@ -24,116 +29,94 @@ function fmtFecha(iso) {
   } catch { return iso; }
 }
 
+// Estado de cada documento, resaltado a mano. "Pendiente" va sin color: es lo
+// normal y no necesita llamar la atención.
 const ESTADO_CONFIG = {
-  vencido:            { label: "Vencido",          color: "bg-red-100 text-red-700",       dot: "bg-red-500"     },
-  parcial:            { label: "Pago parcial",     color: "bg-amber-100 text-amber-700",   dot: "bg-amber-500"   },
-  pendiente:          { label: "Pendiente",        color: "bg-blue-100 text-blue-700",     dot: "bg-blue-400"    },
-  pagado:             { label: "Pagado",           color: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
-  anticipo_excedente: { label: "Anticipo a favor", color: "bg-slate-100 text-slate-600",   dot: "bg-slate-400"   },
+  vencido:            { label: "vencido",          resalte: "rosa"    },
+  parcial:            { label: "pago parcial",     resalte: "durazno" },
+  pendiente:          { label: "pendiente",        resalte: null      },
+  pagado:             { label: "pagado",           resalte: "menta"   },
+  anticipo_excedente: { label: "anticipo a favor", resalte: "lavanda" },
 };
 
 const TIPO_DEUDA_CONFIG = {
-  proveedor:  { label: "Proveedor",  color: "bg-purple-100 text-purple-700" },
-  factoring:  { label: "Factoring",  color: "bg-violet-100 text-violet-700" },
-  financiera: { label: "Financiera", color: "bg-indigo-100 text-indigo-700" },
+  proveedor:  { label: "Proveedor",  resalte: "lavanda" },
+  factoring:  { label: "Factoring",  resalte: "durazno" },
+  financiera: { label: "Financiera", resalte: "rosa"    },
 };
 
-// ─── KPI Card (mismo patrón visual que FinanzasDashboard) ─────────────────────
-function KpiCard({ icon, label, value, sub, gradient, tag, tagColor }) {
-  return (
-    <div className="glass-card rounded-xl p-4 sm:p-5 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-md text-xl`}>{icon}</div>
-        {tag && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${tagColor}`}>{tag}</span>}
-      </div>
-      <div className="text-xl sm:text-2xl font-black text-slate-900 break-words">{value}</div>
-      <div className="text-xs sm:text-sm font-semibold text-slate-600 mt-0.5">{label}</div>
-      {sub && <div className="text-[11px] text-slate-400 mt-1">{sub}</div>}
-    </div>
-  );
+function EstadoDocumento({ estado }) {
+  const e = ESTADO_CONFIG[estado] || ESTADO_CONFIG.pendiente;
+  return e.resalte
+    ? <Resaltado color={e.resalte} className="text-[15px] flex-shrink-0">{e.label}</Resaltado>
+    : <span className="text-[15px] text-cuaderno-grafito flex-shrink-0">{e.label}</span>;
 }
 
-// ─── Dona simple SVG para distribución por tipo de deuda ──────────────────────
-function DonaTipoDeuda({ datos }) {
+function Mora({ dias }) {
+  if (!(dias > 0)) return <span className="text-cuaderno-grafito">—</span>;
+  return <Resaltado color={dias > 90 ? "rosa" : "durazno"} className="text-[15px]">{dias} días</Resaltado>;
+}
+
+// ─── Distribución por tipo: barras como trazos de resaltador ─────────────────
+function DistribucionTipo({ datos }) {
   const total = datos.reduce((s, d) => s + d.valor, 0);
-  if (total <= 0) return <div className="h-40 flex items-center justify-center text-xs text-slate-300">Sin datos</div>;
-
-  const R = 60, CX = 70, CY = 70, GROSOR = 18;
-  const circ = 2 * Math.PI * R;
-  let acumulado = 0;
-
+  if (total <= 0) return <p className="m-0 py-6 text-center text-[16px] text-cuaderno-grafito">Sin saldo pendiente.</p>;
   return (
-    <div className="flex items-center gap-5">
-      <svg viewBox="0 0 140 140" className="w-32 h-32 flex-shrink-0">
-        <circle cx={CX} cy={CY} r={R} fill="none" stroke="#f1f5f9" strokeWidth={GROSOR} />
-        {datos.map((d, i) => {
-          const frac = d.valor / total;
-          const dash = frac * circ;
-          const gap = circ - dash;
-          const offset = circ - acumulado;
-          acumulado += dash;
-          return (
-            <circle
-              key={i}
-              cx={CX} cy={CY} r={R} fill="none"
-              stroke={d.color} strokeWidth={GROSOR}
-              strokeDasharray={`${dash} ${gap}`}
-              strokeDashoffset={offset}
-              transform={`rotate(-90 ${CX} ${CY})`}
-              strokeLinecap="butt"
-            />
-          );
-        })}
-        <text x={CX} y={CY - 4} textAnchor="middle" fontSize="15" fontWeight="900" fill="#1e293b">{fmtM(total)}</text>
-        <text x={CX} y={CY + 14} textAnchor="middle" fontSize="9" fill="#94a3b8">Total deuda</text>
-      </svg>
-      <div className="space-y-2 flex-1 min-w-0">
-        {datos.map((d, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.color }} />
-            <span className="text-xs font-semibold text-slate-600 flex-1 truncate">{d.label}</span>
-            <span className="text-xs font-black text-slate-800">{fmtM(d.valor)}</span>
-            <span className="text-[10px] text-slate-400 w-10 text-right">{total > 0 ? Math.round((d.valor / total) * 100) : 0}%</span>
+    <div className="space-y-3">
+      {datos.map(d => {
+        const pct = Math.round((d.valor / total) * 100);
+        // distribTipo entrega la etiqueta del tipo; el resaltador sale de la configuración
+        const resalte = Object.values(TIPO_DEUDA_CONFIG).find(t => t.label === d.label)?.resalte;
+        return (
+          <div key={d.label}>
+            <div className="flex items-baseline justify-between gap-3 text-[17px]">
+              <span>{d.label}</span>
+              <span className="flex items-baseline gap-3">
+                <Cifra valor={d.valor} escala="pesos" />
+                <span className="w-10 text-right text-[15px] text-cuaderno-grafito">{pct}%</span>
+              </span>
+            </div>
+            <div className="mt-1 h-2.5 bg-cuaderno-renglon/60 rounded-sm overflow-hidden">
+              <div className={`h-full rounded-sm ${
+                resalte === "durazno" ? "bg-cuaderno-durazno" : resalte === "rosa" ? "bg-cuaderno-rosa" : "bg-cuaderno-lavanda"}`}
+                style={{ width: `${pct}%` }} />
+            </div>
           </div>
-        ))}
+        );
+      })}
+      <div className="pt-1">
+        <LineaGuia etiqueta="Total">
+          <Cifra valor={total} escala="pesos" raya="total" />
+        </LineaGuia>
       </div>
     </div>
   );
 }
 
-// ─── Fila de acreedor en la tabla consolidada ─────────────────────────────────
-// ─── Paginador reutilizable (15 en 15) ─────────────────────────────────────
-function Paginador({ pagina, totalPaginas, onCambiar, totalItems, porPagina }) {
-  if (totalPaginas <= 1) return null;
-  const desde = (pagina - 1) * porPagina + 1;
-  const hasta = Math.min(pagina * porPagina, totalItems);
+// ─── Tabla de acreedores ──────────────────────────────────────────────────────
+function EncabezadoTabla({ onOrdenar, orden }) {
+  const col = (campo, label) => {
+    const activo = orden?.campo === campo;
+    const contenido = <>{label}{activo && <span aria-hidden="true">{orden.dir === "desc" ? " ↓" : " ↑"}</span>}</>;
+    return (
+      <th className="font-normal text-[15px] text-right px-3 py-2"
+        aria-sort={activo ? (orden.dir === "desc" ? "descending" : "ascending") : undefined}>
+        {onOrdenar
+          ? <button onClick={() => onOrdenar(campo)} className="min-h-[36px] text-cuaderno-grafito hover:text-cuaderno-tinta">{contenido}</button>
+          : <span className="text-cuaderno-grafito">{label}</span>}
+      </th>
+    );
+  };
   return (
-    <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-slate-100">
-      <p className="text-[11px] text-slate-400 font-semibold">
-        Mostrando {desde}–{hasta} de {totalItems}
-      </p>
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => onCambiar(Math.max(1, pagina - 1))}
-          disabled={pagina === 1}
-          className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 flex items-center justify-center transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <span className="text-xs font-bold text-slate-600 px-2">{pagina} / {totalPaginas}</span>
-        <button
-          onClick={() => onCambiar(Math.min(totalPaginas, pagina + 1))}
-          disabled={pagina === totalPaginas}
-          className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 flex items-center justify-center transition-colors"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
-    </div>
+    <thead>
+      <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+        <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-3 py-2">Acreedor</th>
+        {col("documentos", "Docs.")}
+        {col("saldoPendiente", "Saldo")}
+        {col("saldoVencido", "Vencido")}
+        {col("maxDiasMora", "Mora")}
+      </tr>
+    </thead>
   );
 }
 
@@ -141,119 +124,106 @@ function FilaAcreedor({ acreedor, onVerDetalle }) {
   const tipo = TIPO_DEUDA_CONFIG[acreedor.tipoDeuda] || TIPO_DEUDA_CONFIG.proveedor;
   const tieneVencido = acreedor.saldoVencido > 0;
   return (
-    <tr className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors cursor-pointer" onClick={() => onVerDetalle(acreedor)}>
-      <td className="py-3 px-3">
-        <div className="font-bold text-sm text-slate-800">{acreedor.nombre}</div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tipo.color}`}>{tipo.label}</span>
-          {acreedor.cedidoAFactoring && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">
-              vía {acreedor.entidadFactoring}
-            </span>
-          )}
+    <tr className="border-b border-cuaderno-renglon hover:bg-cuaderno-papel cursor-pointer focus:outline-none focus-visible:bg-cuaderno-papel"
+      tabIndex={0}
+      onClick={() => onVerDetalle(acreedor)}
+      onKeyDown={e => { if (e.key === "Enter") onVerDetalle(acreedor); }}>
+      <td className="py-2 px-3">
+        <div className="text-[17px] leading-tight">{casoTitulo(acreedor.nombre)}</div>
+        <div className="text-[13px] text-cuaderno-grafito">
+          {tipo.label.toLowerCase()}{acreedor.cedidoAFactoring && `, vía ${acreedor.entidadFactoring}`}
         </div>
       </td>
-      <td className="py-3 px-3 text-right text-sm font-semibold text-slate-600">{acreedor.documentos}</td>
-      <td className="py-3 px-3 text-right text-sm font-black text-slate-900">{fmtM(acreedor.saldoPendiente)}</td>
-      <td className="py-3 px-3 text-right">
-        {tieneVencido ? (
-          <span className="text-sm font-black text-red-600">{fmtM(acreedor.saldoVencido)}</span>
-        ) : (
-          <span className="text-sm text-slate-300">—</span>
-        )}
+      <td className="py-2 px-3 text-right text-[16px] text-cuaderno-grafito">{acreedor.documentos}</td>
+      <td className="py-2 px-3 text-right text-[16px]"><Cifra valor={acreedor.saldoPendiente} escala="pesos" vacio="$0" /></td>
+      <td className="py-2 px-3 text-right text-[16px]">
+        {tieneVencido ? <Cifra valor={acreedor.saldoVencido} escala="pesos" color="roja" /> : <span className="text-cuaderno-grafito">—</span>}
       </td>
-      <td className="py-3 px-3 text-right">
-        {acreedor.maxDiasMora > 0 ? (
-          <span className={`text-xs font-black px-2 py-1 rounded-lg ${acreedor.maxDiasMora > 90 ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
-            {acreedor.maxDiasMora}d
-          </span>
-        ) : (
-          <span className="text-xs text-slate-300">—</span>
-        )}
-      </td>
+      <td className="py-2 px-3 text-right"><Mora dias={acreedor.maxDiasMora} /></td>
     </tr>
   );
 }
 
 // ─── Panel de detalle de un acreedor (documentos individuales) ────────────────
+// Se monta en <body>: dentro de la pantalla heredaba el margen de space-y y
+// quedaba corrido hacia abajo.
 function PanelDetalleAcreedor({ acreedor, documentos, onClose, empresaId, onDocumentoActualizado }) {
   if (!acreedor) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:w-[480px] bg-white shadow-2xl h-full flex flex-col">
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
-          <div>
-            <h2 className="text-white font-black text-sm leading-tight">{acreedor.nombre}</h2>
-            <p className="text-purple-200 text-xs mt-0.5">{acreedor.rut || "Sin RUT registrado"}</p>
+  return createPortal(
+    <div className="cuaderno fixed inset-0 z-50 flex items-stretch justify-end">
+      <div className="absolute inset-0 bg-cuaderno-tinta/25 backdrop-blur-[2px]" onClick={onClose} />
+      <aside role="dialog" aria-modal="true" aria-labelledby="panel-acreedor-titulo"
+        className="relative w-full sm:w-[500px] bg-cuaderno-tarjeta border-l border-cuaderno-columna/70 h-full flex flex-col shadow-[-20px_0_40px_-20px_rgb(var(--cuaderno-tinta)/0.35)]">
+        <header className="px-6 pt-5 pb-3 border-b-[3px] border-double border-cuaderno-margen flex items-start justify-between gap-3 flex-shrink-0">
+          <div className="min-w-0">
+            <p className="m-0 text-[15px] text-cuaderno-grafito">{acreedor.rut || "Sin RUT registrado"}</p>
+            <Titulo as="h2" tamano="lg" id="panel-acreedor-titulo" className="break-words">{casoTitulo(acreedor.nombre)}</Titulo>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <Boton variante="icono" onClick={onClose} aria-label="Cerrar detalle"><IconoCerrar /></Boton>
+        </header>
+
+        <div className="px-6 py-3 border-b border-cuaderno-azul flex-shrink-0">
+          <LineaGuia etiqueta="Saldo pendiente" className="text-[18px]">
+            <Cifra valor={acreedor.saldoPendiente} escala="pesos" vacio="$0" raya="doble" />
+          </LineaGuia>
+          <LineaGuia etiqueta="Vencido" className="text-[18px]">
+            {acreedor.saldoVencido > 0
+              ? <Cifra valor={acreedor.saldoVencido} escala="pesos" color="roja" />
+              : <span className="text-cuaderno-verde">nada vencido</span>}
+          </LineaGuia>
         </div>
 
-        <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-2 gap-3 flex-shrink-0">
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold">Saldo pendiente</p>
-            <p className="text-lg font-black text-slate-900">{fmtM(acreedor.saldoPendiente)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold">Vencido</p>
-            <p className={`text-lg font-black ${acreedor.saldoVencido > 0 ? "text-red-600" : "text-emerald-600"}`}>{fmtM(acreedor.saldoVencido)}</p>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {documentos.map((d, i) => {
-            const e = ESTADO_CONFIG[d.estado] || ESTADO_CONFIG.pendiente;
-            return (
-              <div key={i} className="rounded-xl border border-slate-200 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-700">Doc {d.numeroDoc || "—"} · {d.obra}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">OC: {d.oc}</p>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 flex items-center gap-1 ${e.color}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${e.dot}`} />{e.label}
-                  </span>
+        <div className="flex-1 overflow-y-auto px-6">
+          <h3 className="m-0 pt-4 pb-1 text-[16px] text-cuaderno-grafito">
+            {documentos.length} documento{documentos.length !== 1 ? "s" : ""}
+          </h3>
+          {documentos.map((d, i) => (
+            <article key={i} className="py-3 border-b border-cuaderno-azul">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="m-0 text-[17px] leading-tight">Documento {d.numeroDoc || "sin número"}{d.obra && `, ${d.obra}`}</p>
+                  <p className="m-0 text-[14px] text-cuaderno-grafito">OC {d.oc || "sin número"}</p>
                 </div>
-                <div className="flex justify-between mt-2 text-xs">
-                  <span className="text-slate-500">Valor: <b className="text-slate-700">{fmt(d.valorDoc)}</b></span>
-                  <span className="text-slate-500">Saldo: <b className={d.saldoPendiente > 0 ? "text-red-600" : "text-slate-700"}>{fmt(d.saldoPendiente)}</b></span>
-                </div>
-                {d.fechaVencimiento && (
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Vence: {fmtFecha(d.fechaVencimiento)}{d.diasMora > 0 && <span className="text-red-500 font-bold"> · {d.diasMora}d de mora</span>}
-                  </p>
-                )}
-                {d.notasInternas && <p className="text-[10px] text-slate-400 mt-1 italic">{d.notasInternas}</p>}
-
-                {d.id && (
-                  <ComprobantesUploader
-                    empresaId={empresaId}
-                    documentoId={d.id}
-                    comprobantes={d.comprobantes || []}
-                    onCambio={(nuevosComprobantes) => onDocumentoActualizado?.(d.id, { comprobantes: nuevosComprobantes })}
-                  />
-                )}
-                {d.id && (
-                  <PagosDocumento
-                    empresaId={empresaId}
-                    documento={d}
-                    onDocumentoActualizado={(docActualizado) => onDocumentoActualizado?.(d.id, { ...docActualizado })}
-                  />
-                )}
-                {d.id && (
-                  <HistorialAuditoria empresaId={empresaId} documentoId={d.id} />
-                )}
+                <EstadoDocumento estado={d.estado} />
               </div>
-            );
-          })}
+              <div className="mt-1.5 grid grid-cols-2 gap-x-6 text-[16px]">
+                <LineaGuia etiqueta="Valor" className="min-h-[30px] text-[16px]"><Cifra valor={d.valorDoc} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+                <LineaGuia etiqueta="Saldo" className="min-h-[30px] text-[16px]">
+                  <Cifra valor={d.saldoPendiente} escala="pesos" color={d.saldoPendiente > 0 ? "roja" : "tinta"} vacio="$0" />
+                </LineaGuia>
+              </div>
+              {d.fechaVencimiento && (
+                <p className="m-0 text-[14px] text-cuaderno-grafito">
+                  Vence el {fmtFecha(d.fechaVencimiento)}
+                  {d.diasMora > 0 && <span className="text-cuaderno-roja">, con {d.diasMora} días de mora</span>}
+                </p>
+              )}
+              {d.notasInternas && <p className="m-0 mt-1 text-[14px] text-cuaderno-grafito">Nota: {d.notasInternas}</p>}
+
+              {d.id && (
+                <ComprobantesUploader
+                  empresaId={empresaId}
+                  documentoId={d.id}
+                  comprobantes={d.comprobantes || []}
+                  onCambio={(nuevosComprobantes) => onDocumentoActualizado?.(d.id, { comprobantes: nuevosComprobantes })}
+                />
+              )}
+              {d.id && (
+                <PagosDocumento
+                  empresaId={empresaId}
+                  documento={d}
+                  onDocumentoActualizado={(docActualizado) => onDocumentoActualizado?.(d.id, { ...docActualizado })}
+                />
+              )}
+              {d.id && (
+                <HistorialAuditoria empresaId={empresaId} documentoId={d.id} />
+              )}
+            </article>
+          ))}
         </div>
-      </div>
-    </div>
+      </aside>
+    </div>,
+    document.body
   );
 }
 
@@ -393,173 +363,137 @@ export default function FinanzasDeuda() {
     setOrden(o => o.campo === campo ? { campo, dir: o.dir === "desc" ? "asc" : "desc" } : { campo, dir: "desc" });
   }
 
+  const conVencido = acreedores
+    .filter(a => a.saldoVencido > 0)
+    .map(a => ({ ...a, _score: a.saldoVencido * Math.log10(a.maxDiasMora + 10) }))
+    .sort((a, b) => b._score - a._score)
+    .slice(0, 4);
+  const acreedoresConSaldo = acreedores.filter(a => a.saldoPendiente > 0).length;
+
   return (
-    <div className="space-y-4 sm:space-y-5 p-4 sm:p-6">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* Header */}
-      <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 animate-fadeInUp">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              Deuda <span className="text-purple-700">& Plan de Pagos</span>
-            </h1>
-            <p className="text-slate-500 text-xs sm:text-sm mt-0.5">Consolidado de proveedores, factoring y financieras</p>
-          </div>
-          <button onClick={cargar} disabled={loading}
-            className="w-10 h-10 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center transition-all disabled:opacity-40 self-end sm:self-auto" title="Actualizar">
-            <svg className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
-        </div>
+      <FechaHoja />
 
-        {/* Sub-navegación de pestañas */}
-        <div className="mt-4 flex gap-2 border-b border-slate-100 -mb-4 sm:-mb-6 pb-0">
-          {[
-            { id: "consolidado", label: "Consolidado" },
-            { id: "plan_pagos", label: "Plan de Pagos" },
-            { id: "historial", label: `Historial${acreedoresHistorial.length > 0 ? ` (${acreedoresHistorial.length})` : ""}` },
-            { id: "importar", label: "Importar / Agregar" },
-          ].map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${
-                tab === t.id
-                  ? "border-purple-700 text-purple-700"
-                  : "border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Deuda y plan de pagos</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Proveedores, factoring y financieras.</p>
         </div>
-      </div>
+        <Boton onClick={cargar} disabled={loading}>
+          <IconoActualizar tamano={15} className={loading ? "animate-spin" : ""} />
+          {loading ? "Actualizando…" : "Actualizar"}
+        </Boton>
+      </header>
+
+      <Pestanas
+        valor={tab}
+        onCambiar={setTab}
+        opciones={[
+          { id: "consolidado", label: "Consolidado" },
+          { id: "plan_pagos", label: "Plan de pagos" },
+          { id: "historial", label: `Historial${acreedoresHistorial.length > 0 ? ` (${acreedoresHistorial.length})` : ""}` },
+          { id: "importar", label: "Importar o agregar" },
+        ]}
+      />
 
       {tab === "plan_pagos" ? (
         <FinanzasPlanPagos />
       ) : tab === "importar" ? (
         <FinanzasDeudaImportador onImportComplete={cargar} />
       ) : tab === "historial" ? (
-        <div className="p-4 sm:p-6 space-y-4">
-          <div className="glass-card rounded-xl p-4 sm:p-5">
-            <p className="text-sm font-black text-slate-700 mb-1">Acreedores totalmente pagados</p>
-            <p className="text-xs text-slate-400 mb-4">
-              Se mueven aquí automáticamente cuando todos sus documentos llegan a saldo $0.
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b-2 border-slate-100">
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase">Acreedor</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right">Docs</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right">Saldo</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right">Vencido</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right">Mora</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {acreedoresHistorialPaginaActual.map((a, i) => (
-                    <FilaAcreedor key={i} acreedor={a} onVerDetalle={abrirDetalle} />
-                  ))}
-                </tbody>
-              </table>
-              {acreedoresHistorial.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-8">Aún no hay acreedores totalmente pagados</p>
-              )}
-              <Paginador
-                pagina={paginaHistorial}
-                totalPaginas={totalPaginasHistorial}
-                onCambiar={setPaginaHistorial}
-                totalItems={acreedoresHistorial.length}
-                porPagina={POR_PAGINA}
-              />
-            </div>
+        <Hoja titulo="Acreedores pagados por completo"
+          extra={<p className="m-0 text-[15px] text-cuaderno-grafito max-w-sm">Pasan aquí solos cuando todos sus documentos quedan en $0.</p>}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <EncabezadoTabla />
+              <tbody>
+                {acreedoresHistorialPaginaActual.map((a, i) => (
+                  <FilaAcreedor key={i} acreedor={a} onVerDetalle={abrirDetalle} />
+                ))}
+              </tbody>
+            </table>
+            {acreedoresHistorial.length === 0 && (
+              <p className="m-0 py-8 text-center text-[16px] text-cuaderno-grafito">Aún no hay acreedores pagados por completo.</p>
+            )}
+            <Paginador
+              pagina={paginaHistorial}
+              totalPaginas={totalPaginasHistorial}
+              onCambiar={setPaginaHistorial}
+              totalItems={acreedoresHistorial.length}
+              porPagina={POR_PAGINA}
+            />
           </div>
-        </div>
+        </Hoja>
       ) : (
       <>
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="spinner w-10 h-10 border-purple-600" />
-        </div>
+        <p className="m-0 py-16 text-center text-[18px] text-cuaderno-grafito">Buscando los documentos…</p>
       ) : documentos.length === 0 ? (
-        <div className="glass-card rounded-xl p-10 flex flex-col items-center justify-center text-center gap-3">
-          <span className="text-4xl">📋</span>
-          <p className="text-sm font-black text-slate-700">Aún no hay deuda registrada</p>
-          <p className="text-xs text-slate-400 max-w-sm">Importa el detalle de documentos desde el plan de migración para ver el consolidado aquí.</p>
-        </div>
+        <Hoja cuerpo="px-6 py-10 text-center space-y-3">
+          <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">Aún no hay deuda anotada</p>
+          <p className="m-0 text-[16px] text-cuaderno-grafito max-w-md mx-auto">
+            Importa el detalle de documentos desde el Excel de proveedores o agrega uno a mano.
+          </p>
+          <Boton variante="primario" onClick={() => setTab("importar")}>Importar documentos</Boton>
+        </Hoja>
       ) : (
         <>
-          {/* KPIs principales */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <KpiCard icon="💳" label="Deuda total pendiente" value={fmtM(kpis.saldoTotal)} gradient="from-purple-700 to-violet-600" sub={`${acreedores.filter(a=>a.saldoPendiente>0).length} acreedores con saldo`} />
-            <KpiCard icon="⚠️" label="Deuda vencida" value={fmtM(kpis.saldoVencido)} gradient="from-red-500 to-red-600" tag={kpis.docsVencidos > 0 ? `${kpis.docsVencidos} docs` : null} tagColor="bg-red-100 text-red-700" sub="Requiere acción inmediata" />
-            <KpiCard icon="✅" label="Ya pagado" value={fmtM(kpis.montoPagadoTotal)} gradient="from-emerald-500 to-teal-600" sub={`de ${fmtM(kpis.deudaBruta)} en deuda bruta total`} />
-            <KpiCard icon="↩️" label="Anticipos a favor" value={fmtM(kpis.saldoAnticipos)} gradient="from-slate-500 to-slate-700" sub="Ya entregados, reducen tu deuda neta" />
-          </div>
+          {/* Resumen, distribución y mayor riesgo */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <Hoja titulo="Resumen">
+              <LineaGuia etiqueta="Deuda pendiente"><Cifra valor={kpis.saldoTotal} escala="pesos" vacio="$0" /></LineaGuia>
+              <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{acreedoresConSaldo} acreedores con saldo</p>
+              <LineaGuia etiqueta="Vencida"><Cifra valor={kpis.saldoVencido} escala="pesos" color="roja" vacio="$0" /></LineaGuia>
+              {kpis.docsVencidos > 0 && <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-roja">{kpis.docsVencidos} documentos vencidos</p>}
+              <LineaGuia etiqueta="Ya pagado"><Cifra valor={kpis.montoPagadoTotal} escala="pesos" vacio="$0" /></LineaGuia>
+              <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">de <Cifra valor={kpis.deudaBruta} escala="pesos" color="heredar" vacio="$0" /> en deuda bruta</p>
+              <LineaGuia etiqueta="Anticipos a favor"><Cifra valor={kpis.saldoAnticipos} escala="pesos" vacio="$0" /></LineaGuia>
+            </Hoja>
 
-          {/* Distribución + alertas rápidas */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="glass-card rounded-xl p-4 sm:p-5 lg:col-span-2">
-              <p className="text-sm font-black text-slate-700 mb-4">Distribución de deuda por tipo</p>
-              <DonaTipoDeuda datos={distribTipo} />
-            </div>
-            <div className="glass-card rounded-xl p-4 sm:p-5">
-              <p className="text-sm font-black text-slate-700 mb-3">Mayor riesgo</p>
-              <div className="space-y-2">
-                {acreedores
-                  .filter(a => a.saldoVencido > 0)
-                  .map(a => ({ ...a, _score: a.saldoVencido * Math.log10(a.maxDiasMora + 10) }))
-                  .sort((a, b) => b._score - a._score)
-                  .slice(0, 4)
-                  .map((a, i) => (
-                    <div key={i} className="flex items-center justify-between p-2.5 rounded-xl bg-red-50 border border-red-100">
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-red-700 truncate">{a.nombre}</p>
-                        <p className="text-[10px] text-red-400">{a.maxDiasMora} días de mora</p>
-                      </div>
-                      <p className="text-xs font-black text-red-700 flex-shrink-0 ml-2">{fmtM(a.saldoVencido)}</p>
-                    </div>
+            <Hoja titulo="Por tipo de deuda">
+              <DistribucionTipo datos={distribTipo} />
+            </Hoja>
+
+            <Hoja titulo="Mayor riesgo">
+              {conVencido.length > 0 ? (
+                <ul className="m-0 p-0 list-none">
+                  {conVencido.map((a, i) => (
+                    <li key={i}>
+                      <button onClick={() => abrirDetalle(a)}
+                        className="w-full text-left flex items-center justify-between gap-3 min-h-[48px] border-b border-cuaderno-renglon hover:bg-cuaderno-papel px-1">
+                        <span className="min-w-0">
+                          <span className="block text-[17px] leading-tight truncate">{casoTitulo(a.nombre)}</span>
+                          <span className="block text-[13px] text-cuaderno-roja">{a.maxDiasMora} días de mora</span>
+                        </span>
+                        <Cifra valor={a.saldoVencido} escala="pesos" color="roja" className="text-[16px] flex-shrink-0" />
+                      </button>
+                    </li>
                   ))}
-                {acreedores.filter(a => a.saldoVencido > 0).length === 0 && (
-                  <p className="text-xs text-slate-400 text-center py-6">Sin deuda vencida 🎉</p>
-                )}
-              </div>
-            </div>
+                </ul>
+              ) : (
+                <p className="m-0 py-6 text-center text-[16px] text-cuaderno-verde">Sin deuda vencida.</p>
+              )}
+            </Hoja>
           </div>
 
           {/* Tabla de acreedores */}
-          <div className="glass-card rounded-xl p-4 sm:p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <p className="text-sm font-black text-slate-700">Acreedores</p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
-                  placeholder="Buscar acreedor..."
-                  className="px-3 py-2 border-2 border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-purple-400 w-40 sm:w-56"
-                />
-                <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
-                  className="px-3 py-2 border-2 border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-purple-400 bg-white">
-                  <option value="todos">Todos los tipos</option>
+          <Hoja titulo="Acreedores"
+            extra={
+              <>
+                <Campo etiqueta="Buscar" type="search" className="w-48"
+                  value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Nombre del acreedor" />
+                <Campo as="select" etiqueta="Tipo" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+                  <option value="todos">Todos</option>
                   <option value="proveedor">Proveedores</option>
                   <option value="factoring">Factoring</option>
                   <option value="financiera">Financieras</option>
-                </select>
-              </div>
-            </div>
-
+                </Campo>
+              </>
+            }>
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b-2 border-slate-100">
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase">Acreedor</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right cursor-pointer" onClick={() => toggleOrden("documentos")}>Docs</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right cursor-pointer" onClick={() => toggleOrden("saldoPendiente")}>Saldo</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right cursor-pointer" onClick={() => toggleOrden("saldoVencido")}>Vencido</th>
-                    <th className="py-2 px-3 text-[11px] font-black text-slate-400 uppercase text-right cursor-pointer" onClick={() => toggleOrden("maxDiasMora")}>Mora</th>
-                  </tr>
-                </thead>
+              <table className="w-full border-collapse">
+                <EncabezadoTabla onOrdenar={toggleOrden} orden={orden} />
                 <tbody>
                   {acreedoresPaginaActual.map((a, i) => (
                     <FilaAcreedor key={i} acreedor={a} onVerDetalle={abrirDetalle} />
@@ -567,7 +501,7 @@ export default function FinanzasDeuda() {
                 </tbody>
               </table>
               {acreedoresFiltrados.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-8">No se encontraron acreedores con ese filtro</p>
+                <p className="m-0 py-8 text-center text-[16px] text-cuaderno-grafito">Ningún acreedor coincide con la búsqueda.</p>
               )}
               <Paginador
                 pagina={paginaConsolidado}
@@ -577,7 +511,7 @@ export default function FinanzasDeuda() {
                 porPagina={POR_PAGINA}
               />
             </div>
-          </div>
+          </Hoja>
         </>
       )}
 

@@ -272,8 +272,39 @@ export function useFinanzas() {
 }
 
 // ─── Selector de proyecto reutilizable ───────────────────────────────────────
-export function ProyectoSelector({ className = "" }) {
+// variante "cuaderno": renglón subrayado del diseño de Finanzas. Las pantallas
+// que aún no se migran siguen usando la versión de siempre, sin la prop.
+export function ProyectoSelector({ className = "", variante = "default" }) {
   const { proyectos, proyectoId, setProyectoId, loadingProyectos } = useFinanzas();
+
+  if (variante === "cuaderno") {
+    return (
+      <div className={`flex items-end gap-1.5 ${className}`}>
+        <label className="flex flex-col gap-0.5 text-sm text-cuaderno-grafito">
+          Proyecto
+          <select
+            value={proyectoId}
+            onChange={e => setProyectoId(e.target.value)}
+            disabled={loadingProyectos}
+            className="min-h-[40px] min-w-[190px] border-0 border-b-[1.5px] border-cuaderno-tinta/70 focus:border-cuaderno-tinta bg-transparent px-1 text-[18px] text-cuaderno-tinta focus:outline-none disabled:opacity-50 cursor-pointer"
+          >
+            <option value="todos">Todos los proyectos</option>
+            {proyectos.map(p => (
+              <option key={p.id} value={p.id}>{p.name || p.nombre}</option>
+            ))}
+          </select>
+        </label>
+        {proyectoId !== "todos" && (
+          <button
+            onClick={() => setProyectoId("todos")}
+            className="min-h-[40px] px-1 text-[15px] text-cuaderno-grafito underline underline-offset-[3px] decoration-cuaderno-columna hover:text-cuaderno-tinta"
+          >
+            quitar filtro
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -311,29 +342,24 @@ export function ProyectoSelector({ className = "" }) {
   );
 }
 
-// ─── Botón campana reutilizable ───────────────────────────────────────────────
+// ─── Botón de avisos (pie de la barra lateral) ───────────────────────────────
+// Diseño cuaderno: campana a trazo fino y el contador encerrado a lápiz, rojo si
+// hay algo urgente.
 export function NotificacionesBtn({ className = "" }) {
   const { totalAlertas, alertasCriticas, setDrawerOpen } = useFinanzas();
   return (
     <button
       onClick={() => setDrawerOpen(true)}
-      className={`relative w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-        alertasCriticas > 0
-          ? "bg-red-50 hover:bg-red-100 text-red-600"
-          : totalAlertas > 0
-          ? "bg-amber-50 hover:bg-amber-100 text-amber-600"
-          : "bg-slate-100 hover:bg-slate-200 text-slate-500"
-      } ${className}`}
-      title="Centro de notificaciones"
+      className={`relative min-h-[40px] pl-2 pr-1 rounded-md flex items-center gap-2 font-manuscrita text-[16px] text-cuaderno-tinta hover:bg-cuaderno-hoja/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${className}`}
+      title="Avisos"
+      aria-label={totalAlertas > 0 ? `Avisos: ${totalAlertas} pendientes` : "Avisos"}
     >
-      <svg className="w-4.5 h-4.5" style={{width:"18px",height:"18px"}} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
       </svg>
       {totalAlertas > 0 && (
-        <span className={`absolute -top-1 -right-1 min-w-4 h-4 px-0.5 rounded-full text-white text-[10px] font-black flex items-center justify-center ${
-          alertasCriticas > 0 ? "bg-red-500" : "bg-amber-500"
-        }`}>
+        <span className={`inline-flex items-center justify-center min-w-[1.6rem] px-1 rounded-full border-[1.5px] text-[13px] leading-5 ${
+          alertasCriticas > 0 ? "border-cuaderno-roja text-cuaderno-roja" : "border-cuaderno-grafito text-cuaderno-grafito"}`}>
           {totalAlertas > 9 ? "9+" : totalAlertas}
         </span>
       )}

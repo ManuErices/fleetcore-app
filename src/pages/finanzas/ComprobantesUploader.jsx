@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { auth } from "../../lib/firebase";
 import { subirComprobante, eliminarComprobante, formatTamano } from "../../lib/comprobantesStorage";
+import { IconoDocumento, IconoCerrar, IconoMas } from "./cuaderno";
 
 /*
  * Lista de comprobantes adjuntos a UN documento de deuda + zona de subida.
@@ -13,11 +14,12 @@ import { subirComprobante, eliminarComprobante, formatTamano } from "../../lib/c
  *    el padre actualice su estado local sin tener que recargar todo Firestore
  */
 
-const ICONOS_TIPO = {
-  "application/pdf": "📄",
-  "image/png": "🖼️",
-  "image/jpeg": "🖼️",
-  "image/webp": "🖼️",
+// Tipo de archivo escrito, en vez de un emoji
+const TIPO_ARCHIVO = {
+  "application/pdf": "PDF",
+  "image/png": "imagen",
+  "image/jpeg": "imagen",
+  "image/webp": "imagen",
 };
 
 export default function ComprobantesUploader({ empresaId, documentoId, comprobantes = [], onCambio }) {
@@ -70,52 +72,44 @@ export default function ComprobantesUploader({ empresaId, documentoId, comproban
   }
 
   return (
-    <div className="mt-2 pt-2 border-t border-slate-100">
+    <div className="mt-2 pt-2 border-t border-dashed border-cuaderno-azul">
       {comprobantes.length > 0 && (
-        <div className="space-y-1 mb-2">
+        <ul className="m-0 p-0 list-none mb-2">
           {comprobantes.map((c) => (
-            <div key={c.path} className="flex items-center gap-2 bg-slate-50 rounded-lg px-2 py-1.5">
-              <span className="text-sm flex-shrink-0">{ICONOS_TIPO[c.tipo] || "📎"}</span>
+            <li key={c.path} className="flex items-center gap-2 min-h-[40px] border-b border-cuaderno-azul/70">
+              <IconoDocumento tamano={15} className="text-cuaderno-grafito" />
               <a
                 href={c.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 min-w-0 text-[11px] font-semibold text-purple-700 hover:underline truncate"
+                className="flex-1 min-w-0 text-[15px] text-cuaderno-tinta underline decoration-cuaderno-azul underline-offset-4 hover:decoration-cuaderno-tinta truncate"
                 title={c.nombre}
               >
                 {c.nombre}
               </a>
-              <span className="text-[10px] text-slate-400 flex-shrink-0">{formatTamano(c.tamano)}</span>
+              <span className="text-[13px] text-cuaderno-grafito flex-shrink-0">{TIPO_ARCHIVO[c.tipo] || "archivo"}, {formatTamano(c.tamano)}</span>
               <button
                 onClick={() => handleEliminar(c)}
                 disabled={eliminandoPath === c.path}
-                className="w-5 h-5 rounded-md hover:bg-red-100 text-slate-400 hover:text-red-600 flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50"
-                title="Eliminar"
+                aria-label={`Quitar ${c.nombre}`}
+                title="Quitar comprobante"
+                className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 disabled:opacity-50"
               >
-                {eliminandoPath === c.path ? (
-                  <div className="w-2.5 h-2.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
+                {eliminandoPath === c.path
+                  ? <span className="text-[12px]">…</span>
+                  : <IconoCerrar tamano={13} />}
               </button>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      <label className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-slate-300 hover:border-purple-400 hover:bg-purple-50/40 cursor-pointer transition-colors text-[11px] font-bold text-slate-500">
+      <label className="flex items-center justify-center gap-2 min-h-[40px] rounded-md border-[1.5px] border-dashed border-cuaderno-columna hover:border-cuaderno-tinta hover:bg-cuaderno-hoja cursor-pointer text-[15px] text-cuaderno-tinta focus-within:ring-2 focus-within:ring-cuaderno-tinta/40">
         {subiendo ? (
-          <>
-            <div className="w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-            Subiendo... {progreso}%
-          </>
+          <span className="text-cuaderno-grafito">Subiendo… {progreso}%</span>
         ) : (
           <>
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+            <IconoMas tamano={13} />
             Adjuntar comprobante
           </>
         )}
@@ -124,13 +118,13 @@ export default function ComprobantesUploader({ empresaId, documentoId, comproban
           type="file"
           accept=".pdf,.png,.jpg,.jpeg,.webp"
           multiple
-          className="hidden"
+          className="sr-only"
           disabled={subiendo}
           onChange={handleArchivos}
         />
       </label>
 
-      {error && <p className="text-[10px] text-red-600 font-bold mt-1">{error}</p>}
+      {error && <p className="m-0 mt-1 text-[14px] text-cuaderno-roja">{error}</p>}
     </div>
   );
 }
