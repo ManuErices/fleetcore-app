@@ -1329,8 +1329,10 @@ function RemuneracionesSection() {
     for (const trab of activos) {
       try {
         const candidatos = contratos.filter(c => c.trabajadorId === trab.id && tocaPeriodo(c));
-        const contrato = candidatos.find(c => c.estado === 'vigente') || candidatos[0];
-        if (!contrato) { omitidos++; sinContrato++; continue; }
+        const contratoDoc = candidatos.find(c => c.estado === 'vigente') || candidatos[0];
+        if (!contratoDoc) { omitidos++; sinContrato++; continue; }
+        // Sueldo y bonos vigentes en ESTE mes según los anexos aplicados.
+        const contrato = Calc.contratoAlPeriodo(contratoDoc, filtroMes, filtroAnio);
 
         // Verificar si ya existe liquidación para este período
         const yaExiste = liquidaciones.some(l =>
@@ -1444,19 +1446,11 @@ function RemuneracionesSection() {
     { label: 'Total líquido', value: `$${totalLiquido.toLocaleString('es-CL')}`, color: 'text-emerald-600', mono: true },
   ];
 
-  // Export Previred TXT
-  const exportarPrevired = () => {
-    const data = filtradas
-      .filter(l => l._trabajador && l._contrato && l._calc)
-      .map(l => ({ trabajador: l._trabajador, contrato: l._contrato, calc: l._calc }));
-    if (!data.length) { alert('No hay liquidaciones con datos completos para exportar.'); return; }
-    const txt = generarTXTPrevired(data);
-    const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `Previred_${filtroAnio}_${MESES[parseInt(filtroMes) - 1] || filtroMes}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  };
+  // Previred: el archivo de 105 campos vive en su propia sección, con
+  // validación previa. Antes este botón llamaba a una función que no existía
+  // (`generarTXTPrevired` no se exporta desde pdfs.jsx) y fallaba al hacer clic.
+  const navigatePrevired = useNavigate();
+  const exportarPrevired = () => navigatePrevired('/rrhh/previred_avanzado');
 
   // Export Excel simple (CSV)
   const exportarExcel = () => {
