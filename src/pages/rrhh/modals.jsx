@@ -9,6 +9,7 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import { useContextoPeriodo, extrasDelPeriodo } from './periodo';
 import { aplicarAnexo, prorrogasDe } from './anexos';
+import { useVacaciones, resumenVacaciones } from './vacaciones';
 
 const {
   inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
@@ -838,6 +839,28 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           </Field>
         </div>
 
+        <Divider label="Feriado legal (vacaciones)" />
+        <p className="text-[11px] text-slate-400 -mt-2 leading-snug">
+          El saldo se calcula solo: saldo inicial + 15 días hábiles por año (más el progresivo) − vacaciones aprobadas.
+          Si la persona venía de Talana, carga el saldo que tenía a una fecha de corte; sin él se asume que no
+          tomó vacaciones antes de registrarlas en FleetCore.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Saldo inicial (días hábiles)">
+            <input type="number" step="0.01" className={inp} value={form.vacSaldoInicial ?? ''}
+              onChange={e => set('vacSaldoInicial', e.target.value)} placeholder="Ej: 12,5" />
+          </Field>
+          <Field label="A la fecha de corte">
+            <input type="date" className={inp} value={form.vacFechaCorte || ''}
+              onChange={e => set('vacFechaCorte', e.target.value)} />
+          </Field>
+          {/* Art. 68: valen hasta 10 años con empleadores anteriores, acreditados con certificado. */}
+          <Field label="Años con empleadores anteriores">
+            <input type="number" min="0" max="10" className={inp} value={form.aniosServicioPrevios ?? ''}
+              onChange={e => set('aniosServicioPrevios', e.target.value)} placeholder="0" />
+          </Field>
+        </div>
+
         <Divider label="Observaciones" />
         <Field label="Observaciones">
           <textarea className={inp} rows={2} value={form.observaciones}
@@ -1362,6 +1385,35 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
             </select>
           </Field>
         </div>
+
+        {/* Turnos: la jornada excepcional (Art. 38) requiere resolución de la DT */}
+        {String(form.jornada || '').startsWith('Turno') && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Horas semanales promedio del ciclo">
+              <input type="number" step="0.5" className={inp} value={form.jornadaHorasSemanales || ''}
+                onChange={e => set('jornadaHorasSemanales', e.target.value)} placeholder="Ej: 42" />
+            </Field>
+            {!String(form.jornada).includes('4x3') && (
+              <Field label="Resolución DT jornada excepcional (N° y fecha)">
+                <input className={inp} value={form.resolucionDT || ''}
+                  onChange={e => set('resolucionDT', e.target.value)} placeholder="Ej: Exenta N° 1234 del 15/03/2026" />
+              </Field>
+            )}
+          </div>
+        )}
+        {/* Ley 21.561: jornada máxima 42 hrs desde el 26-04-2026. Parcial: hasta 2/3 de la ordinaria (28 hrs). */}
+        {/(44|45) hrs/.test(form.jornada || '') && (form.fechaInicio || '9999') >= '2026-04-26' && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700 font-bold">
+            Desde el 26 de abril de 2026 la jornada ordinaria máxima es de 42 horas (Ley 21.561). Un contrato
+            nuevo de {String(form.jornada).match(/\d+/)?.[0]} horas tendría una cláusula ilegal.
+          </div>
+        )}
+        {form.jornada === 'Parcial (30 hrs)' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
+            Con jornada ordinaria de 42 horas, la jornada parcial es de hasta 28 horas (dos tercios, Art. 40 bis).
+            30 horas ya no califica como parcial.
+          </div>
+        )}
 
         {/* Horario de colación */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1959,7 +2011,7 @@ function Auto({ valor, sugerido, fuente, onRestaurar, formato = (v) => v }) {
   );
 }
 
-function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, onSaved }) {
+function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, remuneraciones = [], onSaved }) {
   const { empresaId } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -1967,11 +2019,14 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     causal: '', ultimaRemuneracion: '',
     diasFeriadoPendiente: '0', remuneracionesPendientes: '0',
     pagoAvisoPrevio: 'no', anticipoPendiente: '0', otrosDescuentos: '0',
-    gratificacionYaPagada: 'si',
+    gratificacionYaPagada: 'si', imputacionAFC: '0',
     estadoFirma: 'pendiente', observaciones: '',
   };
   const [form,   setForm]   = useState(empty);
   const [saving, setSaving] = useState(false);
+  // Solicitudes de vacaciones: el saldo de feriado se calcula, no se lee de la ficha.
+  const vacaciones = useVacaciones(isOpen ? empresaId : null);
+  const prevSug = useRef({});
   const [pdfPreview, setPdfPreview] = useState(null);
 
   useEffect(() => {
@@ -2009,15 +2064,12 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente')
       || contratos?.find(c => c.trabajadorId === tid);
     const trab = trabajadores?.find(t => t.id === tid);
+    // La base del Art. 172 y los días de feriado se proponen solos más abajo
+    // (calculados desde las liquidaciones y las vacaciones registradas).
     setForm(f => ({
       ...f, trabajadorId: tid,
       contratoId: contrato?.id || '',
-      ultimaRemuneracion: contrato?.sueldoBase || '',
-      // Los días de feriado ya están en la ficha: no hay por qué escribirlos
-      // de nuevo y arriesgar una diferencia con lo que el trabajador tiene.
-      diasFeriadoPendiente: trab?.diasVacacionesDisponibles != null
-        ? String(trab.diasVacacionesDisponibles)
-        : f.diasFeriadoPendiente,
+      ultimaRemuneracion: '', diasFeriadoPendiente: '',
     }));
   };
 
@@ -2025,16 +2077,51 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
   // Lo que el sistema propone para cada campo. Se usa tanto para precargar como
   // para poder volver atrás si el usuario lo cambió.
+  // Base del Art. 172 desde las liquidaciones del trabajador (fijos del último
+  // mes completo + promedio de variables de 3 meses + gratificación).
+  const baseInfo = (trabajadorSel && contratoSel)
+    ? Calc.baseIndemnizacion(trabajadorSel, contratoSel,
+        (remuneraciones || []).filter(l => l.trabajadorId === form.trabajadorId), form.fechaTermino)
+    : null;
+  // Saldo de feriado al término: saldo inicial + devengado − vacaciones tomadas.
+  const vac = trabajadorSel
+    ? resumenVacaciones({ trabajador: trabajadorSel, fechaIngreso: contratoSel?.fechaInicio, vacaciones, fecha: form.fechaTermino })
+    : null;
   const sugerido = {
-    ultimaRemuneracion: contratoSel?.sueldoBase ?? '',
-    diasFeriadoPendiente: trabajadorSel?.diasVacacionesDisponibles ?? '',
+    ultimaRemuneracion: baseInfo?.total ?? contratoSel?.sueldoBase ?? '',
+    diasFeriadoPendiente: vac ? vac.pendienteAnteriores : '',
     // El aviso previo sustitutivo solo procede en la causal 161
     pagoAvisoPrevio: form.causal === '161' ? 'si' : 'no',
   };
   const restaurar = (campo) => set(campo, String(sugerido[campo]));
 
+  // Precarga lo sugerido en un finiquito nuevo, y lo sigue actualizando si
+  // cambia la fecha de término, mientras nadie haya escrito otro valor encima.
+  useEffect(() => {
+    if (!isOpen || editData?.id) return;
+    ['ultimaRemuneracion', 'diasFeriadoPendiente'].forEach(k => {
+      const nuevo = sugerido[k];
+      if (nuevo === '' || nuevo == null) return;
+      setForm(f => {
+        const actual = String(f[k] ?? '');
+        const sinTocar = actual === '' || actual === String(prevSug.current[k] ?? '');
+        return sinTocar ? { ...f, [k]: String(nuevo) } : f;
+      });
+      prevSug.current[k] = nuevo;
+    });
+  }, [isOpen, editData?.id, sugerido.ultimaRemuneracion, sugerido.diasFeriadoPendiente]);
+
+  // Lo que el motor necesita además del formulario: el desglose de la base,
+  // el promedio de variables para el feriado (Art. 71) y el feriado anual con
+  // progresivo. En un finiquito ya guardado se usa lo que quedó guardado.
+  const finCalc = {
+    ...form,
+    desgloseBase: form.desgloseBase || baseInfo || null,
+    promedioVariableFeriado: form.promedioVariableFeriado ?? baseInfo?.promedioVariable ?? 0,
+    diasFeriadoAnual: form.diasFeriadoAnual ?? vac?.diasAnual ?? 15,
+  };
   const calc = (form.fechaTermino && form.ultimaRemuneracion)
-    ? calcularFiniquito(form, contratoSel, trabajadorSel) : null;
+    ? calcularFiniquito(finCalc, contratoSel, trabajadorSel) : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
 
   const handleSave = async () => {
@@ -2047,9 +2134,16 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
       // que quede en `undefined` —una causal sin elegir, un monto vacío— hace
       // que updateDoc lance "Unsupported field value" y la pantalla solo diga
       // "Error". Por eso se filtra también acá.
+      // Se guarda con qué se calculó (base, promedio de variables, feriado anual
+      // y el saldo de vacaciones a la fecha): el PDF y cualquier revisión
+      // posterior deben dar exactamente lo mismo aunque cambien los datos.
       const payload = Object.fromEntries(
-        Object.entries({ ...form, updatedAt: serverTimestamp() })
-          .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
+        Object.entries({
+          ...finCalc,
+          resumenVacaciones: vac ? { saldoInicial: vac.saldoInicial, corte: vac.corte, devengado: vac.devengado,
+            tomados: vac.tomados, saldo: vac.saldo, pendienteAnteriores: vac.pendienteAnteriores } : null,
+          updatedAt: serverTimestamp(),
+        }).filter(([k, v]) => !k.startsWith('_') && v !== undefined)
       );
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'finiquitos', editData.id), payload);
@@ -2119,7 +2213,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
           <Field label="Última remuneración ($)" required>
             <input type="text" className={inp} value={formatCLP(form.ultimaRemuneracion)} onChange={e => set('ultimaRemuneracion', parseCLP(e.target.value))} />
             <Auto valor={form.ultimaRemuneracion} sugerido={sugerido.ultimaRemuneracion}
-              fuente="el sueldo base del contrato" onRestaurar={() => restaurar('ultimaRemuneracion')}
+              fuente={baseInfo ? 'la base del Art. 172 calculada desde las liquidaciones' : 'el sueldo base del contrato (no hay liquidaciones)'} onRestaurar={() => restaurar('ultimaRemuneracion')}
               formato={v => `$${Number(v).toLocaleString('es-CL')}`} />
           </Field>
 
@@ -2137,8 +2231,8 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
                 {[
                   ['Sueldo base',      calc.desgloseBase.sueldoBase],
                   ['Gratificación',    calc.desgloseBase.gratificacion],
-                  ['Bono producción',  calc.desgloseBase.bonoProduccion],
-                  ['Otros imponibles', calc.desgloseBase.otrosImponibles],
+                  ['Variables (prom. 3 meses)', calc.desgloseBase.bonoProduccion],
+                  ['Bonos fijos',      calc.desgloseBase.otrosImponibles],
                   ['Colación',         calc.desgloseBase.colacion],
                   ['Movilización',     calc.desgloseBase.movilizacion],
                   ['Viáticos',         calc.desgloseBase.viaticos],
@@ -2173,7 +2267,7 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
           <Field label="Días feriado pendientes">
             <input type="number" step="0.5" className={inp} value={form.diasFeriadoPendiente} onChange={e => set('diasFeriadoPendiente', e.target.value)} />
             <Auto valor={form.diasFeriadoPendiente} sugerido={sugerido.diasFeriadoPendiente}
-              fuente="el saldo de vacaciones de la ficha" onRestaurar={() => restaurar('diasFeriadoPendiente')}
+              fuente="el saldo de vacaciones (devengado − tomado)" onRestaurar={() => restaurar('diasFeriadoPendiente')}
               formato={v => `${v} días`} />
             {calc && (
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
@@ -2183,18 +2277,29 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
               </p>
             )}
           </Field>
-          {calc?.feriadoPendSugerido > 0 && Number(form.diasFeriadoPendiente || 0) === 0 && (
-            <p className="sm:col-span-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-snug">
-              Lleva <strong>{calc.anios} año{calc.anios === 1 ? '' : 's'} cumplido{calc.anios === 1 ? '' : 's'}</strong>, así que
-              acumuló hasta <strong>{calc.feriadoPendSugerido} días hábiles</strong> de feriado.
-              En cero, el finiquito paga solo el proporcional del año en curso y deja fuera el de los
-              años anteriores. Descuenta lo que ya tomó y pon el saldo.
-              <button type="button"
-                onClick={() => set('diasFeriadoPendiente', String(calc.feriadoPendSugerido))}
-                className="ml-1 font-black underline">
-                Usar {calc.feriadoPendSugerido}
-              </button>
-            </p>
+          {vac && (
+            <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[11px] text-slate-600">
+              <p className="font-black text-slate-500 uppercase tracking-widest text-[10px] mb-1.5">
+                Feriado al {form.fechaTermino} · {vac.diasAnual} días hábiles por año
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-1">
+                {vac.corte && <span>Saldo inicial al {vac.corte}: <b>{vac.saldoInicial}</b></span>}
+                <span>Devengado: <b>{vac.devengado}</b></span>
+                <span>Tomado: <b>−{vac.tomados}</b> ({vac.solicitudes} solicitud{vac.solicitudes === 1 ? '' : 'es'})</span>
+                <span>Saldo: <b>{vac.saldo}</b></span>
+                <span>Proporcional año en curso: <b>{vac.proporcionalActual}</b></span>
+                <span>Años anteriores: <b>{vac.pendienteAnteriores}</b></span>
+              </div>
+              {vac.pendienteAnteriores < 0 && (
+                <p className="mt-1.5 text-sky-700">Tomó {Math.abs(vac.pendienteAnteriores)} días por adelantado: se descuentan del proporcional.</p>
+              )}
+              {vac.sinSaldoInicial && (
+                <p className="mt-1.5 text-amber-700 font-bold">
+                  Sin saldo inicial en la ficha: se asume que no tomó vacaciones antes de registrarlas en FleetCore.
+                  Si venía de Talana, carga en la ficha el saldo que tenía a la fecha de corte.
+                </p>
+              )}
+            </div>
           )}
           <Field label="Remuneraciones pendientes ($)">
             <input type="text" className={inp} value={formatCLP(form.remuneracionesPendientes)} onChange={e => set('remuneracionesPendientes', parseCLP(e.target.value))} />
@@ -2215,6 +2320,20 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, on
             La indemnización sustitutiva del aviso previo solo procede en la causal 161
             (necesidades de la empresa). Con la causal seleccionada no corresponde pagarla.
           </p>
+        )}
+
+        {form.causal === '161' && calc?.tieneIndemnizacion && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Imputación AFC — Art. 13 Ley 19.728 ($)">
+              <input type="text" className={inp} value={formatCLP(form.imputacionAFC)}
+                onChange={e => set('imputacionAFC', parseCLP(e.target.value))} placeholder="0" />
+            </Field>
+            <p className="text-[11px] text-slate-500 leading-snug self-end pb-2">
+              Aporte del empleador a la cuenta individual de cesantía más su rentabilidad, según el
+              certificado de la AFC. Se descuenta de la indemnización por años de servicio. Si el despido
+              se declara injustificado, la Corte Suprema ha resuelto que no procede.
+            </p>
+          </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
