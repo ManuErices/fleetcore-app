@@ -2,6 +2,37 @@ import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, TRAMOS_IUT, CAUSAL
 import { nombreTrabajador, calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad, horasOrdinariasSemanales } from './calculo';
 import { paramsDe } from './parametros';
 
+/**
+ * Cláusula de jornada según el tipo pactado.
+ *
+ * Antes todo contrato decía "distribuida de lunes a viernes", incluso los de
+ * turno 7x7 o 14x14: una cláusula que no describe la jornada real y que, en
+ * faena, omite la resolución de la DT que autoriza la jornada excepcional.
+ */
+function clausulaJornada(contrato) {
+  const j = String(contrato.jornada || '');
+  const horasProm = contrato.jornadaHorasSemanales || (j.match(/(\d+(?:[.,]\d+)?)\s*hrs/) || [])[1] || '';
+  const turno = j.match(/Turno\s+(\d+)x(\d+)/i);
+  if (turno) {
+    const [, trab, desc] = turno;
+    if (trab === '4' && desc === '3') {
+      return `<p>La jornada ordinaria será de <strong>${horasProm || '___'} horas semanales</strong>, distribuida en cuatro días de trabajo seguidos de tres días de descanso, según lo acordado por las partes y dentro de los límites de los artículos 22 y 28 del Código del Trabajo.</p>`;
+    }
+    const resol = contrato.resolucionDT
+      ? `, autorizado por la Resolución ${contrato.resolucionDT} de la Dirección del Trabajo`
+      : ', autorizado por la Dirección del Trabajo mediante la resolución que corresponda';
+    return `<p>Atendida la naturaleza de los servicios y su prestación en lugares apartados de centros urbanos, la jornada se cumplirá en un sistema excepcional de distribución de jornada y descansos de <strong>${trab} días de trabajo por ${desc} días de descanso</strong>${horasProm ? `, con un promedio de <strong>${horasProm} horas semanales</strong> en el ciclo` : ''}, conforme al artículo 38 del Código del Trabajo${resol}.</p>`;
+  }
+  const dias = Array.isArray(contrato.jornadaDias) && contrato.jornadaDias.length
+    ? `los días ${contrato.jornadaDias.join(', ')}` : 'de lunes a viernes';
+  const horario = contrato.jornadaHoraEntrada && contrato.jornadaHoraSalida
+    ? `, en horario de ${contrato.jornadaHoraEntrada} a ${contrato.jornadaHoraSalida} horas` : '';
+  if (/parcial/i.test(j)) {
+    return `<p>Se pacta una jornada a tiempo parcial de <strong>${horasProm || '___'} horas semanales</strong>, distribuida ${dias}${horario}, conforme al artículo 40 bis del Código del Trabajo.</p>`;
+  }
+  return `<p>La jornada ordinaria de trabajo será de <strong>${horasProm || '___'} horas semanales</strong>, distribuida ${dias}${horario}, conforme a lo establecido en los artículos 22 y 28 del Código del Trabajo.</p>`;
+}
+
 function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml = false, empresa = null } = {}) {
   const rutEmpleador = empresa?.rut || contrato.rutEmpresa || '_______________';
   const nombreEmpleador = empresa?.nombre || contrato.empresa || 'La Empresa';
@@ -142,7 +173,7 @@ function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml 
       ${contrato.jornadaDescripcion ? `<p>${contrato.jornadaDescripcion}</p>` : ''}
       <p>Lo anterior en conformidad con lo establecido en el artículo 22 del Código del Trabajo.</p>
       ` : `
-      <p>La jornada de trabajo será: <strong>${contrato.jornada || '45 horas semanales'}</strong>, distribuida de lunes a viernes${contrato.jornada?.includes('Turno') ? ', en régimen de turnos' : ''}, conforme a lo establecido en el artículo 22 del Código del Trabajo.</p>
+      ${clausulaJornada(contrato)}
       ${contrato.horarioColacion ? `<p>El tiempo de descanso para colación será de <strong>${contrato.horarioColacion}</strong>.</p>` : ''}
       `}
       ${hExtra > 0 ? `<p>Se pactan horas extraordinarias habituales de hasta <strong>${hExtra} horas semanales</strong>, con un recargo mínimo del 50% sobre el valor de la hora ordinaria (Art. 32 CT), con un valor hora extra de <strong>${fmt(contrato.valorHoraExtra)}</strong>.</p>` : ''}
@@ -733,7 +764,8 @@ function generarPDFFiniquito(fin, trabajador, contrato, { preview = false } = {}
       ${calc.feriadoPropMonto ? `<tr><td>Feriado proporcional (Art. 73 CT)</td><td>${calc.feriadoPropDias} días hábiles — ${calc.mesesFeriado?.toFixed(1)} meses</td><td>${fmt(calc.feriadoPropMonto)}</td></tr>` : ''}
       ${calc.feriadoPendiente ? `<tr><td>Feriado acumulado pendiente (Art. 73 CT)</td><td>${calc.feriadoPendiente} días</td><td>${fmt(calc.feriadoPendMonto)}</td></tr>` : ''}
       ${calc.gratPropMonto ? `<tr><td>Gratificación proporcional (Art. 50 CT)</td><td>${calc.mesesFeriado?.toFixed(1)} meses año en curso</td><td>${fmt(calc.gratPropMonto)}</td></tr>` : ''}
-      ${calc.tieneIndemnizacion ? `<tr><td><strong>Indemnización por años de servicio (Art. 163 CT)</strong></td><td>${calc.aniosIndemnizacion} año${calc.aniosIndemnizacion!==1?'s':''} × ${fmt(calc.ultimaRemuneracion)}</td><td><strong>${fmt(calc.indemMonto)}</strong></td></tr>` : ''}
+      ${calc.tieneIndemnizacion ? `<tr><td><strong>Indemnización por años de servicio (Art. 163 CT)</strong></td><td>${calc.aniosIndemnizacion} año${calc.aniosIndemnizacion!==1?'s':''} × ${fmt(calc.baseIndem)}${calc.baseTopeada ? ' (tope 90 UF, Art. 172)' : ''}</td><td><strong>${fmt(calc.indemBruta ?? calc.indemMonto)}</strong></td></tr>` : ''}
+      ${calc.imputacionAFC > 0 ? `<tr><td>Imputación aporte del empleador al seguro de cesantía (Art. 13 Ley 19.728)</td><td>Según certificado AFC</td><td>-${fmt(calc.imputacionAFC)}</td></tr>` : ''}
       ${calc.indемAvisoPrevio ? `<tr><td>Indemnización sustitutiva aviso previo (Art. 161 CT)</td><td>Equivalente a 1 mes de remuneración</td><td>${fmt(calc.indемAvisoPrevio)}</td></tr>` : ''}
       ${calc.otrosHaberes > 0 ? `<tr><td>${fin.glosaOtrosHaberes||'Otros haberes'}</td><td></td><td>${fmt(calc.otrosHaberes)}</td></tr>` : ''}
     </tbody>

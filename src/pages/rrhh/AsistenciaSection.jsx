@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
+import { diasHabilesEntre, resumenVacaciones } from './vacaciones';
 import { TrabajadoresSection } from './sections.a';
 import * as Modals from './modals';
 
@@ -48,23 +49,10 @@ const DIAS_SEMANA = [
   { key: 'domingo', label: 'Domingo' }
 ];
 
-const calcularDiasHabiles = (desde, hasta) => {
-  if (!desde || !hasta) return 0;
-  const start = new Date(desde + 'T00:00:00');
-  const end = new Date(hasta + 'T00:00:00');
-  if (end < start) return 0;
-  
-  let count = 0;
-  let cur = new Date(start);
-  while (cur <= end) {
-    const day = cur.getDay(); // 0 = Domingo, 6 = Sábado
-    if (day !== 0 && day !== 6) {
-      count++;
-    }
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-};
+// Art. 69: el sábado es siempre inhábil, igual que domingos y FESTIVOS. Antes
+// solo se saltaban sábados y domingos: unas vacaciones que tomaban el 18 y 19
+// de septiembre descontaban dos días de más.
+const calcularDiasHabiles = (desde, hasta) => diasHabilesEntre(desde, hasta);
 
 export default function AsistenciaSection() {
   const { empresaId } = useEmpresa();
@@ -79,6 +67,8 @@ export default function AsistenciaSection() {
   const [turnos, setTurnos] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
   const [vacaciones, setVacaciones] = useState([]);
+  // Contratos: la fecha de inicio del vigente es desde donde se devenga el feriado.
+  const [contratosVac, setContratosVac] = useState([]);
   const [showVacacionModal, setShowVacacionModal] = useState(false);
   const [permisos, setPermisos] = useState([]);
   const [ausencias, setAusencias] = useState([]);
@@ -303,6 +293,13 @@ export default function AsistenciaSection() {
     return () => unsub();
   }, [empresaId]);
 
+  useEffect(() => {
+    if (!empresaId) return;
+    return onSnapshot(collection(db, 'empresas', empresaId, 'contratos'),
+      snap => setContratosVac(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => setContratosVac([]));
+  }, [empresaId]);
+
   // Real-time Permisos loading (solicitudes del trabajador)
   useEffect(() => {
     if (!empresaId) return;
@@ -314,6 +311,7 @@ export default function AsistenciaSection() {
       err => console.error('Error loading permisos:', err)
     );
     return () => unsub();
+  }, [empresaId]);
   }, [empresaId]);
 
   // Real-time Ausencias loading
@@ -353,27 +351,22 @@ export default function AsistenciaSection() {
       const workerRef = doc(db, 'empresas', empresaId, 'trabajadores', vacacion.trabajadorId);
       const vacacionRef = doc(db, 'empresas', empresaId, 'vacaciones', vacacion.id);
       
+      // El saldo ya no se guarda en la ficha: se calcula como saldo inicial +
+      // devengado − vacaciones aprobadas (vacaciones.js). Restar acá, desde un
+      // saldo que partía en 15 para todos y nunca sumaba, era lo que dejaba el
+      // finiquito con días de feriado inventados.
       await runTransaction(db, async (transaction) => {
         const workerSnap = await transaction.get(workerRef);
         if (!workerSnap.exists()) {
           throw new Error('El trabajador asociado a esta solicitud no existe.');
         }
-        
-        const workerData = workerSnap.data();
-        const currentBalance = Number(workerData.diasVacacionesDisponibles ?? 15.0);
-        const newBalance = Math.round((currentBalance - vacacion.diasSolicitados) * 100) / 100;
-        
         transaction.update(vacacionRef, {
           estado: 'aprobado',
           updatedAt: serverTimestamp()
         });
-        
-        transaction.update(workerRef, {
-          diasVacacionesDisponibles: newBalance
-        });
       });
-      
-      alert('Solicitud aprobada y saldo de vacaciones actualizado.');
+
+      alert('Solicitud aprobada.');
     } catch (e) {
       console.error('Error al aprobar vacaciones:', e);
       alert('Error al aprobar la solicitud: ' + e.message);
@@ -1703,6 +1696,8 @@ export default function AsistenciaSection() {
           isOpen={showVacacionModal}
           onClose={() => setShowVacacionModal(false)}
           trabajadores={trabajadores}
+          vacaciones={vacaciones}
+          contratos={contratosVac}
           onSave={handleSaveVacacion}
         />
       )}
@@ -2429,7 +2424,7 @@ function VacacionesTabContent({ vacaciones, trabajadores, empresaId, onSolicitar
   );
 }
 
-function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, onSave }) {
+function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, vacaciones = [], contratos = [], onSave }) {
   const [trabajadorId, setTrabajadorId] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -2437,7 +2432,12 @@ function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, onSave }) {
   
   const diasSolicitados = calcularDiasHabiles(desde, hasta);
   const selectedWorker = trabajadores.find(t => t.id === trabajadorId);
-  const diasDisponibles = selectedWorker ? (selectedWorker.diasVacacionesDisponibles ?? 15.0) : 0;
+  // Saldo calculado: saldo inicial + devengado − aprobadas (Art. 67-69).
+  const saldoDe = (t) => {
+    const c = contratos.find(x => x.trabajadorId === t.id && x.estado === 'vigente');
+    return resumenVacaciones({ trabajador: t, fechaIngreso: c?.fechaInicio, vacaciones }).saldo;
+  };
+  const diasDisponibles = selectedWorker ? saldoDe(selectedWorker) : 0;
 
   const handleSave = () => {
     if (!trabajadorId) {
@@ -2477,7 +2477,7 @@ function SolicitarVacacionesModal({ isOpen, onClose, trabajadores, onSave }) {
             <option value="">Seleccione un trabajador...</option>
             {trabajadores.map(t => (
               <option key={t.id} value={t.id}>
-                {t.nombre} {t.apellidoPaterno} - Saldo: {t.diasVacacionesDisponibles ?? 15.0} días
+                {t.nombre} {t.apellidoPaterno} - Saldo: {saldoDe(t)} días
               </option>
             ))}
           </select>

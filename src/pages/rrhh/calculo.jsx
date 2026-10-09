@@ -772,11 +772,25 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // Son dos bases distintas para dos cosas distintas: indemnizar una salida
   // (Art. 172, base amplia) y pagar vacaciones no tomadas (Art. 71, sueldo).
   // Usar la base amplia acá pagaría vacaciones de más.
-  const sueldoFeriado = parseInt(fin.sueldoBaseFeriado)
+  // Art. 71 inc. 3: con sueldo y estipendios variables, la remuneración
+  // íntegra es el sueldo MÁS el promedio de los variables de los últimos tres
+  // meses (bonos de producción, tratos, comisiones). La pantalla lo trae
+  // calculado desde las liquidaciones en `fin.promedioVariableFeriado`.
+  // El respaldo es el SUELDO del desglose de la última liquidación, nunca la
+  // base del Art. 172 (`ult`), que ya trae gratificación, colación y
+  // movilización: pagaría el feriado sobre una base que el Art. 71 no admite.
+  const sueldoFeriado = (parseInt(fin.sueldoBaseFeriado)
+    || parseInt(fin.desgloseBase?.sueldoBase)
     || parseInt(contrato?.sueldoBase)
-    || ult;
-  const feriadoPropDias    = Math.round((15 / 12) * mesesFeriado * 10) / 10;
-  const feriadoPendiente   = parseFloat(fin.diasFeriadoPendiente || 0);
+    || ult) + (parseInt(fin.promedioVariableFeriado) || 0);
+  // Feriado anual: 15 días, más el progresivo (Art. 68) si la pantalla lo trae.
+  const diasAnual          = Number(fin.diasFeriadoAnual) > 15 ? Number(fin.diasFeriadoAnual) : 15;
+  const feriadoPropBruto   = Math.round((diasAnual / 12) * mesesFeriado * 10) / 10;
+  // Pendiente negativo = tomó vacaciones por adelantado: se descuentan del
+  // proporcional en vez de ignorarse (antes un saldo negativo pagaba igual).
+  const pendienteIngresado = parseFloat(fin.diasFeriadoPendiente || 0) || 0;
+  const feriadoPropDias    = Math.max(0, Math.round((feriadoPropBruto + Math.min(0, pendienteIngresado)) * 10) / 10);
+  const feriadoPendiente   = Math.max(0, pendienteIngresado);
 
   // Días efectivamente pagados: los hábiles más los sábados, domingos y
   // festivos que caen en medio, contados en el calendario real desde el día
@@ -800,6 +814,9 @@ function calcularFiniquito(fin, contrato, trabajador) {
     ultimoAniversario,
     mesesDesdeAniversario: Math.round(mesesFeriado * 10) / 10,
     diasProporcionales: feriadoPropDias,
+    diasProporcionalesBruto: feriadoPropBruto,
+    diasAdelantados: Math.max(0, -pendienteIngresado),
+    diasAnual,
     diasCorridosProp: propCorridos,
     diasCorridosPend: pendCorridos,
     valorDiaCorrido: sueldoFeriado ? Math.round(sueldoFeriado / 30) : 0,
@@ -812,12 +829,26 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // 4,75 IMM al año, no el tope directo. El IMM se toma al de la fecha de
   // término, que es el que rige el finiquito.
   const gratAnualTope      = paramsDe(fin.fechaTermino).topeGratAnual;
-  const gratMensualPagable = Math.min(ult * 0.25, gratAnualTope / 12);
+  // 25% de la remuneración (sueldo + variables), no de la base del Art. 172,
+  // que ya incluye la gratificación misma más colación y movilización.
+  const baseGratFin        = fin.desgloseBase
+    ? (parseInt(fin.desgloseBase.sueldoBase) || 0) + (parseInt(fin.desgloseBase.bonoProduccion) || 0) + (parseInt(fin.desgloseBase.otrosImponibles) || 0)
+    : ult;
+  const gratMensualPagable = Math.min(baseGratFin * 0.25, gratAnualTope / 12);
   // Si la gratificación ya se paga mes a mes (garantizada), no corresponde
   // volver a pagarla acá: se controla con `fin.gratificacionYaPagada`.
+  // Se devenga por ejercicio comercial (año calendario), no por año de
+  // servicio: meses desde el 1 de enero —o desde el ingreso, si fue este año—
+  // hasta el término. Antes se usaban los meses desde el aniversario.
+  const inicioEjercicio = (() => {
+    const ene = new Date(dtTerm.getFullYear(), 0, 1, 12);
+    return dtIng && dtIng > ene ? dtIng : ene;
+  })();
+  const mesesEjercicio  = !isNaN(dtTerm) && dtTerm >= inicioEjercicio
+    ? Math.min(12, Math.round((dtTerm - inicioEjercicio) / 86400000 + 1) / 30) : 0;
   const gratPropMonto      = fin.gratificacionYaPagada === 'si'
     ? 0
-    : Math.round(gratMensualPagable * mesesFeriado);
+    : Math.round(gratMensualPagable * mesesEjercicio);
 
   // ── Remuneración del mes en curso (proporcional si no está pagada) ──
   const remMesEnCurso      = parseInt(fin.remMesEnCurso || 0);
@@ -842,7 +873,15 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // discutir, solo desconfiar.
   const desgloseBase       = fin.desgloseBase || null;
   const baseTopeada        = ult > topeIndem;
-  const indemMonto         = tieneIndemnizacion ? baseIndem * aniosIndemnizacion : 0;
+  const indemBruta         = tieneIndemnizacion ? baseIndem * aniosIndemnizacion : 0;
+  // Art. 13 Ley 19.728: en el despido por Art. 161, el empleador puede imputar
+  // a la indemnización por años de servicio lo que aportó a la cuenta
+  // individual de cesantía del trabajador, más su rentabilidad. El monto sale
+  // del certificado de la AFC. Ojo: si un tribunal declara injustificado el
+  // despido, la Corte Suprema ha resuelto que la imputación no procede.
+  const imputacionAFC      = tieneIndemnizacion && causal === '161'
+    ? Math.min(indemBruta, Math.max(0, parseInt(fin.imputacionAFC) || 0)) : 0;
+  const indemMonto         = indemBruta - imputacionAFC;
 
   // ── Indemnización sustitutiva aviso previo (Art. 161 CT) ──
   // La indemnización sustitutiva del aviso previo usa la misma base topeada.
@@ -889,13 +928,79 @@ function calcularFiniquito(fin, contrato, trabajador) {
     feriadoPendiente, feriadoPendMonto, totalFeriado, feriadoPendSugerido,
     gratPropMonto, gratAnualTope,
     remMesEnCurso, remPendiente, otrosHaberes,
-    tieneIndemnizacion, aniosIndemnizacion, aniosConFraccion, indemMonto,
+    tieneIndemnizacion, aniosIndemnizacion, aniosConFraccion, indemMonto, indemBruta, imputacionAFC,
+    mesesEjercicio,
     baseIndem, baseTopeada, topeIndem, gratMensualPagable, desgloseBase,
     indemAvisoPrevio,
     descAfp, descSalud, descCes, totalDescPrev,
     anticipoPend, otrosDescuentos, totalDescuentos,
     totalHaberes, totalFiniquito,
     ultimaRemuneracion: ult,
+  };
+}
+
+/**
+ * Base de la indemnización por años de servicio y del aviso previo (Art. 172),
+ * calculada desde las liquidaciones del trabajador.
+ *
+ *   · Fijos, del último mes completo: sueldo, colación, movilización y bonos
+ *     fijos mensuales (ítems que se prorratean).
+ *   · Variables (bono de producción, otros imponibles, ítems variables): el
+ *     promedio de los últimos tres meses (Art. 172 inc. 2).
+ *   · Gratificación mensual del contrato sobre esa base, con su tope. La Corte
+ *     Suprema ha resuelto que la gratificación pagada mes a mes se incluye: no
+ *     es un beneficio "por una sola vez al año".
+ *   · Fuera: horas extra y asignación familiar (las excluye el artículo) y
+ *     viáticos, que compensan gastos. Si un "viático" es en verdad un monto
+ *     fijo mensual que no compensa gastos reales, puede ser recalificado.
+ *
+ * Antes el modal precargaba el sueldo base del contrato: a quien ganaba
+ * $1.200.000 + gratificación + colación se le indemnizaba como si ganara
+ * $1.200.000.
+ *
+ * También devuelve `promedioVariable`, que es lo que el Art. 71 inc. 3 suma al
+ * sueldo para pagar el feriado.
+ */
+function baseIndemnizacion(trabajador, contrato, liqsTrabajador, fechaTermino) {
+  const tope = String(fechaTermino || '').slice(0, 7);
+  const per = (l) => `${l.anio}-${String(l.mes).padStart(2, '0')}`;
+  const liqs = liquidacionesVigentes(liqsTrabajador || [])
+    .filter(l => l.estado !== 'borrador' && (!tope || per(l) <= tope))
+    .sort((a, b) => per(b).localeCompare(per(a)));
+  if (!liqs.length) return null;
+
+  const n = v => Math.max(0, Math.round(Number(v) || 0));
+  const items = l => (Array.isArray(l.items) ? l.items : []);
+  const sumaItems = (l, filtro) => items(l).filter(filtro).reduce((s, i) => s + n(i.monto), 0);
+
+  const calcs = liqs.slice(0, 6).map(l => ({ l, c: liquidacionDe(trabajador, contrato, l) }));
+  const ref = calcs.find(x => x.c.diasTrab >= 30) || calcs[0];
+
+  const sueldo       = n(ref.l.sueldoBase || contrato?.sueldoBase);
+  const colacion     = n(ref.l.bonoColacion);
+  const movilizacion = n(ref.l.bonoMovilizacion);
+  const fijosImp     = sumaItems(ref.l, i => i.prorratea === true && i.tipo === 'imponible');
+  const fijosNoImp   = sumaItems(ref.l, i => i.prorratea === true && i.tipo === 'noImponible');
+
+  const ult3 = calcs.slice(0, 3);
+  const variableDe = x => n(x.c.bProd) + n(x.c.otrosImp) + sumaItems(x.l, i => i.prorratea !== true && i.tipo === 'imponible');
+  const promedioVariable = ult3.length ? Math.round(ult3.reduce((s, x) => s + variableDe(x), 0) / ult3.length) : 0;
+
+  const sinGrat = contrato?.gratificacion === 'ninguna' || contrato?.gratificacion === false;
+  const P = paramsDe({ mes: ref.l.mes, anio: ref.l.anio });
+  const gratificacion = sinGrat ? 0
+    : Math.round(Math.min((sueldo + promedioVariable + fijosImp) * 0.25, P.imm * 4.75 / 12));
+
+  const total = sueldo + gratificacion + promedioVariable + fijosImp + fijosNoImp + colacion + movilizacion;
+  return {
+    periodo: labelPeriodo(ref.l),
+    sueldoBase: sueldo, gratificacion,
+    bonoProduccion: promedioVariable,           // variables, promedio 3 meses
+    otrosImponibles: fijosImp,                  // bonos fijos imponibles
+    otrosNoImponibles: fijosNoImp,
+    colacion, movilizacion, viaticos: 0,
+    total, promedioVariable,
+    mesesPromediados: ult3.map(x => labelPeriodo(x.l)),
   };
 }
 
@@ -1488,7 +1593,7 @@ function fueReliquidada(liq, liquidaciones) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172,
+  nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172, baseIndemnizacion, festivosChile,
   calcularLiquidacion, remDe, liquidacionDe, redondearPar, contratoAlPeriodo, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
