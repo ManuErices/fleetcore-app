@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db, auth } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import { writeBatch, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import * as Shared from './shared';
 import * as Calc from './calculo';
@@ -707,10 +708,10 @@ function OldAsistenciaSection() {
   // ── Cargar trabajadores y contratos una sola vez ──
   useEffect(() => {
     Promise.all([
-      getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('apellidoPaterno'))),
+      fetchTrabajadores(empresaId),
       getDocs(collection(db, 'empresas', empresaId, 'contratos')),
-    ]).then(([tSnap, cSnap]) => {
-      setTrabajadores(tSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    ]).then(([trabajadoresList, cSnap]) => {
+      setTrabajadores(trabajadoresList);
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoadingBase(false);
     });

@@ -24,13 +24,50 @@ export function matchWorker(emp, search) {
 }
 
 /**
- * matchMachine: búsqueda flexible en tipo, patente, código y modelo.
+ * matchMachine: búsqueda flexible en tipo, patente, código, marca y modelo.
  */
 export function matchMachine(m, search) {
   if (!search?.trim()) return true;
-  const hay  = normalize([m.tipo, m.patente, m.codigo, m.code, m.modelo, m.name].join(' '));
+  const hay  = normalize([m.tipo, m.type, m.patente, m.codigo, m.code, m.marca, m.modelo, m.name, m.nombre].join(' '));
   const words = normalize(search).split(/\s+/).filter(Boolean);
   return words.every(w => hay.includes(w));
+}
+
+/**
+ * machineTitulo: nombre "humano" del equipo (Bulldozer, Motoniveladora, Camioneta…).
+ * Las máquinas creadas desde Administración guardan el tipo en `type`; las creadas
+ * desde el módulo de combustible lo guardan en `tipo`. Se usan ambos, y si no hay
+ * tipo se cae al nombre / marca+modelo antes de mostrar "Sin tipo".
+ */
+export function machineTitulo(m) {
+  if (!m) return 'Sin tipo';
+  const tipo = (m.tipo || m.type || '').trim();
+  if (tipo) return tipo;
+  const nombre = (m.name || m.nombre || '').trim();
+  if (nombre) return nombre;
+  const marcaModelo = [m.marca, m.modelo].filter(Boolean).join(' ').trim();
+  return marcaModelo || 'Sin tipo';
+}
+
+/**
+ * machinePatente: patente (o código) de la máquina.
+ */
+export function machinePatente(m) {
+  if (!m) return 'S/P';
+  const patente = (m.patente || '').trim();
+  const codigo = (m.codigo || m.code || '').trim();
+  if (patente && codigo && patente !== codigo) return `${codigo} · ${patente}`;
+  return patente || codigo || (m.modelo || '').trim() || 'S/P';
+}
+
+/**
+ * machineLabel: "TIPO · PATENTE" en una sola línea (listas compactas, vouchers).
+ */
+export function machineLabel(m) {
+  if (!m) return '';
+  const titulo = machineTitulo(m);
+  const patente = machinePatente(m);
+  return patente && patente !== 'S/P' ? `${titulo} · ${patente}` : titulo;
 }
 
 /**

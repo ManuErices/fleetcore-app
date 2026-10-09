@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 export default function CameraCapture({ onCapture, onClose, title = "Capturar Foto", color = "blue" }) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState(null);
+  const [facingMode, setFacingMode] = useState("environment"); // 'environment' = trasera, 'user' = delantera
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -17,9 +18,15 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
   const startCamera = async () => {
     try {
       setError(null);
+      // Cerrar el stream previo (importante al alternar de cámara)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      setStreaming(false);
       const constraints = {
         video: {
-          facingMode: { ideal: "environment" },
+          facingMode: { ideal: facingMode },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         }
@@ -35,6 +42,8 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
       setError("No se pudo acceder a la cámara. Asegúrate de dar los permisos necesarios.");
     }
   };
+
+  const flipCamera = () => setFacingMode(m => (m === "environment" ? "user" : "environment"));
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -58,6 +67,12 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
     canvas.width = Math.round(sw * scale);
     canvas.height = Math.round(sh * scale);
 
+    // Con la cámara delantera la vista previa se muestra espejada; espejamos
+    // también la captura para que la foto coincida con lo que se ve.
+    if (facingMode === "user") {
+      context.translate(canvas.width, 0);
+      context.scale(-1, 1);
+    }
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const photoData = canvas.toDataURL("image/jpeg", 0.5);
@@ -66,17 +81,17 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
     onClose();
   };
 
+  // (Re)inicia la cámara al montar y cada vez que se alterna delantera/trasera.
   useEffect(() => {
     startCamera();
-    
-    // Prevenir doble scroll al abrir el modal
+    return () => stopCamera();
+  }, [facingMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bloquea el scroll de fondo mientras el modal está abierto.
+  useEffect(() => {
     const originalStyle = window.getComputedStyle(document.body).overflow;
     document.body.style.overflow = 'hidden';
-    
-    return () => {
-      stopCamera();
-      document.body.style.overflow = originalStyle;
-    };
+    return () => { document.body.style.overflow = originalStyle; };
   }, []);
 
   const modalContent = (
@@ -130,7 +145,7 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className={`w-full h-full object-cover ${facingMode === "user" ? "scale-x-[-1]" : ""}`}
               />
               {!streaming && (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -141,6 +156,17 @@ export default function CameraCapture({ onCapture, onClose, title = "Capturar Fo
               <div className="absolute inset-0 pointer-events-none border-[3rem] border-black/40">
                 <div className="w-full h-full border-2 border-white/50 rounded-2xl"></div>
               </div>
+              {/* Botón alternar cámara delantera/trasera */}
+              <button
+                type="button"
+                onClick={flipCamera}
+                title={facingMode === "environment" ? "Usar cámara delantera" : "Usar cámara trasera"}
+                className="absolute top-3 right-3 w-11 h-11 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-md text-white flex items-center justify-center transition-all active:scale-90"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
             </div>
           )}
 

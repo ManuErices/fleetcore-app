@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, firebaseConfig } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getAuth, createUserWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
 import { initializeApp, deleteApp } from 'firebase/app';
@@ -573,13 +574,16 @@ function TrabajadoresSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const [tSnap, cSnap] = await Promise.all([
-        getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('apellidoPaterno'))),
+      // Sin orderBy('apellidoPaterno'): ese orderBy deja fuera a cualquier ficha
+      // sin ese campo (las creadas desde combustible o el importador), y esos
+      // trabajadores parecían borrados. Se ordena en memoria.
+      const [trabajadores, cSnap] = await Promise.all([
+        fetchTrabajadores(empresaId),
         getDocs(collection(db, 'empresas', empresaId, 'contratos')),
       ]);
-      setData(tSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setData(trabajadores);
       setContratos(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+    } catch (e) { console.error('Error cargando trabajadores:', e); }
     setLoading(false);
   }, [empresaId]);
 

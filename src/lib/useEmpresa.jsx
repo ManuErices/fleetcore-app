@@ -99,10 +99,31 @@ export function EmpresaProvider({ user, children }) {
           let eid = userData.empresaId?.trim() || null;
 
           if (esSuperAdmin && !eid) {
-            // Superadmin sin empresa asignada: toma la primera disponible
+            // Superadmin sin empresa asignada.
+            // Antes se tomaba `snap.docs[0]`, es decir la primera por ID: cada
+            // vez que alguien creaba una empresa o una sub-empresa con un ID
+            // "menor", el superadmin despertaba en OTRO tenant y veía todo
+            // vacío (operadores, máquinas, reportes). Se recuerda la última
+            // empresa usada y, al elegir una, se deja fijada en su usuario.
             const { getDocs } = await import('firebase/firestore');
             const snap = await getDocs(collection(db, 'empresas'));
-            if (!snap.empty) eid = snap.docs[0].id;
+            if (!snap.empty) {
+              const todas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              let recordada = null;
+              try { recordada = localStorage.getItem('empresaIdActiva'); } catch { /* modo privado */ }
+              const principales = todas.filter(e => !e.parentEmpresaId);
+              const candidata =
+                todas.find(e => e.id === recordada) ||
+                [...(principales.length ? principales : todas)]
+                  .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))[0];
+              eid = candidata?.id || null;
+
+              // Fijarla para que no vuelva a cambiar sola
+              if (eid) {
+                updateDoc(doc(db, 'users', user.uid), { empresaId: eid })
+                  .catch(err => console.warn('No se pudo fijar la empresa activa:', err?.code || err?.message));
+              }
+            }
           }
 
           if (!eid) {
@@ -112,6 +133,7 @@ export function EmpresaProvider({ user, children }) {
           }
 
           const datosEmpresa = await leerEmpresa(eid);
+          try { localStorage.setItem('empresaIdActiva', eid); } catch { /* modo privado */ }
           setEmpresaId(eid);
           setEmpresa({
             id: eid,
@@ -148,6 +170,10 @@ export function EmpresaProvider({ user, children }) {
         console.error('Error escuchando usuario:', err);
         setError('Error al cargar datos de empresa.');
         setLoading(false);
+        // Si el listener falla (permission-denied, red caída) hay que soltar el
+        // spinner de cambio de empresa; si no, el menú queda pegado en
+        // "Cambiando de empresa…" para siempre.
+        setCambiandoEmpresa(false);
       }
     );
 
@@ -196,13 +222,18 @@ export function EmpresaProvider({ user, children }) {
     }
 
     setSubEmpresasLoading(true);
+    // Sin orderBy('nombre'): descartaba las sub-empresas sin ese campo y obligaba
+    // a mantener un índice compuesto. Se ordena en memoria.
     const q = query(
       collection(db, 'empresas'),
-      where('parentEmpresaId', '==', empresaId),
-      orderBy('nombre')
+      where('parentEmpresaId', '==', empresaId)
     );
     const unsub = onSnapshot(q, (snap) => {
-      setSubEmpresas(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setSubEmpresas(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'))
+      );
       setSubEmpresasLoading(false);
     }, (err) => {
       console.error('Error cargando sub_empresas:', err);

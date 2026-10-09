@@ -8,6 +8,24 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ReporteDetalleModal from "../../components/ReporteDetalleModal";
 import ReportDetallado from "./ReportDetallado";
+import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
+import { useToast, ToastContainer } from "../../components/Toast";
+import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
+import { machineLabel } from "../../utils/searchHelpers";
+
+// Estandariza nombres propios (operadores, obras) a Capitalización de Título:
+// la data llega en MAYÚSCULAS ("JOSE BRAVO BRAVO") y se ve mejor uniforme.
+// Respeta conectores en minúscula (de, del, la, y…) y no toca códigos/RUT.
+const CONECTORES = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'do']);
+function titleCase(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w, i) => (i > 0 && CONECTORES.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+    .trim();
+}
 
 // ═══════════════════════════════════════════════════════════════
 // PLANTILLA DE IMPORTACIÓN
@@ -82,12 +100,16 @@ export function descargarPlantillaReportes() {
 
 export default function ReporteWorkFleet() {
   const { empresaId } = useEmpresa();
+  const { toast, toasts, removeToast } = useToast();
+  const [reporteAEliminar, setReporteAEliminar] = useState(null); // reporte pendiente de confirmar eliminación
   const [reportes, setReportes] = useState([]);
   const [projects, setProjects] = useState([]);
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   const [reporteDetalle, setReporteDetalle] = useState(null);
+  const [abrirEnEdicion, setAbrirEnEdicion] = useState(false); // abrir el detalle directo en modo edición
+  const [maquinaDetalle, setMaquinaDetalle] = useState(null); // máquina cuyo detalle se despliega
   const [userRole, setUserRole] = useState('operador'); // Estado para el rol del usuario
   const [currentUser, setCurrentUser] = useState(null); // Usuario actual
   const [reportesSeleccionados, setReportesSeleccionados] = useState([]);
@@ -115,6 +137,11 @@ export default function ReporteWorkFleet() {
   // Listas únicas para selectores
   const [operadores, setOperadores] = useState([]);
   const [empleados, setEmpleados] = useState([]);
+
+  // Planes/eventos de mantención (módulo maquinaria) para el panel de Análisis.
+  // Se cargan bajo empresas/{empresaId}/... — se mantiene el aislamiento multi-tenant.
+  const [maintPlans, setMaintPlans] = useState([]);
+  const [maintEvents, setMaintEvents] = useState([]);
 
   // Obtener rol del usuario actual desde Firebase
   useEffect(() => {
@@ -171,14 +198,37 @@ export default function ReporteWorkFleet() {
         }));
         setMachines(machinesData);
 
-        // Cargar empleados
-        const empleadosRef = collection(db, 'empresas', empresaId, 'employees');
-        const empleadosSnap = await getDocs(empleadosRef);
-        const empleadosData = empleadosSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setEmpleados(empleadosData);
+        // Cargar operadores registrados para el desplegable de "quién registra".
+        // La nómina vive en 'trabajadores'; 'employees' es la colección anterior
+        // a la migración y aún tiene fichas antiguas. Se leen las dos y se
+        // fusionan por RUT (cayendo al id si no hay RUT), así la misma persona
+        // presente en ambas colecciones aparece una sola vez y con los datos de
+        // 'trabajadores', que es la fuente vigente.
+        const [trabSnap, legacySnap] = await Promise.all([
+          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
+          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
+        ]);
+        const porClave = new Map();
+        [...legacySnap.docs, ...trabSnap.docs].forEach(d => {
+          const data = { id: d.id, ...d.data() };
+          const clave = (data.rut || '').replace(/[.\-\s]/g, '').toUpperCase() || d.id;
+          porClave.set(clave, { ...(porClave.get(clave) || {}), ...data });
+        });
+        setEmpleados([...porClave.values()]);
+
+        // Planes y eventos de mantención (helpers ya scoped a empresaId).
+        // Si el módulo maquinaria no está en uso, quedan vacíos y el panel
+        // de mantenciones simplemente no se muestra.
+        try {
+          const [planes, eventos] = await Promise.all([
+            listMaintenancePlans(empresaId),
+            listMaintenanceEvents(empresaId),
+          ]);
+          setMaintPlans(planes);
+          setMaintEvents(eventos);
+        } catch (mantErr) {
+          console.warn("No se pudieron cargar mantenciones:", mantErr?.message);
+        }
       } catch (error) {
         console.error("Error cargando datos base:", error);
       }
@@ -222,15 +272,15 @@ export default function ReporteWorkFleet() {
   // ✅ FIX correlativo: soft-delete. El documento se conserva marcado como
   // eliminado, de modo que su número de reporte sigue "tomado" y el correlativo
   // de la máquina nunca retrocede ni reutiliza folios ya impresos en terreno.
-  const handleEliminarReporte = async (id) => {
+  // Abre el modal de confirmación (reemplaza al window.confirm nativo)
+  const handleEliminarReporte = (id) => {
     const reporte = reportes.find(r => r.id === id);
-    const ok = window.confirm(
-      `¿Eliminar el reporte ${reporte?.numeroReporte || ''}?\n\n` +
-      'Quedará oculto del listado pero se conserva en la base de datos, ' +
-      'para no reutilizar su número correlativo.'
-    );
-    if (!ok) return;
+    setReporteAEliminar(reporte || { id });
+  };
 
+  const confirmarEliminarReporte = async () => {
+    const id = reporteAEliminar?.id;
+    if (!id) return;
     try {
       await updateDoc(doc(db, 'empresas', empresaId, 'reportes_detallados', id), {
         deleted: true,
@@ -242,8 +292,11 @@ export default function ReporteWorkFleet() {
         },
       });
       setReportes(prev => prev.map(r => (r.id === id ? { ...r, deleted: true } : r)));
+      toast({ type: 'success', message: `Reporte ${reporteAEliminar?.numeroReporte || ''} eliminado.` });
     } catch (err) {
-      alert('Error al eliminar: ' + err.message);
+      toast({ type: 'error', message: 'No se pudo eliminar el reporte: ' + err.message });
+    } finally {
+      setReporteAEliminar(null);
     }
   };
 
@@ -301,15 +354,41 @@ export default function ReporteWorkFleet() {
 
       return {
         ...r,
-        projectName:    project?.name    || r.projectName    || r.projectId || '',
-        machinePatente: machine?.patente || r.machinePatente || '',
-        machineCode:    machine?.code    || r.machineCode    || '',
-        machineName:    machine?.name    || r.machineName    || '',
-        machineType:    machine?.type    || r.machineType    || '',
-        machineMarca:   machine?.marca   || r.machineMarca   || '',
+        projectName:       project?.name        || r.projectName    || r.projectId || '',
+        projectCode:       project?.codigo      || r.projectCode    || '',
+        projectMandante:   project?.mandante    || r.projectMandante || '',
+        machinePatente:    machine?.patente     || r.machinePatente || '',
+        machineCode:       machine?.code        || r.machineCode    || '',
+        machineName:       machine?.name        || r.machineName    || '',
+        machineType:       machine?.type        || r.machineType    || '',
+        machineMarca:      machine?.marca       || r.machineMarca   || '',
+        machineModelo:     machine?.modelo      || r.machineModelo  || '',
+        machineEmpresa:    machine?.empresa     || r.machineEmpresa || '',
+        machinePropietario: machine?.propietario || r.machinePropietario || '',
       };
     });
   }, [filtros, reportes, projects, machines, userRole, mostrarEliminados]);
+
+  // ✅ Filtros Máquina ↔ Operador correlativos: al elegir una máquina, el
+  // selector de operadores muestra solo quienes tienen registros con ella, y
+  // viceversa. Se basa en los reportes activos (no eliminados).
+  const machinesDisponibles = useMemo(() => {
+    if (!filtros.operador) return machines;
+    const ids = new Set(
+      reportes.filter(r => r.deleted !== true && r.operador === filtros.operador)
+              .map(r => r.machineId)
+    );
+    return machines.filter(m => ids.has(m.id));
+  }, [machines, reportes, filtros.operador]);
+
+  const operadoresDisponibles = useMemo(() => {
+    if (!filtros.maquina) return operadores;
+    const ops = new Set(
+      reportes.filter(r => r.deleted !== true && r.machineId === filtros.maquina)
+              .map(r => r.operador).filter(Boolean)
+    );
+    return operadores.filter(o => ops.has(o));
+  }, [operadores, reportes, filtros.maquina]);
 
   const handleFiltroChange = (campo, valor) => {
     setFiltros(prev => ({
@@ -780,14 +859,25 @@ export default function ReporteWorkFleet() {
         ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(2)
         : '0';
 
+      // "Máquina": nombre descriptivo; si no hay name, cae a tipo/marca/modelo.
+      const maquinaDesc = r.machineName
+        || [r.machineType, r.machineMarca, r.machineModelo].filter(Boolean).join(' ')
+        || r.machineCode || r.machineId || '';
+
       return {
-        'Cod. Obra': r.projectId || '',
-        'Obra': r.projectName,
+        'Cod. Obra': r.projectCode || '',
+        'Obra': titleCase(r.projectName),
+        'Mandante': titleCase(r.projectMandante),
         'Fecha': r.fecha,
-        'Cod./ Patente': r.machinePatente || r.machineId,
-        'Máquina': r.machineName || r.machineId,
+        'Cod./ Patente': r.machinePatente || r.machineCode || '',
+        'Máquina': maquinaDesc,
+        'Tipo Máquina': r.machineType || '',
+        'Marca': r.machineMarca || '',
+        'Modelo': r.machineModelo || '',
+        'Empresa/Propietario': r.machineEmpresa || r.machinePropietario || '',
         'N° de Reporte': r.numeroReporte,
-        'Nombre Operador': r.operador,
+        'Folio': r.folio || r.folioExterno || '',
+        'Nombre Operador': titleCase(r.operador),
         'Rut Operador': r.rut,
         'Horas Inicial': r.horometroInicial || '0',
         'Horas Final': r.horometroFinal || '0',
@@ -800,15 +890,21 @@ export default function ReporteWorkFleet() {
     });
 
     const ws = XLSX.utils.json_to_sheet(datosExcel);
-    
+
     // Ajustar ancho de columnas
     const columnWidths = [
       { wch: 12 }, // Cod. Obra
-      { wch: 20 }, // Obra
+      { wch: 22 }, // Obra
+      { wch: 22 }, // Mandante
       { wch: 12 }, // Fecha
       { wch: 15 }, // Cod./Patente
-      { wch: 20 }, // Máquina
+      { wch: 24 }, // Máquina
+      { wch: 16 }, // Tipo Máquina
+      { wch: 14 }, // Marca
+      { wch: 14 }, // Modelo
+      { wch: 22 }, // Empresa/Propietario
       { wch: 15 }, // N° Reporte
+      { wch: 14 }, // Folio
       { wch: 25 }, // Nombre Operador
       { wch: 15 }, // Rut Operador
       { wch: 10 }, // Horas Inicial
@@ -822,7 +918,95 @@ export default function ReporteWorkFleet() {
     ws['!cols'] = columnWidths;
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Reportes WorkFleet');
+
+    // ── Hoja(s) "CONTROL DE MAQUINARIA": una por máquina (como el cliente) ──
+    // Si el filtro trae una sola máquina, sale una hoja; si trae varias, una
+    // hoja por cada una. La hoja de datos plana va al final.
+    const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const periodoDe = (grupo) => {
+      const fechas = grupo.map(r => r.fecha).filter(Boolean).sort();
+      const f = fechas[fechas.length - 1] || '';
+      const m = /^(\d{4})-(\d{2})/.exec(f);
+      return m ? `${MESES[parseInt(m[2], 10) - 1]}.-${m[1].slice(2)}` : '';
+    };
+
+    // Nombres de pestaña: máx 31 chars, sin caracteres inválidos, únicos.
+    const nombresUsados = new Set();
+    const nombreHoja = (base) => {
+      let n = String(base || 'Maquina').replace(/[[\]:*?/\\]/g, ' ').slice(0, 28).trim() || 'Maquina';
+      let final = n, i = 2;
+      while (nombresUsados.has(final.toLowerCase())) final = `${n} ${i++}`.slice(0, 31);
+      nombresUsados.add(final.toLowerCase());
+      return final;
+    };
+
+    // Agrupar los reportes filtrados por máquina
+    const grupos = {};
+    reportesFiltrados.forEach(r => {
+      const k = r.machineId || r.machinePatente || 'sin-maquina';
+      (grupos[k] = grupos[k] || []).push(r);
+    });
+
+    Object.values(grupos).forEach(grupoRaw => {
+      const grupo = [...grupoRaw].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+      const first = grupo[0];
+      const maquina = first.machineName
+        || [first.machineType, first.machineMarca, first.machineModelo].filter(Boolean).join(' ')
+        || first.machineCode || first.machinePatente || 'Máquina';
+
+      const aoa = [];
+      aoa.push(['', 'MPF INGENIERIA CIVIL SPA', '', '', '', '', '', '', 'CENTRO DE COSTO']);
+      aoa.push(['', 'CONTROL DE MAQUINARIA', '', '', '', '', '', '', first.projectCode || '']);
+      aoa.push(['', (first.machineType || '').toUpperCase(), '', '', '', '', '', '', titleCase(first.projectName)]);
+      aoa.push([]);
+      aoa.push(['MAQUINA', ':', maquina]);
+      aoa.push(['PATENTE', ':', first.machinePatente || first.machineCode || '']);
+      aoa.push(['PROVEEDOR', ':', first.machineEmpresa || first.machinePropietario || '']);
+      aoa.push(['PERIODO', ':', periodoDe(grupo)]);
+      aoa.push([]);
+      aoa.push(['Fecha', 'Folio', 'Empleado', 'Horómetro Inicial', 'Horómetro Final', 'Actividad', 'Diésel Lts.', 'Actividades Realizadas', 'Obs. Maquina']);
+
+      let totalHoras = 0, totalDiesel = 0;
+      grupo.forEach(r => {
+        const hi = parseFloat(r.horometroInicial) || 0;
+        const hf = parseFloat(r.horometroFinal) || 0;
+        const horas = Math.max(0, hf - hi);
+        const diesel = parseFloat(r.cargaCombustible) || 0;
+        totalHoras += horas;
+        totalDiesel += diesel;
+        const actividades = r.observaciones
+          || (r.actividadesEfectivas || []).map(a => a.actividad).filter(Boolean).join('; ');
+        aoa.push([
+          r.fecha,
+          r.folio || r.folioExterno || r.numeroReporte || '',
+          titleCase(r.operador),
+          hi || '',
+          hf || '',
+          horas,
+          diesel,
+          actividades || '',
+          r.observacionesMaquina || r.obsMaquina || '',
+        ]);
+      });
+      aoa.push([]);
+      aoa.push(['', '', 'TOTAL HORÓMETRO', '', '', totalHoras, totalDiesel, '', '']);
+
+      const wsCtrl = XLSX.utils.aoa_to_sheet(aoa);
+      wsCtrl['!merges'] = [
+        { s: { r: 0, c: 1 }, e: { r: 0, c: 7 } },
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 7 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 7 } },
+      ];
+      wsCtrl['!cols'] = [
+        { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 12 },
+        { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 20 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsCtrl, nombreHoja(first.machinePatente || first.machineCode || maquina));
+    });
+
+    // Hoja de datos plana (todos los registros) al final
+    XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+
     XLSX.writeFile(wb, `Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
@@ -846,12 +1030,18 @@ export default function ReporteWorkFleet() {
         ? (parseFloat(r.kilometrajeFinal) - parseFloat(r.kilometrajeInicial)).toFixed(2)
         : '0';
 
+      // Descripción de la máquina: tipo (marca/modelo si hay).
+      const maquinaDesc = r.machineType
+        || [r.machineMarca, r.machineModelo].filter(Boolean).join(' ')
+        || r.machineName || '';
+
       return [
-        r.projectName || '',
+        titleCase(r.projectName) || '',
         r.fecha,
+        maquinaDesc,
         r.machinePatente || '',
-        r.numeroReporte,
-        r.operador,
+        r.folio || r.folioExterno || '—',
+        titleCase(r.operador),
         r.rut,
         r.horometroInicial || '0',
         r.horometroFinal || '0',
@@ -867,8 +1057,9 @@ export default function ReporteWorkFleet() {
       head: [[
         'Obra',
         'Fecha',
+        'Máquina',
         'Patente',
-        'N° Rep.',
+        'Folio',
         'Operador',
         'RUT',
         'H.Ini',
@@ -884,19 +1075,20 @@ export default function ReporteWorkFleet() {
       styles: { fontSize: 7 },
       headStyles: { fillColor: [124, 58, 237], fontSize: 7 },
       columnStyles: {
-        0: { cellWidth: 25 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 13 },
-        7: { cellWidth: 13 },
-        8: { cellWidth: 13 },
-        9: { cellWidth: 13 },
-        10: { cellWidth: 13 },
-        11: { cellWidth: 13 },
-        12: { cellWidth: 13 }
+        0: { cellWidth: 23 },
+        1: { cellWidth: 18 },
+        2: { cellWidth: 24 }, // Máquina
+        3: { cellWidth: 16 }, // Patente
+        4: { cellWidth: 18 }, // Folio
+        5: { cellWidth: 28 },
+        6: { cellWidth: 20 },
+        7: { cellWidth: 12 },
+        8: { cellWidth: 12 },
+        9: { cellWidth: 12 },
+        10: { cellWidth: 12 },
+        11: { cellWidth: 12 },
+        12: { cellWidth: 12 },
+        13: { cellWidth: 12 }
       }
     });
 
@@ -997,8 +1189,8 @@ export default function ReporteWorkFleet() {
                 className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               >
                 <option value="">Todas</option>
-                {machines.map(m => (
-                  <option key={m.id} value={m.id}>{m.code || m.patente || m.name}</option>
+                {machinesDisponibles.map(m => (
+                  <option key={m.id} value={m.id}>{machineLabel(m)}</option>
                 ))}
               </select>
             </div>
@@ -1012,7 +1204,7 @@ export default function ReporteWorkFleet() {
                 className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:outline-none focus:border-indigo-500"
               >
                 <option value="">Todos</option>
-                {operadores.map(o => (
+                {operadoresDisponibles.map(o => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -1163,6 +1355,7 @@ export default function ReporteWorkFleet() {
                     />
                   </th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">N° Reporte</th>
+                <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Folio</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Obra</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Fecha</th>
                 <th className="px-3 py-4 text-left text-xs font-bold uppercase tracking-wider">Patente</th>
@@ -1178,7 +1371,7 @@ export default function ReporteWorkFleet() {
               <thead className="bg-indigo-700">
                 <tr>
                   <th></th>
-                  <th colSpan="6"></th>
+                  <th colSpan="7"></th>
                   <th className="px-1 py-2 text-xs font-semibold text-white">Ini</th>
                   <th className="px-1 py-2 text-xs font-semibold text-white">Fin</th>
                   <th className="px-1 py-2 text-xs font-semibold text-white">Trab.</th>
@@ -1191,7 +1384,7 @@ export default function ReporteWorkFleet() {
               <tbody className="divide-y divide-indigo-100">
                 {reportesFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan="15" className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan="16" className="px-6 py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center gap-3">
                       <svg className="w-16 h-16 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1228,15 +1421,30 @@ export default function ReporteWorkFleet() {
                       </td>
                       <td className="px-3 py-3 text-sm">
                         <button
-                          onClick={() => setReporteDetalle(reporte)}
+                          onClick={() => { setAbrirEnEdicion(false); setReporteDetalle(reporte); }}
                           className="font-black text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
                         >
                           {reporte.numeroReporte}
                         </button>
                       </td>
+                      <td className="px-3 py-3 text-sm text-slate-700">{reporte.folio || reporte.folioExterno || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.projectName || '-'}</td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.fecha}</td>
-                      <td className="px-3 py-3 text-sm font-semibold text-indigo-600">{reporte.machinePatente || '-'}</td>
+                      <td className="px-3 py-3 text-sm font-semibold">
+                        {(() => {
+                          const maq = machines.find(m => m.id === reporte.machineId);
+                          if (!maq) return <span className="text-indigo-600">{reporte.machinePatente || '-'}</span>;
+                          return (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setMaquinaDetalle(maq); }}
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                              title="Ver información del vehículo"
+                            >
+                              {reporte.machinePatente || maq.code || '-'}
+                            </button>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-3 text-sm text-slate-900">{reporte.operador}</td>
                       <td className="px-3 py-3 text-sm text-slate-600">{reporte.rut}</td>
                       <td className="px-1 py-3 text-sm text-slate-900 text-center">{reporte.horometroInicial || '0'}</td>
@@ -1267,12 +1475,12 @@ export default function ReporteWorkFleet() {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* ✅ Editar: abre el modal de detalle (que ahora sí muestra el botón) */}
+                          {/* ✅ Editar: abre el modal directamente en modo edición */}
                           {puedeEditar && !reporte.deleted && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setReporteDetalle(reporte); }}
+                              onClick={(e) => { e.stopPropagation(); setAbrirEnEdicion(true); setReporteDetalle(reporte); }}
                               className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-xs font-bold transition-all border border-blue-200"
-                              title="Ver y editar el reporte"
+                              title="Editar el reporte"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -1402,6 +1610,50 @@ export default function ReporteWorkFleet() {
 
         const totalDesglose = horasEfectivas + horasNoEfectivas + horasMantenciones + horasProgramadas;
 
+        // ── Mantenciones (periodo de hrs) que se actualiza con registros ──
+        // El "medidor actual" efectivo de cada máquina es el horómetro más alto
+        // reportado (crece con cada registro), o el medidorActual guardado.
+        const horometroPorMaquina = {};
+        reportes.filter(r => r.deleted !== true).forEach(r => {
+          const hf = parseFloat(r.horometroFinal) || 0;
+          if (r.machineId && hf > (horometroPorMaquina[r.machineId] || 0)) {
+            horometroPorMaquina[r.machineId] = hf;
+          }
+        });
+        // Solo máquinas presentes en el filtro actual
+        const maquinasEnFiltro = new Set(reportesFiltrados.map(r => r.machineId).filter(Boolean));
+
+        const mantenciones = maintPlans
+          .filter(plan => plan.machineId && maquinasEnFiltro.has(plan.machineId))
+          // periodo en horas: horómetro (se excluye km)
+          .filter(plan => (plan.medidorTipo || machines.find(m => m.id === plan.machineId)?.medidorTipo || 'horometro') === 'horometro')
+          .map(plan => {
+            const machine = machines.find(m => m.id === plan.machineId);
+            const medidorGuardado = machine?.medidorActual != null ? Number(machine.medidorActual) : 0;
+            const medidorEfectivo = Math.max(medidorGuardado, horometroPorMaquina[plan.machineId] || 0);
+            const eventosPlan = maintEvents
+              .filter(e => e.planId === plan.id && e.proximaMantencionEn != null)
+              .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            let objetivo = null;
+            if (eventosPlan.length) objetivo = Number(eventosPlan[0].proximaMantencionEn);
+            else if (Number(plan.intervalo)) objetivo = medidorGuardado + Number(plan.intervalo);
+            const restante = objetivo != null ? objetivo - medidorEfectivo : null;
+            return {
+              id: plan.id,
+              etiqueta: machine?.code || machine?.patente || machine?.name || 'Máquina',
+              nombrePlan: plan.nombre || plan.descripcion || 'Mantención',
+              intervalo: Number(plan.intervalo) || 0,
+              medidorEfectivo,
+              objetivo,
+              restante,
+            };
+          })
+          .sort((a, b) => {
+            if (a.restante == null) return 1;
+            if (b.restante == null) return -1;
+            return a.restante - b.restante;
+          });
+
         return (
           <div className="w-full mb-6 mt-6">
             <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
@@ -1440,7 +1692,26 @@ export default function ReporteWorkFleet() {
                   </div>
                 </div>
 
-                {/* Desglose + Top máquinas */}
+                {/* 2ª fila: Combustible y Rendimientos (según filtros aplicados) */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Consumo Combustible</div>
+                    <div className="text-2xl font-black text-amber-700">{totalCombustible.toFixed(1)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">litros (Σ carga)</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Rendimiento lt/hr</div>
+                    <div className="text-2xl font-black text-orange-700">{combustiblePorHora.toFixed(2)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">litros por hora</div>
+                  </div>
+                  <div className="bg-sky-50 rounded-xl p-4 border border-sky-200">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Rendimiento km/hr</div>
+                    <div className="text-2xl font-black text-sky-700">{kmPorHora.toFixed(2)}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">km por hora</div>
+                  </div>
+                </div>
+
+                {/* 3ª fila: Desglose + Top máquinas */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Desglose horas por tipo */}
                   <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
@@ -1503,16 +1774,101 @@ export default function ReporteWorkFleet() {
                     )}
                   </div>
                 </div>
+
+                {/* 4ª fila: Mantenciones (periodo de hrs) — se actualiza con los registros */}
+                {mantenciones.length > 0 && (
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                    <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-3">Mantenciones — Horas hasta la próxima</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {mantenciones.slice(0, 9).map(m => {
+                        const vencida = m.restante != null && m.restante <= 0;
+                        const umbral = Math.max(50, m.intervalo * 0.1);
+                        const proxima = m.restante != null && m.restante > 0 && m.restante <= umbral;
+                        const color = m.restante == null ? 'text-slate-400' : vencida ? 'text-red-600' : proxima ? 'text-amber-600' : 'text-emerald-600';
+                        const bg = m.restante == null ? 'bg-white border-slate-200' : vencida ? 'bg-red-50 border-red-200' : proxima ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200';
+                        return (
+                          <div key={m.id} className={`rounded-lg p-3 border ${bg}`}>
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="min-w-0">
+                                <div className="text-sm font-black text-slate-800 truncate">{m.etiqueta}</div>
+                                <div className="text-[11px] text-slate-500 truncate">{m.nombrePlan} · cada {m.intervalo.toLocaleString('es-CL')} hrs</div>
+                              </div>
+                              <div className={`text-right shrink-0 ${color}`}>
+                                {m.restante == null ? (
+                                  <div className="text-xs font-bold">Sin objetivo</div>
+                                ) : vencida ? (
+                                  <>
+                                    <div className="text-base font-black leading-none">VENCIDA</div>
+                                    <div className="text-[11px] font-semibold">hace {Math.abs(m.restante).toFixed(0)} hrs</div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="text-lg font-black leading-none">{m.restante.toFixed(0)}</div>
+                                    <div className="text-[11px] font-semibold">hrs restantes</div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-2 text-[11px] text-slate-400">
+                              Horómetro: {m.medidorEfectivo.toLocaleString('es-CL')} hrs
+                              {m.objetivo != null ? ` · objetivo ${Number(m.objetivo).toLocaleString('es-CL')} hrs` : ''}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         );
       })()}
+      {/* Detalle de la máquina (clic en la patente) */}
+      {maquinaDetalle && (
+        <MaquinaDetalleModal machine={maquinaDetalle} empresaId={empresaId} onClose={() => setMaquinaDetalle(null)} />
+      )}
+
+      {/* Confirmación de eliminación (reemplaza al confirm nativo) */}
+      {reporteAEliminar && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-black text-slate-900 text-center mb-1">
+              Eliminar reporte {reporteAEliminar.numeroReporte || ''}
+            </h3>
+            <p className="text-sm text-slate-500 text-center mb-5">
+              Quedará oculto del listado pero se conserva en la base de datos, para no reutilizar su número correlativo.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setReporteAEliminar(null)}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarEliminarReporte}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+
       {/* Modal de Detalle del Reporte */}
       {reporteDetalle && (
         <ReporteDetalleModal
           reporte={reporteDetalle}
-          onClose={() => setReporteDetalle(null)}
+          onClose={() => { setReporteDetalle(null); setAbrirEnEdicion(false); }}
           projectName={projects.find(p => p.id === reporteDetalle.projectId)?.name}
           machineInfo={machines.find(m => m.id === reporteDetalle.machineId) || {
             patente: reporteDetalle.machinePatente || '',
@@ -1522,6 +1878,9 @@ export default function ReporteWorkFleet() {
             marca:   reporteDetalle.machineMarca   || '',
           }}
           userRole={rolParaModal}
+          empleados={empleados}
+          machines={machines}
+          iniciarEnEdicion={abrirEnEdicion}
           onSave={async (editedData) => {
             try {
               if (!puedeEditar) {

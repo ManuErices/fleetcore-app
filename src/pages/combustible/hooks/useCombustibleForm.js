@@ -7,6 +7,7 @@ import { getNextGuiaNumber } from '../../../utils/voucherThermalGenerator';
 import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
 import { useEmpresa } from '../../../lib/useEmpresa';
+import { useSurtidorStock } from './useSurtidorStock';
 
 const TODAY = () => new Date().toISOString().split('T')[0];
 
@@ -54,8 +55,10 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
   const [userRole, setUserRole] = useState('operador');
   const [isOfflineSave, setIsOfflineSave] = useState(false);
   const isAdmin = userRole === 'superadmin' || userRole === 'admin_contrato' || userRole === 'admin';
+  // Solo admin / admin_contrato o quien trabaja desde el módulo de reportes puede
+  // elegir a nombre de quién se registra el movimiento.
+  const puedeElegirRepartidor = isAdmin || !!isReportesView;
   const [surtidoresPersonas, setSurtidoresPersonas] = useState([]);
-  const [repartidorSeleccionado, setRepartidorSeleccionado] = useState(null);
 
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [lastReportData, setLastReportData] = useState(null);
@@ -159,8 +162,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         if (userData) {
           setCurrentUserData(userData);
           setUserRole(userData.role || 'operador');
-          const effectIsAdmin = userData.role === 'superadmin' || userData.role === 'admin_contrato';
-          if (!datosControl.repartidorId && !effectIsAdmin) {
+          const effectIsAdmin = userData.role === 'superadmin' || userData.role === 'admin_contrato' || !!isReportesView;
+          if (!datosControl.repartidorId) {
             setDatosControl(prev => ({ ...prev, repartidorId: userData.id }));
           }
           if (!effectIsAdmin && !datosEntrada.operadorId) {
@@ -187,15 +190,20 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
   }, [empleados]);
 
-  // Auto-asignación y sincronización de repartidor para no-admins (evita quedarse vacío al hacer reset del formulario)
+  // Auto-asignación y sincronización del repartidor.
+  // - Quien NO puede elegir (operadores): siempre queda asignado a sí mismo.
+  // - Quien SÍ puede elegir (admin / admin_contrato / módulo reportes): se
+  //   precarga con su propio usuario, pero una selección manual no se pisa.
   useEffect(() => {
-    if (!currentUserData || isAdmin) return;
-    const self = surtidoresPersonas.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+    if (!currentUserData) return;
+    const self = surtidoresPersonas.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut))
+      || trabajadoresLocales.find(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
     const targetId = self ? self.id : currentUserData.id;
+    if (puedeElegirRepartidor && datosControl.repartidorId && datosControl.repartidorId !== currentUserData.id) return;
     if (datosControl.repartidorId !== targetId) {
       setDatosControl(prev => ({ ...prev, repartidorId: targetId }));
     }
-  }, [currentUserData, isAdmin, surtidoresPersonas, datosControl.repartidorId]);
+  }, [currentUserData, puedeElegirRepartidor, surtidoresPersonas, trabajadoresLocales, datosControl.repartidorId]);
 
   // Auto-asignación y sincronización de operador receptor para no-admins
   useEffect(() => {
@@ -256,6 +264,48 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
   };
   const esMPF = esEmpresaInterna;
 
+  // ── Repartidor ────────────────────────────────────────────────
+
+  // Personas autorizadas a repartir: las marcadas como surtidor en RRHH.
+  // Si el usuario actual no está en esa lista, se agrega para que siempre
+  // pueda quedar como repartidor de su propio registro.
+  const repartidoresDisponibles = (() => {
+    const lista = [...surtidoresPersonas];
+    if (currentUserData) {
+      const yaEsta = lista.some(p => p.id === currentUserData.id || (currentUserData.rut && p.rut === currentUserData.rut));
+      if (!yaEsta) {
+        lista.push({
+          id: currentUserData.id,
+          nombre: currentUserData.nombre || currentUserData.email || 'Mi usuario',
+          rut: currentUserData.rut || '',
+        });
+      }
+    }
+    return lista.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+  })();
+
+  const repartidorSeleccionado = datosControl.repartidorId
+    ? (repartidoresDisponibles.find(p => p.id === datosControl.repartidorId)
+      || trabajadoresLocales.find(p => p.id === datosControl.repartidorId)
+      || (currentUserData?.id === datosControl.repartidorId ? currentUserData : null))
+    : null;
+
+  // ── Stock / capacidad del equipo surtidor ─────────────────────
+
+  const equipoSurtidorSel = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId) || null;
+  const capacidadSurtidor = parseFloat(equipoSurtidorSel?.capacidad) || 0;
+  const { stock: stockSurtidor, recargar: recargarStockSurtidor } = useSurtidorStock(empresaId, datosControl.equipoSurtidorId);
+
+  // La entrada suma litros al surtidor cuando el equipo que recibe ES el surtidor
+  // (carga desde estación de servicio o traspaso interno al camión/mochila).
+  // Debe coincidir con el machineId que se guarda al enviar el reporte.
+  const machineIdEntrada = (datosEntrada.tipoOrigen === 'estacion' && datosEntrada.destinoCarga === 'camion')
+    ? datosControl.equipoSurtidorId
+    : datosEntrada.machineId;
+  const entradaCargaAlSurtidor = tipoReporte === 'entrada'
+    && !!datosControl.equipoSurtidorId
+    && machineIdEntrada === datosControl.equipoSurtidorId;
+
   // ── Actions ───────────────────────────────────────────────────
 
   const cargarEstaciones = async (projectId) => {
@@ -290,6 +340,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       empresa: '', fecha: TODAY(), operadorId: '', machineId: '',
       horometroOdometro: '', cantidadLitros: '', observaciones: '', extraEmails: []
     });
+    setOperadorExterno({ nombre: '', rut: '' });
+    setMaquinaExterna({ patente: '', tipo: '', modelo: '' });
     setIsOfflineSave(false);
   };
 
@@ -420,11 +472,27 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     setLoading(true);
     try {
       const empresaNombre = resolverNombreEmpresa(nuevoEmpleadoData.empresaId);
+      // Ficha completa: RRHH y Asistencia ordenan por apellidoPaterno y antes
+      // estas fichas (creadas al vuelo desde combustible) quedaban invisibles
+      // ahí, como si no existieran. Se guardan los mismos campos base que usa
+      // el resto del sistema.
+      const nombreCompleto = nuevoEmpleadoData.nombre.trim().toUpperCase();
+      const partes = nombreCompleto.split(/\s+/).filter(Boolean);
+      const nombres = partes.length >= 3 ? partes.slice(0, partes.length - 2).join(' ') : (partes[0] || '');
+      const apellidoPaterno = partes.length >= 3 ? partes[partes.length - 2] : (partes[1] || '');
+      const apellidoMaterno = partes.length >= 3 ? partes[partes.length - 1] : '';
       const eRef = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), {
-        nombre: nuevoEmpleadoData.nombre.toUpperCase(),
+        nombre: nombreCompleto,
+        nombres,
+        apellidoPaterno,
+        apellidoMaterno,
         rut: nuevoEmpleadoData.rut || '',
         empresa: empresaNombre,
         empresaId: nuevoEmpleadoData.empresaId,
+        cargo: '',
+        estado: 'activo',
+        tipo: 'OPERADOR',
+        origen: 'combustible',
         fechaCreacion: new Date().toISOString()
       });
       const newTrabajador = {
@@ -464,6 +532,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'projects'), {
         name: nuevoProyecto.name.trim(),
         codigo: nuevoProyecto.codigo.trim(),
+        // active: true — sin este campo Oficina Técnica no ve el proyecto
+        active: true,
         createdAt: serverTimestamp()
       });
       const nuevoProj = { id: docRef.id, name: nuevoProyecto.name.trim(), codigo: nuevoProyecto.codigo.trim() };
@@ -509,6 +579,32 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
   };
 
+  // ── Cálculo de litros / capacidad ─────────────────────────────
+
+  // Los inputs guardan el número "crudo" (punto = separador decimal), por eso
+  // NO se deben eliminar los puntos: 328.286 son 328,286 L, no 328.286 L.
+  const parseNumero = (v) => {
+    if (typeof v === 'number') return isNaN(v) ? 0 : v;
+    const n = parseFloat(String(v ?? '').trim().replace(',', '.'));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const litrosEntrada = () => (
+    datosEntrada.tipoOrigen === 'estacion'
+      ? (datosEntrada.documentosEstacion || []).reduce((acc, r) => acc + parseNumero(r.cantidad), 0)
+      : parseNumero(datosEntrada.cantidad)
+  );
+
+  // Devuelve un mensaje de error si la carga supera la capacidad del surtidor,
+  // o null si cabe (o si no hay capacidad/stock conocidos).
+  const litrosExcedenSurtidor = (litros) => {
+    if (!entradaCargaAlSurtidor || capacidadSurtidor <= 0 || stockSurtidor === null) return null;
+    const disponible = Math.max(0, capacidadSurtidor - stockSurtidor);
+    if (litros <= disponible + 0.01) return null;
+    const fmt = (n) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+    return `${equipoSurtidorSel?.nombre || 'El equipo'} tiene capacidad para ${fmt(capacidadSurtidor)} L y ya lleva ${fmt(stockSurtidor)} L. Solo puedes cargar hasta ${fmt(disponible)} L (intentaste ${fmt(litros)} L).`;
+  };
+
   // ── Submit ────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
@@ -549,9 +645,19 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           return;
         }
       }
+      // Capacidad del equipo surtidor: no se puede cargar más de lo que cabe
+      const excedente = litrosExcedenSurtidor(litrosEntrada());
+      if (excedente) {
+        abort('warning', excedente);
+        return;
+      }
     } else if (tipoReporte === 'entrega') {
       if (!datosEntrega.machineId || !datosEntrega.cantidadLitros) {
         abort('warning', 'Completa los campos obligatorios de la entrega (Máquina y Cantidad)');
+        return;
+      }
+      if (!datosEntrega.operadorId && !(operadorExterno.nombre || '').trim()) {
+        abort('warning', 'Indica quién recibe el combustible');
         return;
       }
       if (!isReportesView && !firmaReceptor) {
@@ -589,15 +695,15 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         numeroGuia,
         ...datosControl,
         codigo: finalCodigo,
+        // Se guarda además anidado: los reportes (stock de surtidores, vouchers,
+        // PDF) leen `datosControl.equipoSurtidorId`. Sin esto las salidas no
+        // descuentan del camión/mochila ni muestran el surtidor.
+        datosControl: { ...datosControl, codigo: finalCodigo },
         fechaCreacion: new Date().toISOString(),
         hora: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false }),
         creadoPor: currentUser?.email || 'unknown',
-        repartidorNombre: isAdmin
-          ? (repartidorSeleccionado?.nombre || repartidorSeleccionado?.name || '')
-          : (currentUserData?.nombre || ''),
-        repartidorRut: isAdmin
-          ? (repartidorSeleccionado?.rut || '')
-          : (currentUserData?.rut || '')
+        repartidorNombre: repartidorSeleccionado?.nombre || repartidorSeleccionado?.name || currentUserData?.nombre || '',
+        repartidorRut: repartidorSeleccionado?.rut || currentUserData?.rut || ''
       };
 
       if (tipoReporte === 'entrada') {
@@ -648,7 +754,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           extraFields = {
             numerosDocumento: docsValidos2,
             numeroDocumento: docsValidos2[0] || '',
-            cantidad: parseFloat(datosEntrada.cantidad.toString().replace(/\./g, '').replace(',', '.')) || 0
+            cantidad: parseNumero(datosEntrada.cantidad)
           };
         }
 
@@ -656,21 +762,30 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           ...datosEntrada,
           ...extraFields,
           machineId: machineIdFinal,
-          horometroOdometro: parseFloat(datosEntrada.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0
+          horometroOdometro: parseNumero(datosEntrada.horometroOdometro)
         };
         dataToSave.cantidad = dataToSave.datosEntrada.cantidad;
         dataToSave.empresaProveedora = nombreProveedor;
         dataToSave.firmaRepartidor = firmaRepartidor;
         dataToSave.fechaFirma = new Date().toISOString();
       } else {
-        const cantidadLitrosNum = parseFloat(datosEntrega.cantidadLitros.toString().replace(/\./g, '').replace(',', '.'));
+        const cantidadLitrosNum = parseNumero(datosEntrega.cantidadLitros);
+        const receptorRegistrado = trabajadoresLocales.find(e => e.id === datosEntrega.operadorId);
+        const receptorNombre = receptorRegistrado?.nombre || (operadorExterno.nombre || '').trim();
+        const receptorRut = receptorRegistrado?.rut || (operadorExterno.rut || '').trim();
         dataToSave.cantidadLitros = cantidadLitrosNum;
         dataToSave.datosEntrega = {
           ...datosEntrega,
           cantidadLitros: cantidadLitrosNum,
-          horometroOdometro: parseFloat(datosEntrega.horometroOdometro.toString().replace(/\./g, '').replace(',', '.')) || 0,
+          horometroOdometro: parseNumero(datosEntrega.horometroOdometro),
+          receptorNombre,
+          receptorRut,
           ...(esMPF(datosEntrega.empresa) ? {} : { operadorExterno, maquinaExterna })
         };
+        // También en la raíz: los listados de reportes muestran el receptor desde aquí
+        // cuando la persona no está registrada como trabajador (empresas externas).
+        dataToSave.operadorNombre = receptorNombre;
+        dataToSave.operadorRut = receptorRut;
         dataToSave.firmaReceptor = firmaReceptor;
         dataToSave.fechaFirma = new Date().toISOString();
       }
@@ -734,6 +849,9 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
       const nuevoReporteId = docRef.id;
 
+      // Refrescar el remanente del surtidor (la entrada suma, la entrega descuenta)
+      recargarStockSurtidor();
+
       if (tipoReporte === 'entrega') {
         const projectInfo = projects?.find(p => p.id === datosControl.projectId);
         const empresaDoc = empresasLocal.find(e => e.id === datosEntrega.empresa);
@@ -764,14 +882,26 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         const equipoSurtidorInfo = equiposSurtidores.find(m => m.id === datosControl.equipoSurtidorId)
           || machinesLocal?.find(m => m.id === datosControl.equipoSurtidorId);
 
-        toast({ type: 'success', message: `Reporte de Entrega registrado: ${numeroReporte}`, duration: 5000 });
+        toast({
+          type: online ? 'success' : 'warning',
+          message: online
+            ? `Reporte de Entrega registrado: ${numeroReporte}`
+            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+          duration: online ? 5000 : 7000,
+        });
         if (isReportesView) {
           onClose();
         } else {
           resetForm();
         }
       } else {
-        toast({ type: 'success', message: `Reporte de Entrada registrado: ${numeroReporte}`, duration: 5000 });
+        toast({
+          type: online ? 'success' : 'warning',
+          message: online
+            ? `Reporte de Entrada registrado: ${numeroReporte}`
+            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+          duration: online ? 5000 : 7000,
+        });
         if (isReportesView) {
           onClose();
         } else {
@@ -797,7 +927,11 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     isOfflineSave,
     // User
     currentUser, currentUserData, userRole, isAdmin,
-    surtidoresPersonas, repartidorSeleccionado,
+    puedeElegirRepartidor,
+    surtidoresPersonas, repartidoresDisponibles, repartidorSeleccionado,
+    // Surtidor: capacidad y remanente
+    equipoSurtidorSel, capacidadSurtidor, stockSurtidor, recargarStockSurtidor,
+    entradaCargaAlSurtidor, litrosExcedenSurtidor,
     // Voucher / historial
     showVoucherModal, setShowVoucherModal,
     lastReportData, setLastReportData,
