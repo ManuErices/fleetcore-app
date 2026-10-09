@@ -372,10 +372,12 @@ function calcularLiquidacion(rem) {
   const cargasMat   = parseInt(rem.cargasMaternales) || 0;
   const cargasInv   = parseInt(rem.cargasInvalidez)  || 0;
   const cargasEquiv = cargasSimp + cargasMat + (cargasInv * 2);
-  // Durante el reposo la asignación familiar la paga la entidad de subsidio,
-  // no el empleador. Se prorratea solo por días de licencia — no por otras
-  // ausencias, donde el empleador la sigue debiendo por mes completo.
-  const fAsig = diasLicencia > 0 ? Math.max(0, 30 - diasLicencia) / 30 : 1;
+  // Regla de Previred (validación del campo 22): con licencia o accidente
+  // (movimientos 3 y 6) se informa el valor COMPLETO; si no, y se trabajaron
+  // menos de 25 días, se prorratea por días trabajados (ingresos, egresos,
+  // permisos sin goce). Antes se prorrateaba por licencia y se pagaba completa
+  // con ausencias: justo al revés, y el archivo Previred no habría validado.
+  const fAsig = diasLicencia > 0 ? 1 : (diasTrab < 25 ? diasTrab / 30 : 1);
   const asigFamiliar = Math.round(montoPorAF * cargasEquiv * fAsig);
 
   // ── Base imponible previsional ──
@@ -484,7 +486,11 @@ function calcularLiquidacion(rem) {
   // idéntico a restarlo después y el PDF puede mostrarlo como una línea más.
   const pagoAnterior = Math.max(0, parseInt(rem.pagoAnterior) || 0);
 
-  const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior;
+  // Cuenta 2 de la AFP (ahorro voluntario): sale del líquido, no rebaja el
+  // impuesto y se declara en el campo 30 de Previred.
+  const cuenta2M = Math.max(0, parseInt(rem.cuenta2AFP) || 0);
+
+  const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior - cuenta2M;
 
   const tasaMutualEf = Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual;
   const cesEmpM  = sinAFC ? 0 : Math.round(baseCesantia * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp));
@@ -504,7 +510,7 @@ function calcularLiquidacion(rem) {
     baseCotiza, baseCesantia, sobreTope,
     topeImponible: P.topeImponible, topeRebajaSalud: P.topeRebajaSalud,
     totalDescuentos,
-    descAdicional, anticipo, pagoAnterior, liquido,
+    descAdicional, anticipo, pagoAnterior, cuenta2M, liquido,
     esReliquidacion: pagoAnterior > 0 || rem.tipo === 'reliquidacion',
     anticipoDesdeRegistro: anticipoRegistrado !== undefined && anticipoRegistrado !== null,
     diasTrab, fdias, diasPorContrato, diasAusencia, detalleAus,   // expuestos para auditoría / PDF
@@ -1375,7 +1381,37 @@ function exportarAsistenciaCSV(trabajador, contrato, registros, mes, anio) {
  *
  * Usar SIEMPRE este helper en vez de armar el objeto a mano.
  */
-function remDe(trabajador, contrato, liq, extras) {
+/**
+ * Condiciones del contrato vigentes en un período.
+ *
+ * El documento del contrato guarda las condiciones ACTUALES (los anexos las
+ * actualizan al guardarse) y un `historialAnexos` con el valor anterior de
+ * cada campo y desde cuándo rige el cambio. Para un mes pasado se deshacen,
+ * del más reciente al más antiguo, los cambios que todavía no regían: así una
+ * conversión a indefinido de octubre no cambia la cesantía de septiembre, y un
+ * aumento de noviembre no se cuela en la liquidación de octubre.
+ */
+function contratoAlPeriodo(contrato, mes, anio) {
+  const hist = contrato?.historialAnexos;
+  if (!Array.isArray(hist) || !hist.length || !mes || !anio) return contrato;
+  const m = parseInt(mes), a = parseInt(anio);
+  if (!m || !a) return contrato;
+  const fin = `${a}-${String(m).padStart(2, '0')}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
+  const orden = [...hist].sort((x, y) =>
+    String(y.vigenteDesde || '').localeCompare(String(x.vigenteDesde || '')) ||
+    String(y.aplicadoEn || '').localeCompare(String(x.aplicadoEn || '')));
+  const c = { ...contrato };
+  for (const h of orden) {
+    if (h.vigenteDesde && h.vigenteDesde > fin) {
+      Object.entries(h.cambios || {}).forEach(([campo, v]) => { c[campo] = v?.antes ?? ''; });
+    }
+  }
+  return c;
+}
+
+function remDe(trabajador, contratoActual, liq, extras) {
+  // Condiciones del contrato que regían en el mes de la liquidación.
+  const contrato = contratoAlPeriodo(contratoActual, liq?.mes, liq?.anio);
   return {
     ...(contrato || {}),
     ...(liq || {}),
@@ -1402,6 +1438,7 @@ function remDe(trabajador, contrato, liq, extras) {
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
     apvRegimen:    liq?.apvRegimen    ?? trabajador?.apvRegimen,
     apvInstitucion:liq?.apvInstitucion?? trabajador?.apvInstitucion,
+    cuenta2AFP:    liq?.cuenta2AFP    ?? trabajador?.cuenta2AFP,
     prevision:    trabajador?.prevision    ?? contrato?.prevision,
     isapre:       trabajador?.isapre       ?? contrato?.isapre,
     planIsapre:   trabajador?.planIsapre   ?? contrato?.planIsapre,
@@ -1452,7 +1489,7 @@ function fueReliquidada(liq, liquidaciones) {
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172,
-  calcularLiquidacion, remDe, liquidacionDe, redondearPar, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
+  calcularLiquidacion, remDe, liquidacionDe, redondearPar, contratoAlPeriodo, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
   tramoSugerido, montoAsignacionFamiliar,

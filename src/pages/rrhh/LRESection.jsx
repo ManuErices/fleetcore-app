@@ -18,7 +18,7 @@ import { db } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { inp, MESES } from './shared';
-import { liquidacionDe, calcularIUT, calcularRentaTributable, liquidacionesVigentes } from './calculo';
+import { liquidacionDe, calcularIUT, calcularRentaTributable, liquidacionesVigentes, contratoAlPeriodo } from './calculo';
 import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
 import {
   filaLRE, validarLRE, csvLRE, descargarLRE, nombreArchivoLRE,
@@ -91,7 +91,9 @@ export default function LRESection() {
 
     return delMes.map(l => {
       const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
-      const contrato   = contratos.find(c => c.id === l.contratoId);
+      const contratoDoc = contratos.find(c => c.id === l.contratoId);
+      // Condiciones vigentes en el mes declarado (anexos ya aplicados).
+      const contrato   = contratoDoc ? contratoAlPeriodo(contratoDoc, mes, anio) : null;
       if (!contrato) return null;
 
       const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config.tasaMutual },

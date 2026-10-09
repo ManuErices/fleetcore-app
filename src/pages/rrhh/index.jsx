@@ -16,6 +16,9 @@ import TrabajadorPerfil from './TrabajadorPerfil';
 // ellas desde la app, así que no se podía generar el LRE ni registrar licencias.
 import LRESection from './LRESection';
 import LicenciasSection from './LicenciasSection';
+// Archivo de carga Previred de 105 campos. Reemplaza al "Previred avanzado"
+// de Contabilidad, que bajaba un CSV resumen que Previred no acepta.
+import PreviredSection from './PreviredSection';
 
 // ── Nav groups (shared with AppShellLayout) ──────────────────────────────────
 export const NAV_GROUPS = [
@@ -43,7 +46,7 @@ export const NAV_GROUPS = [
   {
     label: 'Obligaciones',
     tabs: [
-      { id: 'previred_avanzado', label: 'Previred Avanzado', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+      { id: 'previred_avanzado', label: 'Previred',          icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
       { id: 'archivo_pago',      label: 'Archivo de Pago',  icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4' },
       { id: 'lre',               label: 'Libro Remuneraciones (LRE)', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
       { id: 'impuestos',         label: 'Impuestos',        icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
@@ -172,7 +175,7 @@ export default function RRHH({ user, userRole, onLogout, onBackToSelector, onAdm
           <Route path="asistencia"        element={<AsistenciaSection />} />
           <Route path="licencias"         element={<LicenciasSection />} />
           <Route path="lre"               element={<LRESection />} />
-          <Route path="previred_avanzado" element={<PreviredAvanzadoSection />} />
+          <Route path="previred_avanzado" element={<PreviredSection />} />
           <Route path="archivo_pago"      element={<ArchivoPagoSection />} />
           <Route path="impuestos"         element={<ImpuestosSection />} />
           <Route path="reportes"          element={<ReportesSection />} />

@@ -8,6 +8,7 @@ import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import { useContextoPeriodo, extrasDelPeriodo } from './periodo';
+import { aplicarAnexo, prorrogasDe } from './anexos';
 
 const {
   inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
@@ -871,11 +872,18 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
           )}
         </div>
         {form.prevision === 'Isapre' && (
-          <Field label="Plan de Isapre">
-            <input className={inp} value={form.planIsapre || ''}
-              onChange={e => set('planIsapre', e.target.value)}
-              placeholder="Ej: Plan Familia 3 UF, Plan Libre Elección…" />
-          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Plan de Isapre">
+              <input className={inp} value={form.planIsapre || ''}
+                onChange={e => set('planIsapre', e.target.value)}
+                placeholder="Ej: 4,0241 UF" />
+            </Field>
+            {/* Previred exige el N° de contrato con la isapre (campo 76). */}
+            <Field label="N° de FUN (contrato isapre)">
+              <input className={inp} value={form.numeroFUN || ''} maxLength={16}
+                onChange={e => set('numeroFUN', e.target.value.trim())} />
+            </Field>
+          </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -903,6 +911,20 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             <input className={inp} value={form.apvInstitucion || ''}
               onChange={e => set('apvInstitucion', e.target.value)}
               placeholder="Ej: Habitat" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Solo si la institución del APV no es una AFP: código de 3 dígitos
+              de la tabla 11 de Previred (ej. 237 Fintual, 222 Banchile). */}
+          <Field label="Código Previred institución APV (si no es AFP)">
+            <input className={inp} value={form.apvCodigoInstitucion || ''} maxLength={3} placeholder="Ej: 237"
+              onChange={e => set('apvCodigoInstitucion', e.target.value.replace(/\D/g, ''))} />
+          </Field>
+          {/* Ahorro voluntario en la AFP (no previsional): sale del líquido, no
+              rebaja impuesto y va al campo 30 de Previred. */}
+          <Field label="Cuenta 2 AFP mensual ($)">
+            <input className={inp} value={form.cuenta2AFP || ''}
+              onChange={e => set('cuenta2AFP', e.target.value.replace(/\D/g, ''))} placeholder="0" />
           </Field>
         </div>
         {parseInt(form.apvMonto) > 0 && (
@@ -1513,7 +1535,10 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     set('items', itemsForm.filter(i => i.itemId !== itemId));
 
   const handleTrabajador = (tid) => {
-    const contrato   = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    const contratoDoc = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
+    // Condiciones vigentes en el mes que se liquida (los anexos posteriores no
+    // aplican todavía; los anteriores sí, aunque el contrato original diga otra cosa).
+    const contrato   = contratoDoc ? Calc.contratoAlPeriodo(contratoDoc, form.mes, form.anio) : null;
     const trabajador = trabajadores?.find(t => t.id === tid);
     // El anticipo pactado al contratar se copia como valor inicial, no como
     // referencia: cambiar la base en la ficha no debe alterar liquidaciones ya
@@ -2548,10 +2573,19 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
         Object.entries({ ...form, updatedAt: serverTimestamp() })
           .filter(([k, v]) => !k.startsWith('_') && v !== undefined)
       );
-      if (editData?.id) {
-        await updateDoc(doc(db, 'empresas', empresaId, 'anexos', editData.id), payload);
+      let anexoId = editData?.id;
+      if (anexoId) {
+        await updateDoc(doc(db, 'empresas', empresaId, 'anexos', anexoId), payload);
       } else {
-        await addDoc(collection(db, 'empresas', empresaId, 'anexos'), { ...payload, createdAt: serverTimestamp() });
+        const ref = await addDoc(collection(db, 'empresas', empresaId, 'anexos'), { ...payload, createdAt: serverTimestamp() });
+        anexoId = ref.id;
+      }
+      // El anexo modifica el contrato: sueldo, jornada, fecha de término, tipo.
+      // Antes solo se guardaba el anexo y el contrato quedaba igual.
+      try {
+        await aplicarAnexo(empresaId, anexoId, { ...form, id: anexoId });
+      } catch (e) {
+        alert(`El anexo se guardó, pero no se pudo actualizar el contrato: ${e.message}`);
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -2559,6 +2593,9 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
   };
 
   const contratoSel   = contratos?.find(c => c.id === form.contratoId);
+  // Art. 159 N°4: la segunda renovación de un plazo fijo lo transforma en
+  // indefinido por el solo ministerio de la ley.
+  const segundaProrroga = form.tipo === 'prorroga' && !editData && prorrogasDe(contratoSel) >= 1;
   const trabajadorSel = trabajadores?.find(t => t.id === form.trabajadorId);
   const fmt = n => n ? `$${parseInt(n).toLocaleString('es-CL')}` : '';
 
@@ -2753,6 +2790,13 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
         )}
 
         {/* Prórroga */}
+        {segundaProrroga && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 leading-snug">
+            <strong>Esta sería la segunda prórroga de este contrato.</strong> Por el Art. 159 N°4 del Código del
+            Trabajo, la segunda renovación lo convierte en indefinido. Corresponde un anexo de
+            «Conversión a contrato indefinido», no una nueva prórroga.
+          </div>
+        )}
         {form.tipo === 'prorroga' && (
           <Field label="Nueva fecha de término">
             <input type="date" className={inp} value={form.fechaFin} onChange={e => set('fechaFin', e.target.value)} />

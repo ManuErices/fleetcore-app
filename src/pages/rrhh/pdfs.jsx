@@ -283,7 +283,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   const itemsPorTipo = (tipo) => itemsCalc
     .filter(i => i.tipo === tipo && i.montoCalc > 0)
     .map(i => [i.nombre, i.montoCalc]);
-  const otrosDesc    = (calc.descAdicional || 0) + (calc.anticipo || 0) + (calc.itemsDesc || 0) + (calc.pagoAnterior || 0);
+  const otrosDesc    = (calc.descAdicional || 0) + (calc.anticipo || 0) + (calc.itemsDesc || 0) + (calc.pagoAnterior || 0) + (calc.cuenta2M || 0);
 
   // Datos del emisor: vienen del documento de la empresa. Antes se leían de
   // `rem.rutEmpresa` / `rem.direccionEmpresa`, que nadie llenaba, y el PDF
@@ -349,6 +349,7 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
       : []),
     ...itemsPorTipo('descuento'),
     ['Descuentos Adicionales', calc.descAdicional],
+    ...(calc.cuenta2M > 0 ? [['Ahorro voluntario Cuenta 2 AFP', calc.cuenta2M]] : []),
   ].filter(([, v]) => v > 0);
 
   const filas = (arr, total) => arr.map(([l, v]) =>
@@ -1381,7 +1382,7 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     // necesitan su propia contrapartida en el haber. Sin ellas el comprobante
     // no cuadraba cada vez que alguien tenía APV o un descuento adicional.
     totalApv        += c.apvM || 0;
-    totalDescOtros  += (c.descAdicional || 0) + (c.itemsDesc || 0);
+    totalDescOtros  += (c.descAdicional || 0) + (c.itemsDesc || 0) + (c.cuenta2M || 0);
     // En una reliquidación el mes completo va al debe, pero solo la diferencia
     // sale de caja: lo ya transferido se cierra contra la cuenta de
     // remuneraciones por pagar del pago original.

@@ -9,6 +9,7 @@ import * as Modals from './modals';
 import ArchivoPagoPanel from './ArchivoPagoPanel';
 import { paramsDe, asegurarIndicadores } from './parametros';
 import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
+import { aplicarAnexo, revertirAnexo, anexoAplicado } from './anexos';
 import OrganigramaVertical, { generarPDFOrganigrama } from './OrganigramaVertical';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
@@ -88,6 +89,11 @@ function AnexosSection() {
   const paginados = filtrados.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
   const handleDelete = async () => {
+    // Antes de borrar el anexo se revierten sus cambios en el contrato. Si un
+    // anexo posterior tocó los mismos campos, revertirAnexo lo bloquea.
+    try {
+      await revertirAnexo(empresaId, confirm.id, confirm.contratoId);
+    } catch (e) { alert(e.message); setConfirm(null); return; }
     try { await deleteDoc(doc(db, 'empresas', empresaId, 'anexos', confirm.id)); load(); }
     catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
@@ -105,8 +111,41 @@ function AnexosSection() {
     contratos.some(c => c.trabajadorId === t.id)
   ).sort((a, b) => a.apellidoPaterno?.localeCompare(b.apellidoPaterno || ''));
 
+  // Anexos guardados antes de que los anexos modificaran el contrato: nunca
+  // llegaron a él. Se aplican una vez, en orden cronológico.
+  const [aplicando, setAplicando] = useState(false);
+  const pendientesAplicar = anexos
+    .filter(a => a.estado !== 'anulado' && a.contratoId && !['otro'].includes(a.tipo))
+    .filter(a => { const c = contratos.find(x => x.id === a.contratoId); return c && !anexoAplicado(a, c); })
+    .sort((a, b) => String(a.fechaAnexo || '').localeCompare(String(b.fechaAnexo || '')) ||
+      (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+  const aplicarPendientes = async () => {
+    if (!window.confirm(`¿Aplicar ${pendientesAplicar.length} anexo(s) a sus contratos?\n\nSe actualizarán sueldo, jornada, fecha de término o tipo de contrato según cada anexo, en orden cronológico. Las liquidaciones de meses anteriores a cada anexo conservan las condiciones de ese mes.`)) return;
+    setAplicando(true);
+    const fallidos = [];
+    for (const a of pendientesAplicar) {
+      try { await aplicarAnexo(empresaId, a.id, a); }
+      catch (e) { fallidos.push(`${a._trabajador?.apellidoPaterno || a.id}: ${e.message}`); }
+    }
+    setAplicando(false);
+    if (fallidos.length) alert(`No se pudieron aplicar ${fallidos.length}:\n\n${fallidos.join('\n')}`);
+    load();
+  };
+
   return (
     <>
+      {pendientesAplicar.length > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3 mb-4">
+          <p className="text-sm text-amber-900">
+            <strong>{pendientesAplicar.length} anexo(s)</strong> nunca se aplicaron a su contrato
+            <span className="text-amber-700"> (se guardaron antes de que los anexos actualizaran el contrato). Mientras no se apliquen, la liquidación sigue usando las condiciones originales.</span>
+          </p>
+          <button onClick={aplicarPendientes} disabled={aplicando}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-40 whitespace-nowrap">
+            {aplicando ? 'Aplicando…' : 'Aplicar a los contratos'}
+          </button>
+        </div>
+      )}
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
