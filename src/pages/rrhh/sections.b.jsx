@@ -412,7 +412,7 @@ function ImpuestosSection() {
         || contratos.find(c => c.trabajadorId === t.id);
       const liqs = liquidacionesVigentes(liquidaciones)
         .filter(l => l.trabajadorId === t.id && l.anio === anio && !esBorrador(l))
-        .map(l => ({ ...l, _extras: extrasDelPeriodo(ctx, t.id, l.mes, l.anio) }));
+        .map(l => ({ ...l, _extras: extrasDelPeriodo(ctx, t.id, l.mes, l.anio, { trabajador: t, contrato }) }));
       if (!contrato || liqs.length === 0) return null;
 
       let totalImp = 0, totalNoImp = 0, totalAfp = 0, totalSalud = 0, totalCes = 0, totalIUT = 0, totalLiq = 0, maxMensual = 0;
@@ -4072,7 +4072,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   const liqEnriquecidas = liqPeriodo.map(liq => {
     const trabajador = trabajadores.find(t => t.id === liq.trabajadorId);
     const contrato = contratos.find(c => c.id === liq.contratoId) || contratos.find(c => c.trabajadorId === liq.trabajadorId && c.estado === 'vigente');
-    const extras = extrasDelPeriodo(ctx, liq.trabajadorId, liq.mes, liq.anio);
+    const extras = extrasDelPeriodo(ctx, liq.trabajadorId, liq.mes, liq.anio, { trabajador, contrato });
     return { liq, trabajador, contrato, extras, calc: contrato ? liquidacionDe(trabajador, contrato, liq, extras) : null };
   }).filter(x => x.contrato);
 
@@ -4370,8 +4370,8 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {liqEnriquecidas.slice(0, 8).map(({ trabajador, contrato, liq }, i) => {
-                          const c = liquidacionDe(trabajador, contrato, liq);
+                        {liqEnriquecidas.slice(0, 8).map(({ trabajador, contrato, liq, calc }, i) => {
+                          const c = calc || liquidacionDe(trabajador, contrato, liq);
                           return (
                             <tr key={i} className="hover:bg-slate-50">
                               <td className="px-3 py-2 font-mono font-bold text-slate-600">{trabajador?.rut || '—'}</td>
@@ -4408,7 +4408,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
                   {detallePrevired && (() => {
                     const fila = liqEnriquecidas.find(x => x.trabajador?.id === detallePrevired.id);
                     if (!fila) return null;
-                    const c = liquidacionDe(fila.trabajador, fila.contrato, fila.liq);
+                    const c = fila.calc || liquidacionDe(fila.trabajador, fila.contrato, fila.liq);
                     const filas = [
                       ['RUT', fila.trabajador?.rut || '—'],
                       ['AFP', fila.trabajador?.afp || '—'],

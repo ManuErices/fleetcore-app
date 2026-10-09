@@ -1405,7 +1405,7 @@ function RemuneracionesSection() {
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
     const contrato = contratos.find(c => c.id === l.contratoId);
-    const extras = extrasDelPeriodo(ctx, l.trabajadorId, l.mes, l.anio);
+    const extras = extrasDelPeriodo(ctx, l.trabajadorId, l.mes, l.anio, { trabajador, contrato });
     const calc = contrato ? liquidacionDe(trabajador, contrato, l, extras) : null;
     return {
       ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc,

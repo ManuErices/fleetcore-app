@@ -27,7 +27,7 @@
 import { useEffect, useState } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { festivosChile } from './calculo';
+import { festivosChile, mesesComerciales } from './calculo';
 
 const aFecha = (s) => { const d = new Date(`${String(s || '').slice(0, 10)}T12:00:00`); return isNaN(d) ? null : d; };
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -68,8 +68,8 @@ export function devengadoFeriado(fechaIngreso, fecha, aniosPrevios = 0) {
     aniv.setFullYear(aniv.getFullYear() + 1);
   }
   const diasAnual = diasFeriadoAnual(anios + 1, aniosPrevios);
-  const diasDesdeAniv = Math.max(0, Math.round((fin - aniv) / 86400000));
-  const proporcional = Math.round(Math.min(12, diasDesdeAniv / 30) * diasAnual / 12 * 100) / 100;
+  // Meses comerciales desde el último aniversario (igual que el finiquito).
+  const proporcional = Math.round(Math.min(12, mesesComerciales(aniv, fin)) * diasAnual / 12 * 100) / 100;
   return { anios, diasAniosCompletos: diasCompletos, proporcional, total: Math.round((diasCompletos + proporcional) * 100) / 100, diasAnual, ultimoAniversario: iso(aniv) };
 }
 

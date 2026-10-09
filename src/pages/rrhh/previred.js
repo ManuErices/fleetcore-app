@@ -173,7 +173,8 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   const codAfp = COD_AFP[t?.afp];
   if (!codAfp) errores.push(`AFP "${t?.afp || 'vacía'}" sin código Previred`);
   const pensionado = c.esPensionado === true;
-  const tipoTrab = pensionado ? '2' : '0';
+  // Tabla 5: 0 activo · 1 pensionado que cotiza · 2 pensionado que no cotiza
+  const tipoTrab = pensionado ? (c.pensionadoCotiza ? '1' : '2') : '0';
 
   const periodo = `${mes}${anio}`;
   const movs = movimientosDelPeriodo({ contrato, calc: c, mes, anio });
@@ -184,10 +185,11 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   const RI = c.baseCotiza || 0;                                       // ya topeada y proporcional
   const lic = movs.find(m => m.codigo === '3' || m.codigo === '6');
   const diasLic = c.diasLicencia || 0;
-  let rimaProp = 0;
-  if (lic && diasLic > 0) {
-    if (!(rimaMensual > 0)) errores.push('licencia sin liquidación del mes anterior para calcular la RIMA');
-    rimaProp = Math.round(Math.min(rimaMensual || 0, P.topeImponible) * diasLic / 30);
+  // La RIMA proporcional la calcula el motor (y con ella SIS, EV, AFC
+  // empleador y SANNA de los días de licencia): un solo número en todo el sistema.
+  const rimaProp = c.rimaProp || 0;
+  if (lic && diasLic > 0 && !(rimaProp > 0)) {
+    errores.push('licencia sin liquidación del mes anterior para calcular la RIMA (o fíjala a mano en la liquidación)');
   }
 
   // ── Fonasa / isapre ──
@@ -201,7 +203,8 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   const conMutual = codMutual !== '00';
   const tasaAT = Number(config.tasaMutual) > 0 ? Number(config.tasaMutual) : (c.tasaMutual || 0);
   if (!(tasaAT > 0)) errores.push('tasa de accidentes del trabajo (mutual/ISL) sin configurar');
-  const cotAT = Math.round(RI * tasaAT);
+  // Mutual: lo que calcula el motor (tasa sobre lo trabajado + SANNA sobre la RIMA).
+  const cotAT = c.mutualM != null && Math.abs((c.tasaMutual || 0) - tasaAT) < 1e-9 ? c.mutualM : Math.round(RI * tasaAT + 1e-6);
 
   // ── CCAF ──
   const codCCAF = String(config.ccaf ?? 0).padStart(2, '0');
@@ -217,10 +220,8 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   const conSC = !c.sinAFC;
   const tc = String(contrato?.tipoContrato || '').toLowerCase();
   const esPF = tc.includes('plazo') || tc.includes('obra');
-  const riSC = conSC
-    ? (lic && rimaMensual > 0 ? Math.min(rimaMensual, P.topeCesantia) : (c.baseCesantia || 0))
-    : 0;
-  const scEmp = conSC ? Math.round(riSC * (esPF ? 0.03 : 0.024)) : 0;
+  const riSC  = conSC ? Math.min((c.baseCesantia || 0) + rimaProp, P.topeCesantia) : 0;
+  const scEmp = conSC ? (c.cesEmpM || 0) : 0;
 
   // ── Campos ──
   F(1, rutNum); F(2, dv); F(3, apPat); F(4, apMat); F(5, nom);
@@ -232,9 +233,11 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   F(19, ent(c.cargasSimp)); F(20, ent(c.cargasMat)); F(21, ent(c.cargasInv));
   F(22, ent(af)); F(23, '0'); F(24, '0'); F(25, 'N');
   F(26, codAfp || '00');
-  F(27, ent(pensionado ? 0 : RI));
-  F(28, ent(pensionado ? 0 : RI * ((TASAS_AFP[t?.afp] || 0) + (c.tasaCIEmp || 0))));
-  F(29, ent(pensionado ? 0 : (RI + rimaProp) * (c.tasaSIS || 0)));
+  const cotizaAFP = !pensionado || c.pensionadoCotiza;
+  F(27, ent(cotizaAFP ? RI : 0));
+  // Trabajador + 0,1% del empleador; el pensionado que cotiza no genera el 0,1%.
+  F(28, ent(cotizaAFP ? Math.round(RI * ((TASAS_AFP[t?.afp] || 0) + (pensionado ? 0 : (c.tasaCIEmp || 0))) + 1e-6) : 0));
+  F(29, ent(pensionado ? 0 : c.sisM));
   F(30, ent(c.cuenta2M || 0));
 
   // APV individual (campos 40-44)
@@ -266,8 +269,8 @@ export function lineasTrabajador({ trabajador: t, contrato, liq, calc: c, rimaMe
   }
   if (lic) F(92, ent(rimaProp));
   F(93, String(contrato?.jornada || '').toLowerCase().includes('parcial') ? '2' : '1');
-  F(94, ent(pensionado ? 0 : (RI + rimaProp) * (c.tasaCEV || 0)));
-  F(95, ent(pensionado ? 0 : RI * (c.tasaCRP || 0)));
+  F(94, ent(pensionado ? 0 : c.cevEmpM));
+  F(95, ent(pensionado ? 0 : c.crpEmpM));
   F(96, codMutual);
   F(97, ent(conMutual ? RI : 0));
   F(98, ent(conMutual ? cotAT : 0));

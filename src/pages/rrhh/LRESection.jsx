@@ -97,7 +97,7 @@ export default function LRESection() {
       if (!contrato) return null;
 
       const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config.tasaMutual },
-        extrasDelPeriodo(ctx, trabajador?.id, mes, anio));
+        extrasDelPeriodo(ctx, trabajador?.id, mes, anio, { trabajador, contrato }));
       const iut = calc.iut;
 
       // Término de contrato dentro del período: la DT exige fecha y causal
