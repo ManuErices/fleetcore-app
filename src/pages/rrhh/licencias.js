@@ -113,16 +113,21 @@ export function diasCorridos(desde, hasta) {
 export function diasEnPeriodo(lic, mes, anio) {
   const m = parseInt(mes), a = parseInt(anio);
   if (!m || !a) return 0;
-  const mm  = String(m).padStart(2, '0');
-  const ini = aFecha(`${a}-${mm}-01`);
-  const fin = aFecha(`${a}-${mm}-30`);
+  const ini = new Date(a, m - 1, 1, 12);
+  // Último día REAL del mes. Antes se armaba la fecha "AAAA-MM-30", que en
+  // febrero JavaScript convierte en el 2 de marzo: una licencia de todo
+  // febrero dejaba 2 días pagados, y una que partía el 1 o 2 de marzo se
+  // descontaba también en febrero.
+  const ultimo = new Date(a, m, 0, 12);
   const d = aFecha(lic.desde), h = aFecha(lic.hasta);
-  if (!ini || !fin || !d || !h) return 0;
+  if (!d || !h) return 0;
+  if (h < ini || d > ultimo) return 0;
 
-  const desde = d > ini ? d : ini;
-  const hasta = h < fin ? h : fin;
-  if (hasta < desde) return 0;
-  return Math.round((hasta - desde) / 86400000) + 1;
+  // Mes comercial de 30 días: si el reposo llega al último día del mes, ese
+  // día es el 30 (en febrero también, y el 31 se funde con el 30).
+  const diaDesde = d > ini ? Math.min(d.getDate(), 30) : 1;
+  const diaHasta = h >= ultimo ? 30 : Math.min(h.getDate(), 30);
+  return Math.max(0, diaHasta - diaDesde + 1);
 }
 
 /**

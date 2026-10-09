@@ -5,6 +5,19 @@ import { TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
 // período que se está liquidando. Ver parametros.js.
 import { paramsDe, montoAsignacionFamiliar, tramoSugerido, valorPlanSalud } from './parametros';
 
+/**
+ * Redondeo "bancario" (mitad al par): 190.312,5 → 190.312 y 83.317,5 → 83.318.
+ * Es el que usa Talana. Solo importa en montos que terminan exactamente en ,5,
+ * que en la práctica aparecen al sacar el 25% de la gratificación.
+ */
+function redondearPar(x) {
+  const n = Number(x) || 0;
+  const piso = Math.floor(n);
+  const dif = n - piso;
+  if (Math.abs(dif - 0.5) < 1e-9) return piso % 2 === 0 ? piso : piso + 1;
+  return Math.round(n);
+}
+
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
   return Math.max(0, Math.round((new Date(hasta) - new Date(desde)) / 86400000));
@@ -70,13 +83,17 @@ function diasVigentesEnPeriodo(contrato, mes, anio) {
   if (fin && !isNaN(fin) && fin < primero) return 0;
 
   const desde = ini && !isNaN(ini) && ini > primero ? ini.getDate() : 1;
-  const hasta = fin && !isNaN(fin) && fin < ultimo  ? fin.getDate() : ultimo.getDate();
+  // Si el contrato sigue vigente al último día real del mes, en mes comercial
+  // ese día es el 30 — también en febrero. Antes se tomaba el 28: quien entraba
+  // el 15 de febrero quedaba con 14 días en vez de 16.
+  const cubreFinDeMes = !(fin && !isNaN(fin) && fin < ultimo);
+  const hasta = cubreFinDeMes ? 30 : fin.getDate();
 
   // Mes comercial: el día 31 se funde con el 30, en los dos extremos. Sin
   // topear también el `desde`, quien entra un 31 daba 0 días trabajados y su
   // liquidación salía en cero.
   const dias = Math.min(30, Math.max(0, Math.min(hasta, 30) - Math.min(desde, 30) + 1));
-  return desde === 1 && hasta >= ultimo.getDate() ? 30 : dias;
+  return desde === 1 && cubreFinDeMes ? 30 : dias;
 }
 
 /** Fonasa cotiza el 7% parejo; el plan pactado solo existe en isapre. */
@@ -121,11 +138,46 @@ export function ausenciasDePeriodo(ausencias, mes, anio) {
   }, []);
 }
 
+/**
+ * Parámetros con que se calcula un documento.
+ *
+ * Parte de la tabla de vigencias del período y encima aplica el snapshot que
+ * el documento trae congelado (`rem.parametros`), pero SOLO los valores que se
+ * congelaron cargados de verdad: un snapshot hecho con la UTM de respaldo no
+ * debe ganarle a la UTM real que se cargó después.
+ *
+ * Antes el snapshot se guardaba y nadie lo leía: reabrir una liquidación
+ * recalculaba todo con lo que hubiera en memoria ese día.
+ */
+function parametrosEfectivos(rem) {
+  const P = { ...paramsDe({ mes: rem.mes, anio: rem.anio }) };
+  const snap = rem.parametros;
+  if (!snap || typeof snap !== 'object') return P;
+  // Un snapshot de otro mes no aplica: pasa si alguien edita la liquidación y
+  // le cambia el período.
+  if (snap.periodo && snap.periodo !== P.periodo) return P;
+
+  if (snap.utmCargada && Number(snap.utm) > 0) {
+    P.utm = Number(snap.utm); P.utmCargada = true;
+  }
+  if (snap.ufFinCargada && Number(snap.ufFin) > 0) {
+    const ufFin = Number(snap.ufFin);
+    P.ufFin = ufFin; P.ufFinCargada = true;
+    P.topeImponible   = Math.round(P.topeImponibleUF * ufFin);
+    P.topeCesantia    = Math.round(P.topeCesantiaUF * ufFin);
+    P.topeRebajaSalud = Math.round(P.topeImponibleUF * ufFin * 0.07);
+  }
+  ['tasaSIS', 'tasaCEV', 'tasaCRP', 'tasaCIEmp'].forEach(k => {
+    if (snap[k] != null && Number(snap[k]) >= 0) P[k] = Number(snap[k]);
+  });
+  return P;
+}
+
 function calcularLiquidacion(rem) {
   // ── Parámetros legales del período que se está liquidando ──
   // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
   // ordinaria máxima. Todo lo que la ley cambia con el tiempo entra por acá.
-  const P = paramsDe({ mes: rem.mes, anio: rem.anio });
+  const P = parametrosEfectivos(rem);
 
   // ── Factor 1: tipo de período (mensual / quincenal / semanal / turno) ──
   const fp = factorPeriodo(rem.tipoPeriodo);
@@ -234,7 +286,13 @@ function calcularLiquidacion(rem) {
   // Antes se multiplicaba por 4 en período mensual, así que escribir "1" pagaba
   // cuatro horas. Nadie que anote horas extra de un mes piensa en semanas.
   const hExtra = parseFloat(rem.horasExtra) || 0;
-  const vHE    = parseInt(rem.valorHoraExtra) || 0;
+  // El valor hora legal tiene decimales (5.909,09), pero la pantalla guarda el
+  // entero (5.909). Si lo guardado coincide con el legal redondeado, se usa el
+  // exacto: 15 horas × 5.909 dejaba la línea $1 corta respecto de Talana. Si
+  // alguien escribió otro valor (un recargo pactado mayor), se respeta ese.
+  const vHEguardado = parseFloat(rem.valorHoraExtra) || 0;
+  const vHElegal    = hExtra > 0 ? valorHoraExtra(rem.sueldoBase, rem, { mes: rem.mes, anio: rem.anio }) : 0;
+  const vHE = vHEguardado && Math.round(vHElegal) === Math.round(vHEguardado) ? vHElegal : vHEguardado;
   const montoHE    = Math.round(hExtra * vHE);
 
   // No imponibles fijos: proporcionales a días asistidos
@@ -276,11 +334,24 @@ function calcularLiquidacion(rem) {
   // hoy: reabrir en septiembre una liquidación de marzo debe seguir usando el
   // mínimo de marzo. Antes era la constante IMM_2026, congelada en el valor de
   // enero, y el reajuste retroactivo de mayo (Ley 21.830) quedaba fuera.
-  const topeGrat  = P.topeGratMensual;
+  // Tope sin redondear (4,75 × IMM ÷ 12 = 219.114,73): prorratearlo ya
+  // redondeado descuadraba en $1 contra Talana.
+  const topeGrat  = P.imm * 4.75 / 12;
   // Los ítems imponibles del catálogo son remuneración devengada, así que
   // entran a la base de gratificación igual que "Otros Imponibles".
-  const baseGrat  = base + bProd + otrosImp + itemsImp;   // remuneración devengada del mes
-  const gratMensual = Math.round(Math.min(baseGrat * 0.25, topeGrat * fp * fdias));
+  // Las horas extra también: el Art. 50 habla del 25% de lo devengado por
+  // concepto de remuneraciones, y el sobresueldo lo es (Art. 42 b). Antes
+  // quedaban fuera y quien hacía horas extra bajo el tope recibía menos.
+  const baseGrat  = base + bProd + montoHE + otrosImp + itemsImp;   // remuneración devengada del mes
+  // El tope se prorratea SOLO por los días no trabajados dentro del mes del
+  // contrato (licencias y ausencias), no por ingresar o egresar a mitad de mes.
+  // Así lo calcula Talana: un egreso el día 17 recibe el 25% de lo devengado con
+  // tope mensual completo; una licencia de 27 días topea a 3/30 del tope.
+  const factorTope = Math.max(0, 30 - diasLicNoPagados - diasAusencia) / 30;
+  // Contratos sin gratificación pactada (`gratificacion: 'ninguna'`).
+  const sinGrat = rem.gratificacion === false || rem.gratificacion === 'ninguna';
+  const gratMensual = sinGrat ? 0
+    : redondearPar(Math.min(baseGrat * 0.25, topeGrat * fp * factorTope));
 
   // ── Asignación familiar (DFL 150) ──
   //
@@ -361,11 +432,20 @@ function calcularLiquidacion(rem) {
   );
   // AFC: indefinido 0,6% trabajador; plazo fijo/obra 0% (lo paga íntegro el empleador)
   // La cesantía tiene su propio tope, más alto que el previsional.
-  const cesM  = esPensionado ? 0
+  // No afectos al seguro de cesantía: pensionados y quien la ficha marque con
+  // `afectoAFC: false` (p. ej. contratos anteriores a oct-2002 sin opción).
+  const sinAFC = esPensionado || rem.afectoAFC === false;
+  const cesM  = sinAFC ? 0
     : Math.round(baseCesantia * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
   // SIS: cargo empleador (referencial, no descuenta al trabajador). Va sobre
-  // el tope previsional, igual que AFP y salud.
-  const sisM  = esPensionado ? 0 : Math.round(baseCotiza * TASAS.sis);
+  // el tope previsional, igual que AFP y salud. La tasa es la del período.
+  const sisM  = esPensionado ? 0 : Math.round(baseCotiza * P.tasaSIS);
+  // Aportes del empleador de la reforma previsional (Ley 21.735), sobre la
+  // misma base topeada. El pensionado no cotiza AFP, así que tampoco genera
+  // el aporte a cuenta individual ni los del Seguro Social.
+  const ciEmpM  = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCIEmp);
+  const cevEmpM = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCEV);
+  const crpEmpM = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCRP);
   // ── APV — Ahorro Previsional Voluntario (Art. 20 DL 3.500) ──
   // Régimen A: el trabajador recibe la bonificación fiscal del 15%, y el aporte
   //            NO rebaja la base del impuesto único.
@@ -406,7 +486,14 @@ function calcularLiquidacion(rem) {
 
   const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior;
 
-  return {
+  const tasaMutualEf = Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual;
+  const cesEmpM  = sinAFC ? 0 : Math.round(baseCesantia * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp));
+  const mutualM  = Math.round(baseCotiza * tasaMutualEf);
+  // Todo lo que paga la empresa por sobre la remuneración. La asignación
+  // familiar no entra al costo: se recupera descontándola de lo que se entera.
+  const aportesEmpleador = sisM + ciEmpM + cevEmpM + crpEmpM + cesEmpM + mutualM;
+
+  const out = {
     base, bProd, montoHE, bColacion, bMovil, viaticos, otrosImp, otrosNoImp, gratMensual,
     asigFamiliar, tramoAF, montoPorAF, cargasSimp, cargasMat, cargasInv, cargasEquiv,
     imponible, noImponible,
@@ -435,22 +522,46 @@ function calcularLiquidacion(rem) {
       jornadaSemanal: horasOrdinariasSemanales(rem, { mes: rem.mes, anio: rem.anio }),
       utm:           P.utm,
       uf:            P.uf,
+      ufFin:         P.ufFin,
       utmCargada:    P.utmCargada,
       ufCargada:     P.ufCargada,
+      ufFinCargada:  P.ufFinCargada,
+      topeImponible: P.topeImponible,
+      topeCesantia:  P.topeCesantia,
+      tasaSIS:       P.tasaSIS,
+      tasaCEV:       P.tasaCEV,
+      tasaCRP:       P.tasaCRP,
+      tasaCIEmp:     P.tasaCIEmp,
     },
     uf: P.uf,   // lo consume calcularRentaTributable para el tope de APV
     tasaAfp, afpResuelta,
-    esPensionado,
-    cesEmpM: esPensionado ? 0 : Math.round(baseCesantia * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp)),
-    sisEmpM: esPensionado ? 0 : Math.round(baseCotiza * TASAS.sis),
+    esPensionado, sinAFC, sinGrat,
+    cesEmpM,
+    sisEmpM: sisM,
+    // Reforma previsional (Ley 21.735) — cargo empleador
+    ciEmpM, cevEmpM, crpEmpM,
+    tasaSIS: P.tasaSIS, tasaCEV: P.tasaCEV, tasaCRP: P.tasaCRP, tasaCIEmp: P.tasaCIEmp,
     // Aporte del empleador Ley 16.744 (accidentes del trabajo y Ley SANNA).
     // La tasa es PROPIA DE CADA EMPRESA: cotización básica más la adicional
     // diferenciada según su siniestralidad. `TASAS.mutual` está fijada a la de
     // MPF, así que se acepta `rem.tasaMutual` para que la empresa la configure
     // sin editar código. Es columna obligatoria del LRE (cód. 4152).
-    tasaMutual: Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual,
-    mutualM: Math.round(baseCotiza * (Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual)),
+    tasaMutual: tasaMutualEf,
+    mutualM,
+    aportesEmpleador,
+    costoEmpresa: imponible + (noImponible - asigFamiliar) + aportesEmpleador,
+    utm: P.utm, utmCargada: P.utmCargada, ufFinCargada: P.ufFinCargada,
   };
+
+  // ── Impuesto único dentro del motor ──
+  // Antes cada pantalla calculaba el IUT por su cuenta, con la UTM que tuviera
+  // a mano (una constante, un input manual, la del período): el PDF, la
+  // nómina bancaria y la contabilidad podían retener montos distintos para la
+  // misma liquidación. Ahora sale de acá, con la UTM efectiva del documento.
+  out.rentaTrib    = calcularRentaTributable(out);
+  out.iut          = calcularIUT(out.rentaTrib, P.utm);
+  out.liquidoFinal = out.liquido - out.iut;
+  return out;
 }
 function calcularAntiguedad(fechaIngreso, fechaTermino) {
   if (!fechaIngreso || !fechaTermino) return { anios:0, meses:0, dias:0, totalMeses:0 };
@@ -500,8 +611,10 @@ function baseArt172(liq, contrato) {
 
   // No imponibles permanentes. La asignación familiar se excluye por ley y no
   // entra acá porque no es un campo del formulario: la calcula el motor.
-  const colacion    = n(liq.colacion);
-  const movilizacion = n(liq.movilizacion);
+  // Los campos de la liquidación se llaman bonoColacion / bonoMovilizacion.
+  // Se leía `colacion` y `movilizacion`, que no existen: la base salía sin ellos.
+  const colacion    = n(liq.bonoColacion ?? liq.colacion);
+  const movilizacion = n(liq.bonoMovilizacion ?? liq.movilizacion);
   const viaticos    = n(liq.viaticos);
   const otrosNoImp  = n(liq.otrosNoImponibles);
 
@@ -710,12 +823,13 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   // Art. 163: la fracción superior a seis meses se cuenta como año completo.
   // Antes se truncaba: 3 años 7 meses pagaban 3 años en vez de 4.
-  const aniosConFraccion   = anios + (meses > 6 ? 1 : 0);
+  // "Fracción superior a seis meses": 6 meses y algunos días ya lo es.
+  const aniosConFraccion   = anios + ((meses > 6 || (meses === 6 && dias > 0)) ? 1 : 0);
   const aniosIndemnizacion = Math.min(aniosConFraccion, TOPE_ANIOS_INDEMNIZACION);
 
   // Art. 172: la base no puede exceder 90 UF. El comentario anterior lo
   // mencionaba pero el tope no se aplicaba en ninguna parte.
-  const topeIndem          = Math.round(90 * (fin.uf || paramsDe(fin.fechaTermino).uf));
+  const topeIndem          = Math.round(90 * (fin.uf || paramsDe(fin.fechaTermino).ufFin));
   const baseIndem          = Math.min(ult, topeIndem);
   // Se expone para que la pantalla muestre de qué se compone la base: sin el
   // desglose, un número que no calza con el de la contraparte no se puede
@@ -737,11 +851,19 @@ function calcularFiniquito(fin, contrato, trabajador) {
 
   // ── Descuentos previsionales del mes de término ──
   // Sobre la remuneración del mes en curso (si se está liquidando aquí)
+  // Solo hay cotizaciones si el finiquito incluye remuneración del mes. El
+  // feriado y las indemnizaciones no son imponibles: antes, sin remuneración
+  // del mes, se cotizaba sobre la "última remuneración" completa.
+  // El tipo de contrato se compara sin mayúsculas: TIPOS_CONTRATO dice
+  // 'Plazo fijo' y la comparación exacta contra 'Plazo Fijo' fallaba, así que
+  // a un plazo fijo se le descontaba 0,6% de AFC que no corresponde.
   const tasaAfp  = TASAS_AFP[trabajador?.afp] || TASAS.afp;
-  const descAfp  = fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * tasaAfp) : parseInt(fin.descAfp || 0);
-  const descSalud= fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * TASAS.salud) : parseInt(fin.descSalud || 0);
-  const esCt     = contrato?.tipoContrato === 'Plazo Fijo' || contrato?.tipoContrato === 'Obra o Faena';
-  const descCes  = fin.aplicarDescuentos === 'si' ? Math.round((remMesEnCurso || ult) * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab)) : parseInt(fin.descCes || 0);
+  const tc       = String(contrato?.tipoContrato || '').toLowerCase();
+  const esCt     = tc.includes('plazo') || tc.includes('obra');
+  const baseDesc = remMesEnCurso;
+  const descAfp  = fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * tasaAfp) : parseInt(fin.descAfp || 0);
+  const descSalud= fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * TASAS.salud) : parseInt(fin.descSalud || 0);
+  const descCes  = fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab)) : parseInt(fin.descCes || 0);
   const totalDescPrev = descAfp + descSalud + descCes;
 
   // ── Otros descuentos ──
@@ -803,8 +925,8 @@ function calcularHaberesDesdeRemuneraciones(trabajadorId, contratos, remuneracio
                  paramsDe(liqMesAnt)?.topeGratMensual || Infinity),
     bonoProduccion:   parseInt(liqMesAnt.bonoProduccion)   || 0,
     otrosImponibles:  parseInt(liqMesAnt.otrosImponibles)  || 0,
-    colacion:         parseInt(liqMesAnt.colacion)         || 0,
-    movilizacion:     parseInt(liqMesAnt.movilizacion)     || 0,
+    colacion:         parseInt(liqMesAnt.bonoColacion ?? liqMesAnt.colacion)         || 0,
+    movilizacion:     parseInt(liqMesAnt.bonoMovilizacion ?? liqMesAnt.movilizacion) || 0,
     viaticos:         parseInt(liqMesAnt.viaticos)         || 0,
     otrosNoImponibles:parseInt(liqMesAnt.otrosNoImponibles)|| 0,
     periodo: `${liqMesAnt.mes}/${liqMesAnt.anio}`,
@@ -923,8 +1045,8 @@ function calcularLiquidacionConIUT(rem, utm) {
   // Si no llega una UTM explícita se usa la del período liquidado. Antes caía a
   // UTM_DEFAULT (64.085, un valor de 2024): con una UTM baja el sueldo "vale"
   // más UTM de las que corresponde y el impuesto sale sobrestimado.
-  const utmPeriodo = utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm;
   const calc     = calcularLiquidacion(rem);
+  const utmPeriodo = utm || calc.utm;
   const rentaTrib= calcularRentaTributable(calc);
   const iut      = calcularIUT(rentaTrib, utmPeriodo);
   const liquidoFinal = calc.liquido - iut;
@@ -1030,7 +1152,7 @@ function valorHoraExtra(sueldoBase, jornada, periodo, recargo = 0.5) {
   const pisoIMM    = Math.round(P.imm * proporcion);
   const base       = Math.max(parseInt(sueldoBase) || 0, pisoIMM);
 
-  return Math.round((base * 7) / (horas * 30) * (1 + recargo));
+  return Math.round((base * 7) / (horas * 30) * (1 + recargo) * 100) / 100;
 }
 
 /**
@@ -1276,6 +1398,7 @@ function remDe(trabajador, contrato, liq, extras) {
       : {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,
+    afectoAFC:    trabajador?.afectoAFC,
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
     apvRegimen:    liq?.apvRegimen    ?? trabajador?.apvRegimen,
     apvInstitucion:liq?.apvInstitucion?? trabajador?.apvInstitucion,
@@ -1328,8 +1451,8 @@ function fueReliquidada(liq, liquidaciones) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  nombreTrabajador, diasVigentesEnPeriodo,
-  calcularLiquidacion, remDe, liquidacionDe, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
+  nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172,
+  calcularLiquidacion, remDe, liquidacionDe, redondearPar, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,
   tramoSugerido, montoAsignacionFamiliar,

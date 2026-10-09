@@ -7,7 +7,8 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import * as Modals from './modals';
 import ArchivoPagoPanel from './ArchivoPagoPanel';
-import { paramsDe } from './parametros';
+import { paramsDe, asegurarIndicadores } from './parametros';
+import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
 import OrganigramaVertical, { generarPDFOrganigrama } from './OrganigramaVertical';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
@@ -19,6 +20,9 @@ const { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   calcularLiquidacion, liquidacionDe, remDe, liquidacionesVigentes, calcularAntiguedad, calcularFiniquito,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, exportarAsistenciaCSV, nombreTrabajador } = Calc;
+// Color de respaldo para áreas que no están en COLORES_AREA. Se usaba en
+// Reportes sin estar definido: un área nueva hacía caer la pantalla.
+const COLOR_DEFAULT = { bg: '#7c3aed', light: '#f8f8ff', text: '#334155' };
 const { generarPDFLiquidacion, generarPDFResumenNomina, generarTXTPrevired,
   generarCertificadoAnual, generarPDFReporte, generarPDFAsientos,
   generarAsientos, validarRutPrevired, generarPreviredAvanzado, generarArchivoPago,
@@ -325,6 +329,17 @@ function ImpuestosSection() {
   const [pagina, setPagina] = useState(1);
   const [modalTramos, setModalTramos] = useState(false);
   const POR_PAGINA = 10;
+  // Contexto del período y UTM de los 12 meses del año. El impuesto de cada
+  // mes se calcula con SU UTM; antes todo el año usaba la UTM del input.
+  const ctx = useContextoPeriodo(empresaId);
+  const [indVersion, setIndVersion] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    const meses = Array.from({ length: 12 }, (_, i) => ({ mes: String(i + 1).padStart(2, '0'), anio }));
+    Promise.all(meses.map(m => asegurarIndicadores({ db, doc, getDoc, setDoc }, empresaId, m).catch(() => null)))
+      .then(() => { if (vivo) setIndVersion(v => v + 1); });
+    return () => { vivo = false; };
+  }, [empresaId, anio]);
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -355,12 +370,16 @@ function ImpuestosSection() {
     .map(t => {
       const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente')
         || contratos.find(c => c.trabajadorId === t.id);
-      const liqs = liquidacionesVigentes(liquidaciones).filter(l => l.trabajadorId === t.id && l.anio === anio);
+      const liqs = liquidacionesVigentes(liquidaciones)
+        .filter(l => l.trabajadorId === t.id && l.anio === anio && !esBorrador(l))
+        .map(l => ({ ...l, _extras: extrasDelPeriodo(ctx, t.id, l.mes, l.anio) }));
       if (!contrato || liqs.length === 0) return null;
 
       let totalImp = 0, totalNoImp = 0, totalAfp = 0, totalSalud = 0, totalCes = 0, totalIUT = 0, totalLiq = 0, maxMensual = 0;
       liqs.forEach(l => {
-        const c = calcularLiquidacionConIUT(remDe(t, contrato, l), utm);
+        // Cada mes con su UTM y su contexto. `_extras` viaja con la liquidación
+        // para que el certificado use exactamente el mismo cálculo.
+        const c = liquidacionDe(t, contrato, l, l._extras);
         totalImp += c.imponible;
         totalNoImp += c.noImponible;
         totalAfp += c.afpM;
@@ -545,7 +564,7 @@ function ImpuestosSection() {
                       <td className="px-4 py-3 font-black text-emerald-600 text-sm">${row.totalLiq.toLocaleString('es-CL')}</td>
                       <td className="px-4 py-3">
                         <button
-                          onClick={() => generarCertificadoAnual(row, row._contrato, row.liqs, anio, utm)}
+                          onClick={() => generarCertificadoAnual(row, row._contrato, row.liqs, anio)}
                           className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs rounded-lg transition-colors"
                           title="Certificado Anual / Form. 1887">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -3970,6 +3989,9 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   const [validando, setValidando] = useState(false);
   const [planCuentas, setPlanCuentas] = useState(PLAN_CUENTAS_DEFAULT);
   const [editPlan, setEditPlan] = useState(false);
+  // Contexto único del período e indicadores (UTM/UF) cargados de verdad.
+  const ctx = useContextoPeriodo(empresaId);
+  const ind = useIndicadoresPeriodo(empresaId, filtroMes, filtroAnio);
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -3995,23 +4017,28 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   // reliquidación. Esta pantalla alimenta Previred, los asientos contables y
   // el archivo de pago: si contara las dos, declararía dos veces las
   // cotizaciones del mismo mes y duplicaría el costo de la mano de obra.
-  const liqPeriodo = liquidacionesVigentes(liquidaciones).filter(l =>
+  // Los borradores tampoco: nadie los ha revisado, no se pagan ni se declaran.
+  const delPeriodoTodas = liquidacionesVigentes(liquidaciones).filter(l =>
     l.mes === filtroMes &&
     l.anio === filtroAnio &&
     (!filtroEmpresa || trabajadores.find(t => t.id === l.trabajadorId)?.empresa === filtroEmpresa)
   );
+  const borradoresExcluidos = delPeriodoTodas.filter(esBorrador).length;
+  const liqPeriodo = delPeriodoTodas.filter(l => !esBorrador(l));
 
-  // Enriquecer con trabajador y contrato
-  const liqEnriquecidas = liqPeriodo.map(liq => ({
-    liq,
-    trabajador: trabajadores.find(t => t.id === liq.trabajadorId),
-    contrato: contratos.find(c => c.id === liq.contratoId) || contratos.find(c => c.trabajadorId === liq.trabajadorId && c.estado === 'vigente'),
-  })).filter(x => x.contrato);
+  // Enriquecer con trabajador, contrato y el cálculo YA resuelto con el
+  // contexto del período. Asientos, Previred y archivo de pago usan este
+  // mismo `calc`: un solo número por liquidación en todo el sistema.
+  const liqEnriquecidas = liqPeriodo.map(liq => {
+    const trabajador = trabajadores.find(t => t.id === liq.trabajadorId);
+    const contrato = contratos.find(c => c.id === liq.contratoId) || contratos.find(c => c.trabajadorId === liq.trabajadorId && c.estado === 'vigente');
+    const extras = extrasDelPeriodo(ctx, liq.trabajadorId, liq.mes, liq.anio);
+    return { liq, trabajador, contrato, extras, calc: contrato ? liquidacionDe(trabajador, contrato, liq, extras) : null };
+  }).filter(x => x.contrato);
 
   // Calcular totales del período
-  const totalesPeriodo = liqEnriquecidas.reduce((acc, { trabajador, contrato, liq }) => {
-    const c = liquidacionDe(trabajador, contrato, liq);
-    const iut = calcularIUT(calcularRentaTributable(c), utm);
+  const totalesPeriodo = liqEnriquecidas.reduce((acc, { calc: c }) => {
+    const iut = c.iut;
     acc.masaImponible += c.imponible;
     acc.masaNoImp += c.noImponible;
     acc.totalAfp += c.afpM;
@@ -4020,11 +4047,15 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
     acc.totalCesTrab += c.cesM;
     acc.totalCesEmp += c.cesEmpM || 0;
     acc.totalIUT += iut;
-    acc.costoEmp += c.imponible + (c.cesEmpM || 0) + (c.sisM || 0);
+    // Costo empresa completo: imponible + no imponibles (sin asignación
+    // familiar, que se recupera) + SIS, AFC, mutual y aportes de la reforma.
+    acc.costoEmp += c.costoEmpresa || 0;
+    acc.totalReforma += (c.ciEmpM || 0) + (c.cevEmpM || 0) + (c.crpEmpM || 0);
+    acc.totalMutual += c.mutualM || 0;
     acc.totalCotiz += c.totalDescuentos + iut;
-    acc.liquido += Math.max(0, c.liquido - iut);
+    acc.liquido += Math.max(0, c.liquidoFinal);
     return acc;
-  }, { masaImponible: 0, masaNoImp: 0, totalAfp: 0, totalSalud: 0, totalSis: 0, totalCesTrab: 0, totalCesEmp: 0, totalIUT: 0, costoEmp: 0, totalCotiz: 0, liquido: 0 });
+  }, { masaImponible: 0, masaNoImp: 0, totalAfp: 0, totalSalud: 0, totalSis: 0, totalCesTrab: 0, totalCesEmp: 0, totalIUT: 0, costoEmp: 0, totalCotiz: 0, liquido: 0, totalReforma: 0, totalMutual: 0 });
 
   const periodo = `${MESES[parseInt(filtroMes) - 1]} ${filtroAnio}`;
   const asientos = liqEnriquecidas.length > 0 ? generarAsientos(liqEnriquecidas, periodo, utm) : [];
@@ -4084,17 +4115,17 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
             </select>
           </div>
           <div className="min-w-[200px]">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">UTM del período ($)</p>
-            <div className="flex gap-2">
-              <input className={`${inp} flex-1`} value={utmInput}
-                onChange={e => setUtmInput(e.target.value.replace(/\D/g, ''))}
-                onKeyDown={e => { if (e.key === 'Enter') { const v = parseInt(utmInput); if (v > 0) setUtm(v); } }}
-                placeholder={String(UTM_DEFAULT)} />
-              <button onClick={() => { const v = parseInt(utmInput); if (v > 0) setUtm(v); }}
-                className="px-3 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-xs rounded-xl hover:opacity-90">
-                OK
-              </button>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">UTM del período</p>
+            {/* Ya no se ingresa a mano: cada liquidación usa la UTM de SU período
+                (o la congelada al aprobarla). Un input manual hacía que el pago y
+                los asientos retuvieran un impuesto distinto al del PDF. */}
+            <div className={`px-3 py-2.5 rounded-xl text-sm font-bold border ${ind.utmCargada ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'}`}>
+              ${paramsDe({ mes: filtroMes, anio: filtroAnio }).utm.toLocaleString('es-CL')}
+              <span className="text-[10px] font-semibold ml-2">{ind.cargando ? 'cargando…' : ind.utmCargada ? 'cargada' : 'respaldo — no declarar'}</span>
             </div>
+            {borradoresExcluidos > 0 && (
+              <p className="text-[10px] text-amber-600 font-bold mt-1">{borradoresExcluidos} borrador(es) sin aprobar quedan fuera</p>
+            )}
           </div>
 
           {/* Stats rápidas del período */}
@@ -4382,7 +4413,7 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
               trabajadores={trabajadores}
               mes={filtroMes}
               anio={filtroAnio}
-              utm={utm}
+              utm={undefined}
               onSaved={load}
             />
           )}

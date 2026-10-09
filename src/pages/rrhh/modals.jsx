@@ -7,6 +7,7 @@ import * as Shared from './shared';
 import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
+import { useContextoPeriodo, extrasDelPeriodo } from './periodo';
 
 const {
   inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS,
@@ -919,6 +920,15 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             Queda exento de cotización AFP, SIS y seguro de cesantía. Sigue cotizando salud.
           </span>
         </label>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5 rounded" checked={form.afectoAFC === false}
+            onChange={e => set('afectoAFC', e.target.checked ? false : true)} />
+          <span className="text-xs text-slate-600">
+            <b className="text-slate-700">No afecto a seguro de cesantía.</b>{' '}
+            Ni el trabajador ni la empresa cotizan AFC (p. ej. contratos anteriores a octubre de 2002
+            que no optaron). Úsalo solo si corresponde legalmente: por defecto todo dependiente cotiza.
+          </span>
+        </label>
       </div>
 
       {/* ── GRUPO FAMILIAR ── */}
@@ -1220,7 +1230,10 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
   const { empresaId, empresa, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', tipoContrato: 'Indefinido', fechaInicio: '', fechaFin: '',
-    cargo: '', jornada: 'Completa (42 hrs)', empresa: empresa?.nombre || '', sueldoBase: '',
+    // 40 hrs es la jornada pactada en la mayoría de los contratos de MPF (así
+    // liquida Talana). El divisor de la hora extra sale de acá: con 42 la hora
+    // extra se pagaba un 5% más baja.
+    cargo: '', jornada: 'Completa (40 hrs)', gratificacion: 'legal', empresa: empresa?.nombre || '', sueldoBase: '',
     bonoColacion: '', bonoMovilizacion: '', estado: 'vigente', observaciones: '',
     // Jornada personalizada (cuando jornada === 'Otro')
     jornadaHorasSemanales: '', jornadaHoraEntrada: '', jornadaHoraSalida: '',
@@ -1403,6 +1416,22 @@ function ContratoModal({ isOpen, onClose, editData, trabajadores, onSaved }) {
             <input type="text" className={inp} value={formatCLP(form.bonoMovilizacion)} onChange={e => set('bonoMovilizacion', parseCLP(e.target.value))} placeholder="No imponible" />
           </Field>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Field label="Gratificación">
+            {/* El motor la lee directo del contrato: 'ninguna' no paga gratificación.
+                Antes no había forma de indicarlo y se pagaba a todos. */}
+            <select className={inp} value={form.gratificacion || 'legal'} onChange={e => set('gratificacion', e.target.value)}>
+              <option value="legal">Art. 50 — 25% con tope 4,75 IMM, mensual</option>
+              <option value="ninguna">Sin gratificación pactada</option>
+            </select>
+          </Field>
+          {form.gratificacion === 'ninguna' && (
+            <p className="sm:col-span-2 text-[11px] text-amber-700 leading-snug self-end pb-2">
+              La gratificación es obligatoria si la empresa tiene utilidades (Art. 47). Dejarla fuera solo es
+              válido si el contrato lo justifica expresamente; si no, el trabajador puede reclamarla.
+            </p>
+          )}
+        </div>
         {form.sueldoBase && parseInt(form.sueldoBase) < IMM_2026 && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700 font-bold">
             ⚠ Sueldo base bajo el IMM 2026 (${IMM_2026.toLocaleString('es-CL')})
@@ -1435,6 +1464,8 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   // `empresa` alimenta el encabezado del PDF. Faltaba en este destructuring y el
   // botón de vista previa reventaba con "empresa is not defined" al hacer click.
   const { empresaId, empresa } = useEmpresa();
+  // Contexto del período: anticipos, licencias y ausencias registradas.
+  const ctxPeriodo = useContextoPeriodo(isOpen ? empresaId : null);
   const hoy = new Date();
   const empty = {
     trabajadorId: '', contratoId: '',
@@ -1515,8 +1546,11 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
   // desde abril de 2026 sin necesidad de anexo, y la hora vale más.
   const periodoLiq   = { mes: form.mes, anio: form.anio };
   const jornadaSem   = contratoSel ? horasOrdinariasSemanales(contratoSel, periodoLiq) : null;
+  // Entero para la pantalla: valorHoraExtra() devuelve 2 decimales y el campo
+  // usa formatCLP, que borraría el punto (5909.09 → 590.909). El motor usa el
+  // valor exacto cuando lo guardado coincide con este redondeo.
   const vheSugerido  = contratoSel && form.sueldoBase
-    ? valorHoraExtra(form.sueldoBase, contratoSel, periodoLiq)
+    ? Math.round(valorHoraExtra(form.sueldoBase, contratoSel, periodoLiq))
     : 0;
 
   // Se rellena solo mientras el usuario no lo haya tocado. Si lo editó a mano
@@ -1530,24 +1564,23 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     if (sinTocar) setForm(f => ({ ...f, valorHoraExtra: String(vheSugerido) }));
     vhePrevio.current = vheSugerido;
   }, [vheSugerido]);
+  const extrasCtx = extrasDelPeriodo(ctxPeriodo, form.trabajadorId, form.mes, form.anio);
+  const extrasModal = {
+    anticiposRegistrados: anticiposRegistrados !== undefined ? anticiposRegistrados : extrasCtx.anticiposRegistrados,
+    licenciasRegistradas: licenciasRegistradas !== undefined ? licenciasRegistradas : extrasCtx.licenciasRegistradas,
+    ausenciasRegistradas: extrasCtx.ausenciasRegistradas,
+  };
   const calc = (contratoSel && form.sueldoBase)
     // Sin segundo argumento: la UTM se resuelve por el mes y año de la
     // liquidación, no por una constante que envejece.
     // El tramo y las cargas salen de la ficha salvo que la liquidación los
     // sobrescriba, igual que la AFP.
-    ? calcularLiquidacionConIUT({
-        ...contratoSel, ...form,
-        afp: trabajadorSel?.afp,
-        tramoAsignacion:  form.tramoAsignacion  ?? trabajadorSel?.tramoAsignacion,
-        cargas:           form.cargas           ?? trabajadorSel?.cargas,
-        cargasMaternales: form.cargasMaternales ?? trabajadorSel?.cargasMaternales,
-        cargasInvalidez:  form.cargasInvalidez  ?? trabajadorSel?.cargasInvalidez,
-        // Las colecciones mandan sobre los campos manuales, igual que en la
-        // tabla y en la nómina. Si acá no se pasaran, la previsualización
-        // mostraría un líquido que no coincide con el que se transfiere.
-        ...(anticiposRegistrados !== undefined ? { anticiposRegistrados } : {}),
-        ...(licenciasRegistradas !== undefined ? { licenciasRegistradas } : {}),
-      })
+    // Mismo cálculo que la tabla, el PDF y la nómina bancaria: liquidacionDe
+    // con la ficha del trabajador (AFP, isapre y plan, pensionado, APV, cargas)
+    // y el contexto completo del período (anticipos, licencias, ausencias).
+    // Antes se armaba a mano sin isapre, pensionado, APV ni ausencias, así que
+    // la previsualización no coincidía con lo que se transfería.
+    ? Calc.liquidacionDe(trabajadorSel, contratoSel, form, extrasModal)
     : null;
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
 
@@ -1849,7 +1882,7 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
         <div className="flex justify-between items-center pt-2">
           {calc && (
             <button onClick={() => setPdfPreview({
-                url: generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { preview: true, empresa }),
+                url: generarPDFLiquidacion({ ...form }, trabajadorSel, contratoSel, { preview: true, empresa, ...extrasModal }),
                 filename: `Liquidación — ${labelPeriodo(form)}`,
               })}
               className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors">
@@ -2430,7 +2463,7 @@ function SubirDocumentoAnexo({ empresaId, trabajadorId, urlActual, nombreActual,
 // ─── AnexoModal ───────────────────────────────────────────────────────────────
 
 function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAnexo, onSaved }) {
-  const { empresaId } = useEmpresa();
+  const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '', tipo: '',
     fechaAnexo: new Date().toISOString().split('T')[0],

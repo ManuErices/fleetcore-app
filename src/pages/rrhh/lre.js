@@ -73,7 +73,8 @@ export const TIPO_IMPUESTO = {
  * del Art. 38 inciso final, que es la que autoriza la DT.
  */
 export const COD_JORNADA_LRE = {
-  'Completa (42 hrs)': 101,  // Ordinaria - Art. 22
+  'Completa (40 hrs)': 101,  // Ordinaria - Art. 22
+  'Completa (42 hrs)': 101,
   'Completa (44 hrs)': 101,
   'Completa (45 hrs)': 101,
   'Parcial (30 hrs)':  201,  // Parcial - Art. 40 bis

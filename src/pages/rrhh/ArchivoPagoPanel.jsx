@@ -15,9 +15,8 @@ import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { MESES, codigoBanco, codigoTipoCuenta } from './shared';
 import { liquidacionDe, calcularIUT, calcularRentaTributable } from './calculo';
-import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
-import { useLicencias, licenciasDe } from './licencias';
-import { paramsDe } from './parametros';
+import { useAnticipos } from './anticipos';
+import { useContextoPeriodo, liquidacionDelPeriodo, esBorrador } from './periodo';
 import {
   prepararNomina, descargarNominaBancoChile, registrarNomina, nombreDeNomina,
 } from './nominaBanco';
@@ -27,11 +26,9 @@ const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 export default function ArchivoPagoPanel({ liqEnriquecidas = [], trabajadores = [], mes, anio, utm, onSaved }) {
   const { empresaId } = useEmpresa();
   const { anticipos } = useAnticipos(empresaId);
-  const { licencias } = useLicencias(empresaId);
-
-  // UTM del período liquidado, no una constante: con una UTM vieja el sueldo
-  // equivale a más UTM de las que corresponde y el impuesto sale sobrestimado.
-  const utmPeriodo = utm || paramsDe({ mes, anio }).utm;
+  // Contexto completo del período: anticipos, licencias Y ausencias. Antes
+  // faltaban las ausencias, así que se transfería el día que el PDF descontaba.
+  const ctx = useContextoPeriodo(empresaId);
 
   const [tipo, setTipo]         = useState('sueldo');   // 'sueldo' | 'anticipo'
   const [generando, setGen]     = useState(false);
@@ -69,28 +66,21 @@ export default function ArchivoPagoPanel({ liqEnriquecidas = [], trabajadores = 
         .filter(p => p.trabajador);
     }
 
-    // Sueldos: solo lo que no se ha pagado todavía
+    // Sueldos: solo lo que no se ha pagado y ya fue aprobado. Un borrador de
+    // "Generar Nómina" no lo ha revisado nadie: antes entraba igual al archivo.
     return liqEnriquecidas
-      .filter(({ liq }) => liq.estado !== 'pagado')
-      .map(({ trabajador, contrato, liq }) => {
-        const licsDelMes = licenciasDe(licencias, trabajador?.id, mes, anio);
-        const c = liquidacionDe(trabajador, contrato, liq, {
-          anticiposRegistrados: anticiposDe(anticipos, trabajador?.id, mes, anio).length
-            ? totalAnticipos(anticipos, trabajador?.id, mes, anio)
-            : undefined,
-          // Si hay licencias registradas mandan sobre el campo manual: sumar
-          // ambos descontaría dos veces los mismos días de reposo.
-          licenciasRegistradas: licsDelMes.length ? licsDelMes : undefined,
-        });
-        const iut = calcularIUT(calcularRentaTributable(c), utmPeriodo);
+      .filter(({ liq }) => liq.estado !== 'pagado' && !esBorrador(liq))
+      .map(({ trabajador, contrato, liq, calc }) => {
+        // Mismo cálculo que la tabla y el PDF (contexto completo, IUT del motor).
+        const c = calc || liquidacionDelPeriodo(trabajador, contrato, liq, ctx);
         return {
           key: liq.id, liquidacionId: liq.id, trabajador,
-          monto: Math.max(0, c.liquido - iut),
+          monto: Math.max(0, c.liquidoFinal),
           glosa: `REMUNERACION ${periodo}`,
           descripcion: `Liquidacion ${periodo}`,
         };
       });
-  }, [tipo, liqEnriquecidas, anticipos, licencias, trabajadores, mes, anio, periodo, utmPeriodo]);
+  }, [tipo, liqEnriquecidas, anticipos, ctx, trabajadores, mes, anio, periodo]);
 
   const { lineas, errores, total } = useMemo(() => prepararNomina(pagos), [pagos]);
 

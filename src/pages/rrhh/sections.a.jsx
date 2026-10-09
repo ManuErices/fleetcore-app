@@ -13,6 +13,7 @@ import ImportarNominaModal from './ImportarNominaModal';
 import CargaMasivaModal from './CargaMasivaModal';
 import ItemsPagoModal from './ItemsPagoModal';
 import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
+import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
 import ReliquidacionModal from './ReliquidacionModal';
 import { fueReliquidada, liquidacionesVigentes, ausenciasDePeriodo } from './calculo';
 import { paramsDe } from './parametros';
@@ -1225,8 +1226,14 @@ function RemuneracionesSection() {
   const [busqueda, setBusqueda] = useState('');
   const [cargaMasiva, setCargaMasiva] = useState(false);
   const [itemsPago, setItemsPago] = useState(false);
-  const { anticipos } = useAnticipos(empresaId);
+  // Contexto único del período (anticipos + licencias + ausencias). Antes la
+  // tabla y el PDF no consideraban licencias y el pago no consideraba
+  // ausencias: el líquido del PDF y el transferido podían diferir.
+  const ctx = useContextoPeriodo(empresaId);
+  const { anticipos } = ctx;
+  const ind = useIndicadoresPeriodo(empresaId, filtroMes, filtroAnio);
   const [reliq, setReliq] = useState(null);   // { original } | { editData }
+  const [aprobando, setAprobando] = useState(false);
 
   // Suma de anticipos del período de un trabajador, o undefined si no tiene
   // ninguno registrado — en ese caso el motor respeta el campo manual legado.
@@ -1304,13 +1311,22 @@ function RemuneracionesSection() {
     setGenerando(true); setResultadoGen(null);
     let creados = 0, omitidos = 0, errores = 0;
 
-    // Trabajadores activos con contrato vigente
+    // Trabajadores activos con un contrato que TOQUE el período. Antes bastaba
+    // con `estado === 'vigente'`, así que un plazo fijo vencido que nadie
+    // había cerrado seguía generando liquidación de mes completo.
     const activos = trabajadores.filter(t => (t.estado || 'activo') === 'activo');
+    const primeroMes = `${filtroAnio}-${filtroMes}-01`;
+    const ultimoMes  = `${filtroAnio}-${filtroMes}-${String(new Date(parseInt(filtroAnio), parseInt(filtroMes), 0).getDate()).padStart(2, '0')}`;
+    const tocaPeriodo = (c) =>
+      (!c.fechaInicio || c.fechaInicio <= ultimoMes) &&
+      (!c.fechaFin || c.fechaFin >= primeroMes);
+    let sinContrato = 0;
 
     for (const trab of activos) {
       try {
-        const contrato = contratos.find(c => c.trabajadorId === trab.id && c.estado === 'vigente');
-        if (!contrato) { omitidos++; continue; }
+        const candidatos = contratos.filter(c => c.trabajadorId === trab.id && tocaPeriodo(c));
+        const contrato = candidatos.find(c => c.estado === 'vigente') || candidatos[0];
+        if (!contrato) { omitidos++; sinContrato++; continue; }
 
         // Verificar si ya existe liquidación para este período
         const yaExiste = liquidaciones.some(l =>
@@ -1337,9 +1353,11 @@ function RemuneracionesSection() {
           valorHoraExtra: contrato.valorHoraExtra || '0',
           otrosImponibles: '0',
           otrosNoImponibles: '0',
-          diasTrabajados: '30',
+          // SIN diasTrabajados: así el motor los calcula desde las fechas del
+          // contrato (ingresos y egresos a mitad de mes) y descuenta licencias
+          // y ausencias registradas. Escribir '30' anulaba todo eso.
+          // SIN anticipo: los anticipos salen de su propia colección.
           descuentoAdicional: '0',
-          anticipo: '0',
           glosaDescuento: '',
           glosaAnticipo: '',
           estado: 'borrador',
@@ -1353,24 +1371,40 @@ function RemuneracionesSection() {
       } catch (e) { errores++; console.error(e); }
     }
 
-    setResultadoGen({ creados, omitidos, errores });
+    setResultadoGen({ creados, omitidos, errores, sinContrato });
     setGenerando(false);
     load(); // Recargar tabla
+  };
+
+  // ── Aprobar borradores del período ──
+  // Los borradores no se pagan ni se declaran: primero alguien los revisa.
+  // Esto los pasa a 'pendiente' (listos para pagar) de una vez.
+  const aprobarBorradores = async () => {
+    const lista = borradoresPeriodo;
+    if (!lista.length) return;
+    if (!window.confirm(`¿Aprobar ${lista.length} borrador${lista.length > 1 ? 'es' : ''} de ${MESES[parseInt(filtroMes) - 1]} ${filtroAnio}?\n\nQuedan como "Pendiente" y entran a la nómina de pago, Previred y el libro de remuneraciones. Revisa antes los casos especiales del mes.`)) return;
+    setAprobando(true);
+    try {
+      await Promise.all(lista.map(l => updateDoc(doc(db, 'empresas', empresaId, 'remuneraciones', l.id), {
+        estado: 'pendiente',
+        // Se congelan los parámetros con que se aprobó, como hace el modal.
+        ...(l._calc?.parametros ? { parametros: l._calc.parametros } : {}),
+        aprobadoEn: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      })));
+      load();
+    } catch (e) { alert('No se pudieron aprobar todos: ' + e.message); }
+    setAprobando(false);
   };
   const enriquecidas = liquidaciones.map(l => {
     const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
     const contrato = contratos.find(c => c.id === l.contratoId);
-    const anticipoReg = anticiposDelPeriodo(l.trabajadorId, l.mes, l.anio);
-    const ausenciaReg = ausenciasDelPeriodo(l.trabajadorId, l.mes, l.anio);
-    const calc = contrato
-      ? liquidacionDe(trabajador, contrato, l, {
-          anticiposRegistrados: anticipoReg,
-          ausenciasRegistradas: ausenciaReg,
-        })
-      : null;
+    const extras = extrasDelPeriodo(ctx, l.trabajadorId, l.mes, l.anio);
+    const calc = contrato ? liquidacionDe(trabajador, contrato, l, extras) : null;
     return {
       ...l, _trabajador: trabajador, _contrato: contrato, _calc: calc,
-      _anticipoReg: anticipoReg, _ausenciaReg: ausenciaReg,
+      _extras: extras,
+      _anticipoReg: extras.anticiposRegistrados, _ausenciaReg: extras.ausenciasRegistradas,
       // Una liquidación reemplazada sigue en la tabla como registro de lo que
       // se transfirió, pero marcada: ya no es la cifra vigente del mes.
       _reemplazada: fueReliquidada(l, liquidaciones),
@@ -1394,7 +1428,8 @@ function RemuneracionesSection() {
 
   // Stats del período filtrado
   const totalImponible = filtradas.reduce((s, l) => s + (l._calc?.imponible || 0), 0);
-  const totalLiquido = filtradas.reduce((s, l) => s + (l._calc?.liquido || 0), 0);
+  const totalLiquido = filtradas.reduce((s, l) => s + (l._calc?.liquidoFinal || 0), 0);
+  const borradoresPeriodo = filtradas.filter(l => esBorrador(l) && !l._reemplazada);
   const totalDescuentos = filtradas.reduce((s, l) => s + (l._calc?.totalDescuentos || 0), 0);
   const pendientes = filtradas.filter(l => l.estado === 'pendiente').length;
 
@@ -1432,7 +1467,7 @@ function RemuneracionesSection() {
         l._contrato?.cargo || '',
         c?.base || 0, c?.imponible || 0,
         c?.afpM || 0, c?.salM || 0, c?.sisM || 0, c?.cesM || 0,
-        c?.totalDescuentos || 0, c?.noImponible || 0, c?.liquido || 0,
+        c?.totalDescuentos || 0, c?.noImponible || 0, c?.liquidoFinal || 0,
         l.estado || 'pendiente',
       ].join(';');
     }).join('\n');
@@ -1464,12 +1499,44 @@ function RemuneracionesSection() {
               <p className="text-sm font-black text-slate-800">Nómina generada — {MESES[parseInt(filtroMes) - 1]} {filtroAnio}</p>
               <p className="text-xs text-slate-500 mt-0.5">
                 <span className="text-emerald-700 font-bold">{resultadoGen.creados} borradores creados</span>
-                {resultadoGen.omitidos > 0 && <span className="ml-2 text-slate-400">{resultadoGen.omitidos} omitidos (ya existían o sin contrato)</span>}
+                {resultadoGen.omitidos > 0 && <span className="ml-2 text-slate-400">{resultadoGen.omitidos} omitidos ({resultadoGen.omitidos - (resultadoGen.sinContrato || 0)} ya existían · {resultadoGen.sinContrato || 0} sin contrato en el período)</span>}
                 {resultadoGen.errores > 0 && <span className="ml-2 text-red-600 font-bold">{resultadoGen.errores} errores</span>}
               </p>
             </div>
           </div>
           <button onClick={() => setResultadoGen(null)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
+        </div>
+      )}
+
+      {/* Indicadores del período: si no se pudieron cargar, el impuesto y los
+          topes se están calculando con valores de respaldo y hay que saberlo. */}
+      {!ind.cargando && (!ind.utmCargada || !ind.ufFinCargada) && (
+        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-2xl px-5 py-3 mb-3">
+          <span className="text-lg">⚠️</span>
+          <div>
+            <p className="text-sm font-black text-red-800">
+              {MESES[parseInt(filtroMes) - 1]} {filtroAnio}: {!ind.utmCargada ? 'UTM' : ''}{!ind.utmCargada && !ind.ufFinCargada ? ' y ' : ''}{!ind.ufFinCargada ? 'UF de fin de mes' : ''} sin cargar
+            </p>
+            <p className="text-xs text-red-700 mt-0.5 leading-snug">
+              El impuesto único y los topes imponibles se están calculando con valores de respaldo. No pagues
+              ni declares este período hasta que se carguen (se intentan traer solos desde mindicador.cl; si
+              el mes aún no termina, la UF del último día puede no estar publicada todavía).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Borradores por aprobar */}
+      {borradoresPeriodo.length > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3 mb-3">
+          <p className="text-sm text-slate-700">
+            <strong>{borradoresPeriodo.length} borrador{borradoresPeriodo.length > 1 ? 'es' : ''}</strong> sin aprobar.
+            <span className="text-slate-500"> No entran a la nómina de pago, Previred ni el libro hasta aprobarlos.</span>
+          </p>
+          <button onClick={aprobarBorradores} disabled={aprobando}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-40 whitespace-nowrap">
+            {aprobando ? 'Aprobando…' : 'Aprobar borradores'}
+          </button>
         </div>
       )}
 
@@ -1635,8 +1702,9 @@ function RemuneracionesSection() {
                           // liquidación de un mes pasado calculaba el impuesto
                           // con la UTM de hoy y el líquido de la tabla no
                           // coincidía con el del PDF ni con el transferido.
-                          const iutRow = calcularIUT(calcularRentaTributable(c), paramsDe({ mes: row.mes, anio: row.anio }).utm);
-                          const liqReal = c.liquido - iutRow;
+                          // El IUT ya viene del motor, con la UTM efectiva del
+                          // documento: es el mismo número del PDF y del pago.
+                          const liqReal = c.liquidoFinal;
                           return <span className="font-black text-emerald-600 text-sm">${liqReal.toLocaleString('es-CL')}</span>;
                         })() : <span>—</span>}
                       </td>
@@ -1669,7 +1737,7 @@ function RemuneracionesSection() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa, anticiposRegistrados: row._anticipoReg, ausenciasRegistradas: row._ausenciaReg })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
+                          <button onClick={() => generarPDFLiquidacion(row, row._trabajador, row._contrato, { empresa, ...row._extras })} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Descargar liquidación PDF">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </button>
                           <button onClick={() => openEdit(row)} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors" title="Editar">
@@ -1728,7 +1796,9 @@ function RemuneracionesSection() {
         editData={reliq?.editData}
         trabajador={(reliq?.original || reliq?.editData)?._trabajador}
         contrato={(reliq?.original || reliq?.editData)?._contrato}
-        anticiposRegistrados={(reliq?.original || reliq?.editData)?._anticipoReg}
+        anticiposRegistrados={(reliq?.original || reliq?.editData)?._extras?.anticiposRegistrados}
+        licenciasRegistradas={(reliq?.original || reliq?.editData)?._extras?.licenciasRegistradas}
+        ausenciasRegistradas={(reliq?.original || reliq?.editData)?._extras?.ausenciasRegistradas}
         onSaved={load}
       />
       <CargaMasivaModal
