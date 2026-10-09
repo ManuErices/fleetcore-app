@@ -27,7 +27,7 @@ import { db } from '../../lib/firebase';
 import { collection, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
 import { useLicencias, licenciasDe } from './licencias';
-import { ausenciasDePeriodo, liquidacionDe } from './calculo';
+import { ausenciasDePeriodo, liquidacionDe, liquidacionesVigentes } from './calculo';
 import { asegurarIndicadores, paramsDe } from './parametros';
 
 /** Ausencias de la empresa, en vivo. Se recortan por período en memoria. */
@@ -47,15 +47,50 @@ export function useAusencias(empresaId) {
   return { ausencias, loading };
 }
 
-/** Anticipos + licencias + ausencias de la empresa, en vivo. */
+/** Liquidaciones de la empresa, en vivo: hacen falta para la RIMA de las licencias. */
+export function useLiquidaciones(empresaId) {
+  const [liquidaciones, setLiquidaciones] = useState([]);
+  useEffect(() => {
+    if (!empresaId) { setLiquidaciones([]); return; }
+    return onSnapshot(collection(db, 'empresas', empresaId, 'remuneraciones'),
+      snap => setLiquidaciones(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => setLiquidaciones([]));
+  }, [empresaId]);
+  return liquidaciones;
+}
+
+/** Anticipos + licencias + ausencias (+ liquidaciones para la RIMA), en vivo. */
 export function useContextoPeriodo(empresaId) {
   const { anticipos, loading: la } = useAnticipos(empresaId);
   const { licencias, loading: ll } = useLicencias(empresaId);
   const { ausencias, loading: lu } = useAusencias(empresaId);
+  const liquidaciones = useLiquidaciones(empresaId);
   return useMemo(
-    () => ({ anticipos, licencias, ausencias, loading: la || ll || lu }),
-    [anticipos, licencias, ausencias, la, ll, lu]
+    () => ({ anticipos, licencias, ausencias, liquidaciones, loading: la || ll || lu }),
+    [anticipos, licencias, ausencias, liquidaciones, la, ll, lu]
   );
+}
+
+const mesAnterior = (mes, anio) => {
+  const m = parseInt(mes), a = parseInt(anio);
+  return m === 1 ? { mes: '12', anio: String(a - 1) } : { mes: String(m - 1).padStart(2, '0'), anio: String(a) };
+};
+
+/**
+ * Renta imponible del mes anterior a la licencia (RIMA), llevada a 30 días.
+ * Si ese mes también fue de licencia completa, se usa la RIMA que él tenía.
+ */
+export function rimaDelPeriodo(ctx, trabajador, contrato, mes, anio, profundidad = 0) {
+  if (!ctx?.liquidaciones || !trabajador || !contrato || profundidad > 3) return undefined;
+  const ant = mesAnterior(mes, anio);
+  const prev = liquidacionesVigentes(ctx.liquidaciones).find(l =>
+    l.trabajadorId === trabajador.id && l.mes === ant.mes && l.anio === ant.anio && l.estado !== 'borrador');
+  if (!prev) return undefined;
+  const cp = liquidacionDe(trabajador, contrato, prev,
+    extrasDelPeriodo(ctx, trabajador.id, ant.mes, ant.anio, { trabajador, contrato, profundidad: profundidad + 1 }));
+  if (cp.diasTrab > 0 && cp.diasTrab < 30) return Math.round(cp.baseCotiza / cp.diasTrab * 30);
+  if (cp.diasTrab === 0) return cp.rimaMensual || undefined;
+  return cp.baseCotiza;
 }
 
 /**
@@ -63,7 +98,7 @@ export function useContextoPeriodo(empresaId) {
  * Cada campo es `undefined` cuando no hay registro, y en ese caso el motor
  * respeta el campo manual de la liquidación (comportamiento heredado).
  */
-export function extrasDelPeriodo(ctx, trabajadorId, mes, anio) {
+export function extrasDelPeriodo(ctx, trabajadorId, mes, anio, { trabajador, contrato, profundidad = 0 } = {}) {
   if (!ctx || !trabajadorId || !mes || !anio) return {};
   const ants = anticiposDe(ctx.anticipos, trabajadorId, mes, anio);
   const lics = licenciasDe(ctx.licencias, trabajadorId, mes, anio);
@@ -73,6 +108,8 @@ export function extrasDelPeriodo(ctx, trabajadorId, mes, anio) {
     anticiposRegistrados: ants.length ? totalAnticipos(ctx.anticipos, trabajadorId, mes, anio) : undefined,
     licenciasRegistradas: lics.length ? lics : undefined,
     ausenciasRegistradas: aus.length ? aus : undefined,
+    // Solo si hay licencia y se conoce el trabajador y su contrato.
+    rimaMensual: lics.length ? rimaDelPeriodo(ctx, trabajador, contrato, mes, anio, profundidad) : undefined,
   };
 }
 
@@ -83,7 +120,7 @@ export function extrasDelPeriodo(ctx, trabajadorId, mes, anio) {
  */
 export function liquidacionDelPeriodo(trabajador, contrato, liq, ctx) {
   const tid = trabajador?.id || liq?.trabajadorId;
-  return liquidacionDe(trabajador, contrato, liq, extrasDelPeriodo(ctx, tid, liq?.mes, liq?.anio));
+  return liquidacionDe(trabajador, contrato, liq, extrasDelPeriodo(ctx, tid, liq?.mes, liq?.anio, { trabajador, contrato }));
 }
 
 /**

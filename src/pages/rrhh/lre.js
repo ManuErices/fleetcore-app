@@ -409,7 +409,10 @@ export function filaLRE({ trabajador, contrato, liq, calc, iut, finiquito, confi
   f[4152] = monto(calc?.mutualM);
   f[4131] = 0;
   f[4154] = 0;
-  f[4155] = monto(calc?.sisM);
+  // Mientras la DT no cree códigos para los aportes de la reforma, se
+  // informan en el 4155 junto con el SIS (criterio de Buk/Talana). Antes iba
+  // solo el SIS y quedaban fuera Expectativa de Vida, Rent. Protegida y el 0,1%.
+  f[4155] = monto((calc?.sisM || 0) + (calc?.cevEmpM || 0) + (calc?.crpEmpM || 0) + (calc?.ciEmpM || 0));
   f[4157] = 0;
 
   // ── Totales ──

@@ -95,18 +95,10 @@ export default function PreviredSection() {
         return { nombre, rut: trabajador?.rut || '—', errores: [!trabajador ? 'sin ficha de trabajador' : 'sin contrato'], avisos: [], lineas: [], resumen: null };
       }
       const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config2.tasaMutual },
-        extrasDelPeriodo(ctx, trabajador.id, mes, anio));
-
-      // RIMA: renta imponible del mes anterior, llevada a 30 días. Solo se usa
-      // si hay licencia. Se puede fijar a mano en la liquidación (`rima`).
-      let rimaMensual = Number(l.rima) || 0;
-      if (!rimaMensual && (calc.diasLicencia || 0) > 0) {
-        const prev = vigentes.find(x => x.trabajadorId === trabajador.id && x.mes === ant.mes && x.anio === ant.anio && !esBorrador(x));
-        if (prev) {
-          const cp = liquidacionDe(trabajador, contrato, prev, extrasDelPeriodo(ctx, trabajador.id, ant.mes, ant.anio));
-          rimaMensual = cp.diasTrab > 0 && cp.diasTrab < 30 ? Math.round(cp.baseCotiza / cp.diasTrab * 30) : cp.baseCotiza;
-        }
-      }
+        extrasDelPeriodo(ctx, trabajador.id, mes, anio, { trabajador, contrato }));
+      // La RIMA (licencias) la resuelve el motor desde la liquidación del mes
+      // anterior; un `rima` escrito en la liquidación manda.
+      const rimaMensual = calc.rimaMensual || 0;
       const r = lineasTrabajador({ trabajador, contrato, liq: l, calc, rimaMensual, config: config2, mes, anio });
       return { nombre, rut: trabajador.rut, calc, ...r };
     });

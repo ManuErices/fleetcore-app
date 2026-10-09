@@ -396,9 +396,17 @@ function calcularLiquidacion(rem) {
   //   · seguro de cesantía — por ley no puede ser beneficiario activo (AFC)
   // Sigue cotizando el 7% de salud.
   const esPensionado = rem.esPensionado === true;
+  // Pensionado que sigue cotizando AFP (Previred tipo 1): paga AFP, pero no
+  // SIS, cesantía ni los aportes de la reforma. Sin la marca es tipo 2
+  // (pensionado que no cotiza): ni AFP. Así lo liquida Talana.
+  const pensionadoCotiza = esPensionado && rem.pensionadoCotiza === true;
+  // Redondeo de cotizaciones: un monto que termina en ,5 sube (787.500 × 0,9%
+  // = 7.087,5 → 7.088). En coma flotante ese producto da 7.087,4999… y
+  // Math.round lo bajaba: $1 de diferencia con Talana y con Previred.
+  const pct = (b, t) => Math.round(b * t + 1e-6);
 
   const afpResuelta = !!TASAS_AFP[rem.afp];
-  const tasaAfp = esPensionado ? 0 : (TASAS_AFP[rem.afp] || 0.1137);
+  const tasaAfp = esPensionado && !pensionadoCotiza ? 0 : (TASAS_AFP[rem.afp] || 0.1137);
 
   // ── Tope imponible (DL 3.500 Art. 16) ──
   //
@@ -413,7 +421,7 @@ function calcularLiquidacion(rem) {
   const baseCesantia = Math.min(imponible, P.topeCesantia);
   const sobreTope = imponible > P.topeImponible;
 
-  const afpM  = Math.round(baseCotiza * tasaAfp);
+  const afpM  = pct(baseCotiza, tasaAfp);
 
   // ── Salud: el 7% es el MÍNIMO, no el monto ──
   //
@@ -438,16 +446,26 @@ function calcularLiquidacion(rem) {
   // `afectoAFC: false` (p. ej. contratos anteriores a oct-2002 sin opción).
   const sinAFC = esPensionado || rem.afectoAFC === false;
   const cesM  = sinAFC ? 0
-    : Math.round(baseCesantia * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab));
+    : pct(baseCesantia, esCt ? TASAS.ces_trab_pf : TASAS.ces_trab);
   // SIS: cargo empleador (referencial, no descuenta al trabajador). Va sobre
   // el tope previsional, igual que AFP y salud. La tasa es la del período.
-  const sisM  = esPensionado ? 0 : Math.round(baseCotiza * P.tasaSIS);
+  // ── Licencias: lo que el empleador sigue pagando por los días de reposo ──
+  // SIS, Expectativa de Vida, su aporte de cesantía y el 0,03% de la Ley SANNA
+  // corren también sobre la renta del mes anterior (RIMA) proporcional a los
+  // días de licencia. Verificado contra el libro de Talana (sept-2026):
+  // 121.911 + 1.097.204 = 1.219.115 de base → SIS 21.700, EV 8.778, AFC 29.259.
+  // La RIMA llega desde periodo.js (liquidación del mes anterior) o a mano.
+  const rimaMensual = Math.max(0, Number(rem.rima ?? rem.rimaMensual) || 0);
+  const rimaProp = diasLicencia > 0 && rimaMensual > 0
+    ? Math.round(Math.min(rimaMensual, P.topeImponible) * diasLicencia / 30) : 0;
+
+  const sisM  = esPensionado ? 0 : pct(baseCotiza + rimaProp, P.tasaSIS);
   // Aportes del empleador de la reforma previsional (Ley 21.735), sobre la
   // misma base topeada. El pensionado no cotiza AFP, así que tampoco genera
   // el aporte a cuenta individual ni los del Seguro Social.
-  const ciEmpM  = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCIEmp);
-  const cevEmpM = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCEV);
-  const crpEmpM = esPensionado ? 0 : Math.round(baseCotiza * P.tasaCRP);
+  const ciEmpM  = esPensionado ? 0 : pct(baseCotiza, P.tasaCIEmp);
+  const cevEmpM = esPensionado ? 0 : pct(baseCotiza + rimaProp, P.tasaCEV);   // EV también con licencia
+  const crpEmpM = esPensionado ? 0 : pct(baseCotiza, P.tasaCRP);              // RP solo días trabajados
   // ── APV — Ahorro Previsional Voluntario (Art. 20 DL 3.500) ──
   // Régimen A: el trabajador recibe la bonificación fiscal del 15%, y el aporte
   //            NO rebaja la base del impuesto único.
@@ -493,8 +511,9 @@ function calcularLiquidacion(rem) {
   const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior - cuenta2M;
 
   const tasaMutualEf = Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual;
-  const cesEmpM  = sinAFC ? 0 : Math.round(baseCesantia * (esCt ? TASAS.ces_pf_emp : TASAS.ces_emp));
-  const mutualM  = Math.round(baseCotiza * tasaMutualEf);
+  const cesEmpM  = sinAFC ? 0 : pct(Math.min(baseCesantia + rimaProp, P.topeCesantia), esCt ? TASAS.ces_pf_emp : TASAS.ces_emp);
+  // Mutual: tasa completa sobre lo trabajado + Ley SANNA (0,03%) sobre la RIMA.
+  const mutualM  = pct(baseCotiza, tasaMutualEf) + pct(rimaProp, 0.0003);
   // Todo lo que paga la empresa por sobre la remuneración. La asignación
   // familiar no entra al costo: se recupera descontándola de lo que se entera.
   const aportesEmpleador = sisM + ciEmpM + cevEmpM + crpEmpM + cesEmpM + mutualM;
@@ -541,7 +560,7 @@ function calcularLiquidacion(rem) {
     },
     uf: P.uf,   // lo consume calcularRentaTributable para el tope de APV
     tasaAfp, afpResuelta,
-    esPensionado, sinAFC, sinGrat,
+    esPensionado, pensionadoCotiza, sinAFC, sinGrat, rimaMensual, rimaProp,
     cesEmpM,
     sisEmpM: sisM,
     // Reforma previsional (Ley 21.735) — cargo empleador
@@ -717,6 +736,16 @@ function diasFeriadoAPagar(diasHabiles, fechaTermino) {
   return Math.round((n + inhabiles) * 100) / 100;
 }
 
+/** Meses comerciales entre dos fechas: meses completos + días restantes / 30. */
+function mesesComerciales(desde, hasta) {
+  const a = new Date(desde), b = new Date(hasta);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  let meses = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  let dias = b.getDate() - a.getDate();
+  if (dias < 0) { meses -= 1; dias += 30; }
+  return Math.max(0, meses + Math.min(30, dias) / 30);
+}
+
 function calcularFiniquito(fin, contrato, trabajador) {
   const ult      = parseInt(fin.ultimaRemuneracion || contrato?.sueldoBase) || 0;
   const causal   = fin.causal || '';
@@ -753,10 +782,11 @@ function calcularFiniquito(fin, contrato, trabajador) {
       aniv.setFullYear(aniv.getFullYear() + 1);
     }
     ultimoAniversario = aniv.toISOString().slice(0, 10);
-    const diasDesdeAniv = Math.max(0, Math.round((dtTerm - aniv) / 86400000));
-    // El tope de 12 queda como red de seguridad, no como parche: con el
-    // recorrido anterior `diasDesdeAniv` nunca debería pasar de 365.
-    mesesFeriado = Math.min(12, diasDesdeAniv / 30);
+    // Meses COMERCIALES: meses completos desde el aniversario más los días
+    // restantes / 30. Del 17-feb al 17-sep son 7 meses = 8,75 días, no
+    // 212 días / 30 = 8,83. Así lo calcula Talana (verificado con el
+    // finiquito real de sept-2026) y es el criterio de la DT.
+    mesesFeriado = Math.min(12, mesesComerciales(aniv, dtTerm));
   }
 
   // 15 días HÁBILES al año (Art. 67), que se pagan agregando los días de
@@ -779,17 +809,29 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // El respaldo es el SUELDO del desglose de la última liquidación, nunca la
   // base del Art. 172 (`ult`), que ya trae gratificación, colación y
   // movilización: pagaría el feriado sobre una base que el Art. 71 no admite.
-  const sueldoFeriado = (parseInt(fin.sueldoBaseFeriado)
+  // Base: sueldo + gratificación mensual (+ promedio de variables, Art. 71
+  // inc. 3). Sin colación ni movilización, que no son remuneración (Art. 41).
+  // La gratificación mensual se incluye porque es parte de lo que el
+  // trabajador percibe cada mes; así lo hace Talana y calza al peso con el
+  // finiquito real: (1.000.000 + 219.115) / 30 × 35,75 = 1.452.779.
+  const sueldoBaseFer = parseInt(fin.sueldoBaseFeriado)
     || parseInt(fin.desgloseBase?.sueldoBase)
     || parseInt(contrato?.sueldoBase)
-    || ult) + (parseInt(fin.promedioVariableFeriado) || 0);
+    || ult;
+  const gratFeriado = fin.gratificacionEnFeriado === 'no' ? 0
+    : (fin.desgloseBase ? (parseInt(fin.desgloseBase.gratificacion) || 0)
+      : (contrato?.gratificacion === 'ninguna' ? 0
+        : Math.round(Math.min(sueldoBaseFer * 0.25, paramsDe(fin.fechaTermino).imm * 4.75 / 12))));
+  const sueldoFeriado = sueldoBaseFer + gratFeriado + (parseInt(fin.promedioVariableFeriado) || 0);
   // Feriado anual: 15 días, más el progresivo (Art. 68) si la pantalla lo trae.
   const diasAnual          = Number(fin.diasFeriadoAnual) > 15 ? Number(fin.diasFeriadoAnual) : 15;
-  const feriadoPropBruto   = Math.round((diasAnual / 12) * mesesFeriado * 10) / 10;
+  // Dos decimales: 8,75 días, no 8,8 (redondear a uno sumaba $2.032 en el
+  // finiquito real de sept-2026).
+  const feriadoPropBruto   = Math.round((diasAnual / 12) * mesesFeriado * 100) / 100;
   // Pendiente negativo = tomó vacaciones por adelantado: se descuentan del
   // proporcional en vez de ignorarse (antes un saldo negativo pagaba igual).
   const pendienteIngresado = parseFloat(fin.diasFeriadoPendiente || 0) || 0;
-  const feriadoPropDias    = Math.max(0, Math.round((feriadoPropBruto + Math.min(0, pendienteIngresado)) * 10) / 10);
+  const feriadoPropDias    = Math.max(0, Math.round((feriadoPropBruto + Math.min(0, pendienteIngresado)) * 100) / 100);
   const feriadoPendiente   = Math.max(0, pendienteIngresado);
 
   // Días efectivamente pagados: los hábiles más los sábados, domingos y
@@ -820,7 +862,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
     diasCorridosProp: propCorridos,
     diasCorridosPend: pendCorridos,
     valorDiaCorrido: sueldoFeriado ? Math.round(sueldoFeriado / 30) : 0,
-    sueldoFeriado,
+    sueldoFeriado, gratFeriado,
   };
 
   // ── Gratificación proporcional (Art. 50 CT) ──
@@ -1532,6 +1574,11 @@ function remDe(trabajador, contratoActual, liq, extras) {
     ...(extras?.licenciasRegistradas !== undefined
       ? { licenciasRegistradas: extras.licenciasRegistradas }
       : {}),
+    // Renta del mes anterior (RIMA) para los costos del empleador durante una
+    // licencia. La calcula periodo.js; un `rima` escrito en la liquidación manda.
+    ...(extras?.rimaMensual !== undefined && liq?.rima == null
+      ? { rimaMensual: extras.rimaMensual }
+      : {}),
     // Ausencias del período (colección `ausencias`). Mismo criterio: viajan
     // como contexto del cálculo, no se copian al documento.
     ...(extras?.ausenciasRegistradas !== undefined
@@ -1539,6 +1586,7 @@ function remDe(trabajador, contratoActual, liq, extras) {
       : {}),
     afp:          trabajador?.afp          ?? contrato?.afp ?? liq?.afp,
     esPensionado: trabajador?.esPensionado === true,
+    pensionadoCotiza: trabajador?.pensionadoCotiza === true,
     afectoAFC:    trabajador?.afectoAFC,
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
     apvRegimen:    liq?.apvRegimen    ?? trabajador?.apvRegimen,
@@ -1593,7 +1641,7 @@ function fueReliquidada(liq, liquidaciones) {
 }
 
 export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
-  nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172, baseIndemnizacion, festivosChile,
+  nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172, baseIndemnizacion, festivosChile, mesesComerciales,
   calcularLiquidacion, remDe, liquidacionDe, redondearPar, contratoAlPeriodo, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,
   horasOrdinariasSemanales, horasDeclaradas, valorHoraExtra, valorHoraOrdinaria,

@@ -965,6 +965,16 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
             Queda exento de cotización AFP, SIS y seguro de cesantía. Sigue cotizando salud.
           </span>
         </label>
+        {form.esPensionado && (
+          <label className="flex items-start gap-2.5 cursor-pointer ml-6">
+            <input type="checkbox" className="mt-0.5 rounded" checked={form.pensionadoCotiza === true}
+              onChange={e => set('pensionadoCotiza', e.target.checked)} />
+            <span className="text-xs text-slate-600">
+              <b className="text-slate-700">Sigue cotizando AFP.</b>{' '}
+              Paga su cotización AFP, pero no SIS, seguro de cesantía ni aportes de la reforma (Previred tipo 1).
+            </span>
+          </label>
+        )}
         <label className="flex items-start gap-2.5 cursor-pointer">
           <input type="checkbox" className="mt-0.5 rounded" checked={form.afectoAFC === false}
             onChange={e => set('afectoAFC', e.target.checked ? false : true)} />
@@ -1641,7 +1651,8 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     if (sinTocar) setForm(f => ({ ...f, valorHoraExtra: String(vheSugerido) }));
     vhePrevio.current = vheSugerido;
   }, [vheSugerido]);
-  const extrasCtx = extrasDelPeriodo(ctxPeriodo, form.trabajadorId, form.mes, form.anio);
+  const extrasCtx = extrasDelPeriodo(ctxPeriodo, form.trabajadorId, form.mes, form.anio,
+    { trabajador: trabajadores?.find(t => t.id === form.trabajadorId), contrato: contratos?.find(c => c.id === form.contratoId) });
   const extrasModal = {
     anticiposRegistrados: anticiposRegistrados !== undefined ? anticiposRegistrados : extrasCtx.anticiposRegistrados,
     licenciasRegistradas: licenciasRegistradas !== undefined ? licenciasRegistradas : extrasCtx.licenciasRegistradas,
@@ -1884,6 +1895,25 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
                   onChange={e => set('folioLicencia', e.target.value)} placeholder="N° de licencia" />
               </Field>
             </div>
+            {calc?.diasLicencia > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* RIMA: con ella el empleador paga SIS, Expectativa de Vida, su
+                    aporte de cesantía y la Ley SANNA por los días de reposo, y
+                    Previred la exige (campo 92). Se calcula sola desde la
+                    liquidación del mes anterior; si esa no está en el sistema
+                    —el primer mes, por ejemplo— se escribe acá. */}
+                <Field label="Renta imponible mes anterior (RIMA)">
+                  <input type="text" className={inp} value={formatCLP(form.rima ?? '')}
+                    onChange={e => set('rima', parseCLP(e.target.value) || null)}
+                    placeholder={calc.rimaMensual ? `Automática: $${calc.rimaMensual.toLocaleString('es-CL')}` : 'Falta: escríbela'} />
+                </Field>
+                <p className={`sm:col-span-2 text-[11px] leading-snug self-end pb-2 ${calc.rimaMensual ? 'text-slate-500' : 'text-red-600 font-bold'}`}>
+                  {calc.rimaMensual
+                    ? `Por los ${calc.diasLicencia} días de licencia el empleador paga SIS, Expectativa de Vida, cesantía y Ley SANNA sobre $${(calc.rimaProp || 0).toLocaleString('es-CL')}.`
+                    : 'No hay liquidación del mes anterior en el sistema. Sin la RIMA, Previred rechaza la línea y el costo del empleador sale incompleto.'}
+                </p>
+              </div>
+            )}
             {calc?.diasLicencia > 0 && (
               <div className="rounded-xl bg-sky-50 border border-sky-100 px-4 py-3 space-y-2">
                 <p className="text-[11px] text-sky-800 leading-snug">
