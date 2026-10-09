@@ -31,7 +31,7 @@ function Campo({ label, children }) {
 
 export default function ReliquidacionModal({
   isOpen, onClose, original, editData, trabajador, contrato,
-  anticiposRegistrados, licenciasRegistradas, utm, onSaved,
+  anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas, utm, onSaved,
 }) {
   const { empresaId } = useEmpresa();
   const { itemsCustom } = useItemsPago(empresaId);
@@ -46,11 +46,11 @@ export default function ReliquidacionModal({
     if (editData) { setForm({ ...editData }); setEstim(false); return; }
     if (!original) { setForm(null); return; }
     const { monto, estimado: est } = montoYaPagado(original, trabajador, contrato,
-      { utm, anticiposRegistrados, licenciasRegistradas });
+      { utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
     setForm(borradorDeReliquidacion(original, monto));
     setEstim(est);
     setError(null);
-  }, [isOpen, original, editData, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas]);
+  }, [isOpen, original, editData, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -60,8 +60,8 @@ export default function ReliquidacionModal({
 
   const resultado = useMemo(() => {
     if (!form || !contrato) return null;
-    return diferencialDe(form, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas });
-  }, [form, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas]);
+    return diferencialDe(form, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
+  }, [form, trabajador, contrato, utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas]);
 
   const guardar = async () => {
     if (!form) return;

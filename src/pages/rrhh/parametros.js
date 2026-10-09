@@ -97,6 +97,29 @@ const TOPE_IMPONIBLE = [
 ];
 
 
+// ── Cotizaciones de cargo del EMPLEADOR que cambian por período ─────────────
+// SIS (Art. 59 DL 3.500) y los aportes de la reforma previsional (Ley 21.735).
+// Antes el SIS era una constante en shared.jsx (1,62%) y los aportes de la
+// reforma no existían en el motor: el costo empresa y lo que se entera en
+// Previred quedaban cortos en ~1,9 puntos del imponible desde agosto 2026.
+//
+//   · sis — Seguro de Invalidez y Sobrevivencia. Cambia con cada licitación.
+//   · cev — Compensación por Expectativa de Vida (Seguro Social, campo 94 Previred).
+//   · crp — Cotización con Rentabilidad Protegida (campo 95 Previred).
+//   · ci  — Aporte del empleador a la cuenta individual AFP. Se entera junto a
+//           la cotización obligatoria (campo 28 Previred = trabajador + este 0,1%).
+//
+// Todas van sobre la renta imponible TOPEADA (90 UF), igual que AFP y salud.
+// Verificado ago/sep 2026 contra Indicadores Previred y archivo real de Talana.
+// Las filas anteriores a 2026-08 son de referencia: verificar antes de usarlas
+// para reconstruir costos de meses ya declarados.
+const COTIZ_EMPLEADOR = [
+  { desde: '2026-08-01', sis: 0.0178, cev: 0.0072, crp: 0.0090, ci: 0.0010, norma: 'Ley 21.735 año 2 · SIS trim. ago–oct 2026' },
+  { desde: '2026-04-01', sis: 0.0162, cev: 0.0090, crp: 0,      ci: 0.0010, norma: 'Ley 21.735 año 1 · SIS Of. 7429 (verificar CEV)' },
+  { desde: '2025-08-01', sis: 0.0154, cev: 0.0090, crp: 0,      ci: 0.0010, norma: 'Ley 21.735 año 1 (verificar)' },
+  { desde: '1900-01-01', sis: 0.0154, cev: 0,      crp: 0,      ci: 0,      norma: 'valor heredado — sin verificar' },
+];
+
 // Semilla mínima. Lo normal es que estos valores lleguen desde Firestore
 // (`empresas/{id}/parametros_legales/{YYYY-MM}`) o desde mindicador.cl vía
 // `aplicarIndicadores`. La UF se guarda como valor del día 1 del mes: sirve
@@ -110,8 +133,11 @@ const TOPE_IMPONIBLE = [
 // (Circular SP; así lo hace Previred y así lo hace Talana). Con la del día 1
 // el plan de salud sale corto por unos mil pesos al mes.
 const INDICADORES = {
-  '2026-09': { utm: 71721, uf: 40883, ufFin: null },
-  '2026-08': { utm: 71649, uf: null,  ufFin: null },
+  // ufFin: UF del último día del mes (Indicadores Previred). Con ella se
+  // convierten topes y planes de isapre: 90 × 41.057,20 = $3.695.148, que es
+  // el tope oficial de sept-2026.
+  '2026-09': { utm: 71721, uf: 40883,    ufFin: 41057.20 },
+  '2026-08': { utm: 71649, uf: 40700,    ufFin: 40873.77 },
 };
 
 // Último recurso si se pide un período sin UTM/UF cargada ni override.
@@ -178,6 +204,11 @@ export function paramsDe(periodo) {
   const tope  = vigenteEn(TOPE_IMPONIBLE, fecha);
   const ind   = INDICADORES[mes] || {};
   const uf    = ind.uf || UF_FALLBACK;
+  // Topes y planes de isapre se convierten con la UF del ÚLTIMO día del mes
+  // (Circular SP; así lo calcula Previred). Si no está cargada se usa la del
+  // día 1 y la UI lo advierte con `ufFinCargada`.
+  const ufFinVal = ind.ufFin || uf;
+  const cotEmp = vigenteEn(COTIZ_EMPLEADOR, fecha);
 
   return {
     periodo:      mes,
@@ -204,15 +235,21 @@ export function paramsDe(periodo) {
     // UF del último día del mes, que es la que corresponde para convertir el
     // plan de isapre y los topes. Si no está cargada cae a la del día 1, y el
     // resultado queda corto por la variación del mes.
-    ufFin:           ind.ufFin || uf,
+    ufFin:           ufFinVal,
     ufFinCargada:    !!ind.ufFin,
     topeImponibleUF: tope.previsionalUF,
     topeCesantiaUF:  tope.cesantiaUF,
-    topeImponible:   Math.round(tope.previsionalUF * uf),
-    topeCesantia:    Math.round(tope.cesantiaUF * uf),
+    topeImponible:   Math.round(tope.previsionalUF * ufFinVal),
+    topeCesantia:    Math.round(tope.cesantiaUF * ufFinVal),
     // Tope de la rebaja de salud para el impuesto único: 7% del tope imponible
     // (SII, Of. 2406/2016). Lo cotizado por sobre eso no rebaja la base.
-    topeRebajaSalud: Math.round(tope.previsionalUF * uf * 0.07),
+    topeRebajaSalud: Math.round(tope.previsionalUF * ufFinVal * 0.07),
+    // Cotizaciones de cargo del empleador vigentes en el período
+    tasaSIS:  cotEmp.sis,
+    tasaCEV:  cotEmp.cev,
+    tasaCRP:  cotEmp.crp,
+    tasaCIEmp: cotEmp.ci,
+    cotizEmpleadorNorma: cotEmp.norma,
     topeNorma:       tope.norma,
     // Permite que la UI advierta cuando se está calculando con el fallback
     utmCargada:   !!ind.utm,
@@ -358,7 +395,62 @@ export async function consultarIndicadoresOnline(periodo) {
   if (!utm && !uf) return null;
   return {
     mes, utm,
-    uf:    uf    ? Math.round(uf)    : null,
-    ufFin: ufFin ? Math.round(ufFin) : null,
+    // La UF se guarda con decimales: redondearla a entero mueve el tope.
+    uf:    uf    ? Math.round(uf * 100) / 100    : null,
+    ufFin: ufFin ? Math.round(ufFin * 100) / 100 : null,
   };
+}
+
+/**
+ * Deja cargados UTM y UF de un período, en este orden:
+ *   1. ya en memoria (semilla o carga previa) con UTM y UF de fin de mes → listo
+ *   2. Firestore `empresas/{id}/parametros_legales/{YYYY-MM}`
+ *   3. mindicador.cl, y si responde se guarda en Firestore para la próxima vez
+ *
+ * Hasta ahora `cargarIndicadoresFirestore` y `consultarIndicadoresOnline`
+ * existían pero nadie las llamaba: todo mes distinto de ago/sep 2026 se
+ * calculaba con la UTM y UF de respaldo, incluso al reabrir meses pasados.
+ *
+ * `fs` = { db, doc, getDoc, setDoc }. Devuelve el estado de carga del período.
+ */
+const _enCurso = new Map();
+export function asegurarIndicadores(fs, empresaId, periodo) {
+  const mes = claveMes(periodo);
+  const actual = INDICADORES[mes];
+  if (actual?.utm && actual?.ufFin) {
+    return Promise.resolve({ mes, utmCargada: true, ufFinCargada: true, fuente: 'memoria' });
+  }
+  const clave = `${empresaId || '-'}|${mes}`;
+  if (_enCurso.has(clave)) return _enCurso.get(clave);
+
+  const p = (async () => {
+    let fuente = null;
+    if (fs?.db && empresaId) {
+      const r = await cargarIndicadoresFirestore(fs, empresaId, mes);
+      if (r?.utm) fuente = 'firestore';
+    }
+    const tras = INDICADORES[mes] || {};
+    if (!tras.utm || !tras.ufFin) {
+      const online = await consultarIndicadoresOnline(mes);
+      if (online && (online.utm || online.uf)) {
+        aplicarIndicadores({ [mes]: online });
+        fuente = fuente || 'mindicador';
+        // Se persiste para no depender de la API externa la próxima vez.
+        if (fs?.setDoc && fs?.db && empresaId) {
+          const v = INDICADORES[mes];
+          try {
+            await fs.setDoc(fs.doc(fs.db, 'empresas', empresaId, 'parametros_legales', mes),
+              { utm: v.utm || null, uf: v.uf || null, ufFin: v.ufFin || null,
+                fuente: 'mindicador.cl', actualizado: new Date().toISOString() },
+              { merge: true });
+          } catch (e) { console.warn('[parametros] no se pudo guardar', mes, e.message); }
+        }
+      }
+    }
+    const fin = INDICADORES[mes] || {};
+    return { mes, utmCargada: !!fin.utm, ufFinCargada: !!fin.ufFin, fuente };
+  })().finally(() => _enCurso.delete(clave));
+
+  _enCurso.set(clave, p);
+  return p;
 }

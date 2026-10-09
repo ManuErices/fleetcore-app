@@ -51,12 +51,12 @@ const NO_COPIAR = new Set([
  * una estimación, y la UI lo advierte para que alguien lo confirme antes de
  * emitir la diferencia.
  */
-export function montoYaPagado(liq, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas } = {}) {
+export function montoYaPagado(liq, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas } = {}) {
   if (liq?.montoPagado != null) {
     return { monto: Math.max(0, Math.round(liq.montoPagado)), estimado: false };
   }
-  const c   = liquidacionDe(trabajador, contrato, liq, { anticiposRegistrados, licenciasRegistradas });
-  const iut = calcularIUT(calcularRentaTributable(c), utmDe(liq, utm));
+  const c   = liquidacionDe(trabajador, contrato, liq, { anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
+  const iut = utm ? calcularIUT(c.rentaTrib, utm) : c.iut;
   return { monto: Math.max(0, Math.round(c.liquido - iut)), estimado: true };
 }
 
@@ -86,9 +86,10 @@ export function borradorDeReliquidacion(original, pagoAnterior) {
  * fuera de la nómina, porque un archivo de transferencia no admite montos
  * negativos.
  */
-export function diferencialDe(rel, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas } = {}) {
-  const c   = liquidacionDe(trabajador, contrato, rel, { anticiposRegistrados, licenciasRegistradas });
-  const iut = calcularIUT(calcularRentaTributable(c), utmDe(rel, utm));
+export function diferencialDe(rel, trabajador, contrato, { utm, anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas } = {}) {
+  const c   = liquidacionDe(trabajador, contrato, rel, { anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
+  // Sin UTM explícita, la efectiva del documento (la del período o la congelada).
+  const iut = utm ? calcularIUT(c.rentaTrib, utm) : c.iut;
   const dif = c.liquido - iut;             // `liquido` ya trae restado pagoAnterior
   return {
     calc: c,

@@ -19,9 +19,7 @@ import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { inp, MESES } from './shared';
 import { liquidacionDe, calcularIUT, calcularRentaTributable, liquidacionesVigentes } from './calculo';
-import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
-import { useLicencias, licenciasDe } from './licencias';
-import { paramsDe } from './parametros';
+import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
 import {
   filaLRE, validarLRE, csvLRE, descargarLRE, nombreArchivoLRE,
   COLUMNAS_LRE, REGIONES, COD_CCAF, COD_MUTUAL,
@@ -31,11 +29,12 @@ const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 
 export default function LRESection() {
   const { empresaId, empresa } = useEmpresa();
-  const { anticipos } = useAnticipos(empresaId);
-  const { licencias } = useLicencias(empresaId);
+  // Contexto completo del período (incluye ausencias, que antes faltaban).
+  const ctx = useContextoPeriodo(empresaId);
 
   const [mes,  setMes]  = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
   const [anio, setAnio] = useState(String(new Date().getFullYear()));
+  const ind = useIndicadoresPeriodo(empresaId, mes, anio);
 
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [trabajadores, setTrabajadores]   = useState([]);
@@ -85,23 +84,19 @@ export default function LRESection() {
   const filas = useMemo(() => {
     // Una liquidación reemplazada por una reliquidación no va al libro: el mes
     // quedaría declarado dos veces para la misma persona.
+    // Los borradores no se declaran: nadie los ha revisado.
     const delMes = liquidacionesVigentes(
       liquidaciones.filter(l => l.mes === mes && l.anio === anio)
-    );
+    ).filter(l => !esBorrador(l));
 
     return delMes.map(l => {
       const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
       const contrato   = contratos.find(c => c.id === l.contratoId);
       if (!contrato) return null;
 
-      const lics = licenciasDe(licencias, trabajador?.id, mes, anio);
-      const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config.tasaMutual }, {
-        anticiposRegistrados: anticiposDe(anticipos, trabajador?.id, mes, anio).length
-          ? totalAnticipos(anticipos, trabajador?.id, mes, anio)
-          : undefined,
-        licenciasRegistradas: lics.length ? lics : undefined,
-      });
-      const iut = calcularIUT(calcularRentaTributable(calc), paramsDe({ mes, anio }).utm);
+      const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config.tasaMutual },
+        extrasDelPeriodo(ctx, trabajador?.id, mes, anio));
+      const iut = calc.iut;
 
       // Término de contrato dentro del período: la DT exige fecha y causal
       // juntas, y solo se declaran en el mes en que efectivamente ocurrió.
@@ -116,10 +111,11 @@ export default function LRESection() {
         fila: filaLRE({ trabajador, contrato, liq: l, calc, iut, finiquito: fin, config }),
       };
     }).filter(Boolean);
-  }, [liquidaciones, trabajadores, contratos, finiquitos, licencias, anticipos, mes, anio, config]);
+  }, [liquidaciones, trabajadores, contratos, finiquitos, ctx, mes, anio, config, ind.version]);
 
   const problemas = useMemo(() => validarLRE(filas), [filas]);
-  const listo = filas.length > 0 && problemas.length === 0;
+  // Sin UTM cargada el impuesto declarado no es el real: no se habilita.
+  const listo = filas.length > 0 && problemas.length === 0 && ind.utmCargada;
 
   const totales = useMemo(() => ({
     trabajadores: filas.length,
@@ -217,6 +213,15 @@ export default function LRESection() {
           están en el CSV base que se descarga desde el portal Mi DT.
         </p>
       </div>
+
+      {!ind.cargando && !ind.utmCargada && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <p className="text-xs font-bold text-red-800">
+            La UTM de {MESES[parseInt(mes) - 1]} {anio} no está cargada: el impuesto único se estaría declarando con un
+            valor de respaldo. La descarga queda bloqueada hasta que se cargue.
+          </p>
+        </div>
+      )}
 
       {/* ── Validación previa ── */}
       {loading ? (

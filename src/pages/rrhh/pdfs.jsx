@@ -1,5 +1,5 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
-import { nombreTrabajador, calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad } from './calculo';
+import { nombreTrabajador, calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad, horasOrdinariasSemanales } from './calculo';
 import { paramsDe } from './parametros';
 
 function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml = false, empresa = null } = {}) {
@@ -39,10 +39,15 @@ function generarPDFContrato(contrato, trabajador, { preview = false, returnHtml 
   const tipoLabel = getTipoLabel(contrato.tipoContrato);
 
   const gratLabel = {
-    'legal':       'Gratificación legal anual equivalente al 25% de las remuneraciones devengadas en el año, con tope de 4,75 Ingresos Mínimos Mensuales anuales, conforme al Art. 47 del Código del Trabajo.',
-    'garantizada': 'Gratificación garantizada mensual equivalente al 25% del Ingreso Mínimo Mensual vigente, pagadera mensualmente.',
+    // Art. 50: 25% de lo devengado con tope anual de 4,75 IMM. El texto anterior
+    // citaba el Art. 47 (que es el 30% de las utilidades) y la "garantizada"
+    // decía "25% del IMM", que no corresponde a ninguna modalidad legal.
+    'legal':       'Gratificación conforme al artículo 50 del Código del Trabajo: 25% de las remuneraciones mensuales devengadas, con tope anual de 4,75 ingresos mínimos mensuales, pagadera mensualmente.',
+    'garantizada': 'Gratificación conforme al artículo 50 del Código del Trabajo: 25% de las remuneraciones mensuales devengadas, con tope anual de 4,75 ingresos mínimos mensuales, pagadera mensualmente.',
     'ninguna':     'Sin gratificación pactada.',
-  }[contrato.gratificacion] || '';
+  // Contratos antiguos no tienen el campo: el motor les paga la del Art. 50,
+  // así que el documento debe decir lo mismo en vez de quedar en blanco.
+  }[contrato.gratificacion || 'legal'] || '';
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -245,7 +250,9 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   const calc     = liquidacionDe(trabajador, contrato, rem, { anticiposRegistrados, licenciasRegistradas, ausenciasRegistradas });
   // La UTM del período liquidado: el IUT es progresivo y una UTM vieja mueve
   // de tramo. `rem.utm` sigue mandando si el documento la trae congelada.
-  const iut      = calcularIUT(calcularRentaTributable(calc), rem.utm || paramsDe({ mes: rem.mes, anio: rem.anio }).utm);
+  // El IUT sale del motor, con la UTM efectiva del documento (la congelada si
+  // la trae, o la del período). Es el mismo número de la tabla y del pago.
+  const iut      = calc.iut;
   const nombre   = trabajador
     ? nombreTrabajador(trabajador)
     : '_______________';
@@ -253,8 +260,8 @@ function generarPDFLiquidacion(rem, trabajador, contrato, { preview = false, emp
   const fmt      = (n) => `$${(n||0).toLocaleString('es-CL')}`;
   const num      = (n) => (n||0).toLocaleString('es-CL');
   const tasaAfp  = ((calc.tasaAfp || 0.1127) * 100).toFixed(2);
-  const rentaTrib    = calcularRentaTributable(calc);
-  const liquidoFinal = calc.liquido - iut;
+  const rentaTrib    = calc.rentaTrib;
+  const liquidoFinal = calc.liquidoFinal;
   const diasTrab     = calc.diasTrab || rem.diasTrabajados || 30;
   // Los días de reposo salen del cálculo, que ya resolvió si vienen de la
   // colección de licencias o del campo manual. Antes leía solo el campo manual
@@ -971,8 +978,13 @@ function generarCertificadoAnual(trabajador, contrato, liquidacionesAnio, anio, 
   let totalIUT=0, totalLiquido=0;
 
   const filasMeses = liquidacionesAnio.map(liq => {
-    const c = calcularLiquidacionConIUT({ ...contrato, ...liq, afp: trabajador?.afp }, utmVal);
-    const rentaTrib = Math.max(0, c.imponible - c.afpM - c.salM - c.cesM - c.sisM);
+    // Cada mes con SU UTM y la ficha completa (isapre, APV, pensionado). Antes
+    // se recalculaba todo el año con una sola UTM y se restaba el SIS, que es
+    // de cargo del empleador: la renta y el impuesto del certificado no
+    // coincidían con lo efectivamente retenido mes a mes.
+    const c = utm ? calcularLiquidacionConIUT(remDe(trabajador, contrato, liq, liq._extras), utm)
+                  : liquidacionDe(trabajador, contrato, liq, liq._extras);
+    const rentaTrib = c.rentaTrib;
     totalImp      += c.imponible;
     totalNoImp    += c.noImponible;
     totalTrib     += rentaTrib;
@@ -1346,11 +1358,14 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
   // Acumular totales
   let totalImponible=0, totalNoImp=0, totalAfp=0, totalSalud=0, totalSis=0,
       totalCesTrab=0, totalCesEmp=0, totalIUT=0, totalAnticipo=0, totalLiquido=0,
-      totalGrat=0, totalHE=0, totalApv=0, totalDescOtros=0, totalPagoPrevio=0;
+      totalGrat=0, totalHE=0, totalApv=0, totalDescOtros=0, totalPagoPrevio=0,
+      totalCI=0, totalSegSocial=0, totalMutual=0;
 
-  liqEnriquecidas.forEach(({ trabajador, contrato, liq }) => {
-    const c = liquidacionDe(trabajador, contrato, liq);
-    const iut = calcularIUT(calcularRentaTributable(c), utm);
+  liqEnriquecidas.forEach(({ trabajador, contrato, liq, calc, extras }) => {
+    // Se usa el cálculo ya resuelto con el contexto del período (licencias,
+    // ausencias, anticipos). Sin él los asientos no cuadraban con lo pagado.
+    const c = calc || liquidacionDe(trabajador, contrato, liq, extras);
+    const iut = c.iut;
     totalImponible  += c.base + c.bProd + c.montoHE + c.otrosImp + (c.itemsImp || 0);
     totalGrat       += c.gratMensual;
     totalHE         += c.montoHE;
@@ -1372,6 +1387,11 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     // remuneraciones por pagar del pago original.
     totalPagoPrevio += c.pagoAnterior || 0;
     totalLiquido    += c.liquido - iut;
+    // Reforma previsional (Ley 21.735) y Ley 16.744: costos reales del
+    // empleador que no estaban en el comprobante.
+    totalCI         += c.ciEmpM || 0;
+    totalSegSocial  += (c.cevEmpM || 0) + (c.crpEmpM || 0);
+    totalMutual     += c.mutualM || 0;
   });
 
   const totalRemXPagar = totalLiquido;
@@ -1389,6 +1409,9 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     { lado:'D', cuenta:'4110004', glosa:'Beneficios no imponibles (col./mov./viáticos)', monto: totalNoImp     },
     { lado:'D', cuenta:'4120001', glosa:'Aporte empleador SIS',                          monto: totalSis       },
     { lado:'D', cuenta:'4120002', glosa:'Seguro cesantía empleador',                     monto: totalCesEmp    },
+    { lado:'D', cuenta:'4120003', glosa:'Aporte empleador Seguro Social (CEV + RP)',      monto: totalSegSocial },
+    { lado:'D', cuenta:'4120004', glosa:'Aporte empleador cuenta individual AFP',         monto: totalCI        },
+    { lado:'D', cuenta:'4120005', glosa:'Seguro Ley 16.744 (mutual)',                    monto: totalMutual    },
     // ── HABER ──
     // Cuando una reliquidación arroja menos que lo ya transferido, el neto del
     // período es negativo: no hay nada que pagar, hay algo que cobrarle al
@@ -1402,6 +1425,9 @@ function generarAsientos(liqEnriquecidas, periodo, utm) {
     { lado:'H', cuenta:'2110003', glosa:'Cotización salud por enterar',                  monto: totalSalud     },
     { lado:'H', cuenta:'2110004', glosa:'SIS por enterar',                               monto: totalSis       },
     { lado:'H', cuenta:'2110005', glosa:'Cesantía trabajador + empleador',               monto: totalCesTrab + totalCesEmp },
+    { lado:'H', cuenta:'2110010', glosa:'Seguro Social por enterar (CEV + RP)',          monto: totalSegSocial },
+    { lado:'H', cuenta:'2110011', glosa:'Aporte empleador AFP por enterar',              monto: totalCI        },
+    { lado:'H', cuenta:'2110012', glosa:'Mutual Ley 16.744 por enterar',                 monto: totalMutual    },
     ...(totalIUT > 0 ? [{ lado:'H', cuenta:'2110006', glosa:'IUT 2ª Cat. retenido',    monto: totalIUT       }] : []),
     ...(totalAnticipo > 0 ? [{ lado:'H', cuenta:'2110007', glosa:'Anticipos a recuperar', monto: totalAnticipo }] : []),
     ...(totalApv > 0 ? [{ lado:'H', cuenta:'2110008', glosa:'APV por enterar', monto: totalApv }] : []),
@@ -1427,11 +1453,11 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
   const errores = [];
   const filas   = [];
 
-  liqEnriquecidas.forEach(({ trabajador, contrato, liq }, i) => {
+  liqEnriquecidas.forEach(({ trabajador, contrato, liq, calc, extras }, i) => {
     const validRut = validarRutPrevired(trabajador?.rut||'');
     if (!validRut.ok) errores.push(`Fila ${i+1} — ${trabajador?.nombre||'?'}: ${validRut.error}`);
 
-    const c   = liquidacionDe(trabajador, contrato, liq);
+    const c   = calc || liquidacionDe(trabajador, contrato, liq, extras);
     const rut = (trabajador?.rut||'').replace(/\./g,'').replace('-','').toUpperCase();
     const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
 
@@ -1447,8 +1473,9 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
       c.cesEmpM||0,
       c.imponible,
       c.imponible + c.noImponible,
-      Math.max(0, c.liquido),
+      Math.max(0, c.liquidoFinal),
       (contrato?.tipoContrato || '').toLowerCase().includes('plazo') ? 'PF' : 'IND',
+      c.ciEmpM || 0, c.cevEmpM || 0, c.crpEmpM || 0, c.mutualM || 0,
       liq.mes||'',
       liq.anio||'',
     ].join(';'));
@@ -1458,7 +1485,9 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
     alert(`⚠ Previred — ${errores.length} error(es) de validación:\n\n${errores.join('\n')}\n\nEl archivo se generará igualmente. Corrija los RUTs antes de subir.`);
   }
 
-  const header = 'RUT;NOMBRE;AFP;COT_AFP;SALUD;COT_SALUD;SIS;CES_TRAB;CES_EMP;RENTA_IMP;RENTA_BRUTA;LIQUIDO;TIPO_CONTRATO;MES;ANIO';
+  // Ojo: esto es un RESUMEN para revisar, no el archivo de carga de Previred
+  // (formato de 105 campos), que todavía no existe en el sistema.
+  const header = 'RUT;NOMBRE;AFP;COT_AFP;SALUD;COT_SALUD;SIS;CES_TRAB;CES_EMP;RENTA_IMP;RENTA_BRUTA;LIQUIDO;TIPO_CONTRATO;CI_EMP_0_1;EXPECTATIVA_VIDA;RENTAB_PROTEGIDA;MUTUAL;MES;ANIO';
   const csv    = header + '\n' + filas.join('\n');
   const blob   = new Blob(['\uFEFF'+csv], { type:'text/csv;charset=utf-8' });
   const url    = URL.createObjectURL(blob);
@@ -1473,17 +1502,16 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
   // Formato compatible con mayoría de portales bancarios chilenos
   // Columnas: RUT_BENEFICIARIO;NOMBRE;BANCO;TIPO_CUENTA;NRO_CUENTA;MONTO;MONEDA;GLOSA
   const filas = liqEnriquecidas
-    .filter(({ liq }) => liq.estado !== 'pagado')
-    .map(({ trabajador, contrato, liq }) => {
-      const c      = liquidacionDe(trabajador, contrato, liq);
+    .filter(({ liq }) => liq.estado !== 'pagado' && liq.estado !== 'borrador')
+    .map(({ trabajador, contrato, liq, calc, extras }) => {
+      const c      = calc || liquidacionDe(trabajador, contrato, liq, extras);
       const rut    = (trabajador?.rut||'').replace(/\./g,'').toUpperCase();
       const nombre = `${trabajador?.apellidoPaterno||''} ${trabajador?.nombre||''}`.trim().toUpperCase();
       // El líquido a transferir es DESPUÉS del impuesto único. Antes se
       // exportaba `c.liquido` sin restar el IUT, así que a todo trabajador
       // afecto a impuesto se le transfería de más — y la pantalla mostraba
       // el monto correcto mientras el archivo llevaba otro.
-      const iut    = calcularIUT(calcularRentaTributable(c), paramsDe({ mes: liq.mes, anio: liq.anio }).utm);
-      const monto  = Math.max(0, c.liquido - iut);
+      const monto  = Math.max(0, c.liquidoFinal);
       return [
         rut,
         nombre,
@@ -1570,12 +1598,13 @@ function generarCSVImportadorSII(liqPorTrabajador, anio, utm) {
     for (const liq of liquidaciones) {
       const mesNum = parseInt(liq.mes);
       if (!mesNum || mesNum < 1 || mesNum > 12) continue;
-      const c = calcularLiquidacionConIUT(
-        { ...contrato, ...liq, afp: trabajador.afp },
-        utmVal
-      );
-      // Renta tributable mensual = imponible − AFP − salud − AFC trab − SIS
-      const rentaTrib = Math.max(0, c.imponible - c.afpM - c.salM - c.cesM - c.sisM);
+      // Cada mes con su UTM y la ficha completa. El SIS NO se resta: es de
+      // cargo del empleador y el motor ya no lo resta (Art. 42 N°1 LIR).
+      // Pendiente: aplicar factores de actualización (IPC) exigidos por la DJ.
+      const c = utm
+        ? calcularLiquidacionConIUT(remDe(trabajador, contrato, liq, liq._extras), utm)
+        : liquidacionDe(trabajador, contrato, liq, liq._extras);
+      const rentaTrib = c.rentaTrib;
       datosMes[mesNum] = { rentaTrib, iut: c.iut, noImp: c.noImponible };
       totalTrib  += rentaTrib;
       totalIUT   += c.iut;
@@ -1598,7 +1627,7 @@ function generarCSVImportadorSII(liqPorTrabajador, anio, utm) {
 
     // Horas semanales: 45 jornada completa, 30 jornada parcial
     // Se toma del contrato si existe, sino 45 por defecto
-    const horasSemana = contrato?.horasSemana || 45;
+    const horasSemana = contrato?.horasSemana || horasOrdinariasSemanales(contrato || {}, { mes: '12', anio });
 
     // Construir fila de 35 columnas
     const fila = [

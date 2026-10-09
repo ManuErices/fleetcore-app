@@ -30,9 +30,10 @@ export const TASAS_AFP = {
 export const TASAS = {
   afp:         0.1057,
   salud:       0.07,
-  // SIS: 1,62% desde las remuneraciones de abril 2026 (Superintendencia de
-  // Pensiones, Oficio Ord. N° 7429). Es de cargo del empleador. Antes: 0.0154.
-  sis:         0.0162,
+  // SIS: @deprecated — ahora es por período (parametros.js → tasaSIS), porque
+  // cambia con cada licitación: 1,62% abr–jul 2026, 1,78% desde ago 2026. Se
+  // deja solo como respaldo para código que todavía lo lea directo.
+  sis:         0.0178,
   // AFC — Ley 19.728, tasas publicadas por la AFC:
   //   Indefinido:  trabajador 0,6% + empleador 2,4%
   //   Plazo fijo:  trabajador 0%   + empleador 3,0%
@@ -73,7 +74,7 @@ export const TIPOS_CONTRATO = ['Plazo fijo', 'Indefinido', 'Por obra o faena'];
 // 2028. Las opciones de 44 y 45 se conservan porque hay contratos firmados con
 // esas jornadas — el cálculo las topea al máximo legal del período sin
 // necesidad de anexo, así que no hay que corregir contratos viejos a mano.
-export const JORNADAS = ['Completa (42 hrs)','Completa (44 hrs)','Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
+export const JORNADAS = ['Completa (40 hrs)','Completa (42 hrs)','Completa (44 hrs)','Completa (45 hrs)','Parcial (30 hrs)','Parcial (20 hrs)','Turno 7x7','Turno 14x14','Turno 4x3','Otro'];
 export const CENTROS_COSTO = ['Obras','Administración Central','Oficina Técnica','Logística'];
 export const TIPOS_PERIODO = ['mensual','quincenal','semanal','turno'];
 export const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -104,15 +105,19 @@ export const COLORES_AREA = {
   'DPTO. PREVENCIÓN DE RIESGOS Y MEDIO AMBIENTE': { bg:'#ef4444', light:'#fee2e2', text:'#991b1b' },
 };
 
+// Tabla del Impuesto Único de Segunda Categoría (Art. 43 LIR), vigente desde
+// 2020 por la Ley 21.210. Los dos tramos superiores estaban con la tabla
+// anterior (35,5% entre 120 y 150 UTM y 40% desde 150): sobre 120 UTM
+// tributables se retenía de más — unos $137.000 al mes a 200 UTM.
 export const TRAMOS_IUT = [
-  { desde:0,     hasta:13.5,  tasa:0,    rebaja:0     },
-  { desde:13.5,  hasta:30,    tasa:0.04, rebaja:0.54  },
-  { desde:30,    hasta:50,    tasa:0.08, rebaja:1.74  },
-  { desde:50,    hasta:70,    tasa:0.135,rebaja:4.49  },
-  { desde:70,    hasta:90,    tasa:0.23, rebaja:11.14 },
-  { desde:90,    hasta:120,   tasa:0.304,rebaja:17.8  },
-  { desde:120,   hasta:150,   tasa:0.355,rebaja:23.9  },
-  { desde:150,   hasta:999,   tasa:0.40, rebaja:31.4  },
+  { desde:0,     hasta:13.5,     tasa:0,     rebaja:0     },
+  { desde:13.5,  hasta:30,       tasa:0.04,  rebaja:0.54  },
+  { desde:30,    hasta:50,       tasa:0.08,  rebaja:1.74  },
+  { desde:50,    hasta:70,       tasa:0.135, rebaja:4.49  },
+  { desde:70,    hasta:90,       tasa:0.23,  rebaja:11.14 },
+  { desde:90,    hasta:120,      tasa:0.304, rebaja:17.80 },
+  { desde:120,   hasta:310,      tasa:0.35,  rebaja:23.32 },
+  { desde:310,   hasta:Infinity, tasa:0.40,  rebaja:38.82 },
 ];
 
 export const TIPOS_ANEXO = [
