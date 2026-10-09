@@ -9,6 +9,7 @@ export default function CombustibleDetalleModal({
   machineInfo,
   surtidorInfo,
   operadorInfo,
+  empleados = [], // catálogo para elegir quién entrega/recibe (admin)
   userRole = 'operador', // 'administrador' o 'operador'
   onSave, // función callback para guardar cambios
   onSign // función callback para firmar el reporte
@@ -353,20 +354,108 @@ export default function CombustibleDetalleModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white rounded-xl p-4 border border-purple-100">
                 <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
-                  {reporte.tipo === 'entrada' ? 'Surtidor / Quien entrega' : 'Surtidor / Quien entrega'}
+                  Surtidor / Quien entrega
                 </p>
-                <p className="text-sm font-bold text-slate-900">{surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'}</p>
-                {(surtidorInfo?.rut || reporte.repartidorRut) && (
-                  <p className="text-xs text-slate-400 mt-0.5">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
+                {isEditing ? (
+                  <div className="space-y-2">
+                    {empleados.length > 0 && (
+                      <select
+                        className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                        value=""
+                        onChange={(e) => {
+                          const emp = empleados.find(x => x.id === e.target.value);
+                          if (!emp) return;
+                          updateField('repartidorId', emp.id);
+                          updateField('repartidorNombre', emp.nombre || emp.name || emp.displayName || '');
+                          updateField('repartidorRut', emp.rut || '');
+                        }}
+                      >
+                        <option value="">— Elegir de la lista —</option>
+                        {empleados
+                          .slice()
+                          .sort((a, b) => (a.nombre || a.name || '').localeCompare(b.nombre || b.name || ''))
+                          .map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.nombre || emp.name || emp.displayName || '(sin nombre)'}{emp.rut ? ` · ${emp.rut}` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                    <input
+                      type="text"
+                      className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                      placeholder="Nombre"
+                      value={editedData.repartidorNombre ?? (surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '')}
+                      onChange={(e) => updateField('repartidorNombre', e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                      placeholder="RUT"
+                      value={editedData.repartidorRut ?? (surtidorInfo?.rut || reporte.repartidorRut || '')}
+                      onChange={(e) => updateField('repartidorRut', e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold text-slate-900">{surtidorInfo?.nombre || reporte.repartidorNombre || reporte.surtidorNombre || '-'}</p>
+                    {(surtidorInfo?.rut || reporte.repartidorRut) && (
+                      <p className="text-xs text-slate-400 mt-0.5">RUT: {surtidorInfo?.rut || reporte.repartidorRut}</p>
+                    )}
+                  </>
                 )}
               </div>
               <div className="bg-white rounded-xl p-4 border border-purple-100">
                 <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
                   {reporte.tipo === 'entrada' ? 'Receptor / Quien recibe' : 'Receptor'}
                 </p>
-                <p className="text-sm font-bold text-slate-900">{operadorInfo?.nombre || reporte.operadorNombre || '-'}</p>
-                {operadorInfo?.rut && (
-                  <p className="text-xs text-slate-400 mt-0.5">RUT: {operadorInfo.rut}</p>
+                {isEditing ? (
+                  <div className="space-y-2">
+                    {empleados.length > 0 && (
+                      <select
+                        className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                        value=""
+                        onChange={(e) => {
+                          const emp = empleados.find(x => x.id === e.target.value);
+                          if (!emp) return;
+                          updateField('operadorId', emp.id);
+                          updateField('operadorNombre', emp.nombre || emp.name || emp.displayName || '');
+                          updateField('operadorRut', emp.rut || '');
+                        }}
+                      >
+                        <option value="">— Elegir de la lista —</option>
+                        {empleados
+                          .slice()
+                          .sort((a, b) => (a.nombre || a.name || '').localeCompare(b.nombre || b.name || ''))
+                          .map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.nombre || emp.name || emp.displayName || '(sin nombre)'}{emp.rut ? ` · ${emp.rut}` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                    <input
+                      type="text"
+                      className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                      placeholder="Nombre"
+                      value={editedData.operadorNombre ?? (operadorInfo?.nombre || reporte.operadorNombre || '')}
+                      onChange={(e) => updateField('operadorNombre', e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="w-full px-2 py-1.5 text-sm border-2 border-purple-200 rounded-lg focus:outline-none focus:border-purple-500"
+                      placeholder="RUT"
+                      value={editedData.operadorRut ?? (operadorInfo?.rut || reporte.operadorRut || '')}
+                      onChange={(e) => updateField('operadorRut', e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold text-slate-900">{operadorInfo?.nombre || reporte.operadorNombre || '-'}</p>
+                    {operadorInfo?.rut && (
+                      <p className="text-xs text-slate-400 mt-0.5">RUT: {operadorInfo.rut}</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

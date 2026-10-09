@@ -31,6 +31,18 @@ service firebase.storage {
              'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     }
 
+    // Logo de la empresa (lo sube EmpresaSettingsModal en el menú admin).
+    // OJO: es una ruta de 2 segmentos (empresas/{empresaId}/logo), NO la
+    // forma {coleccion}/{docId}/{fileName} del resto — por eso necesita su
+    // propia regla; sin ella la subida fallaba con storage/unauthorized.
+    match /empresas/{empresaId}/logo {
+      allow read:   if autenticado();
+      allow write:  if autenticado()
+                    && request.resource.size < 2 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow delete: if autenticado();
+    }
+
     // Documentos de equipos (leasing, permiso circulación, SOAP, etc.)
     match /empresas/{empresaId}/machineDocuments/{machineId}/{fileName} {
       allow read:  if autenticado();

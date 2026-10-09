@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
+import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
@@ -9,6 +10,7 @@ import { db, auth, firebaseConfig } from '../../lib/firebase';
 import { onAuthStateChanged, createUserWithEmailAndPassword, getAuth, setPersistence, inMemoryPersistence, signOut as firebaseSignOut } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import { usePlan } from '../../hooks/usePlan';
 import {
   MODULES as CONFIG_MODULES,
@@ -59,7 +61,7 @@ const TIPOS_MAQUINA = [
   'OTRO',
 ];
 
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   { label: 'General',     ids: ['operadores', 'proyectos', 'usuarios', 'emails', 'capacitaciones'] },
   { label: 'Flota',       ids: ['maquinas', 'actividades'] },
   { label: 'Combustible', ids: ['surtidores', 'empresas_combustible', 'estaciones'] },
@@ -67,7 +69,7 @@ const NAV_GROUPS = [
   { label: 'Sistema',     ids: ['mi_empresa', 'mi_plan', 'empresas_registro'] },
 ];
 
-const TAB_DEFS = [
+export const TAB_DEFS = [
   { id: 'operadores',          label: 'Operadores',           color: 'blue',   modules: [],                           icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
   { id: 'maquinas',            label: 'Máquinas',             color: 'purple', modules: ['fleetcore', 'workfleet'],   icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
   { id: 'actividades',         label: 'Actividades',          color: 'green',  modules: ['fleetcore', 'workfleet'],   icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
@@ -84,7 +86,7 @@ const TAB_DEFS = [
   { id: 'mi_plan',             label: 'Mi Plan / Módulos',    color: 'indigo', modules: [],                           icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
 ];
 
-const GRADIENTS = {
+export const GRADIENTS = {
   blue:   'from-blue-600 to-indigo-600',
   purple: 'from-purple-600 to-indigo-600',
   green:  'from-emerald-600 to-teal-600',
@@ -96,6 +98,20 @@ const GRADIENTS = {
   slate:  'from-slate-700 to-slate-800',
   violet: 'from-violet-600 to-purple-600',
 };
+
+// Filtra los TAB_DEFS visibles según rol/plan. Compartido por AdminPanel y por
+// el submenú de "Administración" en ReportesShell, para no duplicar la lógica.
+export function filtrarTabsVisibles({ isSuperAdmin, activeModules = [], planLoading, currentUserRole, hideSystem }) {
+  return TAB_DEFS.filter(tab => {
+    if (hideSystem && ['mi_empresa', 'mi_plan', 'empresas_registro'].includes(tab.id)) return false;
+    if (tab.id === 'mi_plan') return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
+    if (tab.modules.includes('__superadmin__')) return isSuperAdmin;
+    if (tab.modules.length === 0) return true;
+    if (isSuperAdmin) return true;
+    if (planLoading) return false;
+    return tab.modules.some(m => activeModules.includes(m));
+  });
+}
 
 const TAB_ACTIVE = {
   blue:   'bg-blue-600 text-white shadow-lg shadow-blue-200',
@@ -553,6 +569,7 @@ function fmtRut(raw) {
 function OperadoresSection() {
   const { empresaId, subEmpresasNames: EMPRESAS_LISTA = [] } = useEmpresa();
   const [data, setData] = useState([]);
+  const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
@@ -569,13 +586,21 @@ function OperadoresSection() {
   const { items: cargosDB, load: reloadCargos } = useCatalogo('cargo_operador');
   const CARGOS_TODOS = [...new Set([...CARGOS_LIST, ...cargosDB.map(c=>c.nombre)])].sort();
 
+  // Sin orderBy: en Firestore un orderBy también FILTRA (deja fuera a quien no
+  // tenga el campo), y las fichas creadas desde RRHH, combustible o el
+  // importador no siempre traen los mismos campos. Se ordena en memoria.
+  // Si la lectura falla NO se muestra la lista vacía: eso se veía como si la
+  // base de datos de operadores se hubiera borrado.
   const load = useCallback(async () => {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      setLoadError(null);
+      setData(await fetchTrabajadores(empresaId));
+    } catch (e) {
+      console.error('Error cargando operadores:', e);
+      setLoadError(e?.message || 'No se pudo cargar la lista de operadores.');
+    }
     setLoading(false);
   }, [empresaId]);
 
@@ -775,7 +800,11 @@ function OperadoresSection() {
       const ops = [deleteDoc(doc(db, 'empresas', empresaId, 'trabajadores', confirm.id))];
       if (uid) {
         ops.push(
-          setDoc(doc(db, 'users', uid), { deleted: true, deletedAt: serverTimestamp() }),
+          // merge: sin él, el doc del usuario quedaba reducido a {deleted:true} y
+          // perdía empresaId/email. Al volver a crear a esa persona, Firebase
+          // respondía "email ya en uso" y la búsqueda por (email, empresaId) ya
+          // no lo encontraba: la cuenta quedaba muerta y había que reinventarla.
+          setDoc(doc(db, 'users', uid), { deleted: true, deletedAt: serverTimestamp() }, { merge: true }),
           deleteDoc(doc(db, 'empresas', empresaId, 'users', uid)),
         );
         fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
@@ -815,6 +844,23 @@ function OperadoresSection() {
       <SectionCard title="Operadores" subtitle="Empleados registrados en el sistema" count={data.length} color="blue" onAdd={openNew} addLabel="Nuevo Operador"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
       >
+        {loadError && (
+          <div className="mb-4 flex items-start gap-3 p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
+            <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-black text-amber-800">No se pudo cargar la lista de operadores</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Los datos NO se borraron: es un problema de conexión o de permisos. Reintenta antes de volver a ingresarlos.
+              </p>
+              <p className="text-[11px] text-amber-600 mt-1 font-mono">{loadError}</p>
+            </div>
+            <button onClick={load} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-black rounded-lg transition-colors">
+              Reintentar
+            </button>
+          </div>
+        )}
         {(() => {
           const empresasOpciones = [...new Set(data.map(r => r.empresa).filter(Boolean))].sort();
           return (
@@ -992,13 +1038,12 @@ function useCatalogo(categoria) {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(
-        collection(db, 'empresas', empresaId, 'catalogo_maquinas'),
-        orderBy('nombre')
-      ));
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'catalogo_maquinas'));
+      const all = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
       setItems(all.filter(x => x.categoria === categoria));
-    } catch { setItems([]); }
+    } catch (e) { console.error('Error cargando catálogo:', e); }
     setLoading(false);
   }, [categoria, empresaId]);
 
@@ -1262,6 +1307,7 @@ function MaquinasSection() {
   const [saving, setSaving] = useState(false);
   const [busquedaMaq, setBusquedaMaq] = useState('');
   const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
+  const [detalle, setDetalle] = useState(null); // máquina cuyo detalle se despliega
 
   // Catálogos dinámicos
   const { items: tiposDB,       add: addTipo,        remove: removeTipo,        load: reloadTipos }        = useCatalogo('tipo');
@@ -1280,9 +1326,13 @@ function MaquinasSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'machines'), orderBy('name')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('name'): en Firestore ese orderBy deja fuera a las máquinas
+      // que no tengan el campo. Se ordena en memoria.
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'machines'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.name || a.code || a.patente || '').localeCompare(String(b.name || b.code || b.patente || ''), 'es')));
+    } catch (e) { console.error('Error cargando máquinas:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1333,6 +1383,15 @@ function MaquinasSection() {
     setConfirm(null);
   };
 
+  const DetalleBtn = (row) => (
+    <button onClick={() => setDetalle(row)} className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Ver detalle de la máquina">
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+      </svg>
+    </button>
+  );
+
   const QRBtn = (row) => (
     <button onClick={() => openQR(row)} className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg transition-colors" title="Ver QR">
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1366,9 +1425,9 @@ function MaquinasSection() {
           const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
           const matchE = !filtroEmpresaMaq || (r.empresa || '').toUpperCase() === filtroEmpresaMaq.toUpperCase();
           return matchQ && matchE;
-        })} onEdit={openEdit} onDelete={setConfirm} extraAction={QRBtn} emptyText="No hay máquinas registradas"
+        })} onEdit={openEdit} onDelete={setConfirm} extraAction={(row) => <>{DetalleBtn(row)}{QRBtn(row)}</>} emptyText="No hay máquinas registradas"
           columns={[
-            { key: 'code', label: 'Código', render: r => <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg text-xs">{r.code || r.patente || '—'}</span> },
+            { key: 'code', label: 'Código', render: r => <button onClick={() => setDetalle(r)} className="font-mono font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-lg text-xs transition-colors cursor-pointer" title="Ver detalle de la máquina">{r.code || r.patente || '—'}</button> },
             { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-slate-700">{r.patente || '—'}</span> },
             { key: 'type', label: 'Tipo' },
             { key: 'marca', label: 'Marca' },
@@ -1513,6 +1572,9 @@ function MaquinasSection() {
       />
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Máquina" message={`¿Eliminar "${confirm?.name}"?`} />
       <QRCard isOpen={!!qr} onClose={() => setQr(null)} title={qr?.title} subtitulo={qr?.subtitulo} headerLabel={qr?.headerLabel} qrText={qr?.qrText} code={qr?.code} patente={qr?.patente} />
+      {detalle && (
+        <MaquinaDetalleModal machine={detalle} empresaId={empresaId} onClose={() => setDetalle(null)} />
+      )}
     </>
   );
 }
@@ -1772,9 +1834,13 @@ function SubEmpresasSection() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('nombre'): así no se pierden las sub-empresas sin ese campo
+      // y la consulta deja de depender del índice compuesto.
+      const snap = await getDocs(query(collection(db, 'empresas'), where('parentEmpresaId', '==', empresaId)));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')));
+    } catch (e) { console.error('Error cargando empresas internas:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1876,9 +1942,11 @@ function EmpresasSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'empresas_combustible'), orderBy('nombre')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'empresas_combustible'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')));
+    } catch (e) { console.error('Error cargando empresas de combustible:', e); }
     setLoading(false);
   }, [empresaId]);
 
@@ -1967,8 +2035,6 @@ function EmpresasSection() {
 // SECCIÓN: PROYECTOS
 // ─────────────────────────────────────────────────────────────
 
-// Formato código proyecto: siempre "CC-NN" (CC-01, CC-23, etc.)
-
 // Comunas de Chile por región
 const COMUNAS_POR_REGION = {
   'Arica y Parinacota': ['Arica','Camarones','Putre','General Lagos'],
@@ -1988,11 +2054,6 @@ const COMUNAS_POR_REGION = {
   "Aysén": ['Coyhaique','Lago Verde','Aysén','Cisnes','Guaitecas','Cochrane',"O'Higgins",'Tortel','Chile Chico','Río Ibáñez'],
   "Magallanes": ['Punta Arenas','Laguna Blanca','Río Verde','San Gregorio','Cabo de Hornos','Antártica','Porvenir','Primavera','Timaukel','Natales','Torres del Paine'],
 };
-function fmtCodigoProyecto(raw) {
-  const prefix = 'CC-';
-  const nums = raw.replace(/[^0-9]/g, '').slice(0, 2);
-  return prefix + nums;
-}
 function ProyectosSection() {
   const { empresaId } = useEmpresa();
   const [data, setData] = useState([]);
@@ -2012,23 +2073,27 @@ function ProyectosSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name')));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch { setData([]); }
+      // Sin orderBy('name') (dejaba fuera a los proyectos sin ese campo)
+      const snap = await getDocs(collection(db, 'empresas', empresaId, 'projects'));
+      setData(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es')));
+    } catch (e) { console.error('Error cargando proyectos:', e); }
     setLoading(false);
   }, [empresaId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', codigo: 'CC-', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { const cod = row.codigo || 'CC-'; setForm({ name: row.name || '', codigo: cod.startsWith('CC-') ? cod : 'CC-' + cod, mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
     setSaving(true);
     try {
       const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'projects', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, createdAt: serverTimestamp() });
+      // active: true — sin este campo el proyecto no aparecía en Oficina Técnica
+      else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, active: true, createdAt: serverTimestamp() });
       setModal(false); load();
     } catch (e) { alert('Error: ' + e.message); }
     setSaving(false);
@@ -2067,22 +2132,13 @@ function ProyectosSection() {
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Código (CC-NN)">
+            <Field label="Código">
               <input
                 className={inputCls}
                 value={form.codigo}
-                onChange={e => {
-                  const raw = e.target.value;
-                  // Si el usuario borra el prefijo, restaurarlo
-                  if (!raw.startsWith('CC-')) {
-                    setForm({ ...form, codigo: fmtCodigoProyecto(raw) });
-                  } else {
-                    const nums = raw.slice(3).replace(/[^0-9]/g, '').slice(0, 2);
-                    setForm({ ...form, codigo: 'CC-' + nums });
-                  }
-                }}
-                placeholder="CC-01"
-                maxLength={5}
+                onChange={e => setForm({ ...form, codigo: e.target.value })}
+                placeholder="Ej: CC-01, NN-23, obra-norte…"
+                maxLength={30}
               />
             </Field>
 
@@ -2847,7 +2903,8 @@ function UsuariosSection() {
         deleteDoc(doc(db, 'empresas', empresaId, 'users', confirm.id)),
         // Tombstone en vez de deleteDoc: fuerza sign out inmediato en el cliente del usuario eliminado
         // y evita que EmpresaSetup lo re-cree automáticamente al detectar su email en trabajadores
-        setDoc(doc(db, 'users', confirm.id), { deleted: true, deletedAt: serverTimestamp() }),
+        // merge: conserva email/empresaId para poder reactivar o re-vincular la cuenta
+        setDoc(doc(db, 'users', confirm.id), { deleted: true, deletedAt: serverTimestamp() }, { merge: true }),
         fetch(`${FUNCTIONS_URL}/deleteAuthUser`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4081,7 +4138,7 @@ function MiPlanSection() {
 // ─────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────
-export default function AdminPanel({ onClose, hideSystem = false }) {
+export default function AdminPanel({ onClose, hideSystem = false, embedded = false, activeTab: activeTabProp, onTabChange }) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
@@ -4089,9 +4146,14 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
 
   const { empresaId, empresa } = useEmpresa();
   const { activeModules, loading: planLoading } = usePlan();
-  
+
   const [currentUserRole, setCurrentUserRole] = useState(null);
-  const [activeTab, setActiveTab] = useState(tabParam || 'operadores');
+  const [activeTabInterno, setActiveTabInterno] = useState(tabParam || 'operadores');
+
+  // Cuando el panel está embebido (submenú en ReportesShell) el tab lo controla
+  // el contenedor; si no, se maneja el estado interno.
+  const activeTab = embedded ? (activeTabProp || 'operadores') : activeTabInterno;
+  const setActiveTab = embedded ? (id) => onTabChange?.(id) : setActiveTabInterno;
 
   const isSuperAdmin = currentUserRole === 'superadmin';
 
@@ -4104,19 +4166,10 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
     });
   }, []);
 
-  const tabsVisibles = useMemo(() => TAB_DEFS.filter(tab => {
-    if (hideSystem && ['mi_empresa', 'mi_plan', 'empresas_registro'].includes(tab.id)) {
-      return false;
-    }
-    if (tab.id === 'mi_plan') {
-      return currentUserRole === 'admin_contrato' || currentUserRole === 'superadmin';
-    }
-    if (tab.modules.includes('__superadmin__')) return isSuperAdmin;
-    if (tab.modules.length === 0) return true;
-    if (isSuperAdmin) return true;
-    if (planLoading) return false;
-    return tab.modules.some(m => activeModules.includes(m));
-  }), [isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem]);
+  const tabsVisibles = useMemo(
+    () => filtrarTabsVisibles({ isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem }),
+    [isSuperAdmin, activeModules, planLoading, currentUserRole, hideSystem]
+  );
 
   // Una sola vez: cuando el rol carga y el tab del URL se vuelve visible, aplicarlo
   useEffect(() => {
@@ -4136,6 +4189,30 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
   const active = tabsVisibles.find(t => t.id === activeTab) || tabsVisibles[0];
 
   const activeTabDef = tabsVisibles.find(t => t.id === activeTab) || tabsVisibles[0];
+
+  const contenido = (
+    <>
+      {activeTab === 'operadores'           && <OperadoresSection />}
+      {activeTab === 'maquinas'             && <MaquinasSection />}
+      {activeTab === 'actividades'          && <ActividadesSection />}
+      {activeTab === 'surtidores'           && <SurtidoresSection />}
+      {activeTab === 'sub_empresas'         && <SubEmpresasSection />}
+      {activeTab === 'empresas_combustible' && <EmpresasSection />}
+      {activeTab === 'proyectos'            && <ProyectosSection />}
+      {activeTab === 'estaciones'           && <EstacionesSection />}
+      {activeTab === 'usuarios'             && <UsuariosSection />}
+      {activeTab === 'emails'               && <EmailsSection />}
+      {activeTab === 'capacitaciones'       && <CapacitacionesSection />}
+      {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
+      {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
+      {activeTab === 'mi_plan'              && <MiPlanSection />}
+    </>
+  );
+
+  // Modo embebido: sin header ni sidebar propios (los provee ReportesShell).
+  if (embedded) {
+    return <div className="w-full max-w-5xl mx-auto">{contenido}</div>;
+  }
 
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
@@ -4253,20 +4330,7 @@ export default function AdminPanel({ onClose, hideSystem = false }) {
         {/* ── Content ─────────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
-            {activeTab === 'operadores'           && <OperadoresSection />}
-            {activeTab === 'maquinas'             && <MaquinasSection />}
-            {activeTab === 'actividades'          && <ActividadesSection />}
-            {activeTab === 'surtidores'           && <SurtidoresSection />}
-            {activeTab === 'sub_empresas'         && <SubEmpresasSection />}
-            {activeTab === 'empresas_combustible' && <EmpresasSection />}
-            {activeTab === 'proyectos'            && <ProyectosSection />}
-            {activeTab === 'estaciones'           && <EstacionesSection />}
-            {activeTab === 'usuarios'             && <UsuariosSection />}
-            {activeTab === 'emails'               && <EmailsSection />}
-            {activeTab === 'capacitaciones'       && <CapacitacionesSection />}
-            {activeTab === 'empresas_registro'    && <EmpresasRegistradasSection />}
-            {activeTab === 'mi_empresa'           && <MiEmpresaSection />}
-            {activeTab === 'mi_plan'              && <MiPlanSection />}
+            {contenido}
           </div>
         </main>
       </div>

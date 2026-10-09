@@ -98,6 +98,10 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
               machines={f.machines}
               trabajadoresLocales={f.trabajadoresLocales}
               surtidoresPersonas={f.surtidoresPersonas}
+              repartidoresDisponibles={f.repartidoresDisponibles}
+              puedeElegirRepartidor={f.puedeElegirRepartidor}
+              stockSurtidor={f.stockSurtidor}
+              capacidadSurtidor={f.capacidadSurtidor}
               currentUserData={f.currentUserData}
               isAdmin={f.isAdmin}
               isReportesView={isReportesView}
@@ -134,6 +138,11 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
               handleSubmit={f.handleSubmit}
               loading={f.loading}
               setPaso={f.setPaso}
+              equipoSurtidorSel={f.equipoSurtidorSel}
+              capacidadSurtidor={f.capacidadSurtidor}
+              stockSurtidor={f.stockSurtidor}
+              entradaCargaAlSurtidor={f.entradaCargaAlSurtidor}
+              litrosExcedenSurtidor={f.litrosExcedenSurtidor}
             />
           )}
 
@@ -163,6 +172,10 @@ export default function CombustibleForm({ empresaId, onClose, isReportesView }) 
               nuevoEmpleadoData={f.nuevoEmpleadoData}
               isAdmin={f.isAdmin}
               isReportesView={isReportesView}
+              operadorExterno={f.operadorExterno}
+              setOperadorExterno={f.setOperadorExterno}
+              equipoSurtidorSel={f.equipoSurtidorSel}
+              stockSurtidor={f.stockSurtidor}
             />
           )}
         </div>

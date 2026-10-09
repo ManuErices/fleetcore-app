@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { db } from '../../lib/firebase';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { useEmpresa } from '../../lib/useEmpresa';
+import { fetchTrabajadores } from '../../lib/trabajadores';
 import AppShellLayout from '../../components/AppShellLayout';
 import { DashboardSection, TrabajadoresSection, ContratosSection,
   RemuneracionesSection, FiniquitosSection, PortalTrabajadoresPanel } from './sections.a';
@@ -128,9 +129,9 @@ function PortalRoute() {
 
   useEffect(() => {
     if (!empresaId) return;
-    getDocs(query(collection(db, 'empresas', empresaId, 'trabajadores'), orderBy('apellidoPaterno')))
-      .then(snap => setTrabajadores(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
-      .catch(() => {});
+    fetchTrabajadores(empresaId)
+      .then(setTrabajadores)
+      .catch(err => console.error('Error cargando trabajadores del portal:', err));
   }, [empresaId]);
 
   return <PortalTrabajadoresPanel trabajadores={trabajadores} />;
