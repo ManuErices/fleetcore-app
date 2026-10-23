@@ -8,7 +8,7 @@ import { useUserRole } from "../../lib/useUserRole";
 import { cuentasNuevas, esEditable, listarCambios, ESTADOS_PROPUESTA, PREFIJO_CUENTA_NUEVA } from "../../lib/finanzas/propuestas.js";
 import {
   listarPropuestas, cargarPropuesta, crearPropuesta, guardarCeldasPropuesta,
-  agregarCuentaNueva, quitarCuentaNueva, cambiarEstado, aplicarPropuesta,
+  agregarCuentaNueva, quitarCuentaNueva, cambiarEstado, aplicarPropuesta, mensajeErrorPropuesta,
 } from "../../lib/finanzas/propuestasDatos.js";
 import { useTransicion, ControlTransicion, lerp } from "./transicion";
 import { escucharProveedores } from "../../lib/proveedores";
@@ -730,7 +730,7 @@ export default function FinanzasFlujoCaja() {
       try { sessionStorage.setItem(clavePropuesta, id); } catch { /* sin almacenamiento */ }
       // Se muestra primero el flujo actual y se "corrige" solo.
       fijar(0); setTimeout(() => irA(1, 1400), 400);
-    } catch (e) { setErrorProp(e.message); }
+    } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
   }, [empresaId, clavePropuesta, fijar, irA]);
 
   const salirPropuesta = useCallback(() => {
@@ -763,7 +763,7 @@ export default function FinanzasFlujoCaja() {
   const abrirMenuPropuestas = async () => {
     if (menuPropuestas) { setMenuPropuestas(null); return; }
     try { setMenuPropuestas((await listarPropuestas(empresaId)).filter(esEditable)); }
-    catch (e) { setErrorProp(e.message); }
+    catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
   };
 
   const crearYActivar = async () => {
@@ -771,7 +771,7 @@ export default function FinanzasFlujoCaja() {
       const id = await crearPropuesta(empresaId, nuevaProp);
       setModalNuevaProp(false); setNuevaProp({ nombre: "", motivo: "" });
       await activarPropuesta(id);
-    } catch (e) { setErrorProp(e.message); }
+    } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
   };
 
   // handlePayment y handleDrop están memorizados; llaman a esta función a
@@ -788,7 +788,7 @@ export default function FinanzasFlujoCaja() {
       // seguido, Firestore tiene ambas aunque la respuesta local llegue cruzada.
       setPropuesta(prev => prev && prev.id === p.id ? { ...prev, cambios: { ...prev.cambios, pagos } } : prev);
       await recargarPropuesta();
-    } catch (e) { setErrorProp(e.message); }
+    } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
   };
 
   const cerrarPropuesta = async () => {
@@ -800,7 +800,7 @@ export default function FinanzasFlujoCaja() {
       setModalCierre(null); setComentarioCierre("");
       salirPropuesta();
       await cargar();
-    } catch (e) { setErrorProp(e.message); }
+    } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
     finally { setTrabajandoProp(false); }
   };
 
@@ -1032,7 +1032,7 @@ export default function FinanzasFlujoCaja() {
         return;
       }
       if (!window.confirm("¿Quitar esta cuenta nueva de la propuesta?")) return;
-      try { await quitarCuentaNueva(empresaId, propuestaRef.current, id); await recargarPropuesta(); } catch (e) { setErrorProp(e.message); }
+      try { await quitarCuentaNueva(empresaId, propuestaRef.current, id); await recargarPropuesta(); } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); }
       return;
     }
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
@@ -1498,7 +1498,7 @@ export default function FinanzasFlujoCaja() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {propuesta.estado === "borrador" && (
               <Boton className="min-h-[38px] text-[16px]" disabled={!cambiadas.size && !cuentasProp.length}
-                onClick={async () => { try { await cambiarEstado(empresaId, propuesta, "en_revision"); await recargarPropuesta(); } catch (e) { setErrorProp(e.message); } }}>
+                onClick={async () => { try { await cambiarEstado(empresaId, propuesta, "en_revision"); await recargarPropuesta(); } catch (e) { setErrorProp(mensajeErrorPropuesta(e)); } }}>
                 Enviar a revisión
               </Boton>
             )}

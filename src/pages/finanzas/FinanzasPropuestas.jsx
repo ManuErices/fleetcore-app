@@ -19,7 +19,7 @@ import {
 } from "../../lib/finanzas/propuestas.js";
 import {
   listarPropuestas, cargarPropuesta, crearPropuesta, proponerPartida, proponerMovimiento, quitarCambio,
-  agregarCuentaNueva, quitarCuentaNueva, proponerColchon, cambiarEstado, aplicarPropuesta,
+  agregarCuentaNueva, quitarCuentaNueva, proponerColchon, cambiarEstado, aplicarPropuesta, mensajeErrorPropuesta,
 } from "../../lib/finanzas/propuestasDatos.js";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Nota, Resaltado, VistoBueno, FechaHoja,
@@ -158,7 +158,7 @@ function FormularioCambio({ datos, propuesta, semanas, empresaId, onCambio }) {
       }
       setMonto("");
       await onCambio();
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(mensajeErrorPropuesta(e)); }
     finally { setGuardando(false); }
   };
 
@@ -227,7 +227,7 @@ function DetallePropuesta({ id, empresaId, rol, onVolver }) {
     try {
       const [d, p] = await Promise.all([cargarDatosCaja(empresaId, hoy), cargarPropuesta(empresaId, id)]);
       setDatos(d); setPropuesta(p); setError("");
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(mensajeErrorPropuesta(e)); }
   }, [empresaId, id, hoy]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -255,7 +255,7 @@ function DetallePropuesta({ id, empresaId, rol, onVolver }) {
   const accion = async (fn) => {
     setTrabajando(true);
     try { await fn(); setModal(null); setComentario(""); await cargar(); }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(mensajeErrorPropuesta(e)); }
     finally { setTrabajando(false); }
   };
 
@@ -465,7 +465,7 @@ export default function FinanzasPropuestas() {
 
   const cargar = useCallback(async () => {
     if (!empresaId) return;
-    try { setLista(await listarPropuestas(empresaId)); } catch (e) { setError(e.message); }
+    try { setLista(await listarPropuestas(empresaId)); } catch (e) { setError(mensajeErrorPropuesta(e)); }
   }, [empresaId]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -483,7 +483,7 @@ export default function FinanzasPropuestas() {
     try {
       const id = await crearPropuesta(empresaId, nueva);
       setModalNueva(false); setNueva({ nombre: "", motivo: "" }); setAbierta(id);
-    } catch (e) { setError(e.message); }
+    } catch (e) { setError(mensajeErrorPropuesta(e)); }
   };
 
   const abiertas = (lista || []).filter(esEditable);

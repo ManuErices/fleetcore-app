@@ -19,6 +19,14 @@ const ref = (empresaId, id) => doc(db, "empresas", empresaId, "flujo_propuestas"
 const ahora = () => new Date().toISOString();
 const quien = () => auth.currentUser?.email || "";
 
+/** Mensaje para el usuario a partir de un error de Firestore u otro. */
+export function mensajeErrorPropuesta(e) {
+  if (e?.code === "permission-denied") {
+    return "Firestore no permite guardar propuestas todavía. Un administrador debe publicar las reglas actualizadas (firestore.rules, regla flujo_propuestas) en la consola de Firebase.";
+  }
+  return e?.message || "No se pudo completar la operación.";
+}
+
 export async function listarPropuestas(empresaId) {
   const snap = await getDocs(col(empresaId));
   return snap.docs
