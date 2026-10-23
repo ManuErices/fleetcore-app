@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
     "chart.js": "^4.5.1",
     "firebase": "^10.8.0",
     "firebase-admin": "^13.6.0",

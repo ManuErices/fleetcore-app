@@ -98,3 +98,18 @@ Service worker at `public/sw.js`. Firebase Firestore uses `persistentLocalCache`
 
 ### Email / notifications
 Firebase Functions (`functions/index.js`) send emails via AWS SES (`functions/ses.js`) and SMS via Twilio (`functions/twilio.js`). Email templates are in `functions/email-templates.js`.
+
+### Agente IA (asistente por texto y voz)
+Floating assistant mounted in `PWAWrapper` (App.jsx), so it appears in every sub-app. It answers questions and runs tasks with Claude tool use.
+
+```
+api/agente/chat.js              ← Vercel function: validates Firebase idToken, calls Claude (one turn)
+api/agente/_herramientas.js     ← system prompt + tool schemas (what Claude sees)
+src/lib/agente/herramientas.js  ← tool executors (run in the browser with the user's Firestore)
+src/lib/agente/useAgente.js     ← conversation loop, confirmations, sessionStorage persistence
+src/components/agente/AgenteIA.jsx ← UI: chat panel, dictation (Web Speech API), read-aloud
+```
+
+Tools execute client-side on purpose: Firestore rules and `empresaId` scoping apply exactly as if the user acted by hand; the server never touches the DB. Tools that write data are listed in `ACCIONES_QUE_MODIFICAN` and require a confirmation card. To add a tool: add its schema in `_herramientas.js` and an executor with the same name in `herramientas.js`.
+
+The conversation history is append-only and assistant `content` (including thinking blocks) is sent back unchanged — editing it makes the API reject the request. Env vars in Vercel: `ANTHROPIC_API_KEY` (required), `ANTHROPIC_AGENTE_MODEL`, `ANTHROPIC_AGENTE_EFFORT` (optional).

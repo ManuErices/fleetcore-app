@@ -1,3 +1,6 @@
 {
+  "functions": {
+    "api/agente/chat.js": { "maxDuration": 60 }
+  },
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
