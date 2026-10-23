@@ -471,6 +471,45 @@ html.cuaderno-activo::-webkit-scrollbar-thumb:hover {
   transform: translateY(-0.3em);
 }
 
+/* Deslizador Original ⇄ Propuesta: un trazo de pluma con un círculo a lápiz. */
+.deslizador-cuaderno {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+.deslizador-cuaderno::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgb(var(--cuaderno-tinta));
+  border-radius: 1px;
+}
+.deslizador-cuaderno::-moz-range-track {
+  height: 2px;
+  background: rgb(var(--cuaderno-tinta));
+  border-radius: 1px;
+}
+.deslizador-cuaderno::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -10px;
+  border-radius: 9999px;
+  border: 1.8px solid rgb(var(--cuaderno-tinta));
+  background: rgb(var(--cuaderno-durazno));
+}
+.deslizador-cuaderno::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  border: 1.8px solid rgb(var(--cuaderno-tinta));
+  background: rgb(var(--cuaderno-durazno));
+}
+.deslizador-cuaderno:focus-visible {
+  outline: 2px solid rgb(var(--cuaderno-tinta) / 0.4);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tema-cuaderno *,
   .tema-cuaderno *::before,

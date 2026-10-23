@@ -24,11 +24,12 @@ import { EJECUTORES_MEJORAS, describirAccionMejoras } from './herramientasMejora
 export const ACCIONES_QUE_MODIFICAN = new Set([
   'crear_obra', 'actualizar_maquina',
   'crear_cuentas_flujo', 'cargar_partidas_flujo', 'mover_pago_flujo', 'marcar_pagado',
+  'aprobar_propuesta_flujo', 'rechazar_propuesta_flujo',
   'proponer_mejora', 'aprobar_mejora', 'rechazar_mejora',
 ]);
 
 // Secciones internas de Finanzas (FinanzasApp no usa rutas por sección).
-const SECCIONES_FINANZAS = ['semana', 'pagos', 'flujo', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'];
+const SECCIONES_FINANZAS = ['semana', 'pagos', 'flujo', 'propuestas', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'];
 
 const MAX_FILAS = 50;
 
@@ -251,14 +252,20 @@ const EJECUTORES = {
     };
   },
 
-  async navegar_a({ destino, seccion_finanzas }, { navigate }) {
+  async navegar_a({ destino, seccion_finanzas, propuesta_id }, { navigate }) {
     const ruta = RUTAS[destino];
     if (!ruta) throw new Error(`No conozco la pantalla "${destino}".`);
     if (ruta.startsWith('/fleetcore')) localStorage.setItem('selectedApp', 'fleetcore');
     if (destino === 'finanzas' && SECCIONES_FINANZAS.includes(seccion_finanzas)) {
       // FinanzasApp la lee al montarse, o la recibe por evento si ya está abierta.
-      try { sessionStorage.setItem('agenteIA:finanzasVista', seccion_finanzas); } catch { /* sin almacenamiento */ }
-      setTimeout(() => window.dispatchEvent(new CustomEvent('agente:finanzas', { detail: seccion_finanzas })), 300);
+      try {
+        sessionStorage.setItem('agenteIA:finanzasVista', seccion_finanzas);
+        if (seccion_finanzas === 'propuestas' && propuesta_id) sessionStorage.setItem('agenteIA:propuestaFlujo', propuesta_id);
+      } catch { /* sin almacenamiento */ }
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('agente:finanzas', { detail: seccion_finanzas }));
+        if (propuesta_id) window.dispatchEvent(new CustomEvent('agente:propuestaFlujo', { detail: propuesta_id }));
+      }, 300);
     }
     navigate(ruta);
     return { ok: true, abierta: seccion_finanzas ? `${destino} / ${seccion_finanzas}` : destino };

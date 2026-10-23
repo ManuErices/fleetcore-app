@@ -56,6 +56,13 @@ const ETIQUETAS = {
   aprobar_mejora: 'Aprobando la mejora',
   rechazar_mejora: 'Rechazando la mejora',
   deuda_proveedores: 'Revisando deuda',
+  listar_propuestas_flujo: 'Revisando propuestas',
+  crear_propuesta_flujo: 'Creando la propuesta',
+  editar_propuesta_flujo: 'Anotando en la propuesta',
+  comparar_propuesta_flujo: 'Comparando con el original',
+  enviar_propuesta_a_revision: 'Enviando a revisión',
+  aprobar_propuesta_flujo: 'Aplicando la propuesta',
+  rechazar_propuesta_flujo: 'Rechazando la propuesta',
 };
 
 const hoyLocal = () => {

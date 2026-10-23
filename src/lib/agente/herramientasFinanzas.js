@@ -17,6 +17,13 @@ import { cargarDatosCaja } from '../finanzas/cajaDatos';
 import {
   proyectar, simularPago, proponerMovimientos, partidasSinCerrar, lunesDe, claveDia, prioridadDe, PRIORIDADES,
 } from '../finanzas/caja';
+import {
+  ESTADOS_PROPUESTA, esEditable, datosConPropuesta, listarCambios, compararProyecciones,
+} from '../finanzas/propuestas';
+import {
+  listarPropuestas, cargarPropuesta, crearPropuesta, proponerPartida, proponerMovimiento as proponerMovimientoEnPropuesta,
+  agregarCuentaNueva, proponerColchon, cambiarEstado, aplicarPropuesta,
+} from '../finanzas/propuestasDatos';
 
 const MAX_PARTIDAS_LOTE = 60;
 const MAX_CUENTAS_LOTE = 30;
@@ -63,7 +70,118 @@ function semanaPorNumero(proy, numero) {
   return f;
 }
 
+const esAdmin = (rol) => rol === 'superadmin' || rol === 'admin_contrato';
+
+async function compararPropuesta(empresaId, id) {
+  const hoy = new Date();
+  const [datos, propuesta] = await Promise.all([cargarDatosCaja(empresaId, hoy), cargarPropuesta(empresaId, id)]);
+  const original = proyectar({ ...datos, hoy });
+  const conPropuesta = proyectar({ ...datosConPropuesta(datos, propuesta), hoy });
+  return { datos, propuesta, cmp: compararProyecciones(original, conPropuesta) };
+}
+
 export const EJECUTORES_FINANZAS = {
+  // ── Propuestas: cambios que no tocan el flujo hasta aprobarse ──
+  async listar_propuestas_flujo(_input, { empresaId }) {
+    const lista = await listarPropuestas(empresaId);
+    return {
+      propuestas: lista.slice(0, 30).map(p => ({
+        id: p.id, nombre: p.nombre, estado: ESTADOS_PROPUESTA[p.estado]?.label || p.estado,
+        cambios: Object.keys(p.cambios?.pagos || {}).length, creada_por: p.creadaPor, actualizada: String(p.actualizadaEn || '').slice(0, 10),
+      })),
+    };
+  },
+
+  async crear_propuesta_flujo({ nombre, motivo }, { empresaId }) {
+    const id = await crearPropuesta(empresaId, { nombre, motivo });
+    return { ok: true, propuesta_id: id, nota: 'Borrador creado. El flujo original no cambia hasta que un administrador apruebe.' };
+  },
+
+  async editar_propuesta_flujo({ propuesta_id, cuentas_nuevas = [], partidas = [], movimientos = [], colchon }, { empresaId }) {
+    const hoy = new Date();
+    const datos = await cargarDatosCaja(empresaId, hoy);
+    let propuesta = await cargarPropuesta(empresaId, propuesta_id);
+    if (!esEditable(propuesta)) throw new Error('Esa propuesta ya está cerrada; crea una nueva.');
+    const recargar = async () => { propuesta = await cargarPropuesta(empresaId, propuesta_id); };
+
+    const refs = {};
+    for (const c of cuentas_nuevas) {
+      refs[c.ref || c.nombre] = await agregarCuentaNueva(empresaId, propuesta, {
+        nombre: c.nombre, categoria: c.categoria, subcategoria: c.subcategoria, obra: c.obra,
+        montoRecurrente: c.monto_recurrente, frecuencia: c.frecuencia,
+      });
+      await recargar();
+    }
+    const hechas = [];
+    for (const p of partidas) {
+      const cuentaId = p.cuenta_id || refs[p.ref_cuenta_nueva];
+      if (!cuentaId) throw new Error(`Falta la cuenta de la partida "${p.etiqueta || ''}".`);
+      const r = await proponerPartida(empresaId, propuesta, datos, { cuentaId, lunes: lunesDeTexto(p.semana), monto: p.monto, modo: p.modo });
+      hechas.push({ cuenta: p.etiqueta || cuentaId, semana: r.key.slice(-10), original: r.original, propuesto: r.valor });
+      await recargar();
+    }
+    for (const m of movimientos) {
+      const r = await proponerMovimientoEnPropuesta(empresaId, propuesta, datos, { cuentaId: m.cuenta_id, desde: lunesDeTexto(m.desde), hasta: lunesDeTexto(m.hasta) });
+      hechas.push({ cuenta: m.etiqueta || m.cuenta_id, movido: `${r.desde} → ${r.hasta}`, monto: r.monto });
+      await recargar();
+    }
+    if (typeof colchon === 'number') await proponerColchon(empresaId, propuesta, colchon);
+
+    const { cmp } = await compararPropuesta(empresaId, propuesta_id);
+    return {
+      ok: true, cambios_anotados: hechas, cuentas_nuevas: Object.keys(refs),
+      efecto: {
+        semana_mas_baja: { original: Math.round(cmp.minimoOriginal), propuesta: Math.round(cmp.minimoPropuesta) },
+        semanas_bajo_colchon: { original: cmp.semanasBajoOriginal, propuesta: cmp.semanasBajoPropuesta },
+      },
+    };
+  },
+
+  async comparar_propuesta_flujo({ propuesta_id }, { empresaId }) {
+    const { datos, propuesta, cmp } = await compararPropuesta(empresaId, propuesta_id);
+    const cambios = listarCambios(datos, propuesta);
+    return {
+      nombre: propuesta.nombre,
+      estado: ESTADOS_PROPUESTA[propuesta.estado]?.label || propuesta.estado,
+      motivo: propuesta.motivo || '',
+      resumen: {
+        semana_mas_baja: { original: Math.round(cmp.minimoOriginal), propuesta: Math.round(cmp.minimoPropuesta) },
+        falta_para_colchon: { original: Math.round(cmp.deficitOriginal), propuesta: Math.round(cmp.deficitPropuesta) },
+        disponible_sobre_colchon: { original: Math.round(cmp.disponibleOriginal), propuesta: Math.round(cmp.disponiblePropuesta) },
+        semanas_bajo_colchon: { original: cmp.semanasBajoOriginal, propuesta: cmp.semanasBajoPropuesta },
+        caja_en_13_semanas: { original: Math.round(cmp.cierreOriginal), propuesta: Math.round(cmp.cierrePropuesta) },
+      },
+      colchon_propuesto: propuesta.cambios?.colchon ?? null,
+      cambios: cambios.slice(0, 40).map(c => ({
+        cuenta: c.cuenta, nueva: c.cuentaNueva, semana: c.semana, original: c.original, propuesto: c.propuesto, conflicto: c.conflicto,
+      })),
+      conflictos: cambios.filter(c => c.conflicto).length,
+      semanas: cmp.semanas.map(x => ({ semana: x.etiqueta, original: Math.round(x.original), propuesta: Math.round(x.propuesta) })),
+    };
+  },
+
+  async enviar_propuesta_a_revision({ propuesta_id }, { empresaId }) {
+    const propuesta = await cargarPropuesta(empresaId, propuesta_id);
+    if (propuesta.estado !== 'borrador') throw new Error('Solo un borrador se envía a revisión.');
+    await cambiarEstado(empresaId, propuesta, 'en_revision');
+    return { ok: true, nota: 'Queda esperando la aprobación de un administrador.' };
+  },
+
+  async aprobar_propuesta_flujo({ propuesta_id, comentario = '' }, { empresaId, rol }) {
+    if (!esAdmin(rol)) throw new Error('Solo un administrador puede aprobar propuestas del flujo de caja.');
+    const propuesta = await cargarPropuesta(empresaId, propuesta_id);
+    const r = await aplicarPropuesta(empresaId, propuesta, comentario);
+    return { ok: true, aplicada: r };
+  },
+
+  async rechazar_propuesta_flujo({ propuesta_id, comentario = '' }, { empresaId, rol }) {
+    if (!esAdmin(rol)) throw new Error('Solo un administrador puede rechazar propuestas del flujo de caja.');
+    const propuesta = await cargarPropuesta(empresaId, propuesta_id);
+    await cambiarEstado(empresaId, propuesta, 'rechazada', comentario);
+    return { ok: true };
+  },
+
+  // ── Flujo original ──
   async proyectar_caja(_input, { empresaId }) {
     const { datos, proy, hoy } = await proyeccion(empresaId);
     const mov = proponerMovimientos(proy);
@@ -285,6 +403,12 @@ export function describirAccionFinanzas(nombre, input = {}) {
   }
   if (nombre === 'mover_pago_flujo') {
     return `Mover el pago de "${input.etiqueta || input.cuenta_id}" de la semana del ${input.desde} a la del ${input.hasta}.`;
+  }
+  if (nombre === 'aprobar_propuesta_flujo') {
+    return `Aprobar la propuesta "${input.nombre || input.propuesta_id}" y escribir todos sus cambios en el flujo de caja original.`;
+  }
+  if (nombre === 'rechazar_propuesta_flujo') {
+    return `Rechazar la propuesta "${input.nombre || input.propuesta_id}". El flujo no cambia.`;
   }
   if (nombre === 'marcar_pagado') {
     return `${input.pagado === false ? 'Desmarcar como pagado' : 'Marcar como pagado'} "${input.etiqueta || input.cuenta_id}" en la semana del ${input.semana}.`;

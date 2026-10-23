@@ -36,6 +36,8 @@ Flujo de caja:
 - Se maneja por semanas (lunes a domingo) y cuentas de ingreso o egreso; los montos se anotan por cuenta y semana. Las cuentas recurrentes se proyectan solas.
 - La proyección es de 13 semanas desde la semana actual, partiendo del saldo de bancos. El colchón es el saldo mínimo que la empresa quiere mantener.
 - Para armar un flujo desde cero: pregunta lo mínimo que falte (ingresos esperados por cliente u obra y cuándo; egresos fijos como sueldos, imposiciones, arriendos, créditos, combustible, subcontratos), revisa con listar_cuentas_flujo lo que ya existe, crea las cuentas que falten en un lote, carga los montos en otro lote, y cierra con proyectar_caja y tu opinión.
+- Propuestas: cuando alguien quiera mejorar o cambiar el flujo (postergar pagos, agregar ingresos, armar un escenario, cubrir un déficit), trabaja en una PROPUESTA y no en el flujo original: crear_propuesta_flujo, luego editar_propuesta_flujo con todos los cambios en una sola llamada, luego comparar_propuesta_flujo para dar tu opinión con números, y al final abre la propuesta con navegar_a (destino finanzas, seccion_finanzas propuestas, propuesta_id) para que la vean transformarse sobre el original. El original solo cambia cuando un administrador la aprueba (aprobar_propuesta_flujo).
+- Usa las herramientas que escriben directo en el flujo (cargar_partidas_flujo, mover_pago_flujo, crear_cuentas_flujo) solo si el usuario pide expresamente cambiar el original ahora, o para registrar algo que ya ocurrió.
 - Prioridades de pago: "Ineludible" (sueldos, imposiciones, impuestos, cuotas) no se mueve; "Para operar" se mueve con cuidado; "Conversable" es lo primero que se negocia.
 
 Memoria del equipo:
@@ -143,9 +145,10 @@ export const HERRAMIENTAS = [
         },
         seccion_finanzas: {
           type: 'string',
-          enum: ['semana', 'pagos', 'flujo', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'],
-          description: 'Solo con destino "finanzas": la sección a abrir. "semana" es la vista de caja y pagos de la semana; "flujo" es la planilla del flujo de caja.',
+          enum: ['semana', 'pagos', 'flujo', 'propuestas', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'],
+          description: 'Solo con destino "finanzas": la sección a abrir. "semana" es la vista de caja y pagos de la semana; "flujo" es la planilla del flujo de caja; "propuestas" son los borradores del flujo.',
         },
+        propuesta_id: { type: 'string', description: 'Con seccion_finanzas "propuestas": abre esa propuesta en el comparador.' },
       },
       required: ['destino'],
       additionalProperties: false,
@@ -422,6 +425,134 @@ export const HERRAMIENTAS = [
         motivo: { type: 'string' },
       },
       required: ['numero'],
+      additionalProperties: false,
+    },
+  },
+
+  // ── Propuestas de flujo de caja ────────────────────────────
+  {
+    name: 'listar_propuestas_flujo',
+    description: 'Lista las propuestas de flujo de caja (borradores que no tocan el flujo hasta aprobarse): id, nombre, estado, cantidad de cambios y autor.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'crear_propuesta_flujo',
+    description: 'Crea una propuesta vacía de flujo de caja. Úsala antes de editar_propuesta_flujo cuando el usuario quiera ensayar o mejorar el flujo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Corto y descriptivo: "Postergar arriendos de noviembre".' },
+        motivo: { type: 'string', description: 'Para qué es la propuesta, en una o dos frases.' },
+      },
+      required: ['nombre'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'editar_propuesta_flujo',
+    description: 'Anota cambios en una propuesta (nunca en el flujo original): cuentas nuevas, montos por cuenta y semana, movimientos de pagos entre semanas y un colchón distinto. Montos siempre positivos; el signo lo pone la categoría de la cuenta. Monto 0 quita la partida. Devuelve cómo cambia la semana más baja.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        propuesta_id: { type: 'string' },
+        cuentas_nuevas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string', description: 'Nombre corto para referirse a esta cuenta en partidas (ref_cuenta_nueva).' },
+              nombre: { type: 'string' },
+              categoria: { type: 'string', enum: ['INGRESOS', 'EGRESOS'] },
+              subcategoria: { type: 'string' },
+              obra: { type: 'string' },
+              monto_recurrente: { type: 'number' },
+              frecuencia: { type: 'string', enum: ['semanal', 'quincenal', 'mensual'] },
+            },
+            required: ['ref', 'nombre', 'categoria'],
+            additionalProperties: false,
+          },
+        },
+        partidas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              cuenta_id: { type: 'string', description: 'Id de una cuenta existente (listar_cuentas_flujo).' },
+              ref_cuenta_nueva: { type: 'string', description: 'O la ref de una cuenta de cuentas_nuevas.' },
+              etiqueta: { type: 'string', description: 'Nombre de la cuenta, para el resumen.' },
+              semana: { type: 'string', description: 'AAAA-MM-DD de cualquier día de la semana.' },
+              monto: { type: 'number' },
+              modo: { type: 'string', enum: ['reemplazar', 'sumar'] },
+            },
+            required: ['semana', 'monto'],
+            additionalProperties: false,
+          },
+        },
+        movimientos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              cuenta_id: { type: 'string' },
+              etiqueta: { type: 'string' },
+              desde: { type: 'string', description: 'AAAA-MM-DD de la semana de origen.' },
+              hasta: { type: 'string', description: 'AAAA-MM-DD de la semana de destino.' },
+            },
+            required: ['cuenta_id', 'desde', 'hasta'],
+            additionalProperties: false,
+          },
+        },
+        colchon: { type: 'number', description: 'Colchón mínimo propuesto, en pesos.' },
+      },
+      required: ['propuesta_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'comparar_propuesta_flujo',
+    description: 'Compara una propuesta con el flujo original: semana más baja, falta o disponible sobre el colchón, semanas bajo el colchón y caja al final, en ambos casos; la lista de cambios y si alguno entró en conflicto con cambios posteriores al original.',
+    input_schema: {
+      type: 'object',
+      properties: { propuesta_id: { type: 'string' } },
+      required: ['propuesta_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'enviar_propuesta_a_revision',
+    description: 'Pasa un borrador a "En revisión" para que un administrador lo apruebe.',
+    input_schema: {
+      type: 'object',
+      properties: { propuesta_id: { type: 'string' } },
+      required: ['propuesta_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'aprobar_propuesta_flujo',
+    description: 'Aprueba una propuesta y escribe todos sus cambios en el flujo de caja original, en un solo paso. Solo administradores. Antes revisa comparar_propuesta_flujo y avisa si hay conflictos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        propuesta_id: { type: 'string' },
+        nombre: { type: 'string', description: 'Nombre de la propuesta, para la confirmación.' },
+        comentario: { type: 'string' },
+      },
+      required: ['propuesta_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'rechazar_propuesta_flujo',
+    description: 'Rechaza una propuesta; el flujo no cambia. Solo administradores.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        propuesta_id: { type: 'string' },
+        nombre: { type: 'string' },
+        comentario: { type: 'string' },
+      },
+      required: ['propuesta_id'],
       additionalProperties: false,
     },
   },
