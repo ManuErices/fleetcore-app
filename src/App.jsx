@@ -50,6 +50,7 @@ import CombustibleModal from "./pages/combustible/CombustibleModal";
 import ConnectionStatus from "./components/ConnectionStatus";
 import InstallPWA from "./components/InstallPWA";
 import SessionExpiryIndicator from "./components/SessionExpiryIndicator";
+import AgenteIA from "./components/agente/AgenteIA";
 
 // ── Firebase ──────────────────────────────────────────────────
 import { auth, googleProvider, db } from "./lib/firebase";
@@ -169,6 +170,7 @@ function PWAWrapper({ user, children }) {
       <InstallPWA />
       <SessionExpiryIndicator />
       {children}
+      <AgenteIA />
     </EmpresaProvider>
   );
 }
