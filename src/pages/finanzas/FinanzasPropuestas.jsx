@@ -491,7 +491,15 @@ export default function FinanzasPropuestas() {
       return id || null;
     } catch { return null; }
   });
-  const [modalNueva, setModalNueva] = useState(false);
+  // "Proponer cambios" (flujo de caja) y "Armar una propuesta" (La semana)
+  // llegan aquí con el formulario de propuesta nueva ya abierto.
+  const [modalNueva, setModalNueva] = useState(() => {
+    try {
+      const pedida = sessionStorage.getItem("finanzas:nuevaPropuesta") === "1";
+      sessionStorage.removeItem("finanzas:nuevaPropuesta");
+      return pedida;
+    } catch { return false; }
+  });
   const [nueva, setNueva] = useState({ nombre: "", motivo: "" });
   const [error, setError] = useState("");
 
@@ -567,9 +575,15 @@ export default function FinanzasPropuestas() {
         </ModalCuaderno>
       )}
 
-      {lista && abiertas.length === 0 && cerradas.length === 0 && (
-        <p className="m-0 flex items-center gap-2 text-[15px] text-cuaderno-grafito"><VistoBueno tamano={13} titulo="" /> El flujo original nunca cambia mientras la propuesta está abierta.</p>
-      )}
+      <Hoja titulo="Cómo funciona">
+        <ol className="m-0 pl-6 space-y-2 text-[17px]">
+          <li><span className="text-cuaderno-tinta">Crea una propuesta</span> <span className="text-cuaderno-grafito">con un nombre que diga qué ensayas, por ejemplo "Postergar arriendos de noviembre".</span></li>
+          <li><span className="text-cuaderno-tinta">Anota los cambios</span> <span className="text-cuaderno-grafito">dentro de ella: cambiar un monto, mover un pago de semana, agregar una cuenta nueva o probar otro colchón. También puedes pedírselo al asistente: "arma una propuesta para cubrir la semana más baja".</span></li>
+          <li><span className="text-cuaderno-tinta">Compara</span> <span className="text-cuaderno-grafito">con los botones Original y Propuesta, o con el deslizador: la curva de caja se redibuja y cada monto corregido se tacha y se escribe encima.</span></li>
+          <li><span className="text-cuaderno-tinta">Envíala a revisión.</span> <span className="text-cuaderno-grafito">Un administrador la aprueba y recién ahí sus cambios entran al flujo de caja, todos juntos. Si la rechaza, el flujo queda igual.</span></li>
+        </ol>
+        <p className="m-0 mt-3 flex items-center gap-2 text-[15px] text-cuaderno-verde"><VistoBueno tamano={13} titulo="" /> Mientras la propuesta está abierta, el flujo original no cambia.</p>
+      </Hoja>
     </div>
   );
 }
