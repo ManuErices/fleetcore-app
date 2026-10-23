@@ -22,32 +22,11 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { INSTRUCCIONES, HERRAMIENTAS } from './_herramientas.js';
+import { tokenDe, validarToken } from '../_comun/sesion.js';
 
 // Tope para que nadie use el endpoint como proxy gratis de la API.
 const MAX_BYTES = 1500 * 1024;
 const MAX_MENSAJES = 300;
-
-const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY
-  || 'AIzaSyByzRUHnLrxAaZOS9Dap1Kl0ZH5STWWzKE';
-
-// Mismo método que extraer-estatutos: valida el idToken contra Identity
-// Toolkit, sin cuenta de servicio.
-async function validarToken(idToken) {
-  const r = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
-    }
-  );
-  if (!r.ok) {
-    console.error('Token rechazado por Identity Toolkit:', r.status, await r.text());
-    return null;
-  }
-  const data = await r.json();
-  return data?.users?.[0]?.localId || null;
-}
 
 // El contexto viene del navegador: sirve para orientar al agente (fecha,
 // rol, pantalla), no para autorizar nada. Los permisos los imponen las
@@ -102,12 +81,11 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const header = req.headers.authorization || '';
-    const idToken = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const idToken = tokenDe(req);
     if (!idToken) return res.status(401).json({ error: 'Falta el token de sesión.' });
 
-    const uid = await validarToken(idToken);
-    if (!uid) return res.status(401).json({ error: 'Sesión inválida. Cierra sesión y vuelve a entrar.' });
+    const sesion = await validarToken(idToken);
+    if (!sesion) return res.status(401).json({ error: 'Sesión inválida. Cierra sesión y vuelve a entrar.' });
 
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(500).json({

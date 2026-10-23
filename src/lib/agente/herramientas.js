@@ -18,11 +18,13 @@ import { db } from '../firebase';
 import { fetchTrabajadores, nombreCompletoTrabajador } from '../trabajadores';
 import { EJECUTORES_FINANZAS, describirAccionFinanzas } from './herramientasFinanzas';
 import { EJECUTORES_EQUIPO } from './herramientasEquipo';
+import { EJECUTORES_MEJORAS, describirAccionMejoras } from './herramientasMejoras';
 
 // Herramientas que escriben en la base: el usuario las confirma antes.
 export const ACCIONES_QUE_MODIFICAN = new Set([
   'crear_obra', 'actualizar_maquina',
   'crear_cuentas_flujo', 'cargar_partidas_flujo', 'mover_pago_flujo', 'marcar_pagado',
+  'proponer_mejora', 'aprobar_mejora', 'rechazar_mejora',
 ]);
 
 // Secciones internas de Finanzas (FinanzasApp no usa rutas por sección).
@@ -300,6 +302,7 @@ const EJECUTORES = {
 
   ...EJECUTORES_FINANZAS,
   ...EJECUTORES_EQUIPO,
+  ...EJECUTORES_MEJORAS,
 };
 
 // Se manda al servidor al empezar cada conversación: solo se ofrecen a Claude
@@ -332,5 +335,5 @@ export function describirAccion(nombre, input = {}) {
     if (typeof input.obra_id === 'string') partes.push(input.obra_id ? 'asignarla a otra obra' : 'dejarla sin obra');
     return `Modificar la máquina: ${partes.join(' y ') || 'sin cambios'}.`;
   }
-  return describirAccionFinanzas(nombre, input) || `Ejecutar ${nombre}.`;
+  return describirAccionFinanzas(nombre, input) || describirAccionMejoras(nombre, input) || `Ejecutar ${nombre}.`;
 }

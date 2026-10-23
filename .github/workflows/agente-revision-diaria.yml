@@ -1,0 +1,107 @@
+# ============================================================
+# Agente — revisión diaria de la plataforma
+#
+# Cada día hábil revisa UN módulo (rota en orden) y propone hasta 3 mejoras
+# como issues con las etiquetas "mejora" y "propuesta". No modifica código:
+# las propuestas solo se desarrollan si un aprobador las aprueba desde el
+# asistente (ver agente-mejora.yml y api/mejoras).
+#
+# Se puede correr a mano para un módulo puntual desde la pestaña Actions.
+#
+# Secretos del repo: ANTHROPIC_API_KEY
+# ============================================================
+name: Agente — revisión diaria
+
+on:
+  schedule:
+    # 07:20 en Chile continental (UTC-3) de lunes a viernes
+    - cron: "20 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      modulo:
+        description: "Módulo a revisar (vacío = el que toca hoy)"
+        required: false
+        type: choice
+        options: ["", combustible, maquinaria, oficina-tecnica, operadores, rrhh, reportes, finanzas, contabilidad, documentos, agente]
+
+concurrency:
+  group: agente-revision-diaria
+  cancel-in-progress: false
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Elegir el módulo del día
+        id: modulo
+        run: |
+          MODULOS=(combustible maquinaria oficina-tecnica operadores rrhh reportes finanzas contabilidad documentos agente)
+          if [ -n "${{ inputs.modulo }}" ]; then
+            M="${{ inputs.modulo }}"
+          else
+            DIA=$((10#$(date -u +%j)))
+            M="${MODULOS[$((DIA % ${#MODULOS[@]}))]}"
+          fi
+          case "$M" in
+            combustible)     RUTAS="src/pages/combustible src/components/combustible src/utils/voucher*" ;;
+            maquinaria)      RUTAS="src/pages/maquinaria src/components/maquinaria" ;;
+            oficina-tecnica) RUTAS="src/pages/oficina-tecnica src/App.jsx" ;;
+            operadores)      RUTAS="src/pages/operadores src/pages/Trabajador*.jsx" ;;
+            rrhh)            RUTAS="src/pages/rrhh" ;;
+            reportes)        RUTAS="src/pages/reportes" ;;
+            finanzas)        RUTAS="src/pages/finanzas src/lib/finanzas src/lib/banco" ;;
+            contabilidad)    RUTAS="src/pages/contabilidad" ;;
+            documentos)      RUTAS="src/pages/documentos" ;;
+            agente)          RUTAS="src/lib/agente src/components/agente api/agente api/mejoras" ;;
+          esac
+          echo "modulo=$M" >> "$GITHUB_OUTPUT"
+          echo "rutas=$RUTAS" >> "$GITHUB_OUTPUT"
+
+      - name: Asegurar etiquetas
+        run: |
+          for l in mejora propuesta aprobada rechazada origen:revision-diaria "modulo:${{ steps.modulo.outputs.modulo }}"; do
+            gh label create "$l" --force >/dev/null
+          done
+
+      - name: Claude revisa el módulo y propone mejoras
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --max-turns 80
+            --allowedTools "Read,Glob,Grep,WebSearch,WebFetch,Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh issue create:*)"
+          prompt: |
+            Eres el product manager y arquitecto de FleetCore, una plataforma chilena para
+            empresas de construcción y maquinaria. Hoy revisas el módulo
+            "${{ steps.modulo.outputs.modulo }}" (código en: ${{ steps.modulo.outputs.rutas }}).
+            Lee CLAUDE.md para entender la arquitectura.
+
+            Objetivo: acercar este módulo a la mejor aplicación posible para quienes lo usan
+            a diario en terreno y en oficina.
+
+            1. Revisa el código del módulo: flujos que obligan a muchos pasos, datos que se
+               piden dos veces, validaciones que faltan, errores que se tragan en silencio,
+               pantallas que no sirven en el celular, cálculos dudosos.
+            2. Investiga en la web cómo resuelven lo mismo las mejores aplicaciones del rubro
+               (gestión de flotas, combustible, RRHH Chile, flujo de caja, etc.) y qué
+               exige la normativa chilena cuando aplique.
+            3. Revisa las mejoras ya existentes para no duplicar:
+               gh issue list --label mejora --state all --limit 100
+            4. Propón como máximo 3 mejoras, las de mayor impacto y factibles en un PR
+               mediano. Crea cada una con:
+               gh issue create --label mejora --label propuesta --label origen:revision-diaria --label "modulo:${{ steps.modulo.outputs.modulo }}" --title "..." --body "..."
+               El cuerpo, en español, con: Problema (con archivo y línea si aplica),
+               Propuesta, Por qué (referencias a lo investigado), Impacto esperado,
+               Cómo se verificaría.
+
+            No modifiques archivos. Si no encuentras nada que valga la pena, no crees issues.
