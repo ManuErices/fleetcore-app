@@ -19,10 +19,11 @@ const Reconocimiento = typeof window !== 'undefined'
   : null;
 
 const EJEMPLOS = [
+  '¿Qué hay para hoy?',
+  '¿Cómo viene la caja las próximas semanas?',
+  'Ayúdame a armar el flujo de caja del próximo mes',
+  '¿Puedo pagar 15 millones esta semana?',
   '¿Cuánto combustible se entregó esta semana?',
-  'Busca la excavadora CAT',
-  '¿Qué máquinas tiene asignada cada obra?',
-  'Abre el reporte de combustible',
 ];
 
 function leerEnVozAlta(texto) {
@@ -176,7 +177,7 @@ export default function AgenteIA() {
         {agente.vista.length === 0 && (
           <div className="text-center text-slate-500 text-sm px-4 pt-6">
             <p className="font-medium text-slate-700 mb-1">¿En qué te ayudo?</p>
-            <p className="mb-4">Escribe o toca el micrófono y habla. Puedo consultar datos, abrir pantallas y hacer cambios con tu confirmación.</p>
+            <p className="mb-4">Escribe o toca el micrófono y habla. Reviso datos, armo y ajusto el flujo de caja, te doy mi opinión y hago cambios con tu confirmación.</p>
             <div className="space-y-2">
               {EJEMPLOS.map(ej => (
                 <button key={ej} onClick={() => agente.enviar(ej)} className="block w-full text-left text-sm bg-white border border-slate-200 rounded-xl px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50">
@@ -203,7 +204,7 @@ export default function AgenteIA() {
         {agente.confirmacion && (
           <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-sm">
             <p className="font-semibold text-amber-900 mb-1">¿Confirmas esta acción?</p>
-            <p className="text-amber-900 mb-3">{agente.confirmacion.descripcion}</p>
+            <p className="text-amber-900 mb-3 whitespace-pre-wrap max-h-48 overflow-y-auto">{agente.confirmacion.descripcion}</p>
             <div className="flex gap-2">
               <button onClick={() => agente.responderConfirmacion(true)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg py-2 font-medium">Confirmar</button>
               <button onClick={() => agente.responderConfirmacion(false)} className="flex-1 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg py-2 font-medium">Cancelar</button>

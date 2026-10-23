@@ -9,27 +9,42 @@
 //
 // Para agregar una herramienta nueva:
 //   1. Descríbela aquí (nombre, descripción, input_schema).
-//   2. Implementa su ejecutor con el MISMO nombre en src/lib/agente/herramientas.js.
+//   2. Implementa su ejecutor con el MISMO nombre en src/lib/agente/herramientas.js
+//      (o en herramientasFinanzas.js / herramientasEquipo.js según el tema).
 //   3. Si modifica datos, márcala en ACCIONES_QUE_MODIFICAN de ese archivo
 //      para que el usuario la confirme antes de ejecutarse.
 // ============================================================
 
-export const INSTRUCCIONES = `Eres el asistente de FleetCore, una plataforma chilena de gestión de flotas de maquinaria, combustible, obras y personal. Hablas en español de Chile, de tú, con frases cortas y claras.
+export const INSTRUCCIONES = `Eres el asistente de FleetCore y trabajas como un integrante más del equipo de una empresa chilena de construcción y maquinaria: flota, combustible, obras, personal y finanzas. Hablas en español de Chile, de tú, directo y cercano.
 
-Tu trabajo es ejecutar tareas dentro de la plataforma usando las herramientas disponibles: consultar máquinas, obras, trabajadores, combustible y reportes diarios; abrir pantallas; y hacer cambios cuando el usuario lo pide.
+Tu rol es ser un aliado en el trabajo diario de cada persona, sea operador, administrativo, jefe de obra o gerencia:
+- Haces el trabajo, no solo lo explicas: consultas datos, armas y ajustas el flujo de caja, cargas información, abres pantallas y dejas las cosas listas.
+- Opinas. Cuando ves los datos, das tu lectura y una recomendación concreta, con el número que la respalda ("La S4 queda $3,2 M bajo el colchón; yo movería el pago de X a la S6"). Si algo es una suposición tuya, dilo.
+- Intervienes. Si al revisar algo ves un problema que nadie te preguntó (caja bajo el colchón, documentos de máquinas vencidos, deuda en mora, partidas sin cerrar, máquinas sin reporte), menciónalo en una línea al final.
+- Te adaptas al rol: a un operador le hablas de su máquina, su reporte y su combustible; a gerencia, de caja, deuda y decisiones.
+- Si alguien te saluda o pregunta qué hay para hoy, usa resumen_del_dia y cuéntale lo importante para su rol.
 
 Cómo trabajar:
-- Usa las herramientas para obtener datos reales. Nunca inventes cifras, nombres, patentes ni fechas.
-- Si una búsqueda devuelve varias coincidencias y la tarea depende de cuál es, pregunta cuál antes de modificar nada.
-- Las herramientas que modifican datos le muestran al usuario una tarjeta de confirmación; si la rechaza, acéptalo y no reintentes.
-- Si una herramienta responde con error de permisos, explica que su rol no permite esa acción.
-- Las fechas van en formato AAAA-MM-DD. Interpreta "hoy", "ayer", "esta semana" o "el mes pasado" a partir de la fecha actual del contexto.
-- Si te piden algo que ninguna herramienta permite, dilo y sugiere la pantalla donde se hace (puedes abrirla con navegar_a).
+- Usa las herramientas para obtener datos reales. Nunca inventes cifras, nombres, patentes ni fechas; si un dato no existe en la plataforma, dilo.
+- Antes de modificar algo, resuelve ids con las herramientas de búsqueda. Si hay ambigüedad (dos máquinas o cuentas parecidas), pregunta.
+- Las herramientas que modifican datos le muestran al usuario una tarjeta para confirmar. Agrupa los cambios en lotes (crear_cuentas_flujo, cargar_partidas_flujo) para no pedir veinte confirmaciones. Si rechaza, acéptalo y no reintentes.
+- Si una herramienta responde que el rol no tiene permiso, explícalo sin insistir.
+- Fechas en formato AAAA-MM-DD. Interpreta "hoy", "la próxima semana" o "fin de mes" a partir de la fecha del contexto.
+- Si algo no se puede hacer con tus herramientas, dilo y ofrece abrir la pantalla donde se hace (navegar_a).
 
-Formato de respuesta:
-- Muchas respuestas se leen en voz alta: sé breve, primero el dato que se pidió y luego el detalle mínimo.
-- Texto simple. Nada de tablas ni encabezados markdown; si hay una lista, usa guiones y como máximo 10 elementos.
-- Litros y montos con separador de miles chileno (12.345 L, $1.234.567).`;
+Flujo de caja:
+- Se maneja por semanas (lunes a domingo) y cuentas de ingreso o egreso; los montos se anotan por cuenta y semana. Las cuentas recurrentes se proyectan solas.
+- La proyección es de 13 semanas desde la semana actual, partiendo del saldo de bancos. El colchón es el saldo mínimo que la empresa quiere mantener.
+- Para armar un flujo desde cero: pregunta lo mínimo que falte (ingresos esperados por cliente u obra y cuándo; egresos fijos como sueldos, imposiciones, arriendos, créditos, combustible, subcontratos), revisa con listar_cuentas_flujo lo que ya existe, crea las cuentas que falten en un lote, carga los montos en otro lote, y cierra con proyectar_caja y tu opinión.
+- Prioridades de pago: "Ineludible" (sueldos, imposiciones, impuestos, cuotas) no se mueve; "Para operar" se mueve con cuidado; "Conversable" es lo primero que se negocia.
+
+Memoria del equipo:
+- Si alguien te cuenta algo que conviene saber en futuras conversaciones (una preferencia, una regla de la empresa, un dato estable como "el colchón real es 8 M" o "Copec factura los martes"), guárdalo con recordar. No guardes datos personales sensibles ni cosas de un solo uso.
+
+Formato:
+- Muchas respuestas se leen en voz alta: primero la respuesta, después el detalle mínimo. Sé breve salvo que pidan un análisis.
+- Texto simple, sin tablas ni encabezados markdown. Listas con guiones, máximo 10 elementos.
+- Montos en pesos chilenos con separador de miles ($1.234.567) o abreviados en millones cuando ayuda a leer ($12,3 M). Litros con separador (12.345 L).`;
 
 const FECHA = {
   type: 'string',
@@ -118,6 +133,11 @@ export const HERRAMIENTAS = [
             'reportes', 'finanzas', 'contabilidad', 'documentos', 'selector_apps',
           ],
         },
+        seccion_finanzas: {
+          type: 'string',
+          enum: ['semana', 'pagos', 'flujo', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'],
+          description: 'Solo con destino "finanzas": la sección a abrir. "semana" es la vista de caja y pagos de la semana; "flujo" es la planilla del flujo de caja.',
+        },
       },
       required: ['destino'],
       additionalProperties: false,
@@ -147,6 +167,185 @@ export const HERRAMIENTAS = [
         obra_id: { type: 'string' },
       },
       required: ['maquina_id'],
+      additionalProperties: false,
+    },
+  },
+
+  // ── Equipo ─────────────────────────────────────────────────
+  {
+    name: 'resumen_del_dia',
+    description: 'Panorama de hoy para la empresa: documentos de máquinas vencidos o por vencer, combustible y reportes diarios de hoy (y qué máquinas activas no tienen reporte), situación de caja y deuda vencida. Las secciones que el rol del usuario no puede ver vuelven como sin acceso. Úsala cuando pregunten qué hay para hoy, pidan un resumen o saluden al empezar el día.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'consultar_datos',
+    description: 'Lectura general de una colección de la empresa, para preguntas que ninguna otra herramienta cubre. Devuelve documentos aligerados (sin fotos ni firmas). Colecciones: projects, machines, reportes_combustible, reportes_detallados, deuda_proveedores, finanzas_proveedores, finanzas_activos, flujo_cuentas, subcontratos, rendiciones, solicitudes_pasajes, purchaseOrders, workOrders, maintenancePlans, centros_costo, guias_despacho, equipos_surtidores, estaciones_combustible, empresas_combustible, ausencias, vacaciones, licencias. Prefiere las herramientas específicas cuando existan.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        coleccion: { type: 'string' },
+        desde: { type: 'string', description: 'AAAA-MM-DD, filtra por la fecha principal de la colección si tiene.' },
+        hasta: { type: 'string', description: 'AAAA-MM-DD.' },
+        texto: { type: 'string', description: 'Filtra documentos que contengan este texto en cualquier campo.' },
+        limite: { type: 'integer', description: 'Máximo de documentos a devolver (1-100, por defecto 30).' },
+      },
+      required: ['coleccion'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'recordar',
+    description: 'Guarda una nota en la memoria compartida del equipo. La verás en el contexto de futuras conversaciones de cualquier persona de la empresa. Una idea por nota, redactada para que se entienda sola.',
+    input_schema: {
+      type: 'object',
+      properties: { texto: { type: 'string' } },
+      required: ['texto'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'olvidar',
+    description: 'Borra una nota de la memoria del equipo por su id (aparece entre corchetes en el contexto).',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
+
+  // ── Finanzas ───────────────────────────────────────────────
+  {
+    name: 'proyectar_caja',
+    description: 'Proyección de caja de 13 semanas, la misma de la pantalla "La semana" de Finanzas: saldo de partida, ingresos y egresos pendientes por semana, saldo al cerrar cada semana, semana más baja, cuánto queda disponible sobre el colchón o cuánto falta, una propuesta de pagos "conversables" a mover si falta, y partidas de semanas pasadas sin cerrar.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'detalle_semana_caja',
+    description: 'Partidas de una semana de la proyección (1 = semana actual, hasta 13): cada cuenta con su monto, lo pendiente, si está pagada, su prioridad y si viene de una recurrencia automática.',
+    input_schema: {
+      type: 'object',
+      properties: { semana: { type: 'integer', description: 'Número de semana de la proyección, 1 a 13.' } },
+      required: ['semana'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'simular_pago',
+    description: 'Evalúa si un pago extra (no planificado) cabe en la caja sin bajar del colchón, y si no cabe, desde qué semana se podría hacer.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        monto: { type: 'number', description: 'Monto en pesos, positivo.' },
+        semana: { type: 'integer', description: 'Semana de la proyección en que se pagaría (1 = esta semana).' },
+      },
+      required: ['monto'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'listar_cuentas_flujo',
+    description: 'Lista las cuentas del flujo de caja (id, nombre, ingreso/egreso, subcategoría, obra, recurrencia, prioridad). Úsala para resolver el cuenta_id antes de cargar montos o moverlos.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        texto: { type: 'string', description: 'Filtra por nombre, subcategoría, detalle, obra o cliente.' },
+        categoria: { type: 'string', enum: ['INGRESOS', 'EGRESOS'] },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'crear_cuentas_flujo',
+    description: 'Crea una o varias cuentas nuevas en el flujo de caja en un solo paso (una confirmación). Omite las que ya existen con el mismo nombre. Para gastos o ingresos fijos indica monto_recurrente y frecuencia y la proyección los repetirá sola.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cuentas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              nombre: { type: 'string' },
+              categoria: { type: 'string', enum: ['INGRESOS', 'EGRESOS'] },
+              subcategoria: { type: 'string', description: 'Por ejemplo OPERACIONAL, REMUNERACIONES, FINANCIERO, IMPUESTOS, VENTAS. En mayúsculas.' },
+              detalle: { type: 'string' },
+              obra: { type: 'string', description: 'Código o nombre de la obra a la que pertenece, si aplica.' },
+              cliente: { type: 'string' },
+              monto_recurrente: { type: 'number', description: 'Monto en pesos, positivo, si se repite.' },
+              frecuencia: { type: 'string', enum: ['semanal', 'quincenal', 'mensual'] },
+            },
+            required: ['nombre', 'categoria'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['cuentas'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'cargar_partidas_flujo',
+    description: 'Anota montos en el flujo de caja, uno por cuenta y semana, en un solo paso (una confirmación). Los montos van siempre positivos: el signo lo pone la categoría de la cuenta. Cualquier fecha se lleva al lunes de su semana. modo "reemplazar" deja el monto indicado; "sumar" lo agrega a lo que ya había.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        partidas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              cuenta_id: { type: 'string' },
+              etiqueta: { type: 'string', description: 'Nombre de la cuenta, para mostrarlo en la confirmación.' },
+              semana: { type: 'string', description: 'AAAA-MM-DD de cualquier día de la semana.' },
+              monto: { type: 'number' },
+            },
+            required: ['cuenta_id', 'etiqueta', 'semana', 'monto'],
+            additionalProperties: false,
+          },
+        },
+        modo: { type: 'string', enum: ['reemplazar', 'sumar'] },
+      },
+      required: ['partidas'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'mover_pago_flujo',
+    description: 'Mueve el monto anotado de una cuenta de una semana a otra (por ejemplo, para postergar un pago conversable). Lleva consigo la nota y la marca de pagado. Las recurrencias automáticas no se mueven: para esas, carga el monto a mano.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cuenta_id: { type: 'string' },
+        etiqueta: { type: 'string', description: 'Nombre de la cuenta, para la confirmación.' },
+        desde: { type: 'string', description: 'AAAA-MM-DD de la semana de origen.' },
+        hasta: { type: 'string', description: 'AAAA-MM-DD de la semana de destino.' },
+      },
+      required: ['cuenta_id', 'etiqueta', 'desde', 'hasta'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'marcar_pagado',
+    description: 'Marca (o desmarca) como pagada la partida de una cuenta en una semana, para que deje de contar como pendiente en la proyección.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cuenta_id: { type: 'string' },
+        etiqueta: { type: 'string', description: 'Nombre de la cuenta, para la confirmación.' },
+        semana: { type: 'string', description: 'AAAA-MM-DD de la semana.' },
+        pagado: { type: 'boolean', description: 'false para desmarcar. Por defecto true.' },
+      },
+      required: ['cuenta_id', 'etiqueta', 'semana'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'deuda_proveedores',
+    description: 'Deuda pendiente con proveedores, factoring y financieras, agrupada por acreedor: saldo, monto vencido, días de mora máximos y próximo vencimiento.',
+    input_schema: {
+      type: 'object',
+      properties: { solo_vencida: { type: 'boolean' } },
       additionalProperties: false,
     },
   },

@@ -16,9 +16,17 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { fetchTrabajadores, nombreCompletoTrabajador } from '../trabajadores';
+import { EJECUTORES_FINANZAS, describirAccionFinanzas } from './herramientasFinanzas';
+import { EJECUTORES_EQUIPO } from './herramientasEquipo';
 
 // Herramientas que escriben en la base: el usuario las confirma antes.
-export const ACCIONES_QUE_MODIFICAN = new Set(['crear_obra', 'actualizar_maquina']);
+export const ACCIONES_QUE_MODIFICAN = new Set([
+  'crear_obra', 'actualizar_maquina',
+  'crear_cuentas_flujo', 'cargar_partidas_flujo', 'mover_pago_flujo', 'marcar_pagado',
+]);
+
+// Secciones internas de Finanzas (FinanzasApp no usa rutas por sección).
+const SECCIONES_FINANZAS = ['semana', 'pagos', 'flujo', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'];
 
 const MAX_FILAS = 50;
 
@@ -241,12 +249,17 @@ const EJECUTORES = {
     };
   },
 
-  async navegar_a({ destino }, { navigate }) {
+  async navegar_a({ destino, seccion_finanzas }, { navigate }) {
     const ruta = RUTAS[destino];
     if (!ruta) throw new Error(`No conozco la pantalla "${destino}".`);
     if (ruta.startsWith('/fleetcore')) localStorage.setItem('selectedApp', 'fleetcore');
+    if (destino === 'finanzas' && SECCIONES_FINANZAS.includes(seccion_finanzas)) {
+      // FinanzasApp la lee al montarse, o la recibe por evento si ya está abierta.
+      try { sessionStorage.setItem('agenteIA:finanzasVista', seccion_finanzas); } catch { /* sin almacenamiento */ }
+      setTimeout(() => window.dispatchEvent(new CustomEvent('agente:finanzas', { detail: seccion_finanzas })), 300);
+    }
     navigate(ruta);
-    return { ok: true, abierta: destino };
+    return { ok: true, abierta: seccion_finanzas ? `${destino} / ${seccion_finanzas}` : destino };
   },
 
   async crear_obra({ nombre, codigo = '' }, { empresaId, rol }) {
@@ -284,6 +297,9 @@ const EJECUTORES = {
     await updateDoc(ref, { ...cambios, updatedAt: serverTimestamp() });
     return { ok: true, maquina: etiquetaMaquina(actual.data(), maquina_id), cambios };
   },
+
+  ...EJECUTORES_FINANZAS,
+  ...EJECUTORES_EQUIPO,
 };
 
 /** Ejecuta una herramienta y devuelve su resultado listo para Claude. */
@@ -312,5 +328,5 @@ export function describirAccion(nombre, input = {}) {
     if (typeof input.obra_id === 'string') partes.push(input.obra_id ? 'asignarla a otra obra' : 'dejarla sin obra');
     return `Modificar la máquina: ${partes.join(' y ') || 'sin cambios'}.`;
   }
-  return `Ejecutar ${nombre}.`;
+  return describirAccionFinanzas(nombre, input) || `Ejecutar ${nombre}.`;
 }

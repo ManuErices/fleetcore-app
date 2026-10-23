@@ -105,11 +105,13 @@ Floating assistant mounted in `PWAWrapper` (App.jsx), so it appears in every sub
 ```
 api/agente/chat.js              ← Vercel function: validates Firebase idToken, calls Claude (one turn)
 api/agente/_herramientas.js     ← system prompt + tool schemas (what Claude sees)
-src/lib/agente/herramientas.js  ← tool executors (run in the browser with the user's Firestore)
+src/lib/agente/herramientas.js  ← tool registry + fleet executors (run in the browser with the user's Firestore)
+src/lib/agente/herramientasFinanzas.js ← cash-flow tools; reuse src/lib/finanzas/caja.js so numbers match "La semana"
+src/lib/agente/herramientasEquipo.js   ← resumen_del_dia, consultar_datos (allowlisted collections), team memory
 src/lib/agente/useAgente.js     ← conversation loop, confirmations, sessionStorage persistence
 src/components/agente/AgenteIA.jsx ← UI: chat panel, dictation (Web Speech API), read-aloud
 ```
 
 Tools execute client-side on purpose: Firestore rules and `empresaId` scoping apply exactly as if the user acted by hand; the server never touches the DB. Tools that write data are listed in `ACCIONES_QUE_MODIFICAN` and require a confirmation card. To add a tool: add its schema in `_herramientas.js` and an executor with the same name in `herramientas.js`.
 
-The conversation history is append-only and assistant `content` (including thinking blocks) is sent back unchanged — editing it makes the API reject the request. Env vars in Vercel: `ANTHROPIC_API_KEY` (required), `ANTHROPIC_AGENTE_MODEL`, `ANTHROPIC_AGENTE_EFFORT` (optional).
+The conversation history is append-only and assistant `content` (including thinking blocks) is sent back unchanged — editing it makes the API reject the request. Team memory lives in `empresas/{id}/agente_memoria` (rule in `firestore.rules`); it's loaded once per conversation into the context. Finance sections are opened via `sessionStorage['agenteIA:finanzasVista']` + the `agente:finanzas` window event (FinanzasApp has no per-section routes). Env vars in Vercel: `ANTHROPIC_API_KEY` (required), `ANTHROPIC_AGENTE_MODEL`, `ANTHROPIC_AGENTE_EFFORT` (optional).
