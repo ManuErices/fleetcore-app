@@ -398,6 +398,8 @@ service cloud.firestore {
       match /flujo_pagados/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /flujo_notas/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /flujo_pagos/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Memoria compartida del asistente IA (notas que el equipo le pide recordar)
+      match /agente_memoria/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_activos/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_ingresos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }

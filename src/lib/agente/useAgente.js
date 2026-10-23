@@ -23,9 +23,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from '../firebase';
 import { ACCIONES_QUE_MODIFICAN, describirAccion, ejecutarHerramienta } from './herramientas';
+import { cargarMemoria } from './herramientasEquipo';
 
 const ENDPOINT = '/api/agente/chat';
-const MAX_PASOS = 12;
+// Armar un flujo de caja completo toma varias vueltas (listar, crear, cargar, proyectar).
+const MAX_PASOS = 25;
 
 const ETIQUETAS = {
   listar_obras: 'Revisando obras',
@@ -36,6 +38,19 @@ const ETIQUETAS = {
   navegar_a: 'Abriendo pantalla',
   crear_obra: 'Creando obra',
   actualizar_maquina: 'Actualizando máquina',
+  resumen_del_dia: 'Revisando el día',
+  consultar_datos: 'Consultando datos',
+  recordar: 'Guardando en la memoria del equipo',
+  olvidar: 'Borrando de la memoria',
+  proyectar_caja: 'Proyectando la caja',
+  detalle_semana_caja: 'Revisando la semana',
+  simular_pago: 'Simulando el pago',
+  listar_cuentas_flujo: 'Revisando cuentas del flujo',
+  crear_cuentas_flujo: 'Creando cuentas',
+  cargar_partidas_flujo: 'Cargando montos en el flujo',
+  mover_pago_flujo: 'Moviendo pago',
+  marcar_pagado: 'Marcando pago',
+  deuda_proveedores: 'Revisando deuda',
 };
 
 const hoyLocal = () => {
@@ -151,7 +166,10 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
 
     if (!contextoRef.current) {
       const u = auth.currentUser;
+      setEstado('Preparando…');
+      const memoria = await cargarMemoria(empresaId);
       contextoRef.current = {
+        memoria,
         fechaHoy: hoyLocal(),
         empresaNombre: empresaNombre || '',
         usuarioNombre: u?.displayName || u?.email || '',
@@ -220,7 +238,7 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
           if (ACCIONES_QUE_MODIFICAN.has(llamada.name)) {
             const aprobada = await pedirConfirmacion(llamada.name, llamada.input);
             if (!aprobada) {
-              mostrar({ de: 'accion', texto: `Cancelado: ${describirAccion(llamada.name, llamada.input)}` });
+              mostrar({ de: 'accion', texto: `Cancelado: ${describirAccion(llamada.name, llamada.input).split('\n')[0]}` });
               resultados.push({ type: 'tool_result', tool_use_id: llamada.id, is_error: true, content: 'El usuario rechazó la acción.' });
               continue;
             }
@@ -231,7 +249,9 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
               empresaId, rol, navigate: (ruta) => { rutaPendiente = ruta; },
             });
             if (ACCIONES_QUE_MODIFICAN.has(llamada.name)) {
-              mostrar({ de: 'accion', texto: `Hecho: ${describirAccion(llamada.name, llamada.input)}` });
+              mostrar({ de: 'accion', texto: `Hecho: ${describirAccion(llamada.name, llamada.input).split('\n')[0]}` });
+            } else if (llamada.name === 'recordar') {
+              mostrar({ de: 'accion', texto: `Anotado en la memoria del equipo: "${llamada.input?.texto}"` });
             }
             resultados.push({ type: 'tool_result', tool_use_id: llamada.id, content: JSON.stringify(salida) });
           } catch (err) {

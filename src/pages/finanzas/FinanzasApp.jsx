@@ -114,7 +114,21 @@ const VIEW_TO_ACCION = {
 
 function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminPanel, onAdminEmpresaPanel }) {
   // Finanzas abre en "La semana": caja, programación de pagos y lo disponible.
-  const [activeView, setActiveView] = useState("semana");
+  // El asistente IA puede pedir una sección: al abrir Finanzas la deja en
+  // sessionStorage, y si Finanzas ya está abierto la manda por evento.
+  const [activeView, setActiveView] = useState(() => {
+    try {
+      const pedida = sessionStorage.getItem("agenteIA:finanzasVista");
+      sessionStorage.removeItem("agenteIA:finanzasVista");
+      if (pedida && pedida in VIEW_TO_ACCION) return pedida;
+    } catch { /* sin almacenamiento */ }
+    return "semana";
+  });
+  useEffect(() => {
+    const alPedir = (e) => { if (e.detail in VIEW_TO_ACCION) setActiveView(e.detail); };
+    window.addEventListener("agente:finanzas", alPedir);
+    return () => window.removeEventListener("agente:finanzas", alPedir);
+  }, []);
   const { alertas } = useFinanzas();
 
   // Tema cuaderno: el papel también va bajo <html>, para que no asome el fondo
