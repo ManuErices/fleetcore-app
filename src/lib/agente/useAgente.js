@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from '../firebase';
-import { ACCIONES_QUE_MODIFICAN, describirAccion, ejecutarHerramienta } from './herramientas';
+import { ACCIONES_QUE_MODIFICAN, NOMBRES_HERRAMIENTAS, describirAccion, ejecutarHerramienta } from './herramientas';
 import { cargarMemoria } from './herramientasEquipo';
 
 const ENDPOINT = '/api/agente/chat';
@@ -84,7 +84,11 @@ async function pedirTurno(messages, contexto) {
     body: JSON.stringify({ messages, contexto }),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `El asistente respondió con error ${r.status}.`);
+  if (!r.ok) {
+    const err = new Error(data.error || `El asistente respondió con error ${r.status}.`);
+    err.codigo = data.codigo;
+    throw err;
+  }
   return data;
 }
 
@@ -110,6 +114,7 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
   const [trabajando, setTrabajando] = useState(false);
   const [estado, setEstado] = useState('');         // "Buscando máquinas…"
   const [confirmacion, setConfirmacion] = useState(null);
+  const [desactualizado, setDesactualizado] = useState(false); // el servidor tiene herramientas que esta app no
 
   const historialRef = useRef([]);   // mensajes tal como los recibe la API
   const vistaRef = useRef([]);
@@ -119,7 +124,14 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
 
   // Restaurar al montar / al cambiar de empresa
   useEffect(() => {
-    const guardado = leerGuardado(clave);
+    let guardado = leerGuardado(clave);
+    // Una conversación empezada con otra versión de la app usa otro catálogo
+    // de herramientas: no se puede continuar, se empieza una nueva.
+    if (guardado && guardado.contexto
+      && (guardado.contexto.herramientas || []).join() !== NOMBRES_HERRAMIENTAS.join()) {
+      guardado = null;
+      try { sessionStorage.removeItem(clave); } catch { /* sin almacenamiento */ }
+    }
     historialRef.current = guardado?.historial || [];
     // Si el widget se desmontó esperando una confirmación, la conversación
     // quedó con llamadas sin resultado; se cierran para que siga siendo válida.
@@ -169,6 +181,7 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
       setEstado('Preparando…');
       const memoria = await cargarMemoria(empresaId);
       contextoRef.current = {
+        herramientas: NOMBRES_HERRAMIENTAS,
         memoria,
         fechaHoy: hoyLocal(),
         empresaNombre: empresaNombre || '',
@@ -208,6 +221,8 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
           mostrar({ de: 'error', texto: 'El asistente no pudo procesar esta solicitud. Prueba reformulándola.' });
           break;
         }
+
+        if (respuesta.desactualizado) setDesactualizado(true);
 
         const content = respuesta.content || [];
         historial.push({ role: 'assistant', content });
@@ -265,7 +280,15 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
 
       if (ultimaRespuesta) alResponder?.(ultimaRespuesta);
     } catch (err) {
-      mostrar({ de: 'error', texto: err?.message || 'No se pudo contactar al asistente.' });
+      if (err?.codigo === 'conversacion_invalida') {
+        // La API rechazó el historial: no hay forma de seguirlo. Se empieza
+        // de cero dejando visible lo conversado hasta aquí.
+        historialRef.current = [];
+        contextoRef.current = null;
+        mostrar({ de: 'error', texto: 'Tuve que reiniciar la conversación. Repíteme lo último que me pediste.' });
+      } else {
+        mostrar({ de: 'error', texto: err?.message || 'No se pudo contactar al asistente.' });
+      }
     } finally {
       persistir();
       setEstado('');
@@ -284,5 +307,5 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
     try { sessionStorage.removeItem(clave); } catch { /* sin almacenamiento */ }
   }, [clave]);
 
-  return { vista, trabajando, estado, confirmacion, responderConfirmacion, enviar, reiniciar };
+  return { vista, trabajando, estado, confirmacion, desactualizado, responderConfirmacion, enviar, reiniciar };
 }
