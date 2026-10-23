@@ -252,7 +252,7 @@ const EJECUTORES = {
     };
   },
 
-  async navegar_a({ destino, seccion_finanzas, propuesta_id }, { navigate }) {
+  async navegar_a({ destino, seccion_finanzas, propuesta_id }, { navigate, empresaId }) {
     const ruta = RUTAS[destino];
     if (!ruta) throw new Error(`No conozco la pantalla "${destino}".`);
     if (ruta.startsWith('/fleetcore')) localStorage.setItem('selectedApp', 'fleetcore');
@@ -261,6 +261,8 @@ const EJECUTORES = {
       try {
         sessionStorage.setItem('agenteIA:finanzasVista', seccion_finanzas);
         if (seccion_finanzas === 'propuestas' && propuesta_id) sessionStorage.setItem('agenteIA:propuestaFlujo', propuesta_id);
+        // En el flujo de caja, la propuesta se abre como modo propuesta de la planilla.
+        if (seccion_finanzas === 'flujo' && propuesta_id) sessionStorage.setItem(`finanzas:propuestaActiva:${empresaId}`, propuesta_id);
       } catch { /* sin almacenamiento */ }
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('agente:finanzas', { detail: seccion_finanzas }));

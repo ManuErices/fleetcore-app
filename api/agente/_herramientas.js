@@ -36,7 +36,7 @@ Flujo de caja:
 - Se maneja por semanas (lunes a domingo) y cuentas de ingreso o egreso; los montos se anotan por cuenta y semana. Las cuentas recurrentes se proyectan solas.
 - La proyección es de 13 semanas desde la semana actual, partiendo del saldo de bancos. El colchón es el saldo mínimo que la empresa quiere mantener.
 - Para armar un flujo desde cero: pregunta lo mínimo que falte (ingresos esperados por cliente u obra y cuándo; egresos fijos como sueldos, imposiciones, arriendos, créditos, combustible, subcontratos), revisa con listar_cuentas_flujo lo que ya existe, crea las cuentas que falten en un lote, carga los montos en otro lote, y cierra con proyectar_caja y tu opinión.
-- Propuestas: cuando alguien quiera mejorar o cambiar el flujo (postergar pagos, agregar ingresos, armar un escenario, cubrir un déficit), trabaja en una PROPUESTA y no en el flujo original: crear_propuesta_flujo, luego editar_propuesta_flujo con todos los cambios en una sola llamada, luego comparar_propuesta_flujo para dar tu opinión con números, y al final abre la propuesta con navegar_a (destino finanzas, seccion_finanzas propuestas, propuesta_id) para que la vean transformarse sobre el original. El original solo cambia cuando un administrador la aprueba (aprobar_propuesta_flujo).
+- Propuestas: cuando alguien quiera mejorar o cambiar el flujo (postergar pagos, agregar ingresos, armar un escenario, cubrir un déficit), trabaja en una PROPUESTA y no en el flujo original: crear_propuesta_flujo, luego editar_propuesta_flujo con todos los cambios en una sola llamada, luego comparar_propuesta_flujo para dar tu opinión con números, y al final abre la propuesta con navegar_a (destino finanzas, seccion_finanzas flujo, propuesta_id): se abre la planilla del flujo en modo propuesta, donde el usuario sigue editando como siempre y compara con el deslizador Actual ⇄ Propuesta. Usa seccion_finanzas propuestas solo si piden la comparación semana a semana con la curva de caja. El original solo cambia cuando un administrador la aprueba (aprobar_propuesta_flujo).
 - Usa las herramientas que escriben directo en el flujo (cargar_partidas_flujo, mover_pago_flujo, crear_cuentas_flujo) solo si el usuario pide expresamente cambiar el original ahora, o para registrar algo que ya ocurrió.
 - Prioridades de pago: "Ineludible" (sueldos, imposiciones, impuestos, cuotas) no se mueve; "Para operar" se mueve con cuidado; "Conversable" es lo primero que se negocia.
 
@@ -148,7 +148,7 @@ export const HERRAMIENTAS = [
           enum: ['semana', 'pagos', 'flujo', 'propuestas', 'bancos', 'costos', 'activos', 'proveedores', 'deuda', 'obras', 'reportes'],
           description: 'Solo con destino "finanzas": la sección a abrir. "semana" es la vista de caja y pagos de la semana; "flujo" es la planilla del flujo de caja; "propuestas" son los borradores del flujo.',
         },
-        propuesta_id: { type: 'string', description: 'Con seccion_finanzas "propuestas": abre esa propuesta en el comparador.' },
+        propuesta_id: { type: 'string', description: 'Con seccion_finanzas "flujo": abre la planilla en modo propuesta con esa propuesta. Con "propuestas": abre su comparación semana a semana.' },
       },
       required: ['destino'],
       additionalProperties: false,
