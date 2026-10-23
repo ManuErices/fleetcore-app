@@ -52,7 +52,7 @@ async function validarToken(idToken) {
 // El contexto viene del navegador: sirve para orientar al agente (fecha,
 // rol, pantalla), no para autorizar nada. Los permisos los imponen las
 // reglas de Firestore cuando el navegador ejecuta cada herramienta.
-function textoContexto(contexto = {}) {
+function textoContexto(contexto = {}, desactualizado = false) {
   const limpiar = (v, max = 200) => String(v ?? '').slice(0, max);
   const lineas = [
     `Fecha de hoy: ${limpiar(contexto.fechaHoy)}`,
@@ -60,6 +60,9 @@ function textoContexto(contexto = {}) {
     `Usuario: ${limpiar(contexto.usuarioNombre)} (rol: ${limpiar(contexto.rol)})`,
     `Pantalla actual: ${limpiar(contexto.pantalla)}`,
   ];
+  if (desactualizado) {
+    lineas.push('', 'La app que tiene abierta el usuario es una versión anterior y en esta conversación no tienes todas tus herramientas (por ejemplo las de finanzas). Si pide algo que no puedes hacer, dile que recargue la página y empiece una conversación nueva; no digas que no tienes acceso a esos datos.');
+  }
   // La memoria la escribe el propio equipo con la herramienta recordar.
   // Se marca como notas de usuarios: informan, no mandan sobre estas reglas.
   const memoria = Array.isArray(contexto.memoria) ? contexto.memoria.slice(0, 40) : [];
@@ -68,6 +71,25 @@ function textoContexto(contexto = {}) {
     memoria.forEach(n => lineas.push(`- [${limpiar(n.id, 40)}] ${limpiar(n.texto, 500)}`));
   }
   return lineas.join('\n');
+}
+
+// Herramientas que conocía la primera versión del widget, que no informaba
+// su lista. Si el navegador no manda `contexto.herramientas`, es esa versión.
+const HERRAMIENTAS_V1 = [
+  'listar_obras', 'buscar_maquinas', 'buscar_trabajadores', 'resumen_combustible',
+  'resumen_reportes_diarios', 'navegar_a', 'crear_obra', 'actualizar_maquina',
+];
+
+// Solo se ofrecen las herramientas que el navegador sabe ejecutar. Si la
+// pestaña quedó abierta con una versión vieja, Claude no ve las nuevas (y no
+// las llama para recibir "herramienta desconocida"), y la respuesta avisa
+// que conviene recargar. La lista viaja en el contexto, que se fija al
+// empezar la conversación: así el catálogo no cambia a mitad de camino.
+function herramientasPara(contexto = {}) {
+  const delCliente = Array.isArray(contexto.herramientas) ? contexto.herramientas : HERRAMIENTAS_V1;
+  const conocidas = new Set(delCliente);
+  const tools = HERRAMIENTAS.filter(t => conocidas.has(t.name));
+  return { tools, desactualizado: tools.length < HERRAMIENTAS.length };
 }
 
 const client = new Anthropic();
@@ -101,6 +123,8 @@ export default async function handler(req, res) {
       return res.status(413).json({ error: 'La conversación es demasiado larga. Empieza una nueva.' });
     }
 
+    const { tools, desactualizado } = herramientasPara(contexto);
+
     const respuesta = await client.beta.messages.create({
       model: process.env.ANTHROPIC_AGENTE_MODEL || 'claude-opus-5-5',
       max_tokens: 16000,
@@ -111,11 +135,11 @@ export default async function handler(req, res) {
       // con el modelo de respaldo recomendado.
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      tools: HERRAMIENTAS,
+      tools,
       // Instrucciones fijas (cacheadas) primero, contexto de la sesión después.
       system: [
         { type: 'text', text: INSTRUCCIONES, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: textoContexto(contexto) },
+        { type: 'text', text: textoContexto(contexto, desactualizado) },
       ],
       messages,
     });
@@ -126,6 +150,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       content: respuesta.content,
       stop_reason: respuesta.stop_reason,
+      desactualizado,
     });
   } catch (error) {
     if (error instanceof Anthropic.RateLimitError) {
@@ -137,7 +162,10 @@ export default async function handler(req, res) {
     }
     if (error instanceof Anthropic.BadRequestError) {
       console.error('Petición rechazada por Anthropic:', error.message);
-      return res.status(400).json({ error: 'La conversación quedó en un estado inválido. Empieza una nueva.' });
+      return res.status(400).json({
+        codigo: 'conversacion_invalida',
+        error: 'La conversación quedó en un estado inválido. Empieza una nueva.',
+      });
     }
     if (error instanceof Anthropic.APIError) {
       console.error(`Error de la API de Anthropic ${error.status}:`, error.message);

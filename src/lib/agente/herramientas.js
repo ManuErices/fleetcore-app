@@ -302,10 +302,14 @@ const EJECUTORES = {
   ...EJECUTORES_EQUIPO,
 };
 
+// Se manda al servidor al empezar cada conversación: solo se ofrecen a Claude
+// las herramientas que esta versión de la app sabe ejecutar.
+export const NOMBRES_HERRAMIENTAS = Object.keys(EJECUTORES).sort();
+
 /** Ejecuta una herramienta y devuelve su resultado listo para Claude. */
 export async function ejecutarHerramienta(nombre, input, ctx) {
   const ejecutor = EJECUTORES[nombre];
-  if (!ejecutor) throw new Error(`Herramienta desconocida: ${nombre}`);
+  if (!ejecutor) throw new Error(`La versión de la app que tiene abierta el usuario no incluye "${nombre}". Pídele recargar la página.`);
   if (!ctx.empresaId) throw new Error('No hay una empresa activa.');
   try {
     return await ejecutor(input || {}, ctx);

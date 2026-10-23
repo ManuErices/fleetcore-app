@@ -172,6 +172,13 @@ export default function AgenteIA() {
         </button>
       </div>
 
+      {agente.desactualizado && (
+        <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 text-xs text-amber-900 flex items-center gap-2 flex-shrink-0">
+          <span className="flex-1">Hay una versión nueva del asistente con más funciones.</span>
+          <button onClick={() => window.location.reload()} className="bg-amber-600 hover:bg-amber-700 text-white rounded-md px-2.5 py-1 font-medium">Recargar</button>
+        </div>
+      )}
+
       {/* Conversación */}
       <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 bg-slate-50">
         {agente.vista.length === 0 && (
