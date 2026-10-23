@@ -402,6 +402,27 @@ service cloud.firestore {
       match /flujo_propuestas/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       // Memoria compartida del asistente IA (notas que el equipo le pide recordar)
       match /agente_memoria/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+
+      // ── BANCOS Y PROVEEDORES (Finanzas) ─────────────────
+      // Estaban solo en la consola de Firebase y no en este archivo: al
+      // publicarlo completo se perdían y Bancos/Proveedores dejaban de cargar.
+      match /banco_cuentas/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /banco_movimientos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /banco_importaciones/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /banco_reglas/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /proveedores/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+
+      // ── OTRAS COLECCIONES QUE USA LA APP Y FALTABAN AQUÍ ─
+      // Límites de los reportes diarios (src/lib/reportesConfig.js)
+      match /configuracion/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Documentos adjuntos a la ficha del trabajador (RRHH)
+      match /documentos_trabajadores/{docId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Bitácora de cambios en reportes de combustible: se escribe una vez
+      match /audit_log/{docId} {
+        allow read:   if isSuperAdmin() || canWriteEmpresa(empresaId);
+        allow create: if isSuperAdmin() || canWriteEmpresa(empresaId);
+        allow update, delete: if isSuperAdmin();
+      }
       match /finanzas_activos/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_ingresos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
