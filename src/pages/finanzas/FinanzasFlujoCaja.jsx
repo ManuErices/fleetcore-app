@@ -3,6 +3,7 @@ import { onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, set
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import { irASeccionFinanzas } from "../../lib/finanzas/navegacion";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
@@ -1146,6 +1147,10 @@ export default function FinanzasFlujoCaja() {
             </div>
             {/* Cerrar el menú al hacer clic afuera */}
             {showExportMenu && <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)}/>}
+            <Boton onClick={() => irASeccionFinanzas("propuestas", { nuevaPropuesta: true })}
+              title="Ensaya cambios en un borrador; el flujo no cambia hasta que un administrador los apruebe">
+              Proponer cambios
+            </Boton>
             <Boton variante="primario" onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}>
               <IconoMas tamano={14} /> Nueva cuenta
             </Boton>

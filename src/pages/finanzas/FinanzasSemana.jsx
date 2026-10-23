@@ -24,6 +24,7 @@ import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Nota, Resaltado, VistoBueno,
   FechaHoja, ModalCuaderno, GraficoLinea, IconoActualizar, IconoAnterior, casoTitulo,
 } from "./cuaderno";
+import { irASeccionFinanzas } from "../../lib/finanzas/navegacion";
 
 const ORDEN_PRIORIDAD = ["ineludible", "operar", "conversable"];
 const pesosDe = (texto) => { const n = String(texto || "").replace(/\D/g, ""); return n ? parseInt(n, 10) : 0; };
@@ -356,6 +357,11 @@ export default function FinanzasSemana() {
             <Nota etiqueta="Ojo:" className="mt-2">
               la semana del {proy.semanaMinima.rango} baja a <Cifra valor={proy.minimo} escala="pesos" color="heredar" />: faltan <Cifra valor={proy.deficit} escala="pesos" color="heredar" /> para el colchón.
             </Nota>
+          )}
+          {proy.deficit > 0 && (
+            <Boton variante="texto" className="mt-1" onClick={() => irASeccionFinanzas("propuestas", { nuevaPropuesta: true })}>
+              Armar una propuesta para cubrirlo
+            </Boton>
           )}
         </Hoja>
 
