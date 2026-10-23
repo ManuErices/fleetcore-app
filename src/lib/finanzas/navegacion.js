@@ -6,7 +6,8 @@
  * a Propuestas) se avisa con un evento que FinanzasApp escucha. Es el mismo que
  * usa el asistente IA.
  *
- *  nuevaPropuesta: abre Propuestas con el formulario de una propuesta nueva.
+ *  nuevaPropuesta: la sección de destino (Flujo de Caja o Propuestas) abre con
+ *                  el formulario de una propuesta nueva.
  */
 export function irASeccionFinanzas(seccion, { nuevaPropuesta = false } = {}) {
   if (nuevaPropuesta) {

@@ -4,6 +4,13 @@ import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { irASeccionFinanzas } from "../../lib/finanzas/navegacion";
+import { useUserRole } from "../../lib/useUserRole";
+import { cuentasNuevas, esEditable, listarCambios, ESTADOS_PROPUESTA, PREFIJO_CUENTA_NUEVA } from "../../lib/finanzas/propuestas.js";
+import {
+  listarPropuestas, cargarPropuesta, crearPropuesta, guardarCeldasPropuesta,
+  agregarCuentaNueva, quitarCuentaNueva, cambiarEstado, aplicarPropuesta,
+} from "../../lib/finanzas/propuestasDatos.js";
+import { useTransicion, ControlTransicion, lerp } from "./transicion";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
@@ -410,7 +417,8 @@ function bordeSemana(i, weeks) {
 // ─── Celda editable ─────────────────────────────────────────────────────────
 function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
   onSave, onTogglePaid, onNota,
-  isDragging, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
+  isDragging, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
+  enPropuesta = false, cambiada = false, original = 0, t = 1 }) {
 
   const [editing, setEditing]   = useState(false);
   const [inputVal, setInputVal] = useState("");
@@ -419,6 +427,13 @@ function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
   const inputRef = useRef(null);
 
   const isEmpty = !value || value === 0;
+  // Modo propuesta: `value` es lo propuesto y `original` lo que hay hoy. En el
+  // extremo "Actual" (t≈0) la celda muestra el original; al avanzar, la
+  // corrección: el actual tachado abajo y el propuesto escrito encima.
+  const corrigiendo = enPropuesta && cambiada && t > 0.02;
+  const mostrado = enPropuesta && t <= 0.02 ? original : value;
+  const avanceTachado = Math.min(1, t * 1.6);
+  const avanceEscrito = Math.max(0, Math.min(1, (t - 0.3) / 0.7));
 
   const startEdit = () => {
     setInputVal(value ? fmtInput(Math.abs(value)) : "");
@@ -443,7 +458,10 @@ function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
         isDragOver
           ? "bg-cuaderno-durazno/60 outline-dashed outline-[1.5px] -outline-offset-2 outline-cuaderno-tinta z-10"
           : isCurrentWeek ? "bg-cuaderno-durazno/40" : ""}`}
-      style={{ width: ANCHO_SEMANA, minWidth: ANCHO_SEMANA, height: 44, cursor: editing ? "text" : "default" }}>
+      style={{
+        width: ANCHO_SEMANA, minWidth: ANCHO_SEMANA, height: 44, cursor: editing ? "text" : "default",
+        ...(enPropuesta && cambiada && !isDragOver ? { backgroundColor: `rgb(var(--cuaderno-lavanda) / ${0.55 * t})` } : {}),
+      }}>
 
       {editing ? (
         <div className="flex items-center h-full px-2">
@@ -465,15 +483,31 @@ function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
                   banco <Cifra valor={real} color="heredar" />
                 </span>
           )}
-          {!isEmpty && (
+          {corrigiendo ? (
+            <span className="flex flex-col items-end leading-none gap-[3px]">
+              <span className="text-[16px]" style={{ clipPath: `inset(0 ${(1 - avanceEscrito) * 100}% 0 0)` }}>
+                {value ? <Cifra valor={value} /> : <span className="text-[13px] text-cuaderno-grafito">sin monto</span>}
+              </span>
+              <span className="relative text-[12px]">
+                {original ? <Cifra valor={original} color="grafito" /> : <span className="text-cuaderno-grafito">—</span>}
+                {!!original && (
+                  <svg aria-hidden="true" className="absolute inset-0 w-full h-full overflow-visible pointer-events-none" viewBox="0 0 100 20" preserveAspectRatio="none">
+                    <path d="M-3 12 C 25 9, 60 12, 103 7" fill="none" stroke="rgb(var(--cuaderno-roja))" strokeWidth="1.8"
+                      strokeLinecap="round" pathLength="1" strokeDasharray="1" strokeDashoffset={1 - avanceTachado} vectorEffect="non-scaling-stroke" />
+                  </svg>
+                )}
+              </span>
+            </span>
+          ) : !!mostrado && (
             <span className="inline-flex items-center gap-0.5 text-[16px]">
               {nota && <span className="text-[14px] text-cuaderno-grafito" title={nota}>*</span>}
-              <Cifra valor={value} color={paid ? "grafito" : "auto"} />
+              <Cifra valor={mostrado} color={paid ? "grafito" : "auto"} />
               {paid && <VistoBueno tamano={12} />}
             </span>
           )}
-          {/* Acciones al pasar el mouse: no desplazan la cifra */}
-          {!isEmpty && (
+          {/* Acciones al pasar el mouse: no desplazan la cifra. En una
+              propuesta solo se ensayan montos: pagado y notas son del flujo real. */}
+          {!isEmpty && !enPropuesta && (
             <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5 opacity-0 group-hover/celda:opacity-100 focus-within:opacity-100">
               <button onClick={e => { e.stopPropagation(); onTogglePaid(); }}
                 title={paid ? "Marcar pendiente" : "Marcar pagado"} aria-label={paid ? "Marcar pendiente" : "Marcar pagado"}
@@ -518,7 +552,8 @@ function PaymentCell({ value, real, paid, nota, isEgreso, isCurrentWeek, borde,
 function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas, reales = {},
   onPayment, onTogglePaid, onNota, onEdit, onDelete, proyectoId,
   draggedPayment, dragOverKey, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
-  mesActualWeeks, onOpenDetalle, sangria = "pl-8" }) {
+  mesActualWeeks, onOpenDetalle, sangria = "pl-8",
+  enPropuesta = false, pagosCeldas = null, pagosOriginal = {}, cambiadas = null, t = 1 }) {
 
   const isEgreso = account.categoria === "EGRESOS";
   // Solo los egresos abren el panel de detalle (datos de pago y contacto)
@@ -559,6 +594,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
               {account.recurrente && (
                 <span className="flex-shrink-0 text-[14px] text-cuaderno-grafito" title={`Recurrente, ${account.frecuenciaRecurrente || "mensual"}`}>↺</span>
               )}
+              {account.esNueva && <Resaltado color="lavanda" className="flex-shrink-0 text-[13px]">nueva</Resaltado>}
               {budgetOver && <Resaltado color="rosa" className="flex-shrink-0 text-[13px]">excedido</Resaltado>}
               {budgetWarn && <Resaltado color="durazno" className="flex-shrink-0 text-[13px]">80%</Resaltado>}
             </div>
@@ -591,7 +627,11 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
         const key = `${account.id}-${week.key}`;
         return (
           <PaymentCell key={key}
-            value={payments[key] || 0}
+            value={(pagosCeldas || payments)[key] || 0}
+            enPropuesta={enPropuesta}
+            cambiada={!!cambiadas?.has(key)}
+            original={pagosOriginal[key] || 0}
+            t={t}
             real={reales[key]}
             paid={!!paymentsPaid[key]}
             nota={paymentNotas[key] || ""}
@@ -630,7 +670,11 @@ export default function FinanzasFlujoCaja() {
   const tableRef = useRef(null);
 
   const [cuentas,      setCuentas]      = useState([]);
-  const [payments,     setPayments]     = useState({});
+  // Lo que muestra el flujo hoy (con recurrencias) y lo escrito en flujo_pagos.
+  // `payments` (más abajo) es lo que se dibuja: el actual, la propuesta o un
+  // punto intermedio de la transición.
+  const [pagosActual,    setPagosActual]    = useState({});
+  const [pagosGuardados, setPagosGuardados] = useState({});
   const [paymentsPaid, setPaymentsPaid] = useState({});
   const [paymentNotas, setPaymentNotas] = useState({});
   const [saldoBanco,   setSaldoBanco]   = useState(0);
@@ -652,6 +696,114 @@ export default function FinanzasFlujoCaja() {
   const [expandido,       setExpandido]       = useState(false); // modo pantalla ampliada (oculta sidebar + KPIs)
   const [proveedores,     setProveedores]     = useState([]);    // maestro de proveedores, en vivo
   const [cuentaDetalleId, setCuentaDetalleId] = useState(null);  // cuenta abierta en el panel lateral
+
+  // ── Modo propuesta ─────────────────────────────────────────────────────────
+  // Con una propuesta activa, la planilla se trabaja igual que siempre pero
+  // cada edición se guarda en la propuesta (flujo_propuestas), no en el flujo.
+  // El deslizador Actual ⇄ Propuesta anima celdas, totales y acumulado.
+  const { role } = useUserRole();
+  const esAdmin = role === "superadmin" || role === "admin_contrato";
+  const clavePropuesta = `finanzas:propuestaActiva:${empresaId}`;
+  const [propuesta, setPropuesta] = useState(null);
+  const propuestaRef = useRef(null);
+  propuestaRef.current = propuesta;
+  const [menuPropuestas, setMenuPropuestas] = useState(null);   // null | lista de abiertas
+  // "Armar una propuesta" (La semana) llega con el formulario ya abierto.
+  const [modalNuevaProp, setModalNuevaProp] = useState(() => {
+    try {
+      const pedida = sessionStorage.getItem("finanzas:nuevaPropuesta") === "1";
+      sessionStorage.removeItem("finanzas:nuevaPropuesta");
+      return pedida;
+    } catch { return false; }
+  });
+  const [nuevaProp, setNuevaProp] = useState({ nombre: "", motivo: "" });
+  const [modalCierre, setModalCierre] = useState(null);          // null | "aprobar" | "descartar" | "rechazar"
+  const [comentarioCierre, setComentarioCierre] = useState("");
+  const [trabajandoProp, setTrabajandoProp] = useState(false);
+  const [errorProp, setErrorProp] = useState("");
+  const { t, irA, fijar } = useTransicion(1);
+
+  const activarPropuesta = useCallback(async (id) => {
+    try {
+      const p = await cargarPropuesta(empresaId, id);
+      setPropuesta(p); setErrorProp(""); setMenuPropuestas(null);
+      try { sessionStorage.setItem(clavePropuesta, id); } catch { /* sin almacenamiento */ }
+      // Se muestra primero el flujo actual y se "corrige" solo.
+      fijar(0); setTimeout(() => irA(1, 1400), 400);
+    } catch (e) { setErrorProp(e.message); }
+  }, [empresaId, clavePropuesta, fijar, irA]);
+
+  const salirPropuesta = useCallback(() => {
+    setPropuesta(null); setErrorProp("");
+    try { sessionStorage.removeItem(clavePropuesta); } catch { /* sin almacenamiento */ }
+  }, [clavePropuesta]);
+
+  const recargarPropuesta = useCallback(async () => {
+    if (!propuestaRef.current) return;
+    setPropuesta(await cargarPropuesta(empresaId, propuestaRef.current.id));
+  }, [empresaId]);
+
+  // Retomar la propuesta en la que se estaba trabajando (o la que pidió abrir
+  // la pantalla Propuestas).
+  useEffect(() => {
+    if (!empresaId) return;
+    let id = null;
+    try { id = sessionStorage.getItem(clavePropuesta); } catch { /* sin almacenamiento */ }
+    if (id) activarPropuesta(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId]);
+
+  // El asistente puede pedir abrir una propuesta con el flujo ya en pantalla.
+  useEffect(() => {
+    const alPedir = (e) => activarPropuesta(e.detail);
+    window.addEventListener("agente:propuestaFlujo", alPedir);
+    return () => window.removeEventListener("agente:propuestaFlujo", alPedir);
+  }, [activarPropuesta]);
+
+  const abrirMenuPropuestas = async () => {
+    if (menuPropuestas) { setMenuPropuestas(null); return; }
+    try { setMenuPropuestas((await listarPropuestas(empresaId)).filter(esEditable)); }
+    catch (e) { setErrorProp(e.message); }
+  };
+
+  const crearYActivar = async () => {
+    try {
+      const id = await crearPropuesta(empresaId, nuevaProp);
+      setModalNuevaProp(false); setNuevaProp({ nombre: "", motivo: "" });
+      await activarPropuesta(id);
+    } catch (e) { setErrorProp(e.message); }
+  };
+
+  // handlePayment y handleDrop están memorizados; llaman a esta función a
+  // través de la ref para usar siempre los montos más recientes.
+  const guardarEnPropuestaRef = useRef(null);
+  const guardarEnPropuesta = (celdas) => guardarEnPropuestaRef.current?.(celdas);
+  guardarEnPropuestaRef.current = async (celdas) => {
+    const p = propuestaRef.current;
+    if (!p || !esEditable(p)) return;
+    irA(1);
+    try {
+      const pagos = await guardarCeldasPropuesta(empresaId, p, celdas, { actuales: pagosActual, guardados: pagosGuardados });
+      // Se muestra al tiro y luego se relee: si se editan dos celdas muy
+      // seguido, Firestore tiene ambas aunque la respuesta local llegue cruzada.
+      setPropuesta(prev => prev && prev.id === p.id ? { ...prev, cambios: { ...prev.cambios, pagos } } : prev);
+      await recargarPropuesta();
+    } catch (e) { setErrorProp(e.message); }
+  };
+
+  const cerrarPropuesta = async () => {
+    const p = propuestaRef.current;
+    setTrabajandoProp(true);
+    try {
+      if (modalCierre === "aprobar") await aplicarPropuesta(empresaId, p, comentarioCierre);
+      else await cambiarEstado(empresaId, p, modalCierre === "rechazar" ? "rechazada" : "descartada", comentarioCierre);
+      setModalCierre(null); setComentarioCierre("");
+      salirPropuesta();
+      await cargar();
+    } catch (e) { setErrorProp(e.message); }
+    finally { setTrabajandoProp(false); }
+  };
+
 
   // Salir del modo expandido con Escape — salvo que haya un panel o modal
   // encima: en ese caso Escape cierra esa capa y no el modo ampliado.
@@ -699,6 +851,37 @@ export default function FinanzasFlujoCaja() {
     return changed ? filled : null;
   }, []);
 
+  const cuentasProp = useMemo(() => (propuesta ? cuentasNuevas(propuesta) : []), [propuesta]);
+  const cuentasVista = useMemo(() => (propuesta ? [...cuentas, ...cuentasProp] : cuentas), [propuesta, cuentas, cuentasProp]);
+
+  // La propuesta completa: lo escrito en el flujo + los cambios, con las
+  // mismas reglas de recurrencia que el flujo actual.
+  const pagosPropuesta = useMemo(() => {
+    if (!propuesta) return null;
+    const raw = { ...pagosGuardados };
+    for (const [k, c] of Object.entries(propuesta.cambios?.pagos || {})) raw[k] = c.valor || 0;
+    return applyRecurrentes(cuentasVista, raw, weekColumns) || raw;
+    // applyRecurrentes es estable (useCallback sin dependencias)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propuesta, pagosGuardados, cuentasVista, weekColumns]);
+
+  const cambiadas = useMemo(() => {
+    const set = new Set();
+    if (!pagosPropuesta) return set;
+    for (const k of new Set([...Object.keys(pagosActual), ...Object.keys(pagosPropuesta)])) {
+      if ((pagosPropuesta[k] || 0) !== (pagosActual[k] || 0)) set.add(k);
+    }
+    return set;
+  }, [pagosActual, pagosPropuesta]);
+
+  const payments = useMemo(() => {
+    if (!pagosPropuesta || t >= 0.999) return pagosPropuesta || pagosActual;
+    if (t <= 0.001) return pagosActual;
+    const m = { ...pagosActual };
+    for (const k of cambiadas) m[k] = lerp(pagosActual[k] || 0, pagosPropuesta[k] || 0, t);
+    return m;
+  }, [pagosActual, pagosPropuesta, cambiadas, t]);
+
   // ── Firebase ───────────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
@@ -714,10 +897,11 @@ export default function FinanzasFlujoCaja() {
       const cuentasList = snapC.docs.map(d => ({ id: d.id, ...d.data() }));
       setCuentas(cuentasList);
       const pMap = {}; snapP.docs.forEach(d => { pMap[d.id] = d.data().valor || 0; });
+      setPagosGuardados(pMap);
       // Autorrelleno recurrentes — en memoria, no persiste a Firebase
       const weeksSnap = getWeekColumns();
       const filledMap = applyRecurrentes(cuentasList, pMap, weeksSnap);
-      setPayments(filledMap || pMap);
+      setPagosActual(filledMap || pMap);
       const paidMap = {}; snapPaid.docs.forEach(d => { paidMap[d.id] = true; }); setPaymentsPaid(paidMap);
       const notaMap = {}; snapNotas.docs.forEach(d => { notaMap[d.id] = d.data().texto || ""; }); setPaymentNotas(notaMap);
       snapCfg.docs.forEach(d => { if (d.id === "saldo_banco") setSaldoBanco(d.data().valor || 0); });
@@ -737,11 +921,14 @@ export default function FinanzasFlujoCaja() {
   useEffect(() => { cargar(); }, [cargar]);
 
   const handlePayment = useCallback(async (key, valor) => {
-    setPayments(prev => ({ ...prev, [key]: valor }));
+    if (propuestaRef.current) return guardarEnPropuesta({ [key]: valor });
+    setPagosActual(prev => ({ ...prev, [key]: valor }));
+    setPagosGuardados(prev => ({ ...prev, [key]: valor }));
     try { await setDoc(doc(db, "empresas", empresaId, "flujo_pagos", key), { valor, updatedAt: new Date().toISOString() }); } catch(e) {}
   }, [empresaId]);
 
   const handleTogglePaid = useCallback(async (key) => {
+    if (propuestaRef.current) return;
     const nuevo = !paymentsPaid[key];
     setPaymentsPaid(prev => ({ ...prev, [key]: nuevo }));
     try {
@@ -751,6 +938,7 @@ export default function FinanzasFlujoCaja() {
   }, [paymentsPaid, empresaId]);
 
   const handleNota = useCallback(async (key, texto) => {
+    if (propuestaRef.current) return;
     setPaymentNotas(prev => ({ ...prev, [key]: texto }));
     try {
       if (texto) await setDoc(doc(db, "empresas", empresaId, "flujo_notas", key), { texto, updatedAt: new Date().toISOString() });
@@ -761,10 +949,10 @@ export default function FinanzasFlujoCaja() {
   // ── Drag & Drop ────────────────────────────────────────────────────────────
   const handleDragStart = useCallback((cuentaId, weekKey) => {
     const key = `${cuentaId}-${weekKey}`;
-    const valor = payments[key] || 0;
+    const valor = (pagosPropuesta || pagosActual)[key] || 0;
     if (!valor) return;
     setDraggedPayment({ cuentaId, weekKey, valor, sourceKey: key });
-  }, [payments]);
+  }, [pagosPropuesta, pagosActual]);
 
   const handleDragOver = useCallback((e, key) => {
     e.preventDefault(); setDragOverKey(key);
@@ -777,7 +965,12 @@ export default function FinanzasFlujoCaja() {
     const { sourceKey, valor } = draggedPayment;
     const targetKey = `${cuentaId}-${weekKey}`;
     if (sourceKey === targetKey) { setDraggedPayment(null); setDragOverKey(null); return; }
-    setPayments(prev => ({ ...prev, [targetKey]: valor, [sourceKey]: 0 }));
+    if (propuestaRef.current) {
+      setDraggedPayment(null); setDragOverKey(null);
+      return guardarEnPropuesta({ [targetKey]: valor, [sourceKey]: 0 });
+    }
+    setPagosActual(prev => ({ ...prev, [targetKey]: valor, [sourceKey]: 0 }));
+    setPagosGuardados(prev => ({ ...prev, [targetKey]: valor, [sourceKey]: 0 }));
     if (paymentNotas[sourceKey]) {
       setPaymentNotas(prev => { const next = { ...prev, [targetKey]: prev[sourceKey] }; delete next[sourceKey]; return next; });
     }
@@ -801,6 +994,19 @@ export default function FinanzasFlujoCaja() {
   // Si Firestore falla, el error sube a ModalCuenta, que lo muestra y queda
   // abierto. Antes se tragaba en silencio y el modal se cerraba igual.
   const handleSaveCuenta = useCallback(async (form) => {
+    if (propuestaRef.current) {
+      // En una propuesta solo se agregan cuentas; cambiar una existente es
+      // cambiar el flujo real.
+      if (editandoCuenta) throw new Error("En una propuesta solo se agregan cuentas nuevas. Para editar una cuenta existente, sal de la propuesta.");
+      await agregarCuentaNueva(empresaId, propuestaRef.current, {
+        nombre: form.nombre, categoria: form.categoria, subcategoria: form.subcategoria, detalle: form.detalle,
+        obra: form.proyectoId, cliente: form.cliente,
+        montoRecurrente: form.recurrente ? parseInput(form.montoRecurrente || "0") : 0, frecuencia: form.frecuenciaRecurrente,
+      });
+      await recargarPropuesta();
+      setShowModalCuenta(false); setEditandoCuenta(null);
+      return;
+    }
     if (editandoCuenta) {
       await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", editandoCuenta.id), form);
       setCuentas(prev => prev.map(c => c.id === editandoCuenta.id ? { ...c, ...form } : c));
@@ -810,7 +1016,7 @@ export default function FinanzasFlujoCaja() {
     }
     // Re-aplicar recurrentes después de guardar/editar
     setCuentas(prev => {
-      setPayments(pm => {
+      setPagosActual(pm => {
         const filled = applyRecurrentes(prev, pm, weekColumns);
         return filled || pm;
       });
@@ -820,6 +1026,15 @@ export default function FinanzasFlujoCaja() {
   }, [editandoCuenta, applyRecurrentes, weekColumns, empresaId]);
 
   const handleDeleteCuenta = useCallback(async (id) => {
+    if (propuestaRef.current) {
+      if (!id.startsWith(PREFIJO_CUENTA_NUEVA)) {
+        window.alert("En una propuesta no se eliminan cuentas del flujo. Deja sus montos en 0, o sal de la propuesta.");
+        return;
+      }
+      if (!window.confirm("¿Quitar esta cuenta nueva de la propuesta?")) return;
+      try { await quitarCuentaNueva(empresaId, propuestaRef.current, id); await recargarPropuesta(); } catch (e) { setErrorProp(e.message); }
+      return;
+    }
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
     try { await deleteDoc(doc(db, "empresas", empresaId, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
   }, [empresaId]);
@@ -844,11 +1059,11 @@ export default function FinanzasFlujoCaja() {
 
   // ── Cálculos ───────────────────────────────────────────────────────────────
   const cuentasFiltradas = useMemo(() => {
-    let lista = cuentas;
+    let lista = cuentasVista;
     if (busqueda) lista = lista.filter(c => c.nombre?.toLowerCase().includes(busqueda.toLowerCase()));
     if (proyectoId !== "todos") lista = lista.filter(c => !c.proyectoId || c.proyectoId === proyectoId);
     return lista;
-  }, [cuentas, busqueda, proyectoId]);
+  }, [cuentasVista, busqueda, proyectoId]);
 
   const mesActualWeeks = useMemo(() => weekColumns.filter(w => w.monthIndex === 0), [weekColumns]);
 
@@ -1081,10 +1296,63 @@ export default function FinanzasFlujoCaja() {
   const acumuladoFinal = acumulados[weekColumns[weekColumns.length - 1]?.key] || 0;
   const totalIngresos  = weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
   const totalEgresos   = weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0);
+  // Caja al final de las semanas visibles, en cada versión (para la franja de la propuesta)
+  const acumuladoFinalDe = (mapa) => weekColumns.reduce((tot, w) =>
+    tot + [...ingresos, ...egresos].reduce((x, c) => x + (mapa[`${c.id}-${w.key}`] || 0), 0), saldoBanco);
+  const acumuladoFinalActual = propuesta ? acumuladoFinalDe(pagosActual) : 0;
+  const acumuladoFinalPropuesta = propuesta ? acumuladoFinalDe(pagosPropuesta) : 0;
+
+  // Botón para empezar o retomar una propuesta
+  const botonPropuestas = (
+    <div className="relative">
+      <Boton className={expandido ? "min-h-[38px] text-[16px]" : ""} onClick={abrirMenuPropuestas} aria-expanded={!!menuPropuestas} aria-haspopup="menu"
+        title="Trabaja una versión propuesta del flujo sin tocar el actual">
+        Proponer cambios <IconoBajar tamano={14} />
+      </Boton>
+      {menuPropuestas && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenuPropuestas(null)} />
+          <div role="menu" className="absolute right-0 top-full mt-1 z-50 w-72 bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md py-1 shadow-[0_12px_28px_-12px_rgb(var(--cuaderno-tinta)/0.4)]">
+            <button role="menuitem" onClick={() => { setMenuPropuestas(null); setModalNuevaProp(true); }} className="w-full text-left px-4 py-2.5 hover:bg-cuaderno-hoja">
+              <span className="block text-[17px]">Nueva propuesta</span>
+              <span className="block text-[13px] text-cuaderno-grafito">Copia el flujo actual para ensayar cambios</span>
+            </button>
+            {menuPropuestas.length > 0 && <div className="mx-4 border-t border-cuaderno-azul" />}
+            {menuPropuestas.map(pr => (
+              <button key={pr.id} role="menuitem" onClick={() => activarPropuesta(pr.id)} className="w-full text-left px-4 py-2 hover:bg-cuaderno-hoja">
+                <span className="block text-[16px] truncate">{pr.nombre}</span>
+                <span className="block text-[13px] text-cuaderno-grafito">
+                  {ESTADOS_PROPUESTA[pr.estado]?.label} · {Object.keys(pr.cambios?.pagos || {}).length} cambios · {pr.creadaPor || "—"}
+                </span>
+              </button>
+            ))}
+            <div className="mx-4 border-t border-cuaderno-azul" />
+            <button role="menuitem" onClick={() => { setMenuPropuestas(null); irASeccionFinanzas("propuestas"); }} className="w-full text-left px-4 py-2.5 hover:bg-cuaderno-hoja text-[15px] text-cuaderno-grafito">
+              Ver todas las propuestas
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   const filaProps = {
     weekColumns, payments, paymentsPaid, paymentNotas, reales,
     onPayment: handlePayment, onTogglePaid: handleTogglePaid, onNota: handleNota,
-    onEdit: c => { setEditandoCuenta(c); setShowModalCuenta(true); },
+    onEdit: c => {
+      if (propuesta) {
+        window.alert(c.esNueva
+          ? "Las cuentas nuevas de una propuesta se ajustan anotando sus montos, o se quitan con el basurero."
+          : "En una propuesta no se editan las cuentas del flujo: solo sus montos. Para editar la cuenta, sal de la propuesta.");
+        return;
+      }
+      setEditandoCuenta(c); setShowModalCuenta(true);
+    },
+    enPropuesta: !!propuesta,
+    pagosCeldas: pagosPropuesta,
+    pagosOriginal: pagosActual,
+    cambiadas,
+    t,
     onDelete: handleDeleteCuenta, proyectoId,
     draggedPayment, dragOverKey,
     onDragStart: handleDragStart, onDragOver: handleDragOver,
@@ -1147,10 +1415,7 @@ export default function FinanzasFlujoCaja() {
             </div>
             {/* Cerrar el menú al hacer clic afuera */}
             {showExportMenu && <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)}/>}
-            <Boton onClick={() => irASeccionFinanzas("propuestas", { nuevaPropuesta: true })}
-              title="Ensaya cambios en un borrador; el flujo no cambia hasta que un administrador los apruebe">
-              Proponer cambios
-            </Boton>
+            {!propuesta && botonPropuestas}
             <Boton variante="primario" onClick={() => { setEditandoCuenta(null); setShowModalCuenta(true); }}>
               <IconoMas tamano={14} /> Nueva cuenta
             </Boton>
@@ -1193,6 +1458,70 @@ export default function FinanzasFlujoCaja() {
       </div>
       )}
 
+      {/* ── Propuesta activa ────────────────────────────────────────────────── */}
+      {propuesta && (
+        <div className={`flex-shrink-0 mb-1 rounded-md border-[1.5px] border-dashed border-cuaderno-tinta/50 bg-cuaderno-lavanda/30 px-4 py-3 space-y-2 ${expandido ? "mx-4 mt-3" : "mx-8"}`}>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div className="min-w-[15rem] flex-[0_1_22rem]">
+              <p className="m-0 text-[13px] text-cuaderno-grafito">Estás trabajando en la propuesta</p>
+              <p className="m-0 text-[20px] leading-tight">
+                {propuesta.nombre}{" "}
+                <Resaltado color={propuesta.estado === "en_revision" ? "durazno" : esEditable(propuesta) ? "lavanda" : "rosa"} className="text-[14px]">
+                  {ESTADOS_PROPUESTA[propuesta.estado]?.label || propuesta.estado}
+                </Resaltado>
+              </p>
+              <p className="m-0 text-[13px] text-cuaderno-grafito">
+                {cambiadas.size} {cambiadas.size === 1 ? "celda cambiada" : "celdas cambiadas"}
+                {cuentasProp.length ? ` · ${cuentasProp.length} ${cuentasProp.length === 1 ? "cuenta nueva" : "cuentas nuevas"}` : ""}
+                . {esEditable(propuesta) ? "Edita la tabla como siempre: el flujo actual no cambia." : "Está cerrada: se puede ver, no editar."}
+              </p>
+            </div>
+            <div className="flex-1 min-w-[18rem]">
+              <ControlTransicion t={t} irA={irA} fijar={fijar} etiquetas={["Actual", "Propuesta"]} pistas={["el flujo de hoy", "con la propuesta"]} />
+            </div>
+            <div className="text-[15px] min-w-[12rem]">
+              <LineaGuia etiqueta="Caja al final" className="min-h-0 text-[15px]">
+                <span className="inline-flex items-baseline gap-1.5">
+                  <Cifra valor={acumuladoFinalActual} color="grafito" vacio="0" />
+                  <span className="text-cuaderno-grafito">→</span>
+                  <Cifra valor={acumuladoFinalPropuesta} vacio="0" />
+                </span>
+              </LineaGuia>
+              {acumuladoFinalPropuesta !== acumuladoFinalActual && (
+                <p className={`m-0 text-right text-[14px] ${acumuladoFinalPropuesta > acumuladoFinalActual ? "text-cuaderno-verde" : "text-cuaderno-roja"}`}>
+                  {acumuladoFinalPropuesta > acumuladoFinalActual ? "mejora " : "empeora "}
+                  <Cifra valor={Math.abs(acumuladoFinalPropuesta - acumuladoFinalActual)} color="heredar" /> (miles)
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {propuesta.estado === "borrador" && (
+              <Boton className="min-h-[38px] text-[16px]" disabled={!cambiadas.size && !cuentasProp.length}
+                onClick={async () => { try { await cambiarEstado(empresaId, propuesta, "en_revision"); await recargarPropuesta(); } catch (e) { setErrorProp(e.message); } }}>
+                Enviar a revisión
+              </Boton>
+            )}
+            {esEditable(propuesta) && esAdmin && (
+              <Boton variante="primario" className="min-h-[38px] text-[16px]" onClick={() => setModalCierre("aprobar")}>Aprobar y aplicar</Boton>
+            )}
+            {esEditable(propuesta) && esAdmin && (
+              <Boton variante="texto" className="text-[16px]" onClick={() => setModalCierre("rechazar")}>Rechazar</Boton>
+            )}
+            {esEditable(propuesta) && (
+              <Boton variante="texto" className="text-[16px]" onClick={() => setModalCierre("descartar")}>Descartar</Boton>
+            )}
+            <Boton variante="texto" className="text-[16px]" onClick={() => {
+              try { sessionStorage.setItem("agenteIA:propuestaFlujo", propuesta.id); } catch { /* sin almacenamiento */ }
+              irASeccionFinanzas("propuestas");
+            }}>Ver comparación semana a semana</Boton>
+            <Boton variante="texto" className="text-[16px] ml-auto" onClick={salirPropuesta}>Volver al flujo actual</Boton>
+          </div>
+          {errorProp && <Nota etiqueta="Ojo:">{errorProp}</Nota>}
+        </div>
+      )}
+      {!propuesta && errorProp && <div className={expandido ? "mx-4" : "mx-8"}><Nota etiqueta="Ojo:">{errorProp}</Nota></div>}
+
       {/* ── Pestañas ────────────────────────────────────────────────────────── */}
       <div className={`flex flex-wrap items-center justify-between gap-3 py-2 flex-shrink-0 ${expandido ? "px-4" : "px-8"}`}>
         <div role="tablist" className="flex gap-6">
@@ -1218,6 +1547,8 @@ export default function FinanzasFlujoCaja() {
               ))}
             </>
           )}
+
+          {expandido && !propuesta && botonPropuestas}
 
           {/* Nueva cuenta — solo en vista ampliada (la del encabezado queda oculta) */}
           {expandido && (
@@ -1551,6 +1882,49 @@ export default function FinanzasFlujoCaja() {
         <ModalCuenta editando={editandoCuenta} onSave={handleSaveCuenta} proveedores={proveedores}
           onClose={() => { setShowModalCuenta(false); setEditandoCuenta(null); }}/>
       )}
+      {modalNuevaProp && (
+        <ModalCuaderno titulo="Nueva propuesta" subtitulo="Una copia del flujo para ensayar cambios" onClose={() => setModalNuevaProp(false)}
+          pie={<div className="flex gap-2">
+            <Boton className="flex-1" onClick={() => setModalNuevaProp(false)}>Cancelar</Boton>
+            <Boton variante="primario" className="flex-1" disabled={!nuevaProp.nombre.trim()} onClick={crearYActivar}>Crear y empezar</Boton>
+          </div>}>
+          <Campo etiqueta="Nombre" autoFocus value={nuevaProp.nombre} onChange={e => setNuevaProp(n => ({ ...n, nombre: e.target.value }))}
+            placeholder="Ej: Postergar arriendos de noviembre" />
+          <Campo as="textarea" rows={3} etiqueta="Para qué (opcional)" value={nuevaProp.motivo} onChange={e => setNuevaProp(n => ({ ...n, motivo: e.target.value }))} />
+          <p className="m-0 text-[15px] text-cuaderno-grafito">Vas a ver la misma tabla. Lo que edites, arrastres o agregues queda en la propuesta; el flujo actual no cambia hasta que un administrador la apruebe.</p>
+        </ModalCuaderno>
+      )}
+
+      {modalCierre && propuesta && (() => {
+        const conflictos = listarCambios({ pagos: pagosGuardados, cuentas }, propuesta).filter(c => c.conflicto).length;
+        return (
+          <ModalCuaderno
+            titulo={modalCierre === "aprobar" ? "Aprobar y aplicar" : modalCierre === "rechazar" ? "Rechazar la propuesta" : "Descartar la propuesta"}
+            subtitulo={propuesta.nombre} onClose={() => setModalCierre(null)} bloqueado={trabajandoProp}
+            pie={<div className="flex gap-2">
+              <Boton className="flex-1" onClick={() => setModalCierre(null)} disabled={trabajandoProp}>Cancelar</Boton>
+              <Boton variante="primario" className="flex-1" disabled={trabajandoProp} onClick={cerrarPropuesta}>
+                {trabajandoProp ? "Guardando…" : modalCierre === "aprobar" ? "Aprobar" : modalCierre === "rechazar" ? "Rechazar" : "Descartar"}
+              </Boton>
+            </div>}>
+            {modalCierre === "aprobar" ? (
+              <>
+                <p className="m-0 text-[17px]">
+                  Las {cambiadas.size} celdas cambiadas{cuentasProp.length ? ` y ${cuentasProp.length} cuenta(s) nueva(s)` : ""} pasan al flujo de caja, todas juntas.
+                </p>
+                <LineaGuia etiqueta="Caja al final">
+                  <span className="inline-flex items-baseline gap-1.5"><Cifra valor={acumuladoFinalActual} color="grafito" vacio="0" /> → <Cifra valor={acumuladoFinalPropuesta} vacio="0" /></span>
+                </LineaGuia>
+                {conflictos > 0 && <Nota etiqueta="Ojo:">{conflictos} celda(s) cambiaron en el flujo después de proponerse; quedarán con lo propuesto.</Nota>}
+              </>
+            ) : (
+              <p className="m-0 text-[17px]">El flujo de caja no cambia. La propuesta queda en el historial.</p>
+            )}
+            <Campo as="textarea" rows={3} etiqueta="Comentario (opcional)" value={comentarioCierre} onChange={e => setComentarioCierre(e.target.value)} />
+          </ModalCuaderno>
+        );
+      })()}
+
       {showModalSaldo && (
         <ModalSaldo saldo={saldoBanco} onSave={handleSaldoBanco} onClose={() => setShowModalSaldo(false)}/>
       )}

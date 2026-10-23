@@ -359,7 +359,7 @@ export default function FinanzasSemana() {
             </Nota>
           )}
           {proy.deficit > 0 && (
-            <Boton variante="texto" className="mt-1" onClick={() => irASeccionFinanzas("propuestas", { nuevaPropuesta: true })}>
+            <Boton variante="texto" className="mt-1" onClick={() => irASeccionFinanzas("flujo", { nuevaPropuesta: true })}>
               Armar una propuesta para cubrirlo
             </Boton>
           )}

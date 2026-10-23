@@ -94,6 +94,35 @@ export async function proponerMovimiento(empresaId, propuesta, datos, { cuentaId
   return { monto, desde, hasta, total_destino: destino };
 }
 
+/**
+ * Guarda varias celdas de la propuesta de una vez, con montos ya con signo
+ * (como los escribe la planilla del flujo). Es lo que usa el modo propuesta
+ * del flujo de caja al editar o arrastrar.
+ *  celdas:    { "<cuentaId>-<lunes>": valor }
+ *  actuales:  lo que muestra el flujo hoy en cada celda (con recurrencias)
+ *  guardados: lo que hay escrito en flujo_pagos (sin recurrencias)
+ * Si una celda vuelve a ser igual a la actual, deja de ser un cambio.
+ * Devuelve el nuevo mapa cambios.pagos, para actualizar la pantalla.
+ */
+export async function guardarCeldasPropuesta(empresaId, propuesta, celdas, { actuales = {}, guardados = {} } = {}) {
+  exigirEditable(propuesta);
+  const pagos = { ...(propuesta.cambios?.pagos || {}) };
+  const args = [];
+  for (const [key, valor] of Object.entries(celdas)) {
+    const esNueva = partesClave(key).cuentaId.startsWith(PREFIJO_CUENTA_NUEVA);
+    if (!esNueva && valor === (actuales[key] || 0)) {
+      delete pagos[key];
+      args.push(new FieldPath("cambios", "pagos", key), deleteField());
+    } else {
+      const cambio = { valor, antes: pagos[key] ? pagos[key].antes : (guardados[key] || 0) };
+      pagos[key] = cambio;
+      args.push(new FieldPath("cambios", "pagos", key), cambio);
+    }
+  }
+  if (args.length) await updateDoc(ref(empresaId, propuesta.id), ...args, "actualizadaEn", ahora());
+  return pagos;
+}
+
 export async function quitarCambio(empresaId, propuesta, key) {
   exigirEditable(propuesta);
   await updateDoc(ref(empresaId, propuesta.id), new FieldPath("cambios", "pagos", key), deleteField(), "actualizadaEn", ahora());

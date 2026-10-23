@@ -25,59 +25,14 @@ import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Nota, Resaltado, VistoBueno, FechaHoja,
   ModalCuaderno, IconoActualizar, IconoAnterior, IconoBorrar, IconoMas, casoTitulo, fmtEje,
 } from "./cuaderno";
+import { useTransicion, ControlTransicion, lerp } from "./transicion";
+import { irASeccionFinanzas } from "../../lib/finanzas/navegacion";
 
 const esAdmin = (rol) => rol === "superadmin" || rol === "admin_contrato";
 const pesosDe = (texto) => { const n = String(texto || "").replace(/\D/g, ""); return n ? parseInt(n, 10) : 0; };
 const conPuntos = (texto) => { const n = pesosDe(texto); return n ? n.toLocaleString("es-CL") : ""; };
 const fechaDe = (iso) => { const [a, m, d] = iso.split("-").map(Number); return new Date(a, m - 1, d); };
-const lerp = (a, b, t) => a + (b - a) * t;
 const COLOR_ESTADO = { borrador: "lavanda", en_revision: "durazno", aplicada: "menta", rechazada: "rosa", descartada: "rosa" };
-
-// ─── Transición Original ⇄ Propuesta ──────────────────────────────────────────
-// t = 0 es el original, t = 1 la propuesta. Los botones animan t con una curva
-// suave; el deslizador lo fija a mano. Con "reducir movimiento" salta directo.
-function useTransicion(inicial = 0) {
-  const [t, setT] = useState(inicial);
-  const anim = useRef(null);
-  const tRef = useRef(inicial);
-  tRef.current = t;
-
-  const cancelar = () => { if (anim.current) cancelAnimationFrame(anim.current); anim.current = null; };
-
-  const irA = useCallback((destino, duracion = 1100) => {
-    cancelar();
-    const reducir = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const desde = tRef.current;
-    if (reducir || desde === destino) { setT(destino); return; }
-    const inicio = performance.now();
-    const paso = (ahora) => {
-      const x = Math.min(1, (ahora - inicio) / (duracion * Math.abs(destino - desde)));
-      const suave = x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-      setT(lerp(desde, destino, suave));
-      if (x < 1) anim.current = requestAnimationFrame(paso);
-    };
-    anim.current = requestAnimationFrame(paso);
-  }, []);
-
-  const fijar = useCallback((valor) => { cancelar(); setT(valor); }, []);
-  useEffect(() => cancelar, []);
-  return { t, irA, fijar };
-}
-
-function ControlTransicion({ t, irA, fijar }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      <Boton variante={t < 0.5 ? "primario" : "secundario"} onClick={() => irA(0)}>Original</Boton>
-      <label className="flex-1 min-w-[10rem] flex flex-col gap-1">
-        <span className="sr-only">Mezcla entre original y propuesta</span>
-        <input type="range" min="0" max="1000" value={Math.round(t * 1000)} onChange={e => fijar(Number(e.target.value) / 1000)}
-          className="deslizador-cuaderno w-full" aria-valuetext={`${Math.round(t * 100)}% propuesta`} />
-        <span className="flex justify-between text-[13px] text-cuaderno-grafito"><span>lo que hay</span><span>lo que se propone</span></span>
-      </label>
-      <Boton variante={t >= 0.5 ? "primario" : "secundario"} onClick={() => irA(1)}>Propuesta</Boton>
-    </div>
-  );
-}
 
 // ─── Gráfico que se redibuja ──────────────────────────────────────────────────
 // El original queda como un trazo a lápiz (grafito, punteado). La línea en
@@ -322,6 +277,11 @@ function DetallePropuesta({ id, empresaId, rol, onVolver }) {
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <Boton onClick={cargar}><IconoActualizar tamano={15} /> Actualizar</Boton>
+          <Boton onClick={() => {
+            // El flujo de caja retoma la propuesta guardada en esta clave.
+            try { sessionStorage.setItem(`finanzas:propuestaActiva:${empresaId}`, propuesta.id); } catch { /* sin almacenamiento */ }
+            irASeccionFinanzas("flujo");
+          }}>{editable ? "Trabajarla en el flujo de caja" : "Verla en el flujo de caja"}</Boton>
           {editable && propuesta.estado === "borrador" && (
             <Boton disabled={!cambios.length && typeof propuesta.cambios?.colchon !== "number"}
               onClick={() => accion(() => cambiarEstado(empresaId, propuesta, "en_revision"))}>Enviar a revisión</Boton>
@@ -577,9 +537,9 @@ export default function FinanzasPropuestas() {
 
       <Hoja titulo="Cómo funciona">
         <ol className="m-0 pl-6 space-y-2 text-[17px]">
-          <li><span className="text-cuaderno-tinta">Crea una propuesta</span> <span className="text-cuaderno-grafito">con un nombre que diga qué ensayas, por ejemplo "Postergar arriendos de noviembre".</span></li>
-          <li><span className="text-cuaderno-tinta">Anota los cambios</span> <span className="text-cuaderno-grafito">dentro de ella: cambiar un monto, mover un pago de semana, agregar una cuenta nueva o probar otro colchón. También puedes pedírselo al asistente: "arma una propuesta para cubrir la semana más baja".</span></li>
-          <li><span className="text-cuaderno-tinta">Compara</span> <span className="text-cuaderno-grafito">con los botones Original y Propuesta, o con el deslizador: la curva de caja se redibuja y cada monto corregido se tacha y se escribe encima.</span></li>
+          <li><span className="text-cuaderno-tinta">En Flujo de Caja, toca "Proponer cambios" → Nueva propuesta.</span> <span className="text-cuaderno-grafito">Ponle un nombre que diga qué ensayas, por ejemplo "Postergar arriendos de noviembre".</span></li>
+          <li><span className="text-cuaderno-tinta">Trabaja la tabla como siempre:</span> <span className="text-cuaderno-grafito">edita montos, arrastra pagos a otra semana o agrega cuentas. Todo queda en la propuesta. También puedes pedírselo al asistente: "arma una propuesta para cubrir la semana más baja".</span></li>
+          <li><span className="text-cuaderno-tinta">Compara con el deslizador Actual ⇄ Propuesta:</span> <span className="text-cuaderno-grafito">cada celda cambiada muestra el monto actual tachado y el propuesto encima, y los totales y el acumulado se mueven entre las dos versiones. Aquí, en Propuestas, ves además la curva de caja semana a semana.</span></li>
           <li><span className="text-cuaderno-tinta">Envíala a revisión.</span> <span className="text-cuaderno-grafito">Un administrador la aprueba y recién ahí sus cambios entran al flujo de caja, todos juntos. Si la rechaza, el flujo queda igual.</span></li>
         </ol>
         <p className="m-0 mt-3 flex items-center gap-2 text-[15px] text-cuaderno-verde"><VistoBueno tamano={13} titulo="" /> Mientras la propuesta está abierta, el flujo original no cambia.</p>
