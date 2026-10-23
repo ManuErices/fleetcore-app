@@ -124,3 +124,12 @@ Each platform improvement is a GitHub issue labeled `mejora`. Flow: `proponer_me
 - The development workflow refuses results that touch `.github/`, `firestore.rules`, `storage.rules`, `vercel.json` or `firebase.json`.
 - Server helpers shared by API functions live in `api/_comun/` (token validation and Firestore REST reads with the user's own idToken).
 - Setup: Vercel env `GITHUB_TOKEN_MEJORAS` (fine-grained PAT: Issues read/write, Pull requests read); repo secret `ANTHROPIC_API_KEY`; repo variable `MEJORAS_RAMA_BASE` (default `main`); repo setting "Allow GitHub Actions to create and approve pull requests".
+
+### Propuestas de flujo de caja
+`Finanzas → Propuestas` (`src/pages/finanzas/FinanzasPropuestas.jsx`): drafts that change the cash flow without touching it. Stored in `empresas/{id}/flujo_propuestas` as deltas only — `cambios.pagos["<cuentaId>-<lunes>"] = { valor, antes }`, `cambios.cuentas["nueva_xxx"]` (accounts that exist only in the proposal), `cambios.colchon`. `antes` is the original value when proposed; if the flow changed since, the change is flagged as a conflict.
+
+- Pure logic in `src/lib/finanzas/propuestas.js` (`datosConPropuesta` builds the "what-if" data so both versions are projected with `caja.js`); Firestore in `src/lib/finanzas/propuestasDatos.js`.
+- Approval (`aplicarPropuesta`, admins only in UI and agent) writes everything in one `writeBatch`: new accounts get real ids and their partidas are re-pointed; changed partidas lose their "pagado" mark.
+- The comparison is a notebook-style correction: a slider/buttons drive `t` (0 = original, 1 = proposal); the line chart morphs, the area between versions is shaded menta/rosa, and each amount is struck through while the new one is written above. Respects `prefers-reduced-motion`.
+- The agent defaults to proposals for cash-flow changes (`crear_propuesta_flujo`, `editar_propuesta_flujo`, `comparar_propuesta_flujo`), and opens them with `navegar_a` + `propuesta_id`.
+

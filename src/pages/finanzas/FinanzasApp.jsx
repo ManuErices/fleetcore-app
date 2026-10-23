@@ -9,6 +9,7 @@ import FinanzasDeuda from "./FinanzasDeuda";
 import FinanzasBancos from "./FinanzasBancos";
 import FinanzasSemana from "./FinanzasSemana";
 import FinanzasPagos from "./FinanzasPagos";
+import FinanzasPropuestas from "./FinanzasPropuestas";
 import { FinanzasProvider, NotificacionesBtn, useFinanzas } from "./FinanzasContext";
 import NotificacionesDrawer from "./NotificacionesDrawer";
 import AppShellLayout from "../../components/AppShellLayout";
@@ -36,6 +37,14 @@ const NAV_ITEMS = [
     icon: (
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
         d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+    ),
+  },
+  {
+    id: "propuestas",
+    label: "Propuestas",
+    icon: (
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
     ),
   },
   {
@@ -103,6 +112,7 @@ const VIEW_TO_ACCION = {
   semana:      null,            // resume todo; no filtra
   pagos:       null,
   flujo:       "Flujo de Caja",
+  propuestas:  null,
   bancos:      "Bancos",
   costos:      "Costos",
   activos:     "Activos",
@@ -167,6 +177,7 @@ function FinanzasAppInner({ user, userRole, onLogout, onBackToSelector, onAdminP
       case "semana":       return <FinanzasSemana />;
       case "pagos":        return <FinanzasPagos />;
       case "flujo":        return <FinanzasFlujoCaja />;
+      case "propuestas":   return <FinanzasPropuestas />;
       case "bancos":       return <FinanzasBancos />;
       case "costos":       return <FinanzasCostos />;
       case "activos":      return <FinanzasActivos />;
