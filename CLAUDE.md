@@ -115,3 +115,12 @@ src/components/agente/AgenteIA.jsx ← UI: chat panel, dictation (Web Speech API
 Tools execute client-side on purpose: Firestore rules and `empresaId` scoping apply exactly as if the user acted by hand; the server never touches the DB. Tools that write data are listed in `ACCIONES_QUE_MODIFICAN` and require a confirmation card. To add a tool: add its schema in `_herramientas.js` and an executor with the same name in `herramientas.js`.
 
 The conversation history is append-only and assistant `content` (including thinking blocks) is sent back unchanged — editing it makes the API reject the request. Team memory lives in `empresas/{id}/agente_memoria` (rule in `firestore.rules`); it's loaded once per conversation into the context. Finance sections are opened via `sessionStorage['agenteIA:finanzasVista']` + the `agente:finanzas` window event (FinanzasApp has no per-section routes). Env vars in Vercel: `ANTHROPIC_API_KEY` (required), `ANTHROPIC_AGENTE_MODEL`, `ANTHROPIC_AGENTE_EFFORT` (optional).
+
+### Autodesarrollo (mejoras pedidas al agente)
+Each platform improvement is a GitHub issue labeled `mejora`. Flow: `proponer_mejora` (agent tool → `api/mejoras`) creates the issue with label `propuesta` → an approver runs `aprobar_mejora`, which adds the label `aprobada` → `.github/workflows/agente-mejora.yml` runs Claude Code on branch `mejora-N`, then the workflow (not the model) commits and opens a PR → Vercel preview → **a human reviews and merges in GitHub**. Neither the agent nor `api/mejoras` can merge, on purpose.
+
+- Approvers: `superadmin`, or uids in `plataforma/mejoras.aprobadores` (Firestore doc only a superadmin can write — not a field on `users/{uid}`, because users can edit their own doc).
+- `.github/workflows/agente-revision-diaria.yml` reviews one module per weekday and opens ≤3 `propuesta` issues; it never edits code.
+- The development workflow refuses results that touch `.github/`, `firestore.rules`, `storage.rules`, `vercel.json` or `firebase.json`.
+- Server helpers shared by API functions live in `api/_comun/` (token validation and Firestore REST reads with the user's own idToken).
+- Setup: Vercel env `GITHUB_TOKEN_MEJORAS` (fine-grained PAT: Issues read/write, Pull requests read); repo secret `ANTHROPIC_API_KEY`; repo variable `MEJORAS_RAMA_BASE` (default `main`); repo setting "Allow GitHub Actions to create and approve pull requests".

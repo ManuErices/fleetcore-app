@@ -41,6 +41,13 @@ Flujo de caja:
 Memoria del equipo:
 - Si alguien te cuenta algo que conviene saber en futuras conversaciones (una preferencia, una regla de la empresa, un dato estable como "el colchón real es 8 M" o "Copec factura los martes"), guárdalo con recordar. No guardes datos personales sensibles ni cosas de un solo uso.
 
+Autodesarrollo de la plataforma:
+- Puedes hacer que FleetCore mejore: cambiar pantallas, agregar funciones, corregir errores. El camino es siempre el mismo: proponer_mejora registra el pedido; un aprobador lo aprueba (aprobar_mejora); un agente de desarrollo escribe el código en una rama aparte y deja una vista previa; y una persona revisa el código en GitHub y lo publica. Tú no publicas en producción.
+- Cuando alguien se queje de una pantalla, diga "ojalá esto hiciera…", o veas una fricción repetida, ofrece registrarla como mejora. Redacta la descripción como una especificación clara: qué problema tiene quién, qué debería pasar, en qué pantalla, y cómo se verificaría. Incluye los ejemplos concretos que dio el usuario.
+- Cada día hábil una revisión automática propone mejoras por módulo; listar_mejoras las muestra. Si el usuario puede aprobar, cuéntale las propuestas nuevas cuando pregunte qué hay para hoy.
+- Nunca digas que un cambio de código ya está hecho hasta que estado_mejora lo muestre publicado en producción. Si el usuario no es aprobador y pide aprobar, explícale que lo debe hacer un aprobador.
+- Cuando un desarrollo esté listo, entrega la vista previa para probarlo y el enlace del PR para que alguien con acceso al repositorio revise el código y lo publique.
+
 Formato:
 - Responde siempre en español. Cambia de idioma solo si el usuario escribe frases completas en otro idioma; un saludo como "hello" no cuenta.
 - Muchas respuestas se leen en voz alta: primero la respuesta, después el detalle mínimo. Sé breve salvo que pidan un análisis.
@@ -347,6 +354,74 @@ export const HERRAMIENTAS = [
     input_schema: {
       type: 'object',
       properties: { solo_vencida: { type: 'boolean' } },
+      additionalProperties: false,
+    },
+  },
+
+  // ── Mejoras de la plataforma ───────────────────────────────
+  {
+    name: 'listar_mejoras',
+    description: 'Lista las mejoras de la plataforma (pedidos del equipo y propuestas de la revisión diaria): número, título, estado (propuesta, aprobada, rechazada, cerrada), módulo y origen. También dice si el usuario actual puede aprobar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        estado: { type: 'string', enum: ['propuesta', 'aprobada', 'rechazada', 'cerrada'] },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'estado_mejora',
+    description: 'Detalle y avance de una mejora: descripción, si el agente de desarrollo ya abrió el cambio (PR), la vista previa para probarla y si ya fue publicada en producción.',
+    input_schema: {
+      type: 'object',
+      properties: { numero: { type: 'integer' } },
+      required: ['numero'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'proponer_mejora',
+    description: 'Registra un pedido de cambio en la plataforma (pantalla, función, corrección) para que un aprobador lo revise. No cambia nada por sí sola.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo: { type: 'string', description: 'Corto, en imperativo: "Permitir dictar el reporte diario".' },
+        descripcion: { type: 'string', description: 'Especificación: problema y para quién, comportamiento esperado, pantalla o módulo, ejemplos del usuario y cómo verificarlo.' },
+        modulo: {
+          type: 'string',
+          enum: ['combustible', 'maquinaria', 'oficina-tecnica', 'operadores', 'rrhh', 'reportes', 'finanzas', 'contabilidad', 'documentos', 'agente', 'general'],
+        },
+      },
+      required: ['titulo', 'descripcion', 'modulo'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'aprobar_mejora',
+    description: 'Aprueba una mejora propuesta: un agente de desarrollo escribe el código en una rama aparte y deja una vista previa. No publica nada en producción. Solo aprobadores.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero: { type: 'integer' },
+        titulo: { type: 'string', description: 'Título de la mejora, para la confirmación.' },
+        indicaciones: { type: 'string', description: 'Ajustes o precisiones del aprobador para el desarrollador.' },
+      },
+      required: ['numero'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'rechazar_mejora',
+    description: 'Rechaza y cierra una mejora. Solo aprobadores.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        numero: { type: 'integer' },
+        titulo: { type: 'string' },
+        motivo: { type: 'string' },
+      },
+      required: ['numero'],
       additionalProperties: false,
     },
   },

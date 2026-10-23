@@ -609,6 +609,18 @@ service cloud.firestore {
     }
 
     // ─────────────────────────────────────────────────────
+    // /plataforma — configuración global de la plataforma.
+    // plataforma/mejoras.aprobadores = [uid, ...] define quién puede aprobar
+    // y publicar cambios de código pedidos al agente IA (api/mejoras).
+    // Va aparte de /users porque cada usuario puede editar su propio
+    // documento: ahí podría darse el permiso a sí mismo.
+    // ─────────────────────────────────────────────────────
+    match /plataforma/{docId} {
+      allow read:  if isAuth();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────
     // /subscriptions — usePlan hook lee/escucha el plan activo
     // ─────────────────────────────────────────────────────
     match /subscriptions/{docId} {

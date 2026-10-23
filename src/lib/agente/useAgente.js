@@ -50,6 +50,11 @@ const ETIQUETAS = {
   cargar_partidas_flujo: 'Cargando montos en el flujo',
   mover_pago_flujo: 'Moviendo pago',
   marcar_pagado: 'Marcando pago',
+  listar_mejoras: 'Revisando mejoras',
+  estado_mejora: 'Revisando el avance',
+  proponer_mejora: 'Registrando la mejora',
+  aprobar_mejora: 'Aprobando la mejora',
+  rechazar_mejora: 'Rechazando la mejora',
   deuda_proveedores: 'Revisando deuda',
 };
 
@@ -261,7 +266,7 @@ export function useAgente({ empresaId, empresaNombre, rol, navigate, pantalla, a
 
           try {
             const salida = await ejecutarHerramienta(llamada.name, llamada.input, {
-              empresaId, rol, navigate: (ruta) => { rutaPendiente = ruta; },
+              empresaId, empresaNombre, rol, navigate: (ruta) => { rutaPendiente = ruta; },
             });
             if (ACCIONES_QUE_MODIFICAN.has(llamada.name)) {
               mostrar({ de: 'accion', texto: `Hecho: ${describirAccion(llamada.name, llamada.input).split('\n')[0]}` });
