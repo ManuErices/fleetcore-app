@@ -291,7 +291,9 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
               {resumen.otrosRecuperable !== 0 && <LineaDesglose label="Otros impuestos recuperables" valor={resumen.otrosRecuperable} tenue />}
             </> : <>
               <LineaDesglose label="IVA débito" valor={resumen.iva} tenue />
-              {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue />}
+              {resumen.otrosImpuestos !== 0 && <LineaDesglose label="Otros impuestos recargados" valor={resumen.otrosImpuestos} tenue />}
+              {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue
+                nota="Se descuenta del IVA/PPM en el F29; no cambia el ingreso." />}
             </>}
             <LineaDesglose label="Total documentos" valor={resumen.total} tenue />
             {esCompras && resumen.activoFijoNeto !== 0 && resumen.activoFijoExcluido === 0 && (
@@ -299,6 +301,24 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
                 nota="En 14 D N°3 se rebaja completo (depreciación instantánea): ya está dentro de Compras." />
             )}
           </div>
+
+          {!esCompras && resumen.notasCredito?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Notas de crédito emitidas</p>
+              {resumen.notasCredito.map(nc => (
+                <div key={nc.folio} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
+                  <span className="text-xs text-slate-600 min-w-0">
+                    <span className="block truncate">NC {nc.folio} · {nc.cliente}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {nc.refFolio ? `${nc.anula ? "Anula" : "Rebaja"} ${NOMBRE_DOC[nc.refTipo] || "documento"} ${nc.refFolio}` : "Sin documento de referencia"}
+                      {nc.anula && " · si se refacturó, la nueva factura va en su mes"}
+                    </span>
+                  </span>
+                  <span className="text-xs font-mono text-slate-700">−{fmt(nc.monto)}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {otros.length > 0 && (
             <div>
@@ -326,8 +346,13 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
               El reparto por mes y por fila no suma el total del archivo (diferencia {fmt(calculo.descuadre)}). No se puede cargar: avisa a soporte con este archivo.
             </p>
           )}
-          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || (!esCompras && regimen === "14D3")) && (
+          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || (!esCompras && regimen === "14D3") || Object.keys(resumen.noDelGiro || {}).length > 0) && (
             <div className="space-y-2">
+              {Object.entries(resumen.noDelGiro || {}).map(([tipo, g]) => (
+                <p key={tipo} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Venta de {tipo.toLowerCase()} ({g.docs} doc., {fmt(g.monto)}): entra completa a Ingresos, pero en 14 A se rebaja su valor tributario no depreciado. Agrega ese costo en una fila aparte con la contadora.
+                </p>
+              ))}
               {revisar.length > 0 && (
                 <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   Hay impuestos con códigos que FleetCore no reconoce ({revisar.map(o => o.codigo || "sin código").join(", ")}). Se suman a Compras como costo, que es lo conservador. Confirma con la contadora si alguno da derecho a crédito.
