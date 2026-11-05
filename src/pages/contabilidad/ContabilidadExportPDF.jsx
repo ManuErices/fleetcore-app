@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from "react";
 import { useContabilidad, fmt, MESES } from "./ContabilidadContext";
+import {
+  ModalCuaderno, Boton, Nota, Resaltado, VistoBueno, LineaGuia, IconoDocumento,
+} from "../finanzas/cuaderno";
 
 // ─── Cargador dinámico de jsPDF + AutoTable ────────────────────────────────
 let jsPDFCache = null;
@@ -618,6 +621,73 @@ async function generarERPPDF(cuentas, saldosMap, periodoActivo, empresa, tasaImp
   const fn = `Estado_Resultados_${periodoActivo}.pdf`; doc.save(fn); return fn;
 }
 
+// ─── Piezas de presentación de los modales (cuaderno) ────────────────────────
+// Ícono de descarga a trazo fino, como los de cuaderno.jsx.
+function IconoDescargar({ tamano = 16, className = "" }) {
+  return (
+    <svg width={tamano} height={tamano} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`flex-shrink-0 ${className}`}>
+      <path d="M8 2.5 V10.5 M4.5 7 L8 10.5 L11.5 7 M3 13.5 H13" />
+    </svg>
+  );
+}
+
+// Lista de informes a exportar: cada uno es un renglón que se puede elegir.
+function ListaOpciones({ opciones, onElegir }) {
+  return (
+    <ul className="m-0 p-0 list-none border-t border-cuaderno-renglon">
+      {opciones.map(opt => (
+        <li key={opt.id} className="border-b border-cuaderno-renglon">
+          <button type="button" onClick={() => onElegir(opt.id)}
+            className="w-full min-h-[56px] flex items-center gap-3 px-1 py-2 text-left text-cuaderno-tinta hover:bg-cuaderno-hoja focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40">
+            <IconoDocumento tamano={18} className="text-cuaderno-grafito" />
+            <span className="flex-1 min-w-0">
+              <span className="block text-[18px] leading-snug">{opt.title}</span>
+              <span className="block text-[14px] text-cuaderno-grafito">{opt.desc}</span>
+            </span>
+            <span className="flex items-center gap-1 text-[15px] text-cuaderno-grafito">
+              <IconoDescargar /> PDF
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Generando / listo / error, escrito a mano en la tarjeta.
+function EstadoExport({ estado, progreso, error, generados }) {
+  if (estado === "generando") {
+    return (
+      <p role="status" className="m-0 py-4 text-center font-ligada text-[18px] text-cuaderno-grafito animate-pulse">
+        {progreso}
+      </p>
+    );
+  }
+  if (estado === "listo") {
+    return (
+      <div className="space-y-2">
+        <p className="m-0 flex items-center gap-2 text-[18px]">
+          <VistoBueno tamano={18} titulo="" /> <Resaltado color="menta">PDFs generados</Resaltado>
+        </p>
+        <ul className="m-0 p-0 list-none">
+          {generados.map(f => (
+            <li key={f} className="flex items-center gap-2 min-h-[36px] border-b border-cuaderno-renglon">
+              <IconoDocumento className="text-cuaderno-grafito" />
+              <span className="text-[16px] truncate min-w-0">{f}</span>
+              <span className="ml-auto flex-shrink-0 text-[14px] text-cuaderno-verde">Descargado</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  if (estado === "error") {
+    return <Nota etiqueta="Error:">{error}</Nota>;
+  }
+  return null;
+}
+
 // ─── Modal de exportación ─────────────────────────────────────────────────────
 export default function ModalExportPDF({ isOpen, onClose }) {
   const { asientos, cuentas, periodoActivo } = useContabilidad();
@@ -661,131 +731,45 @@ export default function ModalExportPDF({ isOpen, onClose }) {
   const nCuentas  = cuentas.filter(c => c.activa !== false).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(2,6,23,0.75)", backdropFilter: "blur(6px)" }}>
-      <div className="w-full max-w-md" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-        <div className="bg-white rounded-3xl overflow-hidden shadow-2xl">
-
-          {/* Header */}
-          <div className="relative overflow-hidden px-6 pt-6 pb-5"
-            style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 100%)" }}>
-            <div className="absolute inset-0 opacity-20"
-              style={{ backgroundImage: "radial-gradient(circle at 80% 20%, #60a5fa 0%, transparent 50%)" }} />
-            <div className="relative flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
-                  style={{ background: "rgba(255,255,255,0.12)" }}>📄</div>
-                <div>
-                  <h2 className="text-white font-black text-lg tracking-tight">Exportar libros contables</h2>
-                  <p className="text-blue-300 text-xs mt-0.5">Formato PDF para fiscalización SII</p>
-                </div>
-              </div>
-              <button onClick={handleClose}
-                className="w-8 h-8 rounded-xl flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="p-6 space-y-4">
-
-            {/* Info período */}
-            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
-              <span className="text-2xl">📅</span>
-              <div>
-                <p className="text-xs font-black text-slate-700">Período: {periodo}</p>
-                <p className="text-[10px] text-slate-400">
-                  {nAsientos} asientos · {nCuentas} cuentas activas
-                </p>
-              </div>
-            </div>
-
-            {/* Estado generando */}
-            {estado === "generando" && (
-              <div className="py-6 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-2xl"
-                  style={{ background: "linear-gradient(135deg, #1e3a5f, #1d4ed8)" }}>📊</div>
-                <p className="font-black text-slate-800">{progreso}</p>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mx-auto max-w-xs">
-                  <div className="h-2 rounded-full animate-pulse"
-                    style={{ width: "60%", background: "linear-gradient(90deg, #3b82f6, #6366f1)" }} />
-                </div>
-              </div>
-            )}
-
-            {/* Estado listo */}
-            {estado === "listo" && (
-              <div className="py-4 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-2xl bg-emerald-100">✅</div>
-                <p className="font-black text-slate-800">¡PDFs generados!</p>
-                <div className="space-y-1.5">
-                  {generados.map(f => (
-                    <div key={f} className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                      <span className="text-emerald-600 text-sm">📄</span>
-                      <p className="text-xs font-semibold text-emerald-800">{f}</p>
-                      <span className="text-[10px] text-emerald-600 ml-auto">Descargado</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Estado error */}
-            {estado === "error" && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
-                <p className="text-xs text-red-700 font-semibold">⚠ {error}</p>
-              </div>
-            )}
-
-            {/* Opciones (solo en idle o error) */}
-            {(estado === "idle" || estado === "error") && (
-              <div className="space-y-2">
-                {[
-                  { id:"diario", icon:"📒", title:"Libro Diario", desc:"Todos los asientos del período en orden cronológico", color:"from-indigo-700 to-blue-600" },
-                  { id:"mayor",  icon:"📊", title:"Libro Mayor",  desc:"Movimientos agrupados por cuenta contable con saldos", color:"from-teal-700 to-emerald-600" },
-                  { id:"ambos",  icon:"📁", title:"Ambos libros", desc:"Genera los dos PDFs en una sola operación", color:"from-slate-800 to-indigo-700" },
-                ].map(opt => (
-                  <button key={opt.id} onClick={() => exportar(opt.id)}
-                    className="w-full flex items-center gap-3 p-4 rounded-2xl text-left transition-all hover:scale-[1.01] active:scale-[0.99] shadow-sm hover:shadow-md"
-                    style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}
-                  >
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${opt.color} flex items-center justify-center text-xl shadow-md`}>
-                      {opt.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-black text-slate-800">{opt.title}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{opt.desc}</p>
-                    </div>
-                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                    </svg>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Advertencia legal */}
-            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <span className="text-amber-500 text-sm mt-0.5 flex-shrink-0">⚠️</span>
-              <p className="text-[10px] text-amber-700 leading-relaxed">
-                Estos libros se generan desde los asientos registrados en el sistema.
-                Deben ser revisados y firmados por el contador habilitado antes de presentarlos al SII.
-              </p>
-            </div>
-
-            {estado === "listo" && (
-              <button onClick={reset}
-                className="w-full py-2.5 rounded-2xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all">
-                Exportar otro libro
-              </button>
-            )}
-          </div>
+    <ModalCuaderno
+      titulo="Exportar libros contables"
+      subtitulo="Formato PDF para fiscalización SII"
+      onClose={handleClose}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {estado === "listo" && <Boton variante="secundario" onClick={reset}>Exportar otro libro</Boton>}
+          <Boton variante="texto" onClick={handleClose}>Cerrar</Boton>
         </div>
+      }>
+
+      {/* Info período */}
+      <div>
+        <LineaGuia etiqueta="Período">{periodo}</LineaGuia>
+        <p className="m-0 text-[15px] text-cuaderno-grafito">
+          {nAsientos} asientos · {nCuentas} cuentas activas
+        </p>
       </div>
-    </div>
+
+      <EstadoExport estado={estado} progreso={progreso} error={error} generados={generados} />
+
+      {/* Opciones (solo en idle o error) */}
+      {(estado === "idle" || estado === "error") && (
+        <ListaOpciones
+          opciones={[
+            { id:"diario", title:"Libro Diario", desc:"Todos los asientos del período en orden cronológico" },
+            { id:"mayor",  title:"Libro Mayor",  desc:"Movimientos agrupados por cuenta contable con saldos" },
+            { id:"ambos",  title:"Ambos libros", desc:"Genera los dos PDFs en una sola operación" },
+          ]}
+          onElegir={exportar}
+        />
+      )}
+
+      {/* Advertencia legal */}
+      <Nota etiqueta="Ojo:" tono="grafito" className="text-[15px]">
+        Estos libros se generan desde los asientos registrados en el sistema.
+        Deben ser revisados y firmados por el contador habilitado antes de presentarlos al SII.
+      </Nota>
+    </ModalCuaderno>
   );
 }
 
@@ -838,10 +822,10 @@ export function ModalExportEstados({ isOpen, onClose, vistaActiva }) {
   const periodo = mesLabel(periodoActivo);
 
   const OPCIONES = [
-    { id:"balance8", icon:"📋", title:"Balance 8 Columnas",           desc:"Sumas, saldos, ESF y ERP en una sola tabla",         color:"from-indigo-700 to-blue-600" },
-    { id:"esf",      icon:"🏦", title:"Estado de Situación",           desc:"Activos, pasivos y patrimonio al cierre del período", color:"from-teal-700 to-emerald-600" },
-    { id:"erp",      icon:"📈", title:"Estado de Resultados",          desc:"Ingresos, costos y resultado del período",           color:"from-amber-700 to-orange-600" },
-    { id:"todos",    icon:"📁", title:"Los tres informes",             desc:"Genera los tres PDFs en una sola operación",         color:"from-slate-800 to-indigo-700" },
+    { id:"balance8", title:"Balance 8 Columnas",   desc:"Sumas, saldos, ESF y ERP en una sola tabla" },
+    { id:"esf",      title:"Estado de Situación",  desc:"Activos, pasivos y patrimonio al cierre del período" },
+    { id:"erp",      title:"Estado de Resultados", desc:"Ingresos, costos y resultado del período" },
+    { id:"todos",    title:"Los tres informes",    desc:"Genera los tres PDFs en una sola operación" },
   ];
 
   // Pre-seleccionar la vista activa si viene del tab actual
@@ -850,114 +834,35 @@ export function ModalExportEstados({ isOpen, onClose, vistaActiva }) {
     : OPCIONES;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background:"rgba(2,6,23,0.75)", backdropFilter:"blur(6px)" }}>
-      <div className="w-full max-w-md" style={{ fontFamily:"'DM Sans', system-ui, sans-serif" }}>
-        <div className="bg-white rounded-3xl overflow-hidden shadow-2xl">
-
-          {/* Header */}
-          <div className="relative overflow-hidden px-6 pt-6 pb-5"
-            style={{ background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1d4ed8 100%)" }}>
-            <div className="absolute inset-0 opacity-20"
-              style={{ backgroundImage:"radial-gradient(circle at 80% 20%,#60a5fa 0%,transparent 50%)" }}/>
-            <div className="relative flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
-                  style={{ background:"rgba(255,255,255,0.12)" }}>📊</div>
-                <div>
-                  <h2 className="text-white font-black text-lg tracking-tight">Exportar Estados Financieros</h2>
-                  <p className="text-blue-300 text-xs mt-0.5">PDF corporativo — {periodo}</p>
-                </div>
-              </div>
-              <button onClick={handleClose}
-                className="w-8 h-8 rounded-xl flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div className="p-6 space-y-4">
-
-            {/* Generando */}
-            {estado === "generando" && (
-              <div className="py-6 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-2xl"
-                  style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)" }}>📊</div>
-                <p className="font-black text-slate-800">{progreso}</p>
-                <div className="w-full bg-slate-100 rounded-full h-2 max-w-xs mx-auto overflow-hidden">
-                  <div className="h-2 rounded-full animate-pulse"
-                    style={{ width:"60%", background:"linear-gradient(90deg,#3b82f6,#6366f1)" }}/>
-                </div>
-              </div>
-            )}
-
-            {/* Listo */}
-            {estado === "listo" && (
-              <div className="py-4 text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-2xl bg-emerald-100">✅</div>
-                <p className="font-black text-slate-800">¡PDFs generados!</p>
-                <div className="space-y-1.5">
-                  {generados.map(f => (
-                    <div key={f} className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                      <span className="text-emerald-600">📄</span>
-                      <p className="text-xs font-semibold text-emerald-800 truncate">{f}</p>
-                      <span className="text-[10px] text-emerald-600 ml-auto flex-shrink-0">Descargado</span>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={reset}
-                  className="px-5 py-2 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all">
-                  Exportar otro
-                </button>
-              </div>
-            )}
-
-            {/* Error */}
-            {estado === "error" && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl">
-                <p className="text-xs text-red-700 font-semibold">⚠ {error}</p>
-              </div>
-            )}
-
-            {/* Opciones */}
-            {(estado === "idle" || estado === "error") && (
-              <>
-                <div className="space-y-2">
-                  {opcionesMostradas.map(opt => (
-                    <button key={opt.id} onClick={() => exportar(opt.id)}
-                      className="w-full flex items-center gap-3 p-4 rounded-2xl border-2 border-slate-100 text-left hover:border-slate-200 hover:bg-slate-50 transition-all group">
-                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${opt.color} flex items-center justify-center text-xl shadow-md flex-shrink-0`}>
-                        {opt.icon}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-slate-800">{opt.title}</p>
-                        <p className="text-[10px] text-slate-500 mt-0.5">{opt.desc}</p>
-                      </div>
-                      <svg className="w-4 h-4 text-slate-400 flex-shrink-0 group-hover:text-slate-600 transition-colors"
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                      </svg>
-                    </button>
-                  ))}
-                  {vistaActiva && (
-                    <button onClick={() => exportar("todos")}
-                      className="w-full flex items-center gap-3 p-3 rounded-2xl border border-dashed border-slate-300 text-left hover:border-indigo-300 hover:bg-indigo-50/30 transition-all">
-                      <span className="text-lg">📁</span>
-                      <p className="text-xs font-bold text-slate-500">Exportar los tres informes juntos</p>
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                  <span className="text-amber-500 flex-shrink-0">⚠️</span>
-                  <p className="text-[10px] text-amber-700">Estos informes deben ser revisados y firmados por el contador habilitado antes de presentarlos al SII.</p>
-                </div>
-              </>
-            )}
-          </div>
+    <ModalCuaderno
+      titulo="Exportar estados financieros"
+      subtitulo={`PDF corporativo — ${periodo}`}
+      onClose={handleClose}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {estado === "listo" && <Boton variante="secundario" onClick={reset}>Exportar otro</Boton>}
+          <Boton variante="texto" onClick={handleClose}>Cerrar</Boton>
         </div>
-      </div>
-    </div>
+      }>
+
+      <EstadoExport estado={estado} progreso={progreso} error={error} generados={generados} />
+
+      {/* Opciones */}
+      {(estado === "idle" || estado === "error") && (
+        <>
+          <div>
+            <ListaOpciones opciones={opcionesMostradas} onElegir={exportar} />
+            {vistaActiva && (
+              <div className="pt-2">
+                <Boton variante="texto" onClick={() => exportar("todos")}>Exportar los tres informes juntos</Boton>
+              </div>
+            )}
+          </div>
+          <Nota etiqueta="Ojo:" tono="grafito" className="text-[15px]">
+            Estos informes deben ser revisados y firmados por el contador habilitado antes de presentarlos al SII.
+          </Nota>
+        </>
+      )}
+    </ModalCuaderno>
   );
 }
