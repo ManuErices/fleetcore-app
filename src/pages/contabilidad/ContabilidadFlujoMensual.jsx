@@ -17,6 +17,7 @@ import {
 import {
   APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
 } from "../../lib/contabilidad/remuneraciones";
+import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -427,6 +428,87 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   );
 }
 
+function ModalHonorarios({ resumen, archivo, anioActivo, onAplicar, onCerrar }) {
+  const [aplicando, setAplicando] = useState(false);
+  const r = resumen;
+  const anioCarga = r.anio ?? anioActivo;
+  const filas = r.meses.filter(m => r.mesesInformados.includes(m.mes));
+  return (
+    <ModalCuaderno
+      titulo="Boletas de honorarios recibidas"
+      subtitulo={`${archivo} · ${r.tipo === "anual" ? "informe anual" : "informe mensual"} ${anioCarga} · ${r.boletas} boletas vigentes`}
+      onClose={onCerrar}
+      ancho="max-w-2xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando}
+            onClick={async () => { setAplicando(true); try { await onAplicar(anioCarga); } finally { setAplicando(false); } }}>
+            {aplicando ? "Cargando…" : <>Cargar <Cifra valor={r.bruto} escala="pesos" color="heredar" /> en Honorarios</>}
+          </Boton>
+        </div>
+      }
+    >
+      <section>
+        <p className="m-0 mb-2 text-[15px] text-cuaderno-grafito">
+          El gasto es el honorario <Resaltado color="durazno">bruto</Resaltado> de las boletas vigentes. La retención es parte del bruto: la empresa se la paga al SII en el F29 (código 151) en vez de al prestador. Va en el mes de la boleta.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[16px]">
+            <thead>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                {["Mes", "Boletas", "Bruto", "Retención", "Líquido"].map((t, i) => (
+                  <th key={t} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 ? "text-left" : "text-right"}`}>{t}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map(m => (
+                <tr key={m.mes} className="border-b border-cuaderno-renglon">
+                  <td className="px-2 py-1">{MESES[m.mes]}</td>
+                  <td className="px-2 py-1 text-right">{m.boletas || "·"}{m.anuladas ? <span className="text-[13px] text-cuaderno-grafito"> +{m.anuladas} anulada{m.anuladas > 1 ? "s" : ""}</span> : null}</td>
+                  <td className="px-2 py-1 text-right"><Cifra valor={m.bruto} escala="pesos" vacio="·" /></td>
+                  <td className="px-2 py-1 text-right"><Cifra valor={m.retencionTerceros + m.retencionContribuyente} escala="pesos" vacio="·" color="grafito" /></td>
+                  <td className="px-2 py-1 text-right"><Cifra valor={m.liquido} escala="pesos" vacio="·" color="grafito" /></td>
+                </tr>
+              ))}
+              <tr>
+                <td className="px-2 py-1.5">Total</td>
+                <td className="px-2 py-1.5 text-right">{r.boletas}</td>
+                <td className="px-2 py-1.5 text-right"><Cifra valor={r.bruto} escala="pesos" vacio="0" raya="total" /></td>
+                <td className="px-2 py-1.5 text-right"><Cifra valor={r.retencionTerceros + r.retencionContribuyente} escala="pesos" vacio="0" color="grafito" /></td>
+                <td className="px-2 py-1.5 text-right"><Cifra valor={r.liquido} escala="pesos" vacio="0" color="grafito" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        {r.retencionContribuyente > 0 && (
+          <Nota etiqueta="Nota:" tono="grafito">
+            <Cifra valor={r.retencionContribuyente} escala="pesos" color="heredar" /> de la retención la pagó el propio prestador (retención contribuyente), no la empresa. Igual es parte del bruto, así que el gasto no cambia.
+          </Nota>
+        )}
+        {r.descuadre > 10 && (
+          <Nota etiqueta="Ojo:">En algunos meses bruto − retención no da el líquido (diferencia <Cifra valor={r.descuadre} escala="pesos" color="heredar" />). Revisa el informe en el SII.</Nota>
+        )}
+        {r.anio == null && (
+          <Nota etiqueta="Ojo:">El archivo no dice de qué año es: se cargará en {anioActivo}, el año que estás viendo.</Nota>
+        )}
+        <p className="m-0 text-[14px] text-cuaderno-grafito">
+          {r.tipo === "anual"
+            ? "El informe anual reemplaza los 12 meses de Honorarios que vinieron de archivos anteriores (un mes sin boletas queda en cero)."
+            : "Se reemplazan solo los meses que trae este informe."}
+          {" "}Lo escrito a mano se mantiene. Cuadra el total de retenciones con el código 151 de los F29 y, en marzo, con la declaración jurada 1879.
+          {anioCarga !== anioActivo && ` Como es de ${anioCarga}, se guarda de inmediato en ese año.`}
+        </p>
+      </section>
+    </ModalCuaderno>
+  );
+}
+
 function ModalRemuneraciones({ resumen, archivo, anioActivo, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
   const r = resumen;
@@ -553,6 +635,7 @@ export default function ContabilidadFlujoMensual() {
   const [nuevaFila, setNuevaFila] = useState({ abierto: false, label: "", signo: -1 });
   const [rcv, setRcv]             = useState(null);   // resumen del RCV que se está por cargar
   const [rem, setRem]             = useState(null);   // libro de remuneraciones que se está por cargar
+  const [hon, setHon]             = useState(null);   // informe de boletas de honorarios que se está por cargar
   const [errorRcv, setErrorRcv]   = useState("");
   const [verAyuda, setVerAyuda]   = useState(false);
   const inputRcv = useRef(null);
@@ -663,8 +746,20 @@ export default function ContabilidadFlujoMensual() {
       // Libro de remuneraciones (Excel de Talana): se reconoce por la columna
       // "Rut del Trabajador" y se resume aparte.
       if (!file.name.toLowerCase().endsWith(".csv")) {
-        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        // El SII entrega .xls que por dentro son tablas HTML en Windows-1252:
+        // se decodifican antes, si no los acentos (y el año) salen dañados.
+        const buf = await file.arrayBuffer();
+        const inicio = new TextDecoder("latin1").decode(buf.slice(0, 64)).trimStart();
+        const wb = inicio.startsWith("<")
+          ? XLSX.read(await leerTextoDetectando(file), { type: "string", raw: true })
+          : XLSX.read(buf, { type: "array" });
         const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+        if (detectarHonorarios(arr)) {
+          const h = resumirHonorarios(arr);
+          if (!h || (!h.boletas && !h.anuladas)) { setErrorRcv("El informe de honorarios no trae boletas."); return; }
+          setHon({ ...h, archivo: file.name });
+          return;
+        }
         if (detectarLibroRemuneraciones(arr) >= 0) {
           const r = resumirLibroRemuneraciones(arr);
           if (!r?.documentos) { setErrorRcv("El libro de remuneraciones no trae trabajadores."); return; }
@@ -674,7 +769,7 @@ export default function ContabilidadFlujoMensual() {
       }
       const filas = await leerFilasRCV(file);
       const tipo = detectarTipoRCV(filas);
-      if (!tipo) { setErrorRcv("El archivo no es un RCV del SII ni un libro de remuneraciones (no se encontró RUT Proveedor, Rut cliente ni Rut del Trabajador)."); return; }
+      if (!tipo) { setErrorRcv("No se reconoce el archivo. Sirven: RCV de compras o ventas del SII (CSV), informe de boletas de honorarios recibidas del SII y libro de remuneraciones de Talana."); return; }
       const prueba = tipo === "compras" ? resumirRCVCompras(filas) : resumirRCVVentas(filas);
       if (!prueba.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
       setRcv({ filas, tipo, archivo: file.name });
@@ -792,6 +887,33 @@ export default function ContabilidadFlujoMensual() {
     setRem(null);
   }
 
+  // Boletas de honorarios → fila Honorarios (bruto), un período por mes
+  async function aplicarHonorarios(anioCarga) {
+    const h = hon;
+    const traza = { archivo: h.archivo, informe: h.tipo, cargadoEn: new Date().toISOString() };
+    const aplicar = d => h.mesesInformados.reduce((acc, mes) => {
+      const m = h.meses[mes];
+      const periodo = `${anioCarga}-${String(mes + 1).padStart(2, "0")}`;
+      return aplicarAporteRCV(acc, "honorarios", periodo, m.bruto ? { [mes]: Math.round(m.bruto) } : {},
+        { ...traza, monto: m.bruto, retencion: m.retencionTerceros + m.retencionContribuyente, documentosPorMes: { [mes]: m.boletas } });
+    }, d);
+    if (anioCarga === anio) {
+      setData(aplicar);
+    } else {
+      try {
+        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(anioCarga));
+        const snap = await getDoc(ref);
+        const base = snap.exists() ? normalizar(snap.data(), anioCarga) : docVacio(anioCarga);
+        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base))), updatedAt: serverTimestamp() });
+      } catch (e) {
+        console.error("Error guardando honorarios:", e);
+        alert(`No se pudo guardar en ${anioCarga}. Intenta nuevamente.`);
+        return;
+      }
+    }
+    setHon(null);
+  }
+
   const valorFila = (id, mes) => num(data.filas.find(f => f.id === id)?.valores[mes]);
 
   // ── Cálculos derivados ──
@@ -868,7 +990,7 @@ export default function ContabilidadFlujoMensual() {
           <input ref={inputRcv} type="file" accept=".csv,.xlsx,.xls" className="hidden"
             onChange={e => abrirRCV(e.target.files?.[0])} />
           <Boton variante="primario" onClick={() => inputRcv.current?.click()}
-            aria-label="Importar RCV de compras o ventas del SII, o libro de remuneraciones de Talana">
+            aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII o libro de remuneraciones de Talana">
             <IconoSubir tamano={14} /> Importar archivo
           </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
@@ -895,6 +1017,11 @@ export default function ContabilidadFlujoMensual() {
         <Nota etiqueta="Ojo:">
           Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
         </Nota>
+      )}
+
+      {hon && (
+        <ModalHonorarios resumen={hon} archivo={hon.archivo} anioActivo={anio}
+          onAplicar={aplicarHonorarios} onCerrar={() => setHon(null)} />
       )}
 
       {rem && (
@@ -949,7 +1076,7 @@ export default function ContabilidadFlujoMensual() {
               {configTributaria.regimen === "14A"
                 ? "Montos netos de IVA, en el mes del documento (14 A, base devengada)."
                 : "Montos netos de IVA, en el mes en que se pagan o perciben."}
-              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV o libro de remuneraciones); toca una celda para corregirla.
+              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV, honorarios o libro de remuneraciones); toca una celda para corregirla.
             </p>
 
             {verAyuda && (
