@@ -302,3 +302,86 @@ function mesMasFrecuente(meses) {
   const [anio, mes] = mejor.split("-").map(Number);
   return { anio, mes };
 }
+
+// ─── Reparto del RCV por mes del documento ────────────────────────────────────
+// El RCV de un período trae documentos emitidos en meses anteriores (llegan
+// después). En base devengada (14 A) el gasto va al mes del documento, así
+// que cada fila se asigna según su "Fecha Docto". Las filas de continuación
+// (un mismo documento con varios otros impuestos) no traen fecha y siguen al
+// documento anterior.
+export function repartirRCVPorMes(filas, tipo, opciones = {}) {
+  const resumir = tipo === "compras"
+    ? f => resumirRCVCompras(f, opciones)
+    : f => resumirRCVVentas(f);
+  const grupos = new Map();
+  let ultimo = null;
+  for (const fila of filas || []) {
+    const get = lector(fila);
+    const m = mesDe(get("Fecha Docto")) || ultimo;
+    if (!m) continue;
+    ultimo = m;
+    const k = `${m.anio}-${m.mes}`;
+    if (!grupos.has(k)) grupos.set(k, { anio: m.anio, mes: m.mes, filas: [] });
+    grupos.get(k).filas.push(fila);
+  }
+  return [...grupos.values()]
+    .sort((a, b) => a.anio - b.anio || a.mes - b.mes)
+    .map(g => {
+      const r = resumir(g.filas);
+      return { anio: g.anio, mes: g.mes, documentos: r.documentos, monto: r.monto };
+    })
+    .filter(g => g.documentos > 0);
+}
+
+/**
+ * Aplica lo que un período del RCV aporta a los meses de UN año del flujo,
+ * reemplazando lo que ese mismo período había aportado antes (reimportar no
+ * duplica). Lo que el usuario escribió a mano en la celda se conserva: solo
+ * se resta el aporte anterior y se suma el nuevo.
+ *
+ *   doc.rcv.periodos[filaId][periodo] = { porMes: { [mes]: monto }, ...traza }
+ *
+ * Compatibilidad: la primera versión guardaba doc.rcv[filaId][mes] = traza y
+ * cargaba el archivo completo en el mes del período; se toma como el aporte
+ * anterior de ese período a ese mes.
+ */
+export function aplicarAporteRCV(doc, filaId, periodo, porMesNuevo, traza) {
+  const [pAnio, pMes] = periodo.split("-").map(Number); // pMes 1-12
+  const rcv = { ...(doc.rcv || {}) };
+  const periodos = { ...(rcv.periodos || {}) };
+  const deFila = { ...(periodos[filaId] || {}) };
+  let anterior = deFila[periodo]?.porMes;
+  const legado = { ...(rcv[filaId] || {}) };
+  if (!anterior && pAnio === doc.anio && legado[pMes - 1]) {
+    anterior = { [pMes - 1]: Number(legado[pMes - 1].monto) || 0 };
+  }
+  if (pAnio === doc.anio) delete legado[pMes - 1];
+  anterior = anterior || {};
+
+  const filas = doc.filas.map(f => {
+    if (f.id !== filaId) return f;
+    return {
+      ...f,
+      valores: f.valores.map((v, i) =>
+        Math.round((Number(v) || 0) - (Number(anterior[i]) || 0) + (Number(porMesNuevo[i]) || 0))),
+    };
+  });
+  if (Object.keys(porMesNuevo).length) deFila[periodo] = { ...traza, porMes: porMesNuevo };
+  else delete deFila[periodo];
+  periodos[filaId] = deFila;
+  return { ...doc, filas, rcv: { ...rcv, [filaId]: legado, periodos } };
+}
+
+/** Aportes del RCV a un mes de una fila: [{ periodo, monto, archivo }]. */
+export function aportesRCV(doc, filaId, mes) {
+  const out = [];
+  Object.entries(doc.rcv?.periodos?.[filaId] || {}).forEach(([periodo, p]) => {
+    const monto = Number(p.porMes?.[mes]);
+    if (monto) out.push({ periodo, monto, archivo: p.archivo, documentos: p.documentosPorMes?.[mes] });
+  });
+  const leg = doc.rcv?.[filaId]?.[mes];
+  if (leg && typeof leg === "object" && leg.monto) {
+    out.push({ periodo: `${doc.anio}-${String(mes + 1).padStart(2, "0")}`, monto: leg.monto, archivo: leg.archivo, documentos: leg.documentos });
+  }
+  return out;
+}
