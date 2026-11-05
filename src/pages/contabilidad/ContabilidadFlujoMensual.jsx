@@ -546,23 +546,51 @@ export default function ContabilidadFlujoMensual() {
     return () => { cancelado = true; };
   }, [empresaId, anio]);
 
+  // ── Guardado automático ──
+  // Antes solo se guardaba con el botón: al cambiar de pestaña o cerrar la app
+  // sin apretarlo se perdía todo lo importado. Ahora cada cambio se guarda
+  // solo, 1 s después del último, y al salir de la pantalla se guarda lo que
+  // quede pendiente.
+  const [errorGuardado, setErrorGuardado] = useState(false);
+  const pendienteRef = useRef(null);      // { empresaId, anio, data } sin guardar
+  const escribir = useCallback(async ({ empresaId: emp, anio: a, data: d }) => {
+    const ref = doc(db, "empresas", emp, "flujo_mensual", String(a));
+    // JSON quita los undefined, que Firestore rechaza
+    await setDoc(ref, { ...JSON.parse(JSON.stringify(d)), updatedAt: serverTimestamp() });
+  }, []);
   const guardar = useCallback(async () => {
-    if (!empresaId) return;
+    const p = pendienteRef.current;
+    if (!p) return;
     setGuardando(true);
     try {
-      const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(anio));
-      await setDoc(ref, { ...data, updatedAt: serverTimestamp() });
-      setOriginal(data);
+      await escribir(p);
+      if (pendienteRef.current === p) pendienteRef.current = null;
+      setOriginal(p.data);
+      setErrorGuardado(false);
     } catch (e) {
       console.error("Error guardando flujo mensual:", e);
-      alert("No se pudo guardar el flujo mensual. Intenta nuevamente.");
+      setErrorGuardado(true);
     } finally {
       setGuardando(false);
     }
-  }, [empresaId, anio, data]);
+  }, [escribir]);
 
-  function cambiarAnio(nuevo) {
-    if (dirty && !window.confirm("Tienes cambios sin guardar en este año. ¿Cambiar de todas formas? Se perderán.")) return;
+  useEffect(() => {
+    if (cargando || !empresaId || !dirty) return;
+    pendienteRef.current = { empresaId, anio, data };
+    const t = setTimeout(guardar, 1000);
+    return () => clearTimeout(t);
+  }, [data, dirty, cargando, empresaId, anio, guardar]);
+
+  // Al desmontar (cambiar de pestaña del módulo) o cerrar la página
+  useEffect(() => {
+    const alSalir = () => { if (pendienteRef.current) escribir(pendienteRef.current).catch(() => {}); };
+    window.addEventListener("pagehide", alSalir);
+    return () => { window.removeEventListener("pagehide", alSalir); alSalir(); };
+  }, [escribir]);
+
+  async function cambiarAnio(nuevo) {
+    if (dirty) { pendienteRef.current = { empresaId, anio, data }; await guardar(); }
     setAnio(nuevo);
   }
 
@@ -764,17 +792,11 @@ export default function ContabilidadFlujoMensual() {
           >
             Importar RCV
           </button>
-          <button
-            onClick={guardar}
-            disabled={!dirty || guardando}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all whitespace-nowrap ${
-              dirty && !guardando
-                ? "bg-purple-700 text-white hover:bg-purple-800 shadow-md shadow-purple-200"
-                : "bg-slate-100 text-slate-400 cursor-not-allowed"
-            }`}
-          >
-            {guardando ? "Guardando…" : dirty ? "Guardar cambios" : "Guardado"}
-          </button>
+          <span className={`text-xs font-semibold whitespace-nowrap ${errorGuardado ? "text-red-600" : "text-slate-400"}`}>
+            {errorGuardado
+              ? <button onClick={() => { pendienteRef.current = { empresaId, anio, data }; guardar(); }} className="underline">No se pudo guardar · reintentar</button>
+              : guardando || dirty ? "Guardando…" : "Guardado"}
+          </span>
         </div>
       </div>
 
