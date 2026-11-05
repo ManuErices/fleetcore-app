@@ -5,6 +5,11 @@ import { useEmpresa } from "../../lib/useEmpresa";
 import * as XLSX from "xlsx";
 import { fmt, MESES, MESES_S, useContabilidad, leerTextoDetectando } from "./ContabilidadContext";
 import {
+  Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, Campo, ModalCuaderno,
+  Segmentado, Casilla, FechaHoja, GraficoBarras, casoTitulo,
+  IconoAnterior, IconoSiguiente, IconoSubir, IconoMas, IconoBorrar,
+} from "../finanzas/cuaderno";
+import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
   repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV,
@@ -127,62 +132,52 @@ function normalizar(raw, anio) {
   };
 }
 
-// ─── Subcomponentes visuales ──────────────────────────────────────────────────
-function KpiFlujo({ label, value, sub, color = "text-slate-800" }) {
-  return (
-    <div className="glass-card rounded-xl p-4">
-      <p className="text-xs text-slate-500 font-semibold">{label}</p>
-      <p className={`text-xl font-black mt-1 ${color}`}>{value}</p>
-      {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
+// ─── Subcomponentes visuales (diseño cuaderno, el mismo de Finanzas) ──────────
 
-function CeldaInput({ value, onChange, disabled = false, bold = false }) {
+/**
+ * Celda editable de la planilla. En reposo muestra la cifra con puntos de
+ * miles (negativos en rojo entre paréntesis); al enfocarla se edita el número
+ * sin formato. `rcv` marca con resaltador lavanda lo que vino del RCV.
+ */
+function CeldaInput({ value, onChange, rcv = false, titulo }) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState("");
+  const n = num(value);
   return (
-    <input
-      type="number"
-      inputMode="decimal"
-      value={value === 0 ? "" : value}
-      onChange={e => onChange(e.target.value)}
-      placeholder="0"
-      disabled={disabled}
-      className={`w-full bg-transparent text-right text-xs px-1.5 py-1.5 rounded-md outline-none font-mono
-        ${bold ? "font-black text-slate-800" : "text-slate-600"}
-        ${disabled ? "cursor-not-allowed opacity-60" : "focus:bg-purple-50 focus:ring-1 focus:ring-purple-300"}`}
-    />
-  );
-}
-
-function CeldaCalculada({ value, colorAuto = false, bold = false }) {
-  const color = colorAuto ? (value >= 0 ? "text-emerald-700" : "text-red-600") : "text-slate-700";
-  return (
-    <td className={`px-1.5 py-1.5 text-right text-xs font-mono ${bold ? "font-black" : "font-semibold"} ${color}`}>
-      {fmt(value)}
+    <td className="px-0.5 py-0" title={titulo}>
+      {editando ? (
+        <input
+          autoFocus
+          inputMode="decimal"
+          value={texto}
+          onChange={e => setTexto(e.target.value)}
+          onBlur={() => { setEditando(false); onChange(texto.replace(/\./g, "").replace(",", ".")); }}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur(); }}
+          className="w-full min-h-[36px] bg-cuaderno-tarjeta border-0 border-b-[1.5px] border-cuaderno-tinta px-1 text-right text-[16px] text-cuaderno-tinta focus:outline-none"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => { setTexto(n ? String(n) : ""); setEditando(true); }}
+          className="w-full min-h-[36px] px-1 text-right text-[16px] rounded-sm hover:bg-cuaderno-tarjeta focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40"
+        >
+          {n === 0
+            ? <span className="text-cuaderno-columna">·</span>
+            : <span className={rcv ? "resaltado resaltado-lavanda" : ""}><Cifra valor={n} escala="pesos" /></span>}
+        </button>
+      )}
     </td>
   );
 }
 
-const IconChevronLeft = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-  </svg>
-);
-const IconChevronRight = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-  </svg>
-);
-const IconTrash = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
-);
-const IconPlus = () => (
-  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-  </svg>
-);
+/** Celda calculada (no editable). raya: "ninguna" | "total" | "doble". */
+function CeldaCifra({ value, raya = "ninguna", color = "auto", className = "" }) {
+  return (
+    <td className={`px-1.5 py-1.5 text-right text-[16px] whitespace-nowrap ${className}`}>
+      <Cifra valor={value} escala="pesos" vacio="0" raya={raya} color={color} />
+    </td>
+  );
+}
 
 // ─── Lectura del RCV ──────────────────────────────────────────────────────────
 // El SII exporta CSV separado por ";" y con un ";" sobrante al final de cada
@@ -205,12 +200,12 @@ async function leerFilasRCV(file) {
 
 function LineaDesglose({ label, valor, signo = "", tenue = false, fuerte = false, nota }) {
   return (
-    <div className={`flex items-baseline justify-between gap-3 py-1 ${fuerte ? "border-t-2 border-slate-200 mt-1 pt-2" : ""}`}>
-      <span className={`text-xs ${fuerte ? "font-black text-slate-900" : tenue ? "text-slate-400" : "font-semibold text-slate-600"}`}>
-        {signo && <span className="font-mono mr-1">{signo}</span>}{label}
-        {nota && <span className="block text-[10px] font-normal text-slate-400">{nota}</span>}
-      </span>
-      <span className={`text-xs font-mono whitespace-nowrap ${fuerte ? "font-black text-slate-900" : tenue ? "text-slate-400" : "text-slate-700"}`}>{fmt(valor)}</span>
+    <div className={tenue ? "text-cuaderno-grafito" : ""}>
+      <LineaGuia etiqueta={<span>{signo && <span className="inline-block w-4">{signo}</span>}{label}</span>}
+        className={`min-h-[30px] text-[17px] ${fuerte ? "mt-1" : ""}`}>
+        <Cifra valor={valor} escala="pesos" vacio="0" raya={fuerte ? "total" : "ninguna"} color={tenue ? "grafito" : "auto"} />
+      </LineaGuia>
+      {nota && <p className="m-0 -mt-1 mb-1 pl-4 text-[13px] text-cuaderno-grafito">{nota}</p>}
     </div>
   );
 }
@@ -256,253 +251,212 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   const otros = Object.values(resumen.otros || {});
   const revisar = otros.filter(o => o.tipo === "revisar");
   const ignorados = Object.entries(resumen.ignorados || {});
+  const ETIQUETA_OTRO = { credito: ["recuperable", "menta"], diesel: ["diésel", "lavanda"], costo: ["costo", "durazno"], revisar: ["revisar", "rosa"] };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onCerrar}>
-      <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-5 py-4">
-          <p className="text-white font-black text-sm">RCV {esCompras ? "Compras" : "Ventas"} · {resumen.documentos} documentos</p>
-          <p className="text-purple-200 text-xs">{archivo} · así se calcula la fila {fila}</p>
+    <ModalCuaderno
+      titulo={`RCV de ${esCompras ? "compras" : "ventas"}`}
+      subtitulo={`${archivo} · ${resumen.documentos} documentos${periodoTxt ? ` · período ${periodoTxt}` : ""}`}
+      onClose={onCerrar}
+      ancho="max-w-2xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando || calculo.descuadre > 1}
+            onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}>
+            {aplicando ? "Cargando…" : <>Cargar <Cifra valor={resumen.monto} escala="pesos" color="heredar" /></>}
+          </Boton>
         </div>
+      }
+    >
+      <section>
+        <Titulo as="h3" tamano="sm">Cómo se calcula {fila}</Titulo>
+        <LineaDesglose label="Neto (facturas y notas de débito)" valor={resumen.neto} signo="+" />
+        <LineaDesglose label="Exento" valor={resumen.exento} signo="+" />
+        <LineaDesglose label={`Notas de crédito ${esCompras ? "recibidas" : "emitidas"}`} valor={-(resumen.ncNeto + resumen.ncExento)} signo="−" />
+        {esCompras && <>
+          <LineaDesglose label="IVA no recuperable" valor={resumen.ivaNoRecuperable} signo="+" />
+          <LineaDesglose label="Impuesto sin derecho a crédito" valor={resumen.impSinDerecho} signo="+" />
+          <LineaDesglose label="Otros impuestos no recuperables" valor={resumen.otrosCosto} signo="+" />
+          {resumen.activoFijoExcluido !== 0 && (
+            <LineaDesglose label="Activo fijo (se deprecia)" valor={-resumen.activoFijoExcluido} signo="−"
+              nota="14 A: la compra se capitaliza; el gasto es la depreciación." />
+          )}
+        </>}
+        <LineaDesglose label={fila} valor={resumen.monto} signo="=" fuerte />
+      </section>
 
-        <div className="px-5 py-4 space-y-4">
-          <div>
-            <LineaDesglose label="Neto (facturas y notas de débito)" valor={resumen.neto} signo="+" />
-            <LineaDesglose label="Exento" valor={resumen.exento} signo="+" />
-            <LineaDesglose label={`Notas de crédito ${esCompras ? "recibidas" : "emitidas"} (neto + exento)`} valor={-(resumen.ncNeto + resumen.ncExento)} signo="−" />
-            {esCompras && <>
-              <LineaDesglose label="IVA no recuperable" valor={resumen.ivaNoRecuperable} signo="+" />
-              <LineaDesglose label="Impuesto sin derecho a crédito" valor={resumen.impSinDerecho} signo="+" />
-              <LineaDesglose label="Otros impuestos no recuperables" valor={resumen.otrosCosto} signo="+"
-                nota={otros.length ? "Detalle por código abajo" : undefined} />
-            </>}
-            {esCompras && resumen.activoFijoExcluido !== 0 && (
-              <LineaDesglose label="Activo fijo (se deprecia, no es gasto del mes)" valor={-resumen.activoFijoExcluido} signo="−"
-                nota="14 A: la compra se capitaliza; el gasto es la depreciación (fila Depreciación)." />
-            )}
-            <LineaDesglose label={`= ${fila}`} valor={resumen.monto} fuerte />
-          </div>
+      <section>
+        <Titulo as="h3" tamano="sm">No entra (no es {esCompras ? "gasto" : "ingreso"})</Titulo>
+        {esCompras ? <>
+          <LineaDesglose label="IVA crédito recuperable" valor={resumen.ivaRecuperable} tenue />
+          {resumen.ivaUsoComun !== 0 && <LineaDesglose label="IVA uso común" valor={resumen.ivaUsoComun} tenue />}
+          {resumen.otrosRecuperable !== 0 && <LineaDesglose label="Otros impuestos recuperables" valor={resumen.otrosRecuperable} tenue />}
+        </> : <>
+          <LineaDesglose label="IVA débito" valor={resumen.iva} tenue />
+          {resumen.otrosImpuestos !== 0 && <LineaDesglose label="Otros impuestos recargados" valor={resumen.otrosImpuestos} tenue />}
+          {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue
+            nota="Se descuenta en el F29; no cambia el ingreso." />}
+        </>}
+        <LineaDesglose label="Total de los documentos" valor={resumen.total} tenue />
+        {esCompras && resumen.activoFijoNeto !== 0 && resumen.activoFijoExcluido === 0 && (
+          <LineaDesglose label="…de lo cual es activo fijo" valor={resumen.activoFijoNeto} tenue
+            nota="En 14 D N°3 se rebaja completo: ya está dentro de Compras." />
+        )}
+      </section>
 
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">No entra (no es {esCompras ? "gasto" : "ingreso"})</p>
-            {esCompras ? <>
-              <LineaDesglose label="IVA crédito recuperable" valor={resumen.ivaRecuperable} tenue />
-              {resumen.ivaUsoComun !== 0 && <LineaDesglose label="IVA uso común (factor 1)" valor={resumen.ivaUsoComun} tenue />}
-              {resumen.otrosRecuperable !== 0 && <LineaDesglose label="Otros impuestos recuperables" valor={resumen.otrosRecuperable} tenue />}
-            </> : <>
-              <LineaDesglose label="IVA débito" valor={resumen.iva} tenue />
-              {resumen.otrosImpuestos !== 0 && <LineaDesglose label="Otros impuestos recargados" valor={resumen.otrosImpuestos} tenue />}
-              {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue
-                nota="Se descuenta del IVA/PPM en el F29; no cambia el ingreso." />}
-            </>}
-            <LineaDesglose label="Total documentos" valor={resumen.total} tenue />
-            {esCompras && resumen.activoFijoNeto !== 0 && resumen.activoFijoExcluido === 0 && (
-              <LineaDesglose label="…de lo cual es activo fijo (neto)" valor={resumen.activoFijoNeto} tenue
-                nota="En 14 D N°3 se rebaja completo (depreciación instantánea): ya está dentro de Compras." />
-            )}
-          </div>
+      {otros.length > 0 && (
+        <section>
+          <Titulo as="h3" tamano="sm">Otros impuestos por código</Titulo>
+          {otros.map(o => (
+            <LineaGuia key={o.codigo} className="min-h-[30px] text-[17px]"
+              etiqueta={<span>{o.nombre} <span className="text-[14px] text-cuaderno-grafito">· {o.docs} doc.</span> <Resaltado color={ETIQUETA_OTRO[o.tipo]?.[1]} className="text-[14px]">{ETIQUETA_OTRO[o.tipo]?.[0]}</Resaltado></span>}>
+              <Cifra valor={o.monto} escala="pesos" vacio="0" />
+            </LineaGuia>
+          ))}
+        </section>
+      )}
 
-          {!esCompras && resumen.notasCredito?.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Notas de crédito emitidas</p>
-              {resumen.notasCredito.map(nc => (
-                <div key={nc.folio} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
-                  <span className="text-xs text-slate-600 min-w-0">
-                    <span className="block truncate">NC {nc.folio} · {nc.cliente}</span>
-                    <span className="text-[10px] text-slate-400">
-                      {nc.refFolio ? `${nc.anula ? "Anula" : "Rebaja"} ${NOMBRE_DOC[nc.refTipo] || "documento"} ${nc.refFolio}` : "Sin documento de referencia"}
-                      {nc.anula && " · si se refacturó, la nueva factura va en su mes"}
+      {!esCompras && resumen.notasCredito?.length > 0 && (
+        <section>
+          <Titulo as="h3" tamano="sm">Notas de crédito emitidas</Titulo>
+          {resumen.notasCredito.map(nc => (
+            <div key={nc.folio}>
+              <LineaGuia className="min-h-[30px] text-[17px]" etiqueta={`NC ${nc.folio} · ${casoTitulo(nc.cliente)}`}>
+                <Cifra valor={-nc.monto} escala="pesos" />
+              </LineaGuia>
+              <p className="m-0 -mt-1 text-[13px] text-cuaderno-grafito">
+                {nc.refFolio ? `${nc.anula ? "Anula" : "Rebaja"} ${NOMBRE_DOC[nc.refTipo] || "documento"} ${nc.refFolio}` : "Sin documento de referencia"}
+                {nc.anula && " · si se refacturó, la nueva factura va en su mes"}
+              </p>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {esCompras && (
+        <section>
+          <Titulo as="h3" tamano="sm">Se reparte en estas filas</Titulo>
+          {Object.keys(FILAS_DESTINO_RCV).filter(id => calculo.destinos[id]).map(id => (
+            <LineaDesglose key={id} label={`${FILAS_DESTINO_RCV[id]} · ${calculo.destinos[id].documentos} doc.`} valor={calculo.destinos[id].monto} />
+          ))}
+          {calculo.proveedores.length > 0 && (
+            <div className="mt-3">
+              <p className="m-0 mb-1 text-[15px] text-cuaderno-grafito">
+                Leasing, bancos y factoring facturan, así que vienen en el RCV de compras. Elige a qué fila va cada uno: la regla queda guardada para los próximos meses. La base imponible no cambia, solo el detalle.
+              </p>
+              <ul className="m-0 p-0 list-none">
+                {calculo.proveedores.map(pv => (
+                  <li key={pv.rut} className="flex items-end justify-between gap-3 py-1.5 border-b border-cuaderno-renglon last:border-0">
+                    <span className="min-w-0 text-[17px]">
+                      <span className="block truncate">{casoTitulo(pv.nombre)}</span>
+                      <span className="text-[13px] text-cuaderno-grafito">{pv.rutTxt} · {pv.docs} doc.</span>
+                      {pv.sugerido && <Resaltado color="durazno" className="ml-1 text-[13px]">¿financiero?</Resaltado>}
                     </span>
-                  </span>
-                  <span className="text-xs font-mono text-slate-700">−{fmt(nc.monto)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {otros.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Otros impuestos por código</p>
-              {otros.map(o => (
-                <div key={o.codigo} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">
-                  <span className="text-xs text-slate-600">
-                    {o.nombre} <span className="text-slate-400">· {o.docs} doc.</span>
-                    <span className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                      o.tipo === "credito" ? "bg-emerald-100 text-emerald-700"
-                      : o.tipo === "diesel" ? "bg-sky-100 text-sky-700"
-                      : o.tipo === "costo" ? "bg-slate-100 text-slate-600"
-                      : "bg-amber-100 text-amber-700"}`}>
-                      {o.tipo === "credito" ? "recuperable" : o.tipo === "diesel" ? "diésel" : o.tipo === "costo" ? "costo" : "revisar"}
-                    </span>
-                  </span>
-                  <span className="text-xs font-mono text-slate-700">{fmt(o.monto)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {calculo.descuadre > 1 && (
-            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
-              El reparto por mes y por fila no suma el total del archivo (diferencia {fmt(calculo.descuadre)}). No se puede cargar: avisa a soporte con este archivo.
-            </p>
-          )}
-          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || (!esCompras && regimen === "14D3") || Object.keys(resumen.noDelGiro || {}).length > 0) && (
-            <div className="space-y-2">
-              {Object.entries(resumen.noDelGiro || {}).map(([tipo, g]) => (
-                <p key={tipo} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  Venta de {tipo.toLowerCase()} ({g.docs} doc., {fmt(g.monto)}): entra completa a Ingresos, pero en 14 A se rebaja su valor tributario no depreciado. Agrega ese costo en una fila aparte con la contadora.
-                </p>
-              ))}
-              {revisar.length > 0 && (
-                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  Hay impuestos con códigos que FleetCore no reconoce ({revisar.map(o => o.codigo || "sin código").join(", ")}). Se suman a Compras como costo, que es lo conservador. Confirma con la contadora si alguno da derecho a crédito.
-                </p>
-              )}
-              {Math.abs(resumen.sinExplicar || 0) > 10 && (
-                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  {fmt(resumen.sinExplicar)} del total de los documentos no calza con ninguna columna (neto, exento, IVA, otros impuestos). Revisa el detalle en el CSV.
-                </p>
-              )}
-              {ignorados.length > 0 && (
-                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                  Documentos que no se consideran: {ignorados.map(([t, n]) => `${NOMBRE_DOC[t] || "tipo " + t} (${n})`).join(", ")}.
-                </p>
-              )}
-              {!esCompras && regimen === "14D3" && (
-                <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                  El RCV registra las ventas cuando se emiten. En 14 D N°3 el ingreso cuenta cuando se percibe (una factura cedida en factoring se considera percibida al cederse). Ajusta el mes si lo cobraste en otro.
-                </p>
-              )}
-            </div>
-          )}
-
-          {esCompras && (
-            <div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Se reparte en estas filas</p>
-              {Object.keys(FILAS_DESTINO_RCV).filter(id => calculo.destinos[id]).map(id => (
-                <LineaDesglose key={id} label={`${FILAS_DESTINO_RCV[id]} · ${calculo.destinos[id].documentos} doc.`} valor={calculo.destinos[id].monto} />
-              ))}
-              {calculo.proveedores.length > 0 && (
-                <div className="mt-2 rounded-lg border border-slate-200 divide-y divide-slate-100">
-                  <p className="px-3 py-1.5 text-[11px] text-slate-500">
-                    Leasing, bancos y factoring facturan, así que vienen en el RCV de compras. Aquí eliges a qué fila va cada uno; la regla queda guardada para los próximos meses. La Base Imponible no cambia, solo el detalle.
-                  </p>
-                  {calculo.proveedores.map(pv => (
-                    <div key={pv.rut} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                      <span className="text-xs text-slate-600 min-w-0">
-                        <span className="block truncate">{pv.nombre}</span>
-                        <span className="text-[10px] text-slate-400">{pv.rutTxt} · {pv.docs} doc.{pv.sugerido && " · ¿financiero?"}</span>
-                      </span>
-                      <select value={pv.fila} onChange={e => onCambiarRegla(pv, e.target.value)}
-                        className={`px-2 py-1 text-xs border-2 rounded-lg focus:outline-none ${pv.sugerido ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-                        {Object.entries(FILAS_DESTINO_RCV).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-2 pt-1">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Dónde se carga</p>
-            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
-              <input type="radio" checked={criterio === "docto"} onChange={() => setCriterio("docto")} className="mt-0.5 accent-purple-700" />
-              <span>
-                <b>En el mes de cada documento</b> (devengado)
-                {variosMeses && <span className="block text-[11px] text-slate-500">El RCV de {periodoTxt} trae documentos de {reparto.length} meses.</span>}
-              </span>
-            </label>
-            {criterio === "docto" && (
-              <div className="ml-6 rounded-lg border border-slate-200 divide-y divide-slate-100">
-                {reparto.map(r => (
-                  <div key={`${r.anio}-${r.mes}`} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                    <span className="text-xs text-slate-600">
-                      {MESES[r.mes]} {r.anio} <span className="text-slate-400">· {r.documentos} doc.</span>
-                      {r.anio !== anioActivo && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700">se guarda en {r.anio}</span>}
-                    </span>
-                    <span className="text-xs font-mono text-slate-700">{fmt(r.monto)}</span>
-                  </div>
+                    <Campo as="select" className="w-48 flex-shrink-0" aria-label={`Fila de ${pv.nombre}`}
+                      value={pv.fila} onChange={e => onCambiarRegla(pv, e.target.value)}>
+                      {Object.entries(FILAS_DESTINO_RCV).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                    </Campo>
+                  </li>
                 ))}
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer flex-wrap">
-              <input type="radio" checked={criterio === "mes"} onChange={() => setCriterio("mes")} className="accent-purple-700" />
-              <b>Todo en un mes</b>
-              <select value={mes} onChange={e => { setMes(parseInt(e.target.value, 10)); setCriterio("mes"); }}
-                className="px-2 py-1 text-xs border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-400">
-                {MESES.map((m, i) => <option key={m} value={i}>{m} {anioActivo}</option>)}
-              </select>
-              {criterio === "mes" && valorActual(mes) !== 0 && (
-                <span className="text-[11px] text-slate-500">hoy tiene {fmt(valorActual(mes))}</span>
-              )}
-            </label>
-            <p className="text-[11px] text-slate-500">
-              Si ya habías importado este período, se reemplaza lo que aportó antes (no se duplica). Los montos que escribiste a mano se mantienen.
-              {criterio === "docto" && otrosAnios.length > 0 && ` Lo de ${otrosAnios.join(", ")} se guarda de inmediato en ese año.`}
-            </p>
-          </div>
-        </div>
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50">
-          <button onClick={onCerrar} className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700">Cancelar</button>
-          <button
-            onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}
-            disabled={aplicando || calculo.descuadre > 1}
-            className="px-4 py-2 rounded-xl text-xs font-black bg-purple-700 text-white hover:bg-purple-800 disabled:bg-slate-200 disabled:text-slate-400">
-            {aplicando ? "Cargando…" : `Cargar ${fmt(resumen.monto)}`}
-          </button>
-        </div>
-      </div>
-    </div>
+      {(calculo.descuadre > 1 || revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0
+        || (!esCompras && regimen === "14D3") || Object.keys(resumen.noDelGiro || {}).length > 0) && (
+        <section className="space-y-2">
+          {calculo.descuadre > 1 && (
+            <Nota etiqueta="Ojo:">El reparto por mes y por fila no suma el total del archivo (diferencia <Cifra valor={calculo.descuadre} escala="pesos" color="heredar" />). No se puede cargar: avisa a soporte con este archivo.</Nota>
+          )}
+          {Object.entries(resumen.noDelGiro || {}).map(([tipo, g]) => (
+            <Nota key={tipo} etiqueta="Ojo:">Venta de {tipo.toLowerCase()} ({g.docs} doc., <Cifra valor={g.monto} escala="pesos" color="heredar" />): entra completa a Ingresos, pero en 14 A se rebaja su valor tributario no depreciado. Agrega ese costo con la contadora.</Nota>
+          ))}
+          {revisar.length > 0 && (
+            <Nota etiqueta="Ojo:">Hay impuestos con códigos que FleetCore no reconoce ({revisar.map(o => o.codigo || "sin código").join(", ")}). Se suman a Compras como costo, que es lo conservador. Confirma con la contadora si alguno da derecho a crédito.</Nota>
+          )}
+          {Math.abs(resumen.sinExplicar || 0) > 10 && (
+            <Nota etiqueta="Ojo:"><Cifra valor={resumen.sinExplicar} escala="pesos" color="heredar" /> del total de los documentos no calza con ninguna columna (neto, exento, IVA, otros impuestos). Revisa el detalle en el CSV.</Nota>
+          )}
+          {ignorados.length > 0 && (
+            <Nota etiqueta="Nota:" tono="grafito">No se consideran: {ignorados.map(([t, n]) => `${NOMBRE_DOC[t] || "tipo " + t} (${n})`).join(", ")}.</Nota>
+          )}
+          {!esCompras && regimen === "14D3" && (
+            <Nota etiqueta="Nota:" tono="grafito">El RCV registra las ventas cuando se emiten. En 14 D N°3 el ingreso cuenta cuando se percibe (una factura cedida en factoring se considera percibida al cederse). Ajusta el mes si la cobraste en otro.</Nota>
+          )}
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <Titulo as="h3" tamano="sm">Dónde se carga</Titulo>
+        <Segmentado
+          opciones={[{ id: "docto", label: "En el mes de cada documento" }, { id: "mes", label: "Todo en un mes" }]}
+          valor={criterio}
+          onCambiar={setCriterio}
+        />
+        {criterio === "docto" ? (
+          <div>
+            {variosMeses && <p className="m-0 mb-1 text-[15px] text-cuaderno-grafito">El RCV de {periodoTxt} trae documentos de {reparto.length} meses.</p>}
+            {reparto.map(r => (
+              <LineaGuia key={`${r.anio}-${r.mes}`} className="min-h-[30px] text-[17px]"
+                etiqueta={<span>{MESES[r.mes]} {r.anio} <span className="text-[14px] text-cuaderno-grafito">· {r.documentos} doc.</span>{r.anio !== anioActivo && <Resaltado color="lavanda" className="ml-1 text-[14px]">se guarda en {r.anio}</Resaltado>}</span>}>
+                <Cifra valor={r.monto} escala="pesos" vacio="0" />
+              </LineaGuia>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-end gap-4">
+            <Campo as="select" etiqueta="Mes" className="w-52" value={mes} onChange={e => setMes(parseInt(e.target.value, 10))}>
+              {MESES.map((m, i) => <option key={m} value={i}>{m} {anioActivo}</option>)}
+            </Campo>
+            {valorActual(mes) !== 0 && <p className="m-0 pb-2 text-[15px] text-cuaderno-grafito">hoy tiene <Cifra valor={valorActual(mes)} escala="pesos" color="heredar" /></p>}
+          </div>
+        )}
+        <p className="m-0 text-[14px] text-cuaderno-grafito">
+          Si ya habías importado este período, se reemplaza lo que aportó antes (no se duplica). Los montos escritos a mano se mantienen.
+          {criterio === "docto" && otrosAnios.length > 0 && ` Lo de ${otrosAnios.join(", ")} se guarda de inmediato en ese año.`}
+        </p>
+      </section>
+    </ModalCuaderno>
   );
 }
 
 function ConfigTributaria({ config, onCambiar, anio, tasa, tasaPPM }) {
   const sinRegimen = !config.regimen;
+  const pct = v => `${(v * 100).toLocaleString("es-CL", { maximumFractionDigits: 3 })}%`;
   return (
-    <div className={`glass-card rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2 ${sinRegimen ? "ring-2 ring-amber-300" : ""}`}>
-      <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-        Régimen
-        <select value={config.regimen} onChange={e => onCambiar({ regimen: e.target.value })}
-          className="px-2 py-1.5 text-xs border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
+    <Hoja titulo="Régimen tributario">
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+        <Campo as="select" etiqueta="Régimen" className="w-80" value={config.regimen} onChange={e => onCambiar({ regimen: e.target.value })}>
           <option value="">Sin definir (se usa 27%)</option>
           {REGIMENES_TRIBUTARIOS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-        </select>
-      </label>
-      <span className="text-xs text-slate-500">Impto {anio}: <b className="text-slate-800">{(tasa * 100).toLocaleString("es-CL")}%</b></span>
-      {config.regimen === "14A" ? (
-        <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-          Tasa PPM (del F22)
-          <input type="number" step="0.01" min="0" value={config.tasaPPM14A || ""} placeholder="0"
-            onChange={e => onCambiar({ tasaPPM14A: parseFloat(e.target.value) || 0 })}
-            className="w-16 px-2 py-1 text-xs border-2 border-slate-200 rounded-lg text-right" />%
-        </label>
-      ) : config.regimen !== "14D8" && (
-        <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-          <input type="checkbox" checked={!!config.ingresosSobre50milUF}
-            onChange={e => onCambiar({ ingresosSobre50milUF: e.target.checked })} className="accent-purple-700" />
-          Ingresos del año anterior sobre 50.000 UF
-          <span className="text-slate-400 font-normal">→ PPM {(tasaPPM * 100).toLocaleString("es-CL")}%</span>
-        </label>
-      )}
-      <label className="flex items-center gap-2 text-xs font-semibold text-slate-600" title="Ley 18.502: se recupera el impuesto específico del diésel usado en maquinaria que no circula por vías públicas.">
-        Diésel recuperable
-        <input type="number" min="0" max="100" value={config.dieselRecuperablePct || ""} placeholder="0"
-          onChange={e => onCambiar({ dieselRecuperablePct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
-          className="w-14 px-2 py-1 text-xs border-2 border-slate-200 rounded-lg text-right" />%
-      </label>
+        </Campo>
+        <p className="m-0 pb-2 text-[18px]">Impuesto {anio}: <Resaltado color="durazno">{pct(tasa)}</Resaltado></p>
+        {config.regimen === "14A" ? (
+          <Campo etiqueta="Tasa PPM, del F22 (%)" className="w-44" type="number" step="0.01" min="0"
+            value={config.tasaPPM14A || ""} placeholder="0"
+            onChange={e => onCambiar({ tasaPPM14A: parseFloat(e.target.value) || 0 })} />
+        ) : config.regimen !== "14D8" && (
+          <Casilla marcada={!!config.ingresosSobre50milUF} onCambiar={v => onCambiar({ ingresosSobre50milUF: v })}
+            descripcion={`PPM ${pct(tasaPPM)}`}>
+            Ingresos del año anterior sobre 50.000 UF
+          </Casilla>
+        )}
+        <Campo etiqueta="Diésel recuperable (%)" className="w-44" type="number" min="0" max="100"
+          value={config.dieselRecuperablePct || ""} placeholder="0"
+          ayuda="Ley 18.502: maquinaria fuera de vías públicas"
+          onChange={e => onCambiar({ dieselRecuperablePct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+      </div>
       {sinRegimen && (
-        <p className="w-full text-[11px] text-amber-700 font-semibold">
-          Elige el régimen (aparece en Mi SII → Datos de la empresa). En Pro Pyme General la tasa es 12,5% en 2025-2027; con 27% el Impto queda sobreestimado.
-        </p>
+        <Nota etiqueta="Ojo:" className="mt-3">Elige el régimen (aparece en Mi SII, datos de la empresa). En Pro Pyme General la tasa es 12,5% en 2025-2027; con 27% el impuesto queda sobreestimado.</Nota>
       )}
       {config.regimen === "14D3" && anio >= 2025 && anio <= 2028 && (
-        <p className="w-full text-[11px] text-slate-500">
-          La tasa rebajada exige estar al día con la cotización del empleador de la reforma previsional al cierre del año.
-        </p>
+        <Nota etiqueta="Nota:" tono="grafito" className="mt-3">La tasa rebajada exige estar al día con la cotización del empleador de la reforma previsional al cierre del año.</Nota>
       )}
-    </div>
+    </Hoja>
   );
 }
 
@@ -761,44 +715,48 @@ export default function ContabilidadFlujoMensual() {
   }, [data, tasa, tasaPPM]);
 
   if (!empresaId) {
-    return <div className="p-6 text-sm text-slate-500">Cargando empresa…</div>;
+    return <div className="cuaderno px-8 pt-5 text-[18px] text-cuaderno-grafito">Cargando empresa…</div>;
   }
 
-  return (
-    <div className="p-4 sm:p-6 space-y-5">
+  const regimenLabel = REGIMENES_TRIBUTARIOS.find(r => r.id === configTributaria.regimen)?.label;
+  const COLS = 15; // categoría + 12 meses + total + acción
+  const encabezadoFila = (label, ayuda, signo) => (
+    <th scope="row" className="sticky left-0 z-10 bg-cuaderno-hoja px-2 py-1.5 text-left font-normal text-[17px] whitespace-nowrap">
+      {signo !== undefined && <span className="inline-block w-5 text-cuaderno-grafito">{signo === 1 ? "+" : "−"}</span>}
+      <span title={ayuda || undefined} className={ayuda ? "cursor-help underline decoration-dotted decoration-cuaderno-columna underline-offset-4" : ""}>{label}</span>
+    </th>
+  );
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+  return (
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+      <FechaHoja />
+
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900">Flujo Mensual</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Base imponible tributaria mes a mes · Resultado del Ejercicio</p>
+          <Titulo>Flujo mensual</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">
+            Base imponible tributaria, mes a mes{regimenLabel ? ` · ${regimenLabel}` : ""}.
+          </p>
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
-          <div className="flex items-center gap-0.5 bg-white border-2 border-slate-200 rounded-xl px-1">
-            <button onClick={() => cambiarAnio(anio - 1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500">
-              <IconChevronLeft />
-            </button>
-            <span className="px-2 text-sm font-black text-slate-800 min-w-[56px] text-center">{anio}</span>
-            <button onClick={() => cambiarAnio(anio + 1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500">
-              <IconChevronRight />
-            </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1">
+            <Boton variante="icono" aria-label="Año anterior" onClick={() => cambiarAnio(anio - 1)}><IconoAnterior /></Boton>
+            <span className="px-2 text-[22px] min-w-[64px] text-center">{anio}</span>
+            <Boton variante="icono" aria-label="Año siguiente" onClick={() => cambiarAnio(anio + 1)}><IconoSiguiente /></Boton>
           </div>
           <input ref={inputRcv} type="file" accept=".csv,.xlsx,.xls" className="hidden"
             onChange={e => abrirRCV(e.target.files?.[0])} />
-          <button
-            onClick={() => inputRcv.current?.click()}
-            aria-label="Importar CSV del Registro de Compras o de Ventas descargado de Mi SII"
-            className="px-3 py-2.5 rounded-xl text-xs font-black bg-white border-2 border-purple-200 text-purple-700 hover:bg-purple-50 whitespace-nowrap"
-          >
-            Importar RCV
-          </button>
-          <span className={`text-xs font-semibold whitespace-nowrap ${errorGuardado ? "text-red-600" : "text-slate-400"}`}>
+          <Boton variante="primario" onClick={() => inputRcv.current?.click()}
+            aria-label="Importar CSV del Registro de Compras o de Ventas descargado de Mi SII">
+            <IconoSubir tamano={14} /> Importar RCV
+          </Boton>
+          <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
             {errorGuardado
-              ? <button onClick={() => { pendienteRef.current = { empresaId, anio, data }; guardar(); }} className="underline">No se pudo guardar · reintentar</button>
-              : guardando || dirty ? "Guardando…" : "Guardado"}
+              ? <Boton variante="texto" className="text-cuaderno-roja" onClick={() => { pendienteRef.current = { empresaId, anio, data }; guardar(); }}>No se guardó · reintentar</Boton>
+              : guardando || dirty ? "Guardando…" : <span className="inline-flex items-center gap-1"><VistoBueno titulo="" tamano={13} /> Guardado</span>}
           </span>
         </div>
-      </div>
+      </header>
 
       <ConfigTributaria config={configTributaria} onCambiar={c => guardarConfigTributaria(c).catch(e => {
           console.error("Error guardando config tributaria:", e);
@@ -806,19 +764,16 @@ export default function ContabilidadFlujoMensual() {
         })} anio={anio} tasa={tasa} tasaPPM={tasaPPM} />
 
       {errorRcv && (
-        <div className="px-4 py-3 bg-red-50 border-2 border-red-200 rounded-xl text-xs text-red-700 font-semibold flex justify-between gap-3">
-          {errorRcv}
-          <button onClick={() => setErrorRcv("")} className="text-red-400 hover:text-red-600">✕</button>
+        <div className="flex items-start justify-between gap-3">
+          <Nota etiqueta="Ojo:">{errorRcv}</Nota>
+          <Boton variante="texto" onClick={() => setErrorRcv("")}>Cerrar</Boton>
         </div>
       )}
 
       {!cargando && calc.dobleConteo.length > 0 && (
-        <div className="px-4 py-3 bg-amber-50 border-2 border-amber-200 rounded-xl text-xs text-amber-800">
-          <p className="font-black">Posible doble conteo</p>
-          <p className="mt-0.5">
-            {calc.dobleConteo.map(d => `${d.fila} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en estas filas solo lo que no tiene factura (arriendo con contrato sin factura, boletas de rendiciones).
-          </p>
-        </div>
+        <Nota etiqueta="Ojo:">
+          Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
+        </Nota>
       )}
 
       {rcv && calculoRcv && (
@@ -836,89 +791,78 @@ export default function ContabilidadFlujoMensual() {
       )}
 
       {cargando ? (
-        <div className="glass-card rounded-xl p-8 text-center text-sm text-slate-400">Cargando {anio}…</div>
+        <p className="m-0 py-12 text-center text-[18px] text-cuaderno-grafito">Buscando el flujo de {anio}…</p>
       ) : (
         <>
-          {/* KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <KpiFlujo label={`Ingresos ${anio}`} value={fmt(calc.totalIngresos)} color="text-emerald-600" />
-            <KpiFlujo label={`Gastos ${anio}`} value={fmt(calc.totalGastos)} color="text-red-600"
-              sub={`Impto estimado ${fmt(calc.totalImpuesto)} (${(tasa * 100).toLocaleString("es-CL")}% de la base acumulada)`} />
-            <KpiFlujo
-              label="Utilidad / Pérdida del Ejercicio"
-              value={fmt(calc.totalUtilidad)}
-              color={calc.totalUtilidad >= 0 ? "text-emerald-700" : "text-red-600"}
-            />
-            <KpiFlujo
-              label="Mejor / peor mes"
-              value={`${MESES_S[calc.mejorMes]} / ${MESES_S[calc.peorMes]}`}
-              sub={`${fmt(calc.utilidad[calc.mejorMes])} · ${fmt(calc.utilidad[calc.peorMes])}`}
-            />
+          {/* Resumen del año */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Hoja titulo={`Resumen ${anio}`}>
+              <LineaGuia etiqueta="Ingresos"><Cifra valor={calc.totalIngresos} escala="pesos" vacio="$0" /></LineaGuia>
+              <LineaGuia etiqueta="Gastos"><Cifra valor={-calc.totalGastos} escala="pesos" vacio="$0" /></LineaGuia>
+              <LineaGuia etiqueta="Base imponible"><Cifra valor={calc.totalBaseImponible} escala="pesos" vacio="$0" raya="total" /></LineaGuia>
+              <LineaGuia etiqueta={`Impuesto (${(tasa * 100).toLocaleString("es-CL")}% de la base acumulada)`}><Cifra valor={-calc.totalImpuesto} escala="pesos" vacio="$0" /></LineaGuia>
+              {calc.totalMultas !== 0 && <LineaGuia etiqueta="Multas"><Cifra valor={-calc.totalMultas} escala="pesos" /></LineaGuia>}
+              <LineaGuia etiqueta="Utilidad líquida"><Cifra valor={calc.totalUtilidad} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
+              <p className="m-0 mt-2 text-[15px] text-cuaderno-grafito">
+                Mejor mes {MESES[calc.mejorMes].toLowerCase()} (<Cifra valor={calc.utilidad[calc.mejorMes]} escala="pesos" vacio="$0" color="heredar" />) · peor mes {MESES[calc.peorMes].toLowerCase()} (<Cifra valor={calc.utilidad[calc.peorMes]} escala="pesos" vacio="$0" color="heredar" />)
+              </p>
+            </Hoja>
+            <Hoja titulo="Ingresos y gastos por mes">
+              <GraficoBarras data={MESES_S.map((m, i) => ({
+                label: m,
+                ingresos: data.filas.filter(f => f.signo === 1).reduce((s, f) => s + num(f.valores[i]), 0),
+                egresos: data.filas.filter(f => f.signo === -1).reduce((s, f) => s + num(f.valores[i]), 0),
+              }))} />
+            </Hoja>
           </div>
 
-          {/* Tabla principal */}
-          <div className="glass-card rounded-xl overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-4 py-3">
-              <p className="text-white font-black text-sm">Flujo de Movimientos {anio}</p>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-purple-200 text-xs">
-                  {configTributaria.regimen === "14A"
-                    ? "Montos netos de IVA, en el mes del documento (14 A: base devengada)"
-                    : "Montos netos de IVA, por mes en que se pagan o perciben"}
-                </p>
-                <button onClick={() => setVerAyuda(v => !v)} className="text-[11px] font-bold text-white/90 hover:text-white underline underline-offset-2 whitespace-nowrap">
-                  {verAyuda ? "Ocultar criterios" : "Cómo se calcula cada fila"}
-                </button>
-              </div>
-            </div>
+          {/* Planilla */}
+          <Hoja titulo={`Movimientos ${anio}`}
+            extra={<Boton variante="texto" onClick={() => setVerAyuda(v => !v)}>{verAyuda ? "Ocultar criterios" : "Cómo se calcula cada fila"}</Boton>}>
+            <p className="m-0 -mt-1 mb-2 text-[15px] text-cuaderno-grafito">
+              {configTributaria.regimen === "14A"
+                ? "Montos netos de IVA, en el mes del documento (14 A, base devengada)."
+                : "Montos netos de IVA, en el mes en que se pagan o perciben."}
+              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene del RCV; toca una celda para corregirla.
+            </p>
 
             {verAyuda && (
-              <div className="px-4 py-3 bg-purple-50/60 border-b border-purple-100 grid sm:grid-cols-2 gap-x-6 gap-y-2">
+              <div className="mb-3 grid gap-x-8 gap-y-2 sm:grid-cols-2 border-y border-cuaderno-renglon py-3">
                 {data.filas.filter(f => AYUDA_FILAS[f.id]).map(f => (
-                  <p key={f.id} className="text-[11px] text-slate-600"><b className="text-slate-800">{f.label}.</b> {AYUDA_FILAS[f.id]}</p>
+                  <p key={f.id} className="m-0 text-[15px]"><Resaltado color="durazno">{f.label}</Resaltado> {AYUDA_FILAS[f.id]}</p>
                 ))}
-                <p className="text-[11px] text-slate-600"><b className="text-slate-800">Impto.</b> Base imponible acumulada del año × tasa del régimen. Cada mes muestra cuánto cambia el impuesto anual; un mes con pérdida lo reduce.</p>
-                <p className="text-[11px] text-slate-600"><b className="text-slate-800">Multas.</b> Multas e intereses fiscales: no rebajan la base imponible (no son deducibles), pero sí restan de la utilidad porque son salida de caja.</p>
+                <p className="m-0 text-[15px]"><Resaltado color="durazno">Impuesto</Resaltado> Base imponible acumulada del año × tasa del régimen. Cada mes muestra cuánto cambia el impuesto anual; un mes con pérdida lo reduce.</p>
+                <p className="m-0 text-[15px]"><Resaltado color="durazno">Multas</Resaltado> Multas e intereses fiscales: no rebajan la base imponible (no son deducibles), pero sí restan de la utilidad porque son salida de caja.</p>
               </div>
             )}
+
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse" style={{ minWidth: 920 }}>
+              <table className="w-full border-collapse" style={{ minWidth: 1180 }}>
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="sticky left-0 bg-slate-50 px-3 py-2 text-left text-[10px] font-black text-slate-500 uppercase tracking-wider z-10" style={{ minWidth: 150 }}>
-                      Categoría
-                    </th>
-                    {MESES_S.map(m => (
-                      <th key={m} className="px-1.5 py-2 text-right text-[10px] font-black text-slate-500 uppercase" style={{ minWidth: 64 }}>{m}</th>
-                    ))}
-                    <th className="px-2 py-2 text-right text-[10px] font-black text-slate-700 uppercase bg-slate-100" style={{ minWidth: 80 }}>Total</th>
-                    <th className="w-8" />
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    <th className="sticky left-0 z-10 bg-cuaderno-hoja px-2 py-2 text-left font-normal text-[15px] text-cuaderno-grafito" style={{ minWidth: 220 }}>Categoría</th>
+                    {MESES_S.map(m => <th key={m} className="px-1.5 py-2 text-right font-normal text-[15px] text-cuaderno-grafito" style={{ minWidth: 92 }}>{m}</th>)}
+                    <th className="px-2 py-2 text-right font-normal text-[15px] text-cuaderno-tinta" style={{ minWidth: 112 }}>Total</th>
+                    <th className="w-10" />
                   </tr>
                 </thead>
                 <tbody>
                   {data.filas.map(f => (
-                    <tr key={f.id} className="border-b border-slate-50 hover:bg-purple-50/20">
-                      <td className="sticky left-0 bg-white px-3 py-1 text-xs font-semibold text-slate-700 z-10 whitespace-nowrap">
-                        <span className={f.signo === 1 ? "text-emerald-600 mr-1" : "text-red-500 mr-1"}>{f.signo === 1 ? "[+]" : "[-]"}</span>
-                        <span title={AYUDA_FILAS[f.id] || undefined} className={AYUDA_FILAS[f.id] ? "cursor-help underline decoration-dotted decoration-slate-300 underline-offset-2" : ""}>{f.label}</span>
-                      </td>
+                    <tr key={f.id} className="border-b border-cuaderno-renglon">
+                      {encabezadoFila(f.label, AYUDA_FILAS[f.id], f.signo)}
                       {f.valores.map((v, i) => {
                         const aportes = aportesRCV(data, f.id, i);
-                        const desdeRcv = aportes.length > 0;
                         return (
-                          <td key={i} className="px-0.5 py-0.5 relative"
-                            title={desdeRcv ? "Desde RCV: " + aportes.map(a => `${a.periodo} ${fmt(a.monto)}${a.documentos ? ` (${a.documentos} doc.)` : ""}`).join(" + ") : undefined}>
-                            {desdeRcv && <span className="absolute top-0.5 left-1 w-1.5 h-1.5 rounded-full bg-purple-500" />}
-                            <CeldaInput value={v} onChange={val => setValorFila(f.id, i, val)} />
-                          </td>
+                          <CeldaInput key={i} value={v} rcv={aportes.length > 0}
+                            titulo={aportes.length ? "Desde RCV: " + aportes.map(a => `${a.periodo} ${fmt(a.monto)}${a.documentos ? ` (${a.documentos} doc.)` : ""}`).join(" + ") : undefined}
+                            onChange={val => setValorFila(f.id, i, val)} />
                         );
                       })}
-                      <CeldaCalculada value={calc.filasTotales[f.id]} bold />
+                      <CeldaCifra value={f.signo * calc.filasTotales[f.id]} />
                       <td className="px-1 text-center">
                         {!f.fija && (
-                          <button onClick={() => eliminarFila(f.id, f.label)} className="p-1 text-slate-300 hover:text-red-500 rounded">
-                            <IconTrash />
-                          </button>
+                          <button onClick={() => eliminarFila(f.id, f.label)} aria-label={`Eliminar ${f.label}`}
+                            className="p-1.5 rounded-md text-cuaderno-grafito hover:text-cuaderno-roja"><IconoBorrar /></button>
                         )}
                       </td>
                     </tr>
@@ -926,131 +870,105 @@ export default function ContabilidadFlujoMensual() {
 
                   {/* Agregar categoría */}
                   <tr>
-                    <td colSpan={14} className="px-3 py-2">
+                    <td colSpan={COLS} className="sticky left-0 px-2 py-2">
                       {nuevaFila.abierto ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            autoFocus
-                            value={nuevaFila.label}
+                        <div className="flex flex-wrap items-end gap-4">
+                          <Campo etiqueta="Nombre de la categoría" className="w-64" autoFocus
+                            value={nuevaFila.label} placeholder="Ej. Gastos dic 2024"
                             onChange={e => setNuevaFila(n => ({ ...n, label: e.target.value }))}
-                            placeholder="Nombre de la categoría (ej. Gtos dic 2024)"
-                            className="px-2.5 py-1.5 text-xs border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-400 w-56"
-                            onKeyDown={e => e.key === "Enter" && agregarFila()}
-                          />
-                          <select
-                            value={nuevaFila.signo}
-                            onChange={e => setNuevaFila(n => ({ ...n, signo: parseInt(e.target.value, 10) }))}
-                            className="px-2 py-1.5 text-xs border-2 border-slate-200 rounded-lg focus:outline-none"
-                          >
-                            <option value={-1}>Gasto (-)</option>
-                            <option value={1}>Ingreso (+)</option>
-                          </select>
-                          <button onClick={agregarFila} className="px-3 py-1.5 bg-purple-700 text-white text-xs font-bold rounded-lg hover:bg-purple-800">Agregar</button>
-                          <button onClick={() => setNuevaFila({ abierto: false, label: "", signo: -1 })} className="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600">Cancelar</button>
+                            onKeyDown={e => e.key === "Enter" && agregarFila()} />
+                          <Segmentado opciones={[{ id: -1, label: "Gasto" }, { id: 1, label: "Ingreso" }]}
+                            valor={nuevaFila.signo} onCambiar={v => setNuevaFila(n => ({ ...n, signo: v }))} />
+                          <Boton variante="secundario" onClick={agregarFila}>Agregar</Boton>
+                          <Boton variante="texto" onClick={() => setNuevaFila({ abierto: false, label: "", signo: -1 })}>Cancelar</Boton>
                         </div>
                       ) : (
-                        <button onClick={() => setNuevaFila(n => ({ ...n, abierto: true }))}
-                          className="flex items-center gap-1.5 text-xs font-bold text-purple-700 hover:text-purple-900">
-                          <IconPlus /> Agregar categoría
-                        </button>
+                        <Boton variante="texto" onClick={() => setNuevaFila(n => ({ ...n, abierto: true }))}>
+                          <IconoMas tamano={13} /> Agregar categoría
+                        </Boton>
                       )}
                     </td>
                   </tr>
 
-                  {/* Separador */}
-                  <tr><td colSpan={14} className="h-1 bg-slate-100" /></tr>
-
-                  {/* Base Imponible (calculada) */}
-                  <tr className="bg-slate-50">
-                    <td className="sticky left-0 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-800 z-10">[=] Base Imponible</td>
-                    {calc.baseImponible.map((v, i) => <CeldaCalculada key={i} value={v} bold />)}
-                    <CeldaCalculada value={calc.totalBaseImponible} bold />
+                  {/* Base imponible */}
+                  <tr className="shadow-[inset_0_1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    {encabezadoFila("Base imponible")}
+                    {calc.baseImponible.map((v, i) => <CeldaCifra key={i} value={v} />)}
+                    <CeldaCifra value={calc.totalBaseImponible} raya="total" />
                     <td />
                   </tr>
 
                   {/* Impuesto: automático (régimen) o manual */}
-                  <tr className="border-b border-slate-50 hover:bg-purple-50/20">
-                    <td className="sticky left-0 bg-white px-3 py-1 text-xs font-semibold text-slate-700 z-10 whitespace-nowrap">
-                      [-] Impto
+                  <tr className="border-b border-cuaderno-renglon">
+                    <th scope="row" className="sticky left-0 z-10 bg-cuaderno-hoja px-2 py-1.5 text-left font-normal text-[17px] whitespace-nowrap">
+                      <span className="inline-block w-5 text-cuaderno-grafito">−</span>Impuesto
                       <button
                         onClick={() => setData(d => ({ ...d, impuestoAuto: !d.impuestoAuto, ...(d.impuestoAuto ? { impuesto: calc.impuesto } : {}) }))}
                         title={data.impuestoAuto ? "Calculado con la tasa del régimen. Clic para ingresarlo a mano." : "Ingresado a mano. Clic para calcularlo con la tasa del régimen."}
-                        className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${data.impuestoAuto ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-500"}`}
+                        className="ml-2 text-[14px] text-cuaderno-grafito underline underline-offset-[3px] decoration-cuaderno-columna hover:text-cuaderno-tinta"
                       >
-                        {data.impuestoAuto ? `auto ${(tasa * 100).toLocaleString("es-CL")}%` : "manual"}
+                        {data.impuestoAuto ? `automático ${(tasa * 100).toLocaleString("es-CL")}%` : "a mano"}
                       </button>
-                    </td>
+                    </th>
                     {data.impuestoAuto
-                      ? calc.impuesto.map((v, i) => <CeldaCalculada key={i} value={v} />)
-                      : data.impuesto.map((v, i) => (
-                        <td key={i} className="px-0.5 py-0.5">
-                          <CeldaInput value={v} onChange={val => setValorExtra("impuesto", i, val)} />
-                        </td>
-                      ))}
-                    <CeldaCalculada value={calc.totalImpuesto} bold />
+                      ? calc.impuesto.map((v, i) => <CeldaCifra key={i} value={-v} />)
+                      : data.impuesto.map((v, i) => <CeldaInput key={i} value={v} onChange={val => setValorExtra("impuesto", i, val)} />)}
+                    <CeldaCifra value={-calc.totalImpuesto} />
                     <td />
                   </tr>
 
                   {/* Multas: no deducibles, pero salida de caja */}
-                  <tr className="border-b border-slate-50 hover:bg-purple-50/20">
-                    <td className="sticky left-0 bg-white px-3 py-1 text-xs font-semibold text-slate-700 z-10 whitespace-nowrap">
-                      <span title="Multas e intereses fiscales. No rebajan la Base Imponible, pero sí la Utilidad Líquida." className="cursor-help underline decoration-dotted decoration-slate-300 underline-offset-2">[-] Multas</span>
-                    </td>
-                    {data.multas.map((v, i) => (
-                      <td key={i} className="px-0.5 py-0.5">
-                        <CeldaInput value={v} onChange={val => setValorExtra("multas", i, val)} />
-                      </td>
-                    ))}
-                    <CeldaCalculada value={calc.totalMultas} bold />
+                  <tr className="border-b border-cuaderno-renglon">
+                    {encabezadoFila("Multas", "Multas e intereses fiscales. No rebajan la base imponible, pero sí la utilidad líquida.", -1)}
+                    {data.multas.map((v, i) => <CeldaInput key={i} value={v} onChange={val => setValorExtra("multas", i, val)} />)}
+                    <CeldaCifra value={-calc.totalMultas} />
                     <td />
                   </tr>
 
-                  {/* Utilidad Líquida (calculada, destacada) */}
-                  <tr className="bg-gradient-to-r from-purple-50 to-violet-50">
-                    <td className="sticky left-0 px-3 py-2 text-xs font-black text-slate-900 z-10" style={{ background: "linear-gradient(to right, #faf5ff, #f5f3ff)" }}>
-                      [=] Utilidad Líquida
-                    </td>
-                    {calc.utilidad.map((v, i) => <CeldaCalculada key={i} value={v} bold colorAuto />)}
-                    <CeldaCalculada value={calc.totalUtilidad} bold colorAuto />
+                  {/* Utilidad líquida */}
+                  <tr>
+                    <th scope="row" className="sticky left-0 z-10 bg-cuaderno-hoja px-2 py-2 text-left font-normal text-[18px] whitespace-nowrap">
+                      <Resaltado color={calc.totalUtilidad >= 0 ? "menta" : "rosa"}>Utilidad líquida</Resaltado>
+                    </th>
+                    {calc.utilidad.map((v, i) => <CeldaCifra key={i} value={v} raya="doble" />)}
+                    <CeldaCifra value={calc.totalUtilidad} raya="doble" />
                     <td />
                   </tr>
                 </tbody>
               </table>
             </div>
-          </div>
+          </Hoja>
 
-          {/* Información complementaria: PPM */}
-          <div className="glass-card rounded-xl overflow-hidden">
-            <div className="bg-slate-700 px-4 py-2.5">
-              <p className="text-white font-black text-xs">Información complementaria</p>
-              <p className="text-slate-300 text-[10px]">El PPM es un anticipo del Impto anual: no afecta la Utilidad Líquida</p>
-            </div>
+          {/* PPM */}
+          <Hoja titulo="Pagos provisionales mensuales">
+            <p className="m-0 -mt-1 mb-2 text-[15px] text-cuaderno-grafito">El PPM es un anticipo del impuesto anual: no cambia la utilidad líquida.</p>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse" style={{ minWidth: 920 }}>
+              <table className="w-full border-collapse" style={{ minWidth: 1180 }}>
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    <th className="sticky left-0 z-10 bg-cuaderno-hoja px-2 py-2 text-left font-normal text-[15px] text-cuaderno-grafito" style={{ minWidth: 220 }}>Concepto</th>
+                    {MESES_S.map(m => <th key={m} className="px-1.5 py-2 text-right font-normal text-[15px] text-cuaderno-grafito" style={{ minWidth: 92 }}>{m}</th>)}
+                    <th className="px-2 py-2 text-right font-normal text-[15px] text-cuaderno-tinta" style={{ minWidth: 112 }}>Total</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
                 <tbody>
-                  <tr className="border-b border-slate-50">
-                    <td className="sticky left-0 bg-white px-3 py-1 text-xs font-semibold text-slate-600 z-10" style={{ minWidth: 150 }}>PPM cancelado</td>
-                    {data.ppm.map((v, i) => (
-                      <td key={i} className="px-0.5 py-0.5" style={{ minWidth: 64 }}>
-                        <CeldaInput value={v} onChange={val => setValorExtra("ppm", i, val)} />
-                      </td>
-                    ))}
-                    <CeldaCalculada value={calc.totalPpm} bold />
-                    <td className="w-8" />
+                  <tr className="border-b border-cuaderno-renglon">
+                    {encabezadoFila("PPM pagado")}
+                    {data.ppm.map((v, i) => <CeldaInput key={i} value={v} onChange={val => setValorExtra("ppm", i, val)} />)}
+                    <CeldaCifra value={calc.totalPpm} />
+                    <td />
                   </tr>
                   <tr>
-                    <td className="sticky left-0 bg-white px-3 py-1 text-xs font-semibold text-slate-400 z-10 whitespace-nowrap"
-                      title="Ingresos del mes × tasa de PPM del régimen. Es un anticipo del Impto, no un gasto.">
-                      PPM sugerido ({(tasaPPM * 100).toLocaleString("es-CL")}%)
-                    </td>
-                    {calc.ppmSugerido.map((v, i) => <CeldaCalculada key={i} value={v} />)}
-                    <CeldaCalculada value={calc.totalPpmSugerido} bold />
-                    <td className="w-8" />
+                    {encabezadoFila(`PPM sugerido (${(tasaPPM * 100).toLocaleString("es-CL", { maximumFractionDigits: 3 })}%)`, "Ingresos del mes × tasa de PPM del régimen.")}
+                    {calc.ppmSugerido.map((v, i) => <CeldaCifra key={i} value={v} color="grafito" />)}
+                    <CeldaCifra value={calc.totalPpmSugerido} color="grafito" />
+                    <td />
                   </tr>
                 </tbody>
               </table>
             </div>
-          </div>
+          </Hoja>
         </>
       )}
     </div>

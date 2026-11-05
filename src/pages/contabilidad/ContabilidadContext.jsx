@@ -880,17 +880,16 @@ export function useContabilidad() {
 }
 
 // ─── Selector de período reutilizable ────────────────────────────────────────
+// Renglón subrayado del cuaderno (mismo estilo que Campo de Finanzas).
 export function PeriodoSelector({ className = "" }) {
   const { periodos, periodoActivo, setPeriodoActivo } = useContabilidad();
   return (
-    <div className={`relative ${className}`}>
-      <svg className="w-3.5 h-3.5 text-purple-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
+    <label className={`flex flex-col gap-0.5 text-sm text-cuaderno-grafito ${className}`}>
+      Período
       <select
         value={periodoActivo}
         onChange={e => setPeriodoActivo(e.target.value)}
-        className="pl-7 pr-8 py-2 border-2 border-purple-200 bg-purple-50 text-purple-800 rounded-xl focus:outline-none focus:border-purple-500 text-xs font-bold appearance-none cursor-pointer min-w-36"
+        className="min-h-[40px] min-w-36 border-0 border-b-[1.5px] border-cuaderno-tinta/70 focus:border-cuaderno-tinta bg-transparent px-1 text-[18px] text-cuaderno-tinta focus:outline-none cursor-pointer"
       >
         {periodos.map(p => {
           const [anio, mes] = p.id.split("-");
@@ -901,9 +900,6 @@ export function PeriodoSelector({ className = "" }) {
           );
         })}
       </select>
-      <svg className="w-3 h-3 text-purple-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-      </svg>
-    </div>
+    </label>
   );
 }

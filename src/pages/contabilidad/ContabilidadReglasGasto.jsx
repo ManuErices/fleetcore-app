@@ -11,11 +11,14 @@
 
 import React, { useMemo, useState } from "react";
 import { useContabilidad, fmt, normalizaRut } from "./ContabilidadContext";
+import {
+  Titulo, Hoja, Resaltado, Nota, VistoBueno, Boton, Campo, FechaHoja, IconoBorrar,
+} from "../finanzas/cuaderno";
 
 const ORIGENES = {
-  usuario:   { label: "Elegida por ti",    color: "#0d7d6b", bg: "#ecfdf5", desc: "Reclasificaste este proveedor a mano" },
-  auto:      { label: "Generada sola",     color: "#b45309", bg: "#fffbeb", desc: "La guardó el importador sin intervención — revísala" },
-  historial: { label: "Deducida del uso",  color: "#1a56a0", bg: "#eff6ff", desc: "Inferida de cómo clasificaste a este proveedor antes" },
+  usuario:   { label: "Elegida por ti",    resaltado: "menta",   desc: "Reclasificaste este proveedor a mano" },
+  auto:      { label: "Generada sola",     resaltado: "durazno", desc: "La guardó el importador sin intervención — revísala" },
+  historial: { label: "Deducida del uso",  resaltado: "lavanda", desc: "Inferida de cómo clasificaste a este proveedor antes" },
 };
 
 export default function ContabilidadReglasGasto() {
@@ -110,155 +113,161 @@ export default function ContabilidadReglasGasto() {
     .sort((a, b) => (a.codigo || "").localeCompare(b.codigo || ""));
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <div className="rounded-2xl overflow-hidden" style={{ background: "#0f2744" }}>
-        <div className="px-6 py-4">
-          <p className="text-white/50 text-[10px] font-bold uppercase tracking-[2px]">Importación</p>
-          <h2 className="text-white font-black text-xl tracking-tight">Reglas de Clasificación</h2>
-          <p className="text-blue-300 text-xs mt-0.5">
-            Qué cuenta se asigna a cada proveedor al importar el RCV
-          </p>
-        </div>
-      </div>
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
 
-      {/* Contadores */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {Object.entries(ORIGENES).map(([k, o]) => (
-          <button key={k} onClick={() => setFiltro(filtro === k ? "todas" : k)}
-            className={`rounded-xl px-4 py-3 text-left border transition-all ${filtro === k ? "ring-2" : ""}`}
-            style={{ background: o.bg, borderColor: `${o.color}30`, ringColor: o.color }}>
-            <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: o.color }}>{o.label}</p>
-            <p className="text-2xl font-black mt-0.5" style={{ color: o.color }}>{conteo[k]}</p>
-            <p className="text-[11px] mt-0.5 leading-snug" style={{ color: o.color, opacity: .75 }}>{o.desc}</p>
-          </button>
-        ))}
-      </div>
+      <FechaHoja />
+
+      <header>
+        <p className="m-0 text-[15px] text-cuaderno-grafito">Importación</p>
+        <Titulo>Reglas de clasificación</Titulo>
+        <p className="m-0 text-[17px] text-cuaderno-grafito">Qué cuenta se asigna a cada proveedor al importar el RCV</p>
+      </header>
+
+      {/* Contadores (filtran la tabla) */}
+      <Hoja titulo="Por origen">
+        <div className="grid gap-x-10 gap-y-2 sm:grid-cols-3">
+          {Object.entries(ORIGENES).map(([k, o]) => {
+            const activo = filtro === k;
+            return (
+              <button key={k} type="button" aria-pressed={activo} onClick={() => setFiltro(activo ? "todas" : k)}
+                className={`text-left rounded-md px-3 py-2 border-[1.5px] focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+                  activo ? "border-cuaderno-tinta bg-cuaderno-papel" : "border-transparent hover:bg-cuaderno-papel"}`}>
+                <div className="flex items-baseline justify-between gap-3 text-[18px]">
+                  <Resaltado color={o.resaltado}>{o.label}</Resaltado>
+                  <span className="text-[22px]">{conteo[k]}</span>
+                </div>
+                <p className="m-0 mt-1 text-[14px] leading-snug text-cuaderno-grafito">{o.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+      </Hoja>
 
       {conteo.auto > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex-1">
-            <p className="text-sm font-bold text-amber-800">
-              Hay {conteo.auto} regla(s) que se guardaron solas
-            </p>
-            <p className="text-xs text-amber-700 mt-0.5 leading-snug">
-              El importador las creaba por cada asiento, aunque nadie hubiera reclasificado.
-              Como tienen prioridad sobre la clasificación por nombre, congelan la cuenta
-              equivocada. Limpiarlas es seguro: lo que elegiste a mano se conserva.
-            </p>
+        <Hoja>
+          <div className="pt-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex-1 space-y-1">
+              <Nota etiqueta="Ojo:">Hay {conteo.auto} regla(s) que se guardaron solas.</Nota>
+              <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
+                El importador las creaba por cada asiento, aunque nadie hubiera reclasificado.
+                Como tienen prioridad sobre la clasificación por nombre, congelan la cuenta
+                equivocada. Limpiarlas es seguro: lo que elegiste a mano se conserva.
+              </p>
+            </div>
+            <Boton variante="primario" onClick={limpiar} disabled={limpiando} className="whitespace-nowrap">
+              {limpiando ? "Limpiando…" : "Limpiar reglas automáticas"}
+            </Boton>
           </div>
-          <button onClick={limpiar} disabled={limpiando}
-            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors whitespace-nowrap">
-            {limpiando ? "Limpiando…" : "Limpiar reglas automáticas"}
-          </button>
-        </div>
+        </Hoja>
       )}
 
       {corruptos > 0 && (
-        <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex-1">
-            <p className="text-sm font-bold text-slate-800">
-              {corruptos} proveedor(es) con el nombre mal codificado
-            </p>
-            <p className="text-xs text-slate-600 mt-0.5 leading-snug">
-              El CSV del SII venía en UTF-8 y se leía como Latin-1, así que "ÓPTICA" quedó
-              guardado como "Ã“PTICA". La lectura ya está arreglada; esto corrige lo que
-              quedó en la base.
-            </p>
+        <Hoja>
+          <div className="pt-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex-1 space-y-1">
+              <Nota etiqueta="Nota:">{corruptos} proveedor(es) con el nombre mal codificado.</Nota>
+              <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
+                El CSV del SII venía en UTF-8 y se leía como Latin-1, así que "ÓPTICA" quedó
+                guardado como "Ã“PTICA". La lectura ya está arreglada; esto corrige lo que
+                quedó en la base.
+              </p>
+            </div>
+            <Boton onClick={repararNombres} disabled={reparando} className="whitespace-nowrap">
+              {reparando ? "Corrigiendo…" : "Corregir nombres"}
+            </Boton>
           </div>
-          <button onClick={repararNombres} disabled={reparando}
-            className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors whitespace-nowrap">
-            {reparando ? "Corrigiendo…" : "Corregir nombres"}
-          </button>
-        </div>
+        </Hoja>
       )}
 
       {discrepantes.length > 0 && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-          <p className="text-sm font-bold text-blue-800">
-            {discrepantes.length} proveedor(es) con la regla en desacuerdo con el historial
-          </p>
-          <p className="text-xs text-blue-700 mt-0.5">
+        <div className="space-y-1">
+          <Nota etiqueta="Ojo:">{discrepantes.length} proveedor(es) con la regla en desacuerdo con el historial.</Nota>
+          <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
             La regla apunta a una cuenta, pero en los asientos ya registrados usaste otra.
             Revísalos abajo: aparecen con la sugerencia al lado.
           </p>
         </div>
       )}
 
-      {aviso && (
-        <div className={`rounded-xl px-4 py-2.5 border ${aviso.ok ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
-          <p className={`text-sm font-bold ${aviso.ok ? "text-emerald-700" : "text-red-700"}`}>{aviso.texto}</p>
-        </div>
-      )}
+      {aviso && (aviso.ok
+        ? <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-verde"><VistoBueno tamano={15} titulo="" />{aviso.texto}</p>
+        : <Nota etiqueta="Ojo:">{aviso.texto}</Nota>)}
 
-      <input
-        className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400"
-        placeholder="Buscar por proveedor, RUT o cuenta…"
-        value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-
-      <div className="rounded-2xl overflow-hidden border border-slate-200">
+      <Hoja titulo="Proveedores"
+        extra={
+          <Campo etiqueta="Buscar" type="search" className="w-72"
+            placeholder="Proveedor, RUT o cuenta"
+            value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        }>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 760 }}>
+          <table className="w-full border-collapse" style={{ minWidth: 760 }}>
             <thead>
-              <tr style={{ background: "#f8fafc" }}>
-                {["Proveedor", "RUT", "Origen", "Cuenta asignada", ""].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-left border-b-2 border-slate-200 whitespace-nowrap">{h}</th>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                {["Proveedor", "RUT", "Origen", "Cuenta asignada"].map(h => (
+                  <th key={h} className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2 whitespace-nowrap">{h}</th>
                 ))}
+                <th className="w-12"><span className="sr-only">Acciones</span></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {visibles.map(f => {
                 const o = ORIGENES[f.origen] || ORIGENES.auto;
                 const disc = f.sugerenciaHistorial && f.sugerenciaHistorial.cuentaId !== f.cuentaId;
                 return (
-                  <tr key={f.rut} className="hover:bg-slate-50/60">
-                    <td className="px-3 py-2 font-bold text-slate-700 max-w-[220px] truncate">
-                      {f.razonSocial || <span className="text-slate-400 font-normal">Sin razón social</span>}
+                  <tr key={f.rut} className="border-b border-cuaderno-renglon hover:bg-cuaderno-papel align-top">
+                    <td className="px-2 py-2 text-[17px] max-w-[220px] truncate">
+                      {f.razonSocial || <span className="text-cuaderno-grafito">Sin razón social</span>}
                     </td>
-                    <td className="px-3 py-2 font-mono text-slate-500 text-xs whitespace-nowrap">{f.rut}</td>
-                    <td className="px-3 py-2">
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap"
-                        style={{ background: o.bg, color: o.color }}>{o.label}</span>
+                    <td className="px-2 py-2 text-[15px] text-cuaderno-grafito whitespace-nowrap">{f.rut}</td>
+                    <td className="px-2 py-2 text-[15px] whitespace-nowrap">
+                      <Resaltado color={o.resaltado}>{o.label}</Resaltado>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1">
                       <select
+                        aria-label={`Cuenta asignada a ${f.razonSocial || f.rut}`}
                         value={f.cuentaId || ""}
                         onChange={e => cambiarCuenta(f, e.target.value)}
-                        className="w-full max-w-[280px] px-2 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:border-purple-400">
+                        className="w-full max-w-[300px] min-h-[36px] px-1 bg-transparent border-0 border-b-[1.5px] border-cuaderno-tinta/70 text-[15px] text-cuaderno-tinta focus:outline-none focus:border-cuaderno-tinta">
                         <option value="">Sin cuenta — se clasifica por nombre</option>
                         {cuentasGasto.map(c => (
                           <option key={c.id} value={c.id}>{c.codigo} · {c.nombre}</option>
                         ))}
                       </select>
                       {disc && (
-                        <button onClick={() => cambiarCuenta(f, f.sugerenciaHistorial.cuentaId)}
-                          className="mt-1 text-[11px] text-blue-600 hover:underline font-semibold">
+                        <Boton variante="texto" className="min-h-[32px] mt-1 text-[14px] text-left"
+                          onClick={() => cambiarCuenta(f, f.sugerenciaHistorial.cuentaId)}>
                           En tus asientos usaste {f.sugerenciaHistorial.cuentaNombre} ({f.sugerenciaHistorial.veces}×) — aplicar
-                        </button>
+                        </Boton>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-2 py-2 text-right">
                       {f.guardada && (
                         <button onClick={() => eliminarReglaGasto(f.rut)}
-                          title="Eliminar regla"
-                          className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 inline-flex items-center justify-center transition-all">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M4 7h16" /></svg>
+                          title="Eliminar regla" aria-label="Eliminar regla"
+                          className="w-8 h-8 rounded-md inline-flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40">
+                          <IconoBorrar tamano={14} />
                         </button>
                       )}
                     </td>
                   </tr>
                 );
               })}
-              {visibles.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400">
-                  {filas.length === 0 ? "Todavía no hay reglas. Se crean al reclasificar un asiento importado." : "Nada con ese filtro"}
-                </td></tr>
-              )}
             </tbody>
           </table>
+          {visibles.length === 0 && (
+            <div className="py-12 text-center">
+              <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">
+                {filas.length === 0 ? "Todavía no hay reglas" : "Nada con ese filtro"}
+              </p>
+              {filas.length === 0 && (
+                <p className="m-0 text-[16px] text-cuaderno-grafito">Se crean al reclasificar un asiento importado.</p>
+              )}
+            </div>
+          )}
         </div>
-      </div>
+      </Hoja>
 
-      <p className="text-[11px] text-slate-400 leading-snug">
+      <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
         Al importar, el orden de prioridad es: regla elegida por ti → cuenta que más usaste
         con ese proveedor → clasificación por el nombre de la razón social. Cambiar una cuenta
         acá la marca como decisión tuya y pasa al primer nivel.

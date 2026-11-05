@@ -18,6 +18,9 @@ import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useContabilidad, fmt, MESES } from "./ContabilidadContext";
+import {
+  Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, FechaHoja,
+} from "../finanzas/cuaderno";
 
 // ─── Vida útil tributaria ─────────────────────────────────────────────────────
 // Tabla del SII, en años. El lookup se hace normalizado porque el campo `tipo`
@@ -183,114 +186,133 @@ export default function ContabilidadDepreciacion() {
     setGuardando(false);
   };
 
+  const nombreMes = `${MESES[parseInt(mes) - 1]} ${anio}`;
+  const TH = "font-normal text-[15px] text-cuaderno-grafito px-2 py-2 whitespace-nowrap";
+
   return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <div className="rounded-2xl overflow-hidden" style={{ background: "#0f2744" }}>
-        <div className="px-6 py-4">
-          <p className="text-white/50 text-[10px] font-bold uppercase tracking-[2px]">Contabilización</p>
-          <h2 className="text-white font-black text-xl tracking-tight">Depreciación del Período</h2>
-          <p className="text-blue-300 text-xs mt-0.5">
-            Método lineal · prorrateo desde el mes siguiente a la adquisición · NIC 16
-          </p>
-        </div>
-      </div>
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+
+      <FechaHoja />
+
+      <header>
+        <p className="m-0 text-[15px] text-cuaderno-grafito">Contabilización</p>
+        <Titulo>Depreciación del período</Titulo>
+        <p className="m-0 text-[17px] text-cuaderno-grafito">
+          Método lineal · prorrateo desde el mes siguiente a la adquisición · NIC 16
+        </p>
+      </header>
 
       {/* Estado */}
       {!cGasto || !cAcum ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-          <p className="text-sm font-bold text-red-700">Faltan cuentas en el plan</p>
-          <p className="text-xs text-red-600 mt-1">
-            Se necesitan <span className="font-mono">6-03-001 Depreciación del Período</span> y{" "}
-            <span className="font-mono">1-02-002 Depreciación Acumulada</span>.
+        <div className="space-y-1">
+          <Nota etiqueta="Ojo:">Faltan cuentas en el plan.</Nota>
+          <p className="m-0 text-[15px] text-cuaderno-grafito">
+            Se necesitan 6-03-001 Depreciación del Período y 1-02-002 Depreciación Acumulada.
           </p>
         </div>
       ) : yaGenerado ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <p className="text-sm font-bold text-emerald-700">
-            La depreciación de {MESES[parseInt(mes) - 1]} {anio} ya está contabilizada
+        <div className="space-y-1">
+          <p className="m-0 flex items-center gap-2 text-[18px] text-cuaderno-verde">
+            <VistoBueno tamano={15} titulo="" />
+            La depreciación de {nombreMes} ya está contabilizada
           </p>
-          <p className="text-xs text-emerald-600 mt-1">
+          <p className="m-0 text-[15px] text-cuaderno-grafito">
             Si necesitas rehacerla, elimina primero el asiento desde el Libro Diario.
           </p>
         </div>
       ) : cerrado ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-sm font-bold text-slate-700">El período está cerrado</p>
-        </div>
+        <p className="m-0 text-[18px] text-cuaderno-grafito">
+          <Resaltado color="lavanda">El período está cerrado</Resaltado>
+        </p>
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex-1">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              A contabilizar en {MESES[parseInt(mes) - 1]} {anio}
-            </p>
-            <p className="text-2xl font-black text-slate-800 mt-0.5">{fmt(total)}</p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {depreciables.length} de {detalle.length} activos
-            </p>
+        <Hoja titulo={`A contabilizar en ${nombreMes}`}>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+            <div className="flex-1 max-w-md">
+              <LineaGuia etiqueta="Depreciación del mes">
+                <Cifra valor={total} escala="pesos" vacio="$0" raya="doble" />
+              </LineaGuia>
+              <p className="m-0 text-[14px] text-cuaderno-grafito">
+                {depreciables.length} de {detalle.length} activos
+              </p>
+            </div>
+            <Boton variante="primario" onClick={generar} disabled={!puedeGenerar || guardando}>
+              {guardando ? "Generando…" : "Generar asiento"}
+            </Boton>
           </div>
-          <button onClick={generar} disabled={!puedeGenerar || guardando}
-            className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm rounded-xl transition-colors">
-            {guardando ? "Generando…" : "Generar asiento"}
-          </button>
-        </div>
+        </Hoja>
       )}
 
-      {mensaje && (
-        <div className={`rounded-xl px-4 py-3 border ${mensaje.ok ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
-          <p className={`text-sm font-bold ${mensaje.ok ? "text-emerald-700" : "text-red-700"}`}>{mensaje.texto}</p>
-        </div>
-      )}
+      {mensaje && (mensaje.ok
+        ? <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-verde"><VistoBueno tamano={15} titulo="" />{mensaje.texto}</p>
+        : <Nota etiqueta="Ojo:">{mensaje.texto}</Nota>)}
 
       {/* Detalle */}
-      <div className="rounded-2xl overflow-hidden border border-slate-200">
+      <Hoja titulo="Detalle por activo">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 720 }}>
+          <table className="w-full border-collapse" style={{ minWidth: 720 }}>
             <thead>
-              <tr style={{ background: "#f8fafc" }}>
-                {["Activo", "Familia SII", "Valor compra", "Residual", "Vida útil", "Cuota mes", "Estado"].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-[10px] font-black text-slate-500 uppercase tracking-widest text-left whitespace-nowrap border-b-2 border-slate-200">{h}</th>
-                ))}
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                <th className={`${TH} text-left`}>Activo</th>
+                <th className={`${TH} text-left`}>Familia SII</th>
+                <th className={`${TH} text-right`}>Valor compra</th>
+                <th className={`${TH} text-right`}>Residual</th>
+                <th className={`${TH} text-left`}>Vida útil</th>
+                <th className={`${TH} text-right`}>Cuota mes</th>
+                <th className={`${TH} text-left`}>Estado</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {cargando && (
-                <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">Cargando activos…</td></tr>
+                <tr><td colSpan={7} className="px-2 py-8 text-center text-[17px] text-cuaderno-grafito">Cargando activos…</td></tr>
+              )}
+              {!cargando && detalle.length === 0 && (
+                <tr><td colSpan={7} className="py-12 text-center">
+                  <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">No hay activos registrados</p>
+                </td></tr>
               )}
               {!cargando && detalle.map(d => (
-                <tr key={d.id} className={d.monto > 0 ? "" : "bg-slate-50/60"}>
-                  <td className="px-3 py-2 font-bold text-slate-700">{d.nombre}</td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">{familiaTributaria(d)}</td>
-                  <td className="px-3 py-2 font-mono text-slate-600 text-xs">{d.valorCompra ? fmt(num(d.valorCompra)) : "—"}</td>
-                  <td className="px-3 py-2 font-mono text-slate-500 text-xs">{d.valorResidual ? fmt(num(d.valorResidual)) : "—"}</td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">
-                    {num(d.vidaUtilAnios) || vidaUtilTributaria(d)} años
-                    {!num(d.vidaUtilAnios) && <span className="text-slate-300"> (SII)</span>}
+                <tr key={d.id} className={`border-b border-cuaderno-renglon hover:bg-cuaderno-papel ${d.monto > 0 ? "" : "text-cuaderno-grafito"}`}>
+                  <td className="px-2 py-2 text-[17px]">{d.nombre}</td>
+                  <td className="px-2 py-2 text-[15px] text-cuaderno-grafito">{familiaTributaria(d)}</td>
+                  <td className="px-2 py-2 text-right text-[16px]">
+                    {d.valorCompra ? <Cifra valor={num(d.valorCompra)} escala="pesos" color="heredar" /> : <span className="text-cuaderno-grafito">—</span>}
                   </td>
-                  <td className="px-3 py-2 font-mono font-bold text-slate-700">{d.monto > 0 ? fmt(d.monto) : "—"}</td>
-                  <td className="px-3 py-2 text-xs">
+                  <td className="px-2 py-2 text-right text-[16px]">
+                    {d.valorResidual ? <Cifra valor={num(d.valorResidual)} escala="pesos" color="heredar" /> : <span className="text-cuaderno-grafito">—</span>}
+                  </td>
+                  <td className="px-2 py-2 text-[15px] whitespace-nowrap">
+                    {num(d.vidaUtilAnios) || vidaUtilTributaria(d)} años
+                    {!num(d.vidaUtilAnios) && <span className="text-cuaderno-grafito"> (SII)</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right text-[16px]">
+                    {d.monto > 0 ? <Cifra valor={d.monto} escala="pesos" /> : <span className="text-cuaderno-grafito">—</span>}
+                  </td>
+                  <td className="px-2 py-2 text-[14px]">
                     {d.monto > 0
-                      ? <span className="text-slate-400">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}</span>
-                      : <span className="text-amber-600">{d.motivo}</span>}
+                      ? <span className="text-cuaderno-grafito">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}</span>
+                      : <Resaltado color="durazno">{d.motivo}</Resaltado>}
                   </td>
                 </tr>
               ))}
             </tbody>
             {!cargando && (
               <tfoot>
-                <tr style={{ background: "#0f2744" }}>
-                  <td colSpan={5} className="px-3 py-2.5 text-right text-xs font-black text-white uppercase tracking-widest">Total del mes</td>
-                  <td className="px-3 py-2.5 font-mono font-black text-white">{fmt(total)}</td>
+                <tr>
+                  <td colSpan={5} className="px-2 pt-3 text-right text-[17px]">Total del mes</td>
+                  <td className="px-2 pt-3 text-right text-[17px]">
+                    <Cifra valor={total} escala="pesos" vacio="$0" raya="total" />
+                  </td>
                   <td />
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
-      </div>
+      </Hoja>
 
-      <p className="text-[11px] text-slate-400 leading-snug">
+      <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
         Cuando un activo no tiene vida útil propia se usa la tabla del SII según su familia.
-        El valor residual se lee del campo <span className="font-mono">valorResidual</span> de la ficha
+        El valor residual se lee del campo valorResidual de la ficha
         del equipo; si no está definido se deprecia el 100% del valor de compra.
       </p>
     </div>

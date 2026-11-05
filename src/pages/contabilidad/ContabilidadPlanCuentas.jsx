@@ -1,5 +1,9 @@
 import React, { useState, useMemo } from "react";
-import { useContabilidad, TIPOS_CUENTA, TIPOS_MAP, fmt } from "./ContabilidadContext";
+import { useContabilidad, TIPOS_CUENTA, TIPOS_MAP } from "./ContabilidadContext";
+import {
+  Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, Campo, Casilla,
+  ModalCuaderno, FechaHoja, IconoMas, IconoLapiz, casoOracion,
+} from "../finanzas/cuaderno";
 
 // ─── Modal agregar/editar cuenta ─────────────────────────────────────────────
 const EMPTY_CUENTA = { codigo: "", nombre: "", tipo: "activo_corriente", descripcion: "", activa: true };
@@ -23,78 +27,55 @@ function ModalCuenta({ isOpen, onClose, editando, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="font-black text-base">{editando ? "Editar Cuenta" : "Nueva Cuenta"}</h2>
-              <p className="text-white/70 text-xs">Plan de Cuentas</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">Código <span className="text-red-500">*</span></label>
-              <input value={form.codigo} onChange={e => set("codigo", e.target.value)} placeholder="1-01-001" className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm font-mono" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">Estado</label>
-              <button onClick={() => set("activa", !form.activa)} className={`w-full py-2 rounded-xl text-xs font-bold border-2 transition-all ${form.activa ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
-                {form.activa ? "✓ Activa" : "Inactiva"}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">Nombre <span className="text-red-500">*</span></label>
-            <input value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: Caja Chica" className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-2">Tipo de cuenta</label>
-            <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
-              {TIPOS_CUENTA.map(t => (
-                <button key={t.id} onClick={() => set("tipo", t.id)}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold text-left transition-all border-2 ${form.tipo === t.id ? "border-purple-500 bg-purple-50 text-purple-800" : "border-slate-100 hover:border-slate-200 text-slate-600"}`}>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase">{t.grupo}</span>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">Descripción</label>
-            <textarea value={form.descripcion || ""} onChange={e => set("descripcion", e.target.value)} rows={2} placeholder="Descripción opcional..." className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm resize-none" />
-          </div>
-        </div>
-        <div className="px-5 pb-5 flex gap-3">
-          <button onClick={onClose} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">Cancelar</button>
+    <ModalCuaderno
+      titulo={editando ? "Editar cuenta" : "Nueva cuenta"}
+      subtitulo="Plan de cuentas"
+      ancho="max-w-lg"
+      onClose={onClose}
+      bloqueado={saving}
+      pie={
+        <div className="flex items-center gap-2">
+          <Boton variante="texto" onClick={onClose} disabled={saving}>Cancelar</Boton>
           <div className="flex-1" />
-          <button onClick={handleSubmit} disabled={saving || !form.codigo || !form.nombre}
-            className="px-5 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2">
-            {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>{editando ? "Guardar cambios" : "Crear cuenta"}</>}
-          </button>
+          <Boton variante="primario" onClick={handleSubmit} disabled={saving || !form.codigo || !form.nombre}>
+            {saving ? "Guardando…" : editando ? "Guardar cambios" : "Crear cuenta"}
+          </Boton>
+        </div>
+      }>
+      <div className="grid grid-cols-2 gap-4 items-end">
+        <Campo etiqueta="Código (obligatorio)" value={form.codigo} onChange={e => set("codigo", e.target.value)} placeholder="1-01-001" />
+        <Casilla marcada={form.activa} onCambiar={v => set("activa", v)}>Activa</Casilla>
+      </div>
+      <Campo etiqueta="Nombre (obligatorio)" value={form.nombre} onChange={e => set("nombre", e.target.value)} placeholder="Ej: Caja Chica" />
+      <div>
+        <div className="text-sm text-cuaderno-grafito mb-1.5">Tipo de cuenta</div>
+        <div role="radiogroup" aria-label="Tipo de cuenta" className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
+          {TIPOS_CUENTA.map(t => {
+            const activo = form.tipo === t.id;
+            return (
+              <button key={t.id} type="button" role="radio" aria-checked={activo} onClick={() => set("tipo", t.id)}
+                className={`min-h-[44px] px-3 py-1.5 rounded-md border-[1.5px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 ${
+                  activo ? "border-cuaderno-tinta bg-cuaderno-hoja" : "border-cuaderno-columna/70 hover:border-cuaderno-tinta/60"}`}>
+                <span className="block text-[12px] text-cuaderno-grafito">{casoOracion(t.grupo)}</span>
+                <span className="text-[16px] text-cuaderno-tinta">
+                  {activo ? <Resaltado color="menta">{t.label}</Resaltado> : t.label}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
-    </div>
+      <Campo as="textarea" etiqueta="Descripción" rows={2} value={form.descripcion || ""} onChange={e => set("descripcion", e.target.value)} placeholder="Descripción opcional…" />
+    </ModalCuaderno>
   );
 }
 
-// ─── Badge grupo ──────────────────────────────────────────────────────────────
-const GRUPO_COLORS = {
-  ACTIVO:      "bg-emerald-100 text-emerald-700",
-  PASIVO:      "bg-red-100 text-red-700",
-  PATRIMONIO:  "bg-blue-100 text-blue-700",
-  RESULTADO:   "bg-amber-100 text-amber-700",
-  TRIBUTARIO:  "bg-purple-100 text-purple-700",
+// ─── Resaltado por grupo ──────────────────────────────────────────────────────
+const GRUPO_RESALTADO = {
+  ACTIVO:     "menta",
+  PASIVO:     "rosa",
+  PATRIMONIO: "lavanda",
+  RESULTADO:  "durazno",
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -177,147 +158,133 @@ export default function ContabilidadPlanCuentas() {
   const grupos = ["ACTIVO", "PASIVO", "PATRIMONIO", "RESULTADO", "TRIBUTARIO"];
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+
+      <FechaHoja />
+
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900">Plan de Cuentas</h1>
-          <p className="text-xs text-slate-500 mt-0.5">{cuentas.length} cuentas registradas</p>
+          <Titulo>Plan de cuentas</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">{cuentas.length} cuentas registradas</p>
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
+        <div className="flex flex-wrap items-end gap-3">
           {/* Botón deduplicar — solo visible si hay duplicados */}
           {cuentas.length !== new Set(cuentas.map(c => c.codigo)).size && (
-            <button
-              onClick={deduplicarCuentas}
-              disabled={deduplicando}
-              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all"
-            >
-              {deduplicando
-                ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Limpiando...</>
-                : <>🧹 Eliminar duplicadas</>
-              }
-            </button>
+            <Boton onClick={deduplicarCuentas} disabled={deduplicando}>
+              {deduplicando ? "Limpiando…" : "Eliminar duplicadas"}
+            </Boton>
           )}
-          {errorDedup && (
-            <p className="text-xs font-bold text-red-600 mt-1">⚠️ {errorDedup}</p>
-          )}
-          {resultadoDedup !== null && (
-            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200">
-              ✅ {resultadoDedup} cuenta{resultadoDedup !== 1 ? "s" : ""} duplicada{resultadoDedup !== 1 ? "s" : ""} fusionada{resultadoDedup !== 1 ? "s" : ""}
-              {reasignadosDedup > 0 && ` · ${reasignadosDedup} asiento${reasignadosDedup !== 1 ? "s" : ""} reasignado${reasignadosDedup !== 1 ? "s" : ""}`}
-            </span>
-          )}
-          <button
-            onClick={() => { setEditando(null); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white font-bold rounded-xl text-sm shadow-md shadow-purple-200 hover:shadow-lg transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Nueva cuenta
-          </button>
+          <Boton variante="primario" onClick={() => { setEditando(null); setShowModal(true); }}>
+            <IconoMas tamano={14} /> Nueva cuenta
+          </Boton>
         </div>
-      </div>
+      </header>
 
-      {/* KPIs por grupo */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        {grupos.map(g => (
-          <button key={g} onClick={() => setFiltroGrupo(filtroGrupo === g ? "todos" : g)}
-            className={`rounded-xl p-3 border-2 transition-all text-left ${filtroGrupo === g ? "border-purple-500 bg-purple-50" : "border-slate-100 bg-white hover:border-slate-200"}`}>
-            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{g}</p>
-            <p className="text-lg font-black text-slate-800 mt-0.5">{totalPorGrupo[g] || 0}</p>
-            <p className="text-[10px] text-slate-500">cuentas</p>
-          </button>
-        ))}
-      </div>
+      {errorDedup && <Nota etiqueta="Ojo:">{errorDedup}</Nota>}
+      {resultadoDedup !== null && (
+        <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-verde">
+          <VistoBueno tamano={15} titulo="" />
+          {resultadoDedup} cuenta{resultadoDedup !== 1 ? "s" : ""} duplicada{resultadoDedup !== 1 ? "s" : ""} fusionada{resultadoDedup !== 1 ? "s" : ""}
+          {reasignadosDedup > 0 && ` · ${reasignadosDedup} asiento${reasignadosDedup !== 1 ? "s" : ""} reasignado${reasignadosDedup !== 1 ? "s" : ""}`}
+        </p>
+      )}
 
-      {/* Filtros */}
-      <div className="glass-card rounded-xl p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por código o nombre..." className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm" />
+      {/* Cuentas por grupo (filtran la tabla) */}
+      <Hoja titulo="Por grupo">
+        <div className="grid gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
+          {grupos.map(g => {
+            const activo = filtroGrupo === g;
+            return (
+              <button key={g} type="button" aria-pressed={activo} onClick={() => setFiltroGrupo(activo ? "todos" : g)}
+                className="text-left rounded-sm hover:bg-cuaderno-papel focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40">
+                <LineaGuia etiqueta={activo ? <Resaltado color="lavanda">{casoOracion(g)}</Resaltado> : casoOracion(g)}>
+                  <span>{totalPorGrupo[g] || 0} <span className="text-[15px] text-cuaderno-grafito">cuentas</span></span>
+                </LineaGuia>
+              </button>
+            );
+          })}
         </div>
-        <select value={filtroActiva} onChange={e => setFiltroActiva(e.target.value)} className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:border-purple-400">
-          <option value="activas">Activas</option>
-          <option value="inactivas">Inactivas</option>
-          <option value="todas">Todas</option>
-        </select>
-      </div>
+      </Hoja>
 
       {/* Tabla */}
-      {loadingCuentas ? (
-        <div className="flex items-center justify-center h-40">
-          <div className="w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : (
-        <div className="glass-card rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Código</th>
-                <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500">Nombre</th>
-                <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500 hidden sm:table-cell">Tipo</th>
-                <th className="px-4 py-3 text-left text-xs font-black uppercase tracking-wider text-slate-500 hidden md:table-cell">Grupo</th>
-                <th className="px-4 py-3 text-right text-xs font-black uppercase tracking-wider text-slate-500">Saldo</th>
-                <th className="px-4 py-3 text-center text-xs font-black uppercase tracking-wider text-slate-500">Estado</th>
-                <th className="px-4 py-3 text-center text-xs font-black uppercase tracking-wider text-slate-500">Acción</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {cuentasFiltradas.map((c, i) => {
-                const tipo = TIPOS_MAP[c.tipo];
-                const saldo = saldoCuenta(c.id);
-                return (
-                  <tr key={c.id} className={`hover:bg-purple-50/30 transition-colors ${i % 2 === 0 ? "bg-white" : "bg-slate-50/20"}`}>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">{c.codigo}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-semibold text-slate-800">{c.nombre}</p>
-                      {c.descripcion && <p className="text-xs text-slate-400 truncate max-w-48">{c.descripcion}</p>}
-                    </td>
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <span className="text-xs text-slate-600">{tipo?.label || c.tipo}</span>
-                    </td>
-                    <td className="px-4 py-3 hidden md:table-cell">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${GRUPO_COLORS[tipo?.grupo] || "bg-slate-100 text-slate-600"}`}>
-                        {tipo?.grupo || "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`text-sm font-black ${saldo !== 0 ? (saldo > 0 ? "text-emerald-600" : "text-red-500") : "text-slate-300"}`}>
-                        {saldo !== 0 ? fmt(saldo) : "—"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${c.activa ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>
-                        {c.activa ? "Activa" : "Inactiva"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button onClick={() => { setEditando(c); setShowModal(true); }}
-                        className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center mx-auto transition-all">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                      </button>
-                    </td>
+      <Hoja titulo="Cuentas"
+        extra={
+          <>
+            <Campo etiqueta="Buscar" type="search" className="w-60"
+              value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Código o nombre" />
+            <Campo as="select" etiqueta="Estado" value={filtroActiva} onChange={e => setFiltroActiva(e.target.value)}>
+              <option value="activas">Activas</option>
+              <option value="inactivas">Inactivas</option>
+              <option value="todas">Todas</option>
+            </Campo>
+          </>
+        }>
+        {loadingCuentas ? (
+          <p className="m-0 py-12 text-center text-[18px] text-cuaderno-grafito">Buscando las cuentas…</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2">Código</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2">Nombre</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2 hidden sm:table-cell">Tipo</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2 hidden md:table-cell">Grupo</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2">Saldo</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-center px-2 py-2">Estado</th>
+                    <th className="w-12"><span className="sr-only">Acciones</span></th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {cuentasFiltradas.length === 0 && (
-            <div className="py-16 text-center">
-              <p className="text-slate-400 text-sm">No hay cuentas que coincidan con los filtros</p>
+                </thead>
+                <tbody>
+                  {cuentasFiltradas.map(c => {
+                    const tipo = TIPOS_MAP[c.tipo];
+                    const saldo = saldoCuenta(c.id);
+                    return (
+                      <tr key={c.id} className={`group border-b border-cuaderno-renglon hover:bg-cuaderno-papel ${!c.activa ? "opacity-60" : ""}`}>
+                        <td className="px-2 py-2 text-[16px] whitespace-nowrap">{c.codigo}</td>
+                        <td className="px-2 py-2">
+                          <p className="m-0 text-[17px] leading-tight">{c.nombre}</p>
+                          {c.descripcion && <p className="m-0 text-[13px] text-cuaderno-grafito truncate max-w-[240px]">{c.descripcion}</p>}
+                        </td>
+                        <td className="px-2 py-2 text-[15px] text-cuaderno-grafito hidden sm:table-cell">{tipo?.label || c.tipo}</td>
+                        <td className="px-2 py-2 text-[15px] hidden md:table-cell whitespace-nowrap">
+                          {tipo?.grupo
+                            ? (GRUPO_RESALTADO[tipo.grupo]
+                                ? <Resaltado color={GRUPO_RESALTADO[tipo.grupo]}>{casoOracion(tipo.grupo)}</Resaltado>
+                                : <span className="px-[0.3em]">{casoOracion(tipo.grupo)}</span>)
+                            : <span className="text-cuaderno-grafito">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-right text-[16px]">
+                          {saldo !== 0 ? <Cifra valor={saldo} escala="pesos" /> : <span className="text-cuaderno-grafito">—</span>}
+                        </td>
+                        <td className="px-2 py-2 text-center text-[15px]">
+                          {c.activa ? <Resaltado color="menta">activa</Resaltado> : <span className="text-cuaderno-grafito px-[0.3em]">inactiva</span>}
+                        </td>
+                        <td className="px-2 py-2">
+                          <button onClick={() => { setEditando(c); setShowModal(true); }} aria-label={`Editar ${c.nombre}`}
+                            className="w-8 h-8 mx-auto rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                            <IconoLapiz tamano={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-          <div className="px-4 py-3 bg-gradient-to-r from-purple-700 to-violet-600 flex items-center justify-between">
-            <span className="text-xs font-semibold text-white/70">{cuentasFiltradas.length} cuentas mostradas</span>
-            <span className="text-xs font-black text-white">
-              {filtroGrupo !== "todos" ? filtroGrupo : "Todos los grupos"}
-            </span>
-          </div>
-        </div>
-      )}
+            {cuentasFiltradas.length === 0 && (
+              <div className="py-12 text-center">
+                <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">No hay cuentas que coincidan con los filtros</p>
+              </div>
+            )}
+            <div className="flex flex-wrap items-baseline justify-between gap-3 pt-3 text-[15px] text-cuaderno-grafito">
+              <span>{cuentasFiltradas.length} cuentas mostradas</span>
+              <span>{filtroGrupo !== "todos" ? casoOracion(filtroGrupo) : "Todos los grupos"}</span>
+            </div>
+          </>
+        )}
+      </Hoja>
 
       <ModalCuenta isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }} editando={editando} onSave={guardarCuenta} />
     </div>
