@@ -190,24 +190,25 @@ function normalizarRCV(fila) {
   const exento = n(fila["Monto Exento"]);
   const total  = n(fila["Monto Total"]);
 
-  // ── Impuesto Específico Combustible (Ley 18.502) ──────────────────────────
-  // El SII lo registra en "Valor Otro Impuesto" cuando corresponde a combustible.
-  // Regla definitiva confirmada con datos reales del RCV:
-  //   Neto + IVA + Valor Otro Impuesto = Total (cuadre perfecto)
-  // La detección no depende del código ni de IVA vacío:
-  //   simplemente Valor Otro Impuesto > 0 indica imp. específico.
+  // ── Otros impuestos de la factura ("Codigo Otro Impuesto") ────────────────
+  // Antes cualquier "Valor Otro Impuesto" > 0 se trataba como impuesto
+  // específico al diésel (recuperable) y el proveedor quedaba clasificado como
+  // combustible. Eso es incorrecto para proveedores que no venden combustible.
+  // Ahora se decide por el código:
+  //   28 diésel           → imp. específico recuperable (Ley 18.502)
+  //   15 IVA retenido     → es IVA: va con el crédito fiscal
+  //   cualquier otro      → no recuperable: mayor gasto (gasolina, bebidas,
+  //                         licores, códigos desconocidos)
+  // El IVA no recuperable y el impuesto sin derecho a crédito también son
+  // mayor gasto; antes se ignoraban y el asiento quedaba descuadrado.
   const valorOtroImp = n(fila["Valor Otro Impuesto"]);
   const codOtroImp   = parseInt(String(fila["Codigo Otro Impuesto"] || "0").split(".")[0]) || 0;
-  // Clasificar el tipo de impuesto adicional:
-  // - Tabaco/alcohol (código 27, 271, 272, 273): NO recuperable → se suma al gasto
-  // - Combustible (código 24, 28, o sin código con Neto > 0): recuperable → imp. específico
-  const esCodTabaco  = [27, 271, 272, 273].includes(codOtroImp);
-  const tieneNeto    = neto > 0;
-  // Impuesto específico combustible: Valor Otro Impuesto > 0, tiene neto, no es tabaco
-  const impEspec     = (valorOtroImp > 0 && tieneNeto && !esCodTabaco) ? valorOtroImp : 0;
-  // Impuesto tabaco/alcohol: no recuperable, se incorpora al neto como mayor gasto
-  // (ya está incluido en Monto Total, hay que reflejarlo en el debe para cuadrar)
-  const impTabaco    = esCodTabaco ? valorOtroImp : 0;
+  const impEspec     = codOtroImp === 28 && neto > 0 ? valorOtroImp : 0;
+  const ivaRetenido  = codOtroImp === 15 ? valorOtroImp : 0;
+  const otroNoRec    = valorOtroImp - impEspec - ivaRetenido;
+  const ivaNoRec     = n(fila["Monto Iva No Recuperable"] || fila["Monto IVA No Recuperable"]);
+  const sinDerecho   = n(fila["Impto. Sin Derecho a Credito"]);
+  const impNoRecuperable = otroNoRec + ivaNoRec + sinDerecho;
   const esComb       = impEspec > 0;
 
   return {
@@ -217,11 +218,11 @@ function normalizarRCV(fila) {
     "_fecha":            parseFechaRCV(fila["Fecha Docto"]) || parseFechaRCV(fila["Fecha Recepcion"]),
     "_tipoDoc":          tipoDoc,
     "_neto":             neto,
-    "_iva":              ivaRec,
+    "_iva":              ivaRec + ivaRetenido,
     "_exento":           exento,
     "_impEspec":         impEspec,
-    "_impTabaco":        impTabaco,
-    "_total":            total || (neto + ivaRec + impEspec + exento),
+    "_impTabaco":        impNoRecuperable, // nombre histórico: todo impuesto no recuperable
+    "_total":            total || (neto + ivaRec + ivaRetenido + impEspec + impNoRecuperable + exento),
     "_esExento":         tipoDoc === 34,
     "_esNotaCredito":    tipoDoc === 61,
     "_esCombustibleSII": esComb,
@@ -624,7 +625,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       } else {
         // Factura afecta (Tipo 33): puede tener neto+IVA Y también monto exento
         totalNeto   += neto;
-        totalNeto   += f["_impTabaco"] || 0; // imp. tabaco/alcohol: no recuperable → mayor gasto
+        totalNeto   += f["_impTabaco"] || 0; // impuestos no recuperables (otros códigos, IVA no rec.) → mayor gasto
         totalIVA    += iva;
         totalExento += exento;   // ← Fix: exento de facturas mixtas (peajes, autopistas, etc.)
         if (prov.esCombustible && impEsp > 0) totalImpEspec += impEsp;
