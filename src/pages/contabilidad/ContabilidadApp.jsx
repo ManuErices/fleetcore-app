@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ContabilidadProvider, useContabilidad } from "./ContabilidadContext";
 import AppShellLayout from "../../components/AppShellLayout";
 import ContabilidadPlanCuentas from "./ContabilidadPlanCuentas";
@@ -105,6 +105,13 @@ function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout, onAd
 
   const descuadrados = contarDescuadrados(asientos);
 
+  // Tema cuaderno (el mismo de Finanzas): el papel también va bajo <html>, para
+  // que no asome el fondo gris al desplazar. Se retira al salir del módulo.
+  useEffect(() => {
+    document.documentElement.classList.add("cuaderno-activo");
+    return () => document.documentElement.classList.remove("cuaderno-activo");
+  }, []);
+
   // Lista plana: un solo grupo sin etiqueta, así el shell no dibuja encabezados.
   const navGroups = [{
     label: "",
@@ -132,7 +139,8 @@ function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout, onAd
       navGroups={navGroups}
       activeId={activeView}
       onSelect={setActiveView}
-      marca={{ titulo: "Fleet", resalte: "Core-C", subtitulo: "Contabilidad", logoSrc: "/logo-fleetcore-f.png" }}
+      variante="cuaderno"
+      marca={{ titulo: "Fleet", resalte: "Core", subtitulo: "Contabilidad", logoSrc: "/logo-fleetcore-f.png" }}
       user={user} userRole={userRole} onLogout={onLogout}
       onBackToSelector={onBackToSelector}
       onAdminPanel={onAdminPanel} onAdminEmpresaPanel={onAdminEmpresaPanel}

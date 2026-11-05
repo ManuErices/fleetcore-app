@@ -135,6 +135,9 @@ Each platform improvement is a GitHub issue labeled `mejora`. Flow: `proponer_me
 - The agent defaults to proposals for cash-flow changes (`crear_propuesta_flujo`, `editar_propuesta_flujo`, `comparar_propuesta_flujo`), and opens them with `navegar_a` + `propuesta_id`.
 
 
+### Diseño de Contabilidad
+Contabilidad uses the same "cuaderno" design system as Finanzas: `AppShellLayout variante="cuaderno"`, `html.cuaderno-activo` while mounted, and every screen/modal built from `src/pages/finanzas/cuaderno.jsx` (Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, Boton, Campo, ModalCuaderno…). In Contabilidad every amount uses `<Cifra escala="pesos">` (Cifra's default divides by 1000). No gradients, bold, emojis or colored pills. The printed PDFs (`ContabilidadExportPDF.jsx` generators) keep their own design.
+
 ### Flujo Mensual tributario (Contabilidad)
 `Contabilidad → Flujo Mensual` (`src/pages/contabilidad/ContabilidadFlujoMensual.jsx`) is the tax base per month (14 A: devengado, by document date; 14 D N°3: cash). In 14 A the RCV column "Monto Neto Activo Fijo" is excluded from Compras (it is depreciated: rows Depreciación / Corrección monetaria). The rules that depend on the law live in `src/lib/contabilidad/tributario.js` (pure): Primera Categoría rate by regime **and year** (14 D N°3: 12,5% 2025-2027, 15% 2028, 25% 2029+), PPM rate, tax on the **accumulated** base (`impuestoMensualAcumulado`), and RCV summaries (`resumirRCVCompras` / `resumirRCVVentas`).
 

@@ -1,122 +1,93 @@
 import React, { useState, useMemo } from "react";
-import { useContabilidad, TIPOS_CUENTA, TIPOS_MAP, PeriodoSelector, fmt, fmtM, MESES } from "./ContabilidadContext";
+import { useContabilidad, TIPOS_CUENTA, TIPOS_MAP, PeriodoSelector, MESES } from "./ContabilidadContext";
 import { ModalExportEstados } from "./ContabilidadExportPDF";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Nota, Boton, Pestanas, FechaHoja, IconoDocumento,
+} from "../finanzas/cuaderno";
 
-// ─── Paleta corporativa ───────────────────────────────────────────────────────
-const C = {
-  navy:    "#0f2744",
-  blue:    "#1a56a0",
-  teal:    "#0d7d6b",
-  amber:   "#b45309",
-  slate:   "#334155",
-  light:   "#f8fafc",
-  border:  "#e2e8f0",
-};
-
-// ─── Encabezado corporativo ───────────────────────────────────────────────────
-function ReportHeader({ titulo, subtitulo, norma, periodo }) {
+// ─── Piezas de presentación ───────────────────────────────────────────────────
+// Cada informe es una hoja del cuaderno: título en letra ligada, a la derecha el
+// período y la norma, y debajo los renglones con sus cifras en casillas.
+function Informe({ titulo, subtitulo, norma, periodo, children }) {
   const [anio, mes] = periodo ? periodo.split("-") : ["",""];
   const mesLabel = mes ? MESES[parseInt(mes)-1] : "";
   return (
-    <div className="rounded-2xl overflow-hidden mb-1" style={{ background: C.navy }}>
-      <div className="flex items-center justify-between px-6 py-4">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base"
-              style={{ background: "rgba(255,255,255,0.12)" }}>📊</div>
-            <span className="text-white/50 text-xs font-bold uppercase tracking-[2px]">FleetCore Contabilidad</span>
-          </div>
-          <h2 className="text-white font-black text-xl tracking-tight">{titulo}</h2>
-          <p className="text-blue-300 text-xs mt-0.5">{subtitulo}</p>
-        </div>
+    <Hoja titulo={titulo}
+      extra={
         <div className="text-right">
-          <div className="text-white font-black text-lg">{mesLabel} {anio}</div>
-          <div className="text-blue-300 text-xs mt-0.5">{norma}</div>
-          <div className="text-white/40 text-[10px] mt-1">Generado: {new Date().toLocaleDateString("es-CL")}</div>
+          <p className="m-0 text-[18px] text-cuaderno-tinta">{mesLabel} {anio}</p>
+          <p className="m-0 text-[14px] text-cuaderno-grafito">{norma} · generado el {new Date().toLocaleDateString("es-CL")}</p>
         </div>
-      </div>
-    </div>
+      }>
+      <p className="m-0 mb-3 text-[16px] text-cuaderno-grafito">{subtitulo}</p>
+      {children}
+    </Hoja>
   );
 }
 
-// ─── Fila de tabla financiera ─────────────────────────────────────────────────
-function Fila({ label, valor, nivel = 0, negrita = false, separador = false,
-                total = false, colorValor = null, signo = 1, ocultar = false }) {
-  if (ocultar) return null;
-  if (separador) return (
-    <tr><td colSpan={2} style={{ height: nivel === 0 ? "1px" : "8px", background: nivel === 0 ? C.border : "transparent", padding: 0 }} /></tr>
-  );
-
-  const valorFmt = valor !== undefined && valor !== null ? fmt(Math.abs(valor)) : "—";
-  const negativo = valor < 0;
-
-  const bgStyle = total
-    ? { background: C.navy, color: "white" }
-    : negrita ? { background: C.light } : {};
-
+/** Resumen del informe: concepto ······· cifra, con una nota menor debajo. */
+function Resumen({ filas }) {
   return (
-    <tr style={bgStyle} className={!total && !negrita ? "hover:bg-slate-50/80" : ""}>
-      <td style={{
-        padding: `${total ? 10 : negrita ? 8 : 6}px 16px`,
-        paddingLeft: `${16 + nivel * 20}px`,
-        fontSize: total ? "12px" : "12px",
-        fontWeight: total || negrita ? 800 : 500,
-        color: total ? "white" : negrita ? C.slate : "#475569",
-        textTransform: total ? "uppercase" : "none",
-        letterSpacing: total ? "0.05em" : "normal",
-        borderBottom: `1px solid ${C.border}`,
-      }}>
-        {label}
-      </td>
-      <td style={{
-        padding: `${total ? 10 : negrita ? 8 : 6}px 20px`,
-        textAlign: "right",
-        fontFamily: "monospace",
-        fontSize: "12px",
-        fontWeight: total || negrita ? 800 : 600,
-        color: total ? "white"
-             : colorValor ? undefined
-             : negativo ? "#dc2626" : C.slate,
-        borderBottom: `1px solid ${C.border}`,
-      }}
-        className={colorValor || ""}>
-        {negativo && valor !== 0 && !total ? <span style={{ color: "#dc2626" }}>({valorFmt})</span>
-          : valorFmt}
-      </td>
-    </tr>
+    <Hoja titulo="Resumen">
+      <div className="grid gap-x-10 sm:grid-cols-2">
+        {filas.map(f => (
+          <div key={f.etiqueta}>
+            <LineaGuia etiqueta={f.etiqueta}>
+              <Cifra valor={f.valor} escala="pesos" vacio="$0" raya={f.raya || "ninguna"} />
+            </LineaGuia>
+            {f.nota && <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{f.nota}</p>}
+          </div>
+        ))}
+      </div>
+    </Hoja>
   );
 }
 
-// ─── Sección con título ───────────────────────────────────────────────────────
-function SeccionTitulo({ label, color = C.blue }) {
+// Renglones de un estado: concepto a la izquierda, cifra a la derecha.
+function Seccion({ etiqueta }) {
   return (
     <tr>
-      <td colSpan={2} style={{
-        padding: "6px 16px",
-        fontSize: "10px",
-        fontWeight: 800,
-        letterSpacing: "1.5px",
-        textTransform: "uppercase",
-        color: "white",
-        background: color,
-        borderBottom: `2px solid ${color}`,
-      }}>{label}</td>
+      <td colSpan={2} className="pt-4 pb-1">
+        <Titulo as="h3" tamano="sm">{etiqueta}</Titulo>
+      </td>
     </tr>
   );
 }
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, valor, sub, color, bg, icon }) {
+function Subseccion({ etiqueta }) {
   return (
-    <div className="rounded-2xl p-4 flex flex-col" style={{ background: bg, border: `1.5px solid ${color}20` }}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-black uppercase tracking-wider" style={{ color, opacity: 0.7 }}>{label}</span>
-        <span className="text-lg">{icon}</span>
-      </div>
-      <p className="text-xl font-black tabular-nums" style={{ color }}>{valor}</p>
-      {sub && <p className="text-[10px] mt-1" style={{ color, opacity: 0.6 }}>{sub}</p>}
-    </div>
+    <tr>
+      <td colSpan={2} className="pt-3 pb-0.5 text-[15px] text-cuaderno-grafito">{etiqueta}</td>
+    </tr>
   );
+}
+
+function Renglon({ etiqueta, valor, nivel = 1, raya = "ninguna", vacio = "0", children }) {
+  const conRaya = raya !== "ninguna";
+  return (
+    <tr className={conRaya ? "" : "border-b border-cuaderno-renglon"}>
+      <td className={`py-1.5 pr-3 text-[17px] ${nivel === 0 ? "text-cuaderno-tinta" : "text-cuaderno-tinta/90"}`}
+        style={{ paddingLeft: `${nivel * 18}px` }}>
+        {etiqueta}
+        {children}
+      </td>
+      <td className={`py-1.5 text-right text-[17px] ${conRaya ? "pt-2.5" : ""}`}>
+        <Cifra valor={valor} escala="pesos" raya={raya} vacio={vacio} />
+      </td>
+    </tr>
+  );
+}
+
+function RenglonVacio({ children }) {
+  return (
+    <tr className="border-b border-cuaderno-renglon">
+      <td colSpan={2} className="py-1.5 pl-[18px] text-[15px] text-cuaderno-grafito">{children}</td>
+    </tr>
+  );
+}
+
+function Espacio() {
+  return <tr aria-hidden="true"><td colSpan={2} className="h-2 p-0" /></tr>;
 }
 
 // ─── Balance 8 Columnas ───────────────────────────────────────────────────────
@@ -156,76 +127,71 @@ function Balance8Col({ cuentas, saldosMap, periodo }) {
 
   const activas = filas.filter(f => f.s.debe > 0 || f.s.haber > 0);
 
-  const thStyle = (color) => ({
-    padding: "8px 10px", fontSize: "10px", fontWeight: 800,
-    color, textAlign: "right", background: C.light,
-    borderBottom: `2px solid ${C.border}`, whiteSpace: "nowrap",
-  });
+  const GRUPOS = ["Sumas", "Saldos", "E.S.F.", "E.R.P."];
+  const COLUMNAS = ["Debe", "Haber", "Deudor", "Acreedor", "Activo", "Pasivo", "Pérdida", "Ganancia"];
 
   return (
-    <div>
-      <ReportHeader titulo="Balance de Comprobación — 8 Columnas"
-        subtitulo="Sumas · Saldos · Estado de Situación · Estado de Resultados"
-        norma="NIC 1 / IFRS" periodo={periodo} />
-      <div className="rounded-2xl overflow-hidden border border-slate-200">
+    <Informe titulo="Balance de comprobación, 8 columnas"
+      subtitulo="Sumas · Saldos · Estado de Situación · Estado de Resultados"
+      norma="NIC 1 / IFRS" periodo={periodo}>
+      {activas.length === 0 ? (
+        <div className="py-12 text-center space-y-2">
+          <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">Aún no hay movimientos en el período</p>
+          <p className="m-0 text-[16px] text-cuaderno-grafito">Las cuentas aparecen aquí apenas tengan asientos en el Libro Diario.</p>
+        </div>
+      ) : (
         <div className="overflow-x-auto">
-          <table style={{ width:"100%", minWidth:"860px", borderCollapse:"collapse" }}>
+          <table className="w-full min-w-[960px] border-collapse">
             <thead>
-              <tr style={{ background: C.light }}>
-                <th style={{ ...thStyle(C.slate), textAlign:"left", width:"90px" }}>Código</th>
-                <th style={{ ...thStyle(C.slate), textAlign:"left" }}>Cuenta</th>
-                <th colSpan={2} style={{ ...thStyle(C.teal), textAlign:"center", background:"#ecfdf5" }}>Sumas</th>
-                <th colSpan={2} style={{ ...thStyle(C.blue), textAlign:"center", background:"#eff6ff" }}>Saldos</th>
-                <th colSpan={2} style={{ ...thStyle(C.slate), textAlign:"center", background:"#f5f3ff" }}>E.S.F.</th>
-                <th colSpan={2} style={{ ...thStyle(C.amber), textAlign:"center", background:"#fffbeb" }}>E.R.P.</th>
+              <tr>
+                <th className="w-[90px]" />
+                <th />
+                {GRUPOS.map((g, i) => (
+                  <th key={g} colSpan={2}
+                    className={`font-normal text-[15px] text-center text-cuaderno-tinta px-2 pt-1 pb-0.5 ${i > 0 ? "border-l border-cuaderno-renglon" : "border-l border-cuaderno-columna"}`}>
+                    {g}
+                  </th>
+                ))}
               </tr>
-              <tr style={{ background: C.light, borderBottom: `2px solid ${C.border}` }}>
-                <th style={{ padding:"4px 10px" }} />
-                <th style={{ padding:"4px 10px" }} />
-                {[
-                  [C.teal,"Debe","#ecfdf5"],[C.teal,"Haber","#ecfdf5"],
-                  [C.blue,"Deudor","#eff6ff"],["#ea580c","Acreedor","#eff6ff"],
-                  [C.teal,"Activo","#f5f3ff"],["#dc2626","Pasivo","#f5f3ff"],
-                  ["#dc2626","Pérdida","#fffbeb"],[C.teal,"Ganancia","#fffbeb"],
-                ].map(([color, label, bg], i) => (
-                  <th key={i} style={{ ...thStyle(color), background: bg }}>{label}</th>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-2 py-2">Código</th>
+                <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-2 py-2">Cuenta</th>
+                {COLUMNAS.map((c, i) => (
+                  <th key={c}
+                    className={`font-normal text-[15px] text-right text-cuaderno-grafito px-2 py-2 whitespace-nowrap ${i % 2 === 0 ? (i === 0 ? "border-l border-cuaderno-columna" : "border-l border-cuaderno-renglon") : ""}`}>
+                    {c}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {activas.map((f,i) => (
-                <tr key={f.id} style={{ background: i%2===0?"white":"#f8fafc", borderBottom:`1px solid ${C.border}` }}>
-                  <td style={{ padding:"6px 10px", fontFamily:"monospace", fontSize:"11px", color:"#64748b" }}>{f.codigo}</td>
-                  <td style={{ padding:"6px 10px", fontSize:"12px", fontWeight:600, color:C.slate, maxWidth:"200px" }} className="truncate">{f.nombre}</td>
-                  {[
-                    [f.s.debe,  C.teal],
-                    [f.s.haber, "#dc2626"],
-                    [f.sDeudor,   C.blue],
-                    [f.sAcreedor, "#ea580c"],
-                    [f.esfActivo, C.teal],
-                    [f.esfPasivo, "#dc2626"],
-                    [f.erpLoss,   "#dc2626"],
-                    [f.erpGain,   C.teal],
-                  ].map(([v, color], j) => (
-                    <td key={j} style={{ padding:"6px 10px", textAlign:"right", fontFamily:"monospace", fontSize:"11px", fontWeight:600, color: v>0?color:"#cbd5e1" }}>
-                      {v > 0 ? fmt(v) : ""}
+              {activas.map(f => (
+                <tr key={f.id} className="border-b border-cuaderno-renglon">
+                  <td className="px-2 py-1.5 text-[15px] text-cuaderno-grafito whitespace-nowrap">{f.codigo}</td>
+                  <td className="px-2 py-1.5 text-[16px] max-w-[220px] truncate">{f.nombre}</td>
+                  {[f.s.debe, f.s.haber, f.sDeudor, f.sAcreedor, f.esfActivo, f.esfPasivo, f.erpLoss, f.erpGain].map((v, j) => (
+                    <td key={j}
+                      className={`px-2 py-1.5 text-right text-[16px] ${j % 2 === 0 ? (j === 0 ? "border-l border-cuaderno-columna" : "border-l border-cuaderno-renglon") : ""}`}>
+                      {v > 0 && <Cifra valor={v} escala="pesos" />}
                     </td>
                   ))}
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr style={{ background: C.navy }}>
-                <td colSpan={2} style={{ padding:"10px 16px", color:"white", fontSize:"11px", fontWeight:800, letterSpacing:"1px", textTransform:"uppercase" }}>Totales</td>
+              <tr>
+                <td colSpan={2} className="px-2 pt-3 pb-2 text-[17px]">Totales</td>
                 {[tot.debe,tot.haber,tot.sDeudor,tot.sAcreedor,tot.esfActivo,tot.esfPasivo,tot.erpLoss,tot.erpGain].map((v,i)=>(
-                  <td key={i} style={{ padding:"10px 10px", textAlign:"right", fontFamily:"monospace", fontSize:"11px", fontWeight:800, color:"white" }}>{fmt(v)}</td>
+                  <td key={i} className="px-2 pt-3 pb-2 text-right text-[16px]">
+                    <Cifra valor={v} escala="pesos" raya="total" vacio="0" />
+                  </td>
                 ))}
               </tr>
             </tfoot>
           </table>
         </div>
-      </div>
-    </div>
+      )}
+    </Informe>
   );
 }
 
@@ -278,163 +244,78 @@ function ESF({ cuentas, saldosMap, saldosAnioMap = {}, periodo }) {
              totalAC, totalANC, totalPC, totalPNC, totalPat, totalA, totalP, diff };
   }, [cuentas, saldosMap, saldosAnioMap]);
 
-  const kpis = [
-    { label:"Total Activos",    valor:fmtM(data.totalA),   sub:"Activos netos del período", color:C.teal, bg:"#ecfdf5", icon:"🏦" },
-    { label:"Pasivos Totales",  valor:fmtM(data.totalPC+data.totalPNC), sub:"Obligaciones vigentes", color:"#dc2626", bg:"#fef2f2", icon:"📋" },
-    { label:"Patrimonio Neto",  valor:fmtM(data.totalPat), sub:"Capital + Resultados", color:C.navy, bg:"#eff6ff", icon:"🏛️" },
-    { label:"Resultado Período",valor:fmtM(data.resultadoPeriodo), sub:"Utilidad / (Pérdida)", color: data.resultadoPeriodo>=0?C.teal:"#dc2626", bg: data.resultadoPeriodo>=0?"#ecfdf5":"#fef2f2", icon: data.resultadoPeriodo>=0?"📈":"📉" },
+  const resumen = [
+    { etiqueta: "Total activos",     valor: data.totalA,                 nota: "Activos netos del período" },
+    { etiqueta: "Pasivos totales",   valor: data.totalPC + data.totalPNC, nota: "Obligaciones vigentes" },
+    { etiqueta: "Patrimonio neto",   valor: data.totalPat,               nota: "Capital + Resultados" },
+    { etiqueta: "Resultado período", valor: data.resultadoPeriodo,       nota: "Utilidad / (Pérdida)", raya: "doble" },
   ];
 
   return (
-    <div className="space-y-4">
-      <ReportHeader titulo="Estado de Situación Financiera"
+    <div className="space-y-5">
+      <Resumen filas={resumen} />
+
+      <Informe titulo="Estado de Situación Financiera"
         subtitulo="Balance General — Posición patrimonial al cierre del período"
-        norma="NIC 1 / IFRS" periodo={periodo} />
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {kpis.map(k => <KpiCard key={k.label} {...k} />)}
-      </div>
-
-      {/* Tabla en dos columnas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Activos */}
-        <div className="rounded-2xl overflow-hidden border border-slate-200">
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+        norma="NIC 1 / IFRS" periodo={periodo}>
+        <div className="grid gap-x-10 gap-y-4 md:grid-cols-2">
+          {/* Activos */}
+          <table className="w-full border-collapse self-start">
             <tbody>
-              <SeccionTitulo label="Activos" color={C.teal} />
-              <tr style={{ background:"#f0fdf4" }}>
-                <td colSpan={2} style={{ padding:"6px 16px", fontSize:"10px", fontWeight:800, color:C.teal, letterSpacing:"1px", textTransform:"uppercase", borderBottom:`1px solid ${C.border}` }}>
-                  Activo Corriente
-                </td>
-              </tr>
-              {data.activoC.map(c=>(
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>{c.nombre}</td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
-                </tr>
-              ))}
-              <tr style={{ background:"#f0fdf4" }}>
-                <td style={{ padding:"8px 16px", fontSize:"12px", fontWeight:800, color:C.teal, borderBottom:`2px solid ${C.teal}20` }}>Total Activo Corriente</td>
-                <td style={{ padding:"8px 20px 8px 8px", fontSize:"12px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:C.teal, borderBottom:`2px solid ${C.teal}20` }}>{fmt(data.totalAC)}</td>
-              </tr>
-              <tr><td colSpan={2} style={{ height:"8px" }} /></tr>
-              <tr style={{ background:"#f0fdf4" }}>
-                <td colSpan={2} style={{ padding:"6px 16px", fontSize:"10px", fontWeight:800, color:C.teal, letterSpacing:"1px", textTransform:"uppercase", borderBottom:`1px solid ${C.border}` }}>
-                  Activo No Corriente
-                </td>
-              </tr>
-              {data.activoNC.length === 0 && (
-                <tr><td colSpan={2} style={{ padding:"8px 16px", fontSize:"11px", color:"#94a3b8", fontStyle:"italic", borderBottom:`1px solid ${C.border}` }}>Sin activos no corrientes registrados</td></tr>
-              )}
-              {data.activoNC.map(c=>(
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>{c.nombre}</td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
-                </tr>
-              ))}
-              <tr style={{ background:"#f0fdf4" }}>
-                <td style={{ padding:"8px 16px", fontSize:"12px", fontWeight:800, color:C.teal, borderBottom:`2px solid ${C.teal}20` }}>Total Activo No Corriente</td>
-                <td style={{ padding:"8px 20px 8px 8px", fontSize:"12px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:C.teal, borderBottom:`2px solid ${C.teal}20` }}>{fmt(data.totalANC)}</td>
-              </tr>
-              <tr style={{ background: C.navy }}>
-                <td style={{ padding:"12px 16px", fontSize:"12px", fontWeight:800, color:"white", textTransform:"uppercase", letterSpacing:"1px" }}>TOTAL ACTIVOS</td>
-                <td style={{ padding:"12px 20px 12px 8px", fontSize:"14px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:"white" }}>{fmt(data.totalA)}</td>
-              </tr>
+              <Seccion etiqueta="Activos" />
+              <Subseccion etiqueta="Activo corriente" />
+              {data.activoC.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+              <Renglon etiqueta="Total activo corriente" valor={data.totalAC} nivel={0} raya="total" />
+              <Espacio />
+              <Subseccion etiqueta="Activo no corriente" />
+              {data.activoNC.length === 0 && <RenglonVacio>Sin activos no corrientes registrados</RenglonVacio>}
+              {data.activoNC.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+              <Renglon etiqueta="Total activo no corriente" valor={data.totalANC} nivel={0} raya="total" />
+              <Espacio />
+              <Renglon etiqueta="Total activos" valor={data.totalA} nivel={0} raya="doble" />
             </tbody>
           </table>
-        </div>
 
-        {/* Pasivos + Patrimonio */}
-        <div className="rounded-2xl overflow-hidden border border-slate-200">
-          <table style={{ width:"100%", borderCollapse:"collapse" }}>
-            <tbody>
-              <SeccionTitulo label="Pasivos y Patrimonio" color="#dc2626" />
-              <tr style={{ background:"#fef2f2" }}>
-                <td colSpan={2} style={{ padding:"6px 16px", fontSize:"10px", fontWeight:800, color:"#dc2626", letterSpacing:"1px", textTransform:"uppercase", borderBottom:`1px solid ${C.border}` }}>Pasivo Corriente</td>
-              </tr>
-              {data.pasivoC.map(c=>(
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>{c.nombre}</td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
-                </tr>
-              ))}
-              <tr style={{ background:"#fef2f2" }}>
-                <td style={{ padding:"8px 16px", fontSize:"12px", fontWeight:800, color:"#dc2626", borderBottom:`2px solid #dc262620` }}>Total Pasivo Corriente</td>
-                <td style={{ padding:"8px 20px 8px 8px", fontSize:"12px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:"#dc2626", borderBottom:`2px solid #dc262620` }}>{fmt(data.totalPC)}</td>
-              </tr>
-              <tr><td colSpan={2} style={{ height:"8px" }} /></tr>
-              <tr style={{ background:"#fef2f2" }}>
-                <td colSpan={2} style={{ padding:"6px 16px", fontSize:"10px", fontWeight:800, color:"#dc2626", letterSpacing:"1px", textTransform:"uppercase", borderBottom:`1px solid ${C.border}` }}>Pasivo No Corriente</td>
-              </tr>
-              {data.pasivoNC.length === 0 && (
-                <tr><td colSpan={2} style={{ padding:"8px 16px", fontSize:"11px", color:"#94a3b8", fontStyle:"italic", borderBottom:`1px solid ${C.border}` }}>Sin pasivos no corrientes</td></tr>
-              )}
-              {data.pasivoNC.map(c=>(
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>{c.nombre}</td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
-                </tr>
-              ))}
-              <tr style={{ background:"#fef2f2" }}>
-                <td style={{ padding:"8px 16px", fontSize:"12px", fontWeight:800, color:"#dc2626", borderBottom:`2px solid #dc262620` }}>Total Pasivo No Corriente</td>
-                <td style={{ padding:"8px 20px 8px 8px", fontSize:"12px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:"#dc2626", borderBottom:`2px solid #dc262620` }}>{fmt(data.totalPNC)}</td>
-              </tr>
-              <tr><td colSpan={2} style={{ height:"8px" }} /></tr>
-              <tr style={{ background:"#eff6ff" }}>
-                <td colSpan={2} style={{ padding:"6px 16px", fontSize:"10px", fontWeight:800, color:C.blue, letterSpacing:"1px", textTransform:"uppercase", borderBottom:`1px solid ${C.border}` }}>Patrimonio</td>
-              </tr>
-              {data.patrimonio.map(c=>(
-                <tr key={c.id} className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>{c.nombre}</td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color:C.slate, borderBottom:`1px solid ${C.border}` }}>{fmt(c.saldo)}</td>
-                </tr>
-              ))}
-              {data.resultadoAnterior !== 0 && (
-                <tr className="hover:bg-slate-50">
-                  <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>
-                    Resultados acumulados ejercicios anteriores
-                  </td>
-                  <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color: data.resultadoAnterior>=0?C.slate:"#dc2626", borderBottom:`1px solid ${C.border}` }}>
-                    {data.resultadoAnterior < 0 ? `(${fmt(Math.abs(data.resultadoAnterior))})` : fmt(data.resultadoAnterior)}
-                  </td>
-                </tr>
-              )}
-              <tr className="hover:bg-slate-50">
-                <td style={{ padding:"6px 16px 6px 28px", fontSize:"12px", color:"#475569", borderBottom:`1px solid ${C.border}` }}>
-                  Resultado del ejercicio
-                </td>
-                <td style={{ padding:"6px 20px 6px 8px", fontSize:"12px", fontWeight:600, fontFamily:"monospace", textAlign:"right", color: data.resultadoEjercicio>=0?C.teal:"#dc2626", borderBottom:`1px solid ${C.border}` }}>
-                  {data.resultadoEjercicio < 0 ? `(${fmt(Math.abs(data.resultadoEjercicio))})` : fmt(data.resultadoEjercicio)}
-                </td>
-              </tr>
-              <tr style={{ background:"#eff6ff" }}>
-                <td style={{ padding:"8px 16px", fontSize:"12px", fontWeight:800, color:C.blue, borderBottom:`2px solid ${C.blue}20` }}>Total Patrimonio</td>
-                <td style={{ padding:"8px 20px 8px 8px", fontSize:"12px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:C.blue, borderBottom:`2px solid ${C.blue}20` }}>{fmt(data.totalPat)}</td>
-              </tr>
-              <tr style={{ background: C.navy }}>
-                <td style={{ padding:"12px 16px", fontSize:"12px", fontWeight:800, color:"white", textTransform:"uppercase", letterSpacing:"1px" }}>TOTAL PASIVOS + PAT.</td>
-                <td style={{ padding:"12px 20px 12px 8px", fontSize:"14px", fontWeight:800, fontFamily:"monospace", textAlign:"right", color:"white" }}>{fmt(data.totalP)}</td>
-              </tr>
-            </tbody>
-          </table>
-          {data.diff > 1 && (
-            <div className="px-4 py-3 bg-red-50 border-t border-red-200">
-              <div className="flex items-center gap-2">
-                <span className="text-red-600 text-sm">⚠️</span>
-                <p className="text-xs text-red-700 font-black">
-                  Balance descuadrado en {fmt(data.diff)} — este informe no es válido
+          {/* Pasivos + Patrimonio */}
+          <div className="self-start">
+            <table className="w-full border-collapse">
+              <tbody>
+                <Seccion etiqueta="Pasivos y Patrimonio" />
+                <Subseccion etiqueta="Pasivo corriente" />
+                {data.pasivoC.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+                <Renglon etiqueta="Total pasivo corriente" valor={data.totalPC} nivel={0} raya="total" />
+                <Espacio />
+                <Subseccion etiqueta="Pasivo no corriente" />
+                {data.pasivoNC.length === 0 && <RenglonVacio>Sin pasivos no corrientes</RenglonVacio>}
+                {data.pasivoNC.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+                <Renglon etiqueta="Total pasivo no corriente" valor={data.totalPNC} nivel={0} raya="total" />
+                <Espacio />
+                <Subseccion etiqueta="Patrimonio" />
+                {data.patrimonio.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+                {data.resultadoAnterior !== 0 && (
+                  <Renglon etiqueta="Resultados acumulados ejercicios anteriores" valor={data.resultadoAnterior} />
+                )}
+                <Renglon etiqueta="Resultado del ejercicio" valor={data.resultadoEjercicio} />
+                <Renglon etiqueta="Total patrimonio" valor={data.totalPat} nivel={0} raya="total" />
+                <Espacio />
+                <Renglon etiqueta="Total pasivos + patrimonio" valor={data.totalP} nivel={0} raya="doble" />
+              </tbody>
+            </table>
+            {data.diff > 1 && (
+              <div className="mt-4 space-y-1">
+                <Nota etiqueta="Ojo:">
+                  Balance descuadrado en <Cifra valor={data.diff} escala="pesos" color="heredar" /> — este informe no es válido.
+                </Nota>
+                <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
+                  Activo debe igualar Pasivo más Patrimonio. Revisa el Libro Diario en busca de
+                  asientos con debe distinto de haber, o de cuentas sin saldo de apertura.
+                  No emitas este estado a terceros hasta cerrar la diferencia.
                 </p>
               </div>
-              <p className="text-[11px] text-red-600 mt-1 leading-snug">
-                Activo debe igualar Pasivo más Patrimonio. Revisa el Libro Diario en busca de
-                asientos con debe distinto de haber, o de cuentas sin saldo de apertura.
-                No emitas este estado a terceros hasta cerrar la diferencia.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      </Informe>
     </div>
   );
 }
@@ -484,109 +365,79 @@ function ERP({ cuentas, saldosMap, periodo, tasaImpuesto = 0.27 }) {
              impuestoEstim, utilDespuesEst, tasaImpuesto };
   }, [cuentas, saldosMap, tasaImpuesto]);
 
-  const kpis = [
-    { label:"Ingresos",         valor:fmtM(data.totalIng),  sub:"Ingresos totales del período", color:C.teal, bg:"#ecfdf5", icon:"💰" },
-    { label:"Utilidad Bruta",   valor:fmtM(data.utilBruta), sub:`Margen bruto: ${data.margenBruto}%`, color: data.utilBruta>=0?C.teal:"#dc2626", bg: data.utilBruta>=0?"#ecfdf5":"#fef2f2", icon:"📊" },
-    { label:"Result. Operac.",  valor:fmtM(data.utilOp),    sub:`Margen oper.: ${data.margenOp}%`, color: data.utilOp>=0?C.blue:"#dc2626", bg:"#eff6ff", icon:"⚙️" },
-    { label:"Result. antes de Imp.", valor:fmtM(data.utilAntes), sub:`Margen: ${data.margenNeto}%`, color: data.utilAntes>=0?C.teal:"#dc2626", bg: data.utilAntes>=0?"#ecfdf5":"#fef2f2", icon: data.utilAntes>=0?"📈":"📉" },
+  const resumen = [
+    { etiqueta: "Ingresos",               valor: data.totalIng,  nota: "Ingresos totales del período" },
+    { etiqueta: "Utilidad bruta",         valor: data.utilBruta, nota: `Margen bruto: ${data.margenBruto}%` },
+    { etiqueta: "Resultado operacional",  valor: data.utilOp,    nota: `Margen oper.: ${data.margenOp}%` },
+    { etiqueta: "Resultado antes de imp.", valor: data.utilAntes, nota: `Margen: ${data.margenNeto}%`, raya: "doble" },
   ];
 
-  const Row = ({ label, valor, nivel=0, negrita=false, total=false, separador=false }) => {
-    if (separador) return <tr><td colSpan={2} style={{ height:"1px", background:C.border, padding:0 }} /></tr>;
-    const neg = valor < 0;
-    return (
-      <tr style={{ background: total?C.navy:negrita?"#f8fafc":"white" }} className={!total&&!negrita?"hover:bg-slate-50/80":""}>
-        <td style={{ padding:`${total?10:negrita?8:6}px 16px`, paddingLeft:`${16+nivel*20}px`,
-          fontSize:"12px", fontWeight:total||negrita?800:500,
-          color:total?"white":negrita?C.slate:"#475569",
-          textTransform:total?"uppercase":"none", letterSpacing:total?"1px":"normal",
-          borderBottom:`1px solid ${C.border}` }}>
-          {label}
-        </td>
-        <td style={{ padding:`${total?10:negrita?8:6}px 20px ${total?10:negrita?8:6}px 8px`,
-          textAlign:"right", fontFamily:"monospace", fontSize:total?"13px":"12px",
-          fontWeight:total||negrita?800:600,
-          color:total?"white":neg?"#dc2626":negrita?C.slate:"#475569",
-          borderBottom:`1px solid ${C.border}` }}>
-          {neg && !total ? `(${fmt(Math.abs(valor))})` : fmt(valor)}
-        </td>
-      </tr>
-    );
-  };
+  const Margen = ({ valor }) => valor !== "—"
+    ? <span className="ml-2 text-[14px] text-cuaderno-grafito">(margen {valor}%)</span>
+    : null;
 
   return (
-    <div className="space-y-4">
-      <ReportHeader titulo="Estado de Resultados del Período"
+    <div className="space-y-5">
+      <Resumen filas={resumen} />
+
+      <Informe titulo="Estado de Resultados del Período"
         subtitulo="Rendimiento económico — Base devengada"
-        norma="NIC 1 / IFRS — Art. 29–33 LIR" periodo={periodo} />
+        norma="NIC 1 / IFRS — Art. 29–33 LIR" periodo={periodo}>
+        <div className="max-w-2xl">
+          <table className="w-full border-collapse">
+            <tbody>
+              <Seccion etiqueta="Ingresos de actividades ordinarias" />
+              {data.ingresos.length===0 && <RenglonVacio>Sin ingresos registrados en el período</RenglonVacio>}
+              {data.ingresos.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+              <Renglon etiqueta="Total ingresos" valor={data.totalIng} nivel={0} raya="total" />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {kpis.map(k => <KpiCard key={k.label} {...k} />)}
-      </div>
+              <Seccion etiqueta="Costo de ventas" />
+              {data.costos.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+              <Renglon etiqueta="Total costo de ventas" valor={data.totalCosto} nivel={0} raya="total" />
+              <Espacio />
+              <Renglon etiqueta="Utilidad bruta" valor={data.utilBruta} nivel={0} raya="total">
+                <Margen valor={data.margenBruto} />
+              </Renglon>
 
-      <div className="rounded-2xl overflow-hidden border border-slate-200 max-w-2xl">
-        <table style={{ width:"100%", borderCollapse:"collapse" }}>
-          <tbody>
-            <SeccionTitulo label="Ingresos de Actividades Ordinarias" color={C.teal} />
-            {data.ingresos.length===0 && (
-              <tr><td colSpan={2} style={{ padding:"8px 16px 8px 28px", fontSize:"11px", color:"#94a3b8", fontStyle:"italic", borderBottom:`1px solid ${C.border}` }}>Sin ingresos registrados en el período</td></tr>
-            )}
-            {data.ingresos.map(c => <Row key={c.id} label={c.nombre} valor={c.saldo} nivel={1} />)}
-            <Row label="Total Ingresos" valor={data.totalIng} negrita />
-            <Row separador />
+              <Seccion etiqueta="Gastos de administración y ventas" />
+              {data.gastosAdm.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+              <Renglon etiqueta="Total gastos administración" valor={data.totalGAdm} nivel={0} raya="total" />
+              <Espacio />
+              <Renglon etiqueta="Resultado operacional" valor={data.utilOp} nivel={0} raya="total">
+                <Margen valor={data.margenOp} />
+              </Renglon>
 
-            <SeccionTitulo label="Costo de Ventas" color="#7c3aed" />
-            {data.costos.map(c => <Row key={c.id} label={c.nombre} valor={c.saldo} nivel={1} />)}
-            <Row label="Total Costo de Ventas" valor={data.totalCosto} negrita />
-            <Row separador />
-            <Row label={`UTILIDAD BRUTA  ${data.margenBruto !== "—" ? `(Margen ${data.margenBruto}%)` : ""}`} valor={data.utilBruta} negrita />
-            <Row separador />
+              {(data.gastosFin.length > 0 || data.otrosRes.length > 0) && (
+                <>
+                  <Seccion etiqueta="Gastos financieros y otros" />
+                  {data.gastosFin.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+                  {data.otrosRes.map(c => <Renglon key={c.id} etiqueta={c.nombre} valor={c.saldo} />)}
+                </>
+              )}
 
-            <SeccionTitulo label="Gastos de Administración y Ventas" color={C.amber} />
-            {data.gastosAdm.map(c => <Row key={c.id} label={c.nombre} valor={c.saldo} nivel={1} />)}
-            <Row label="Total Gastos Administración" valor={data.totalGAdm} negrita />
-            <Row separador />
-            <Row label={`RESULTADO OPERACIONAL  ${data.margenOp !== "—" ? `(Margen ${data.margenOp}%)` : ""}`} valor={data.utilOp} negrita />
-            <Row separador />
+              <Espacio />
+              <Espacio />
+              <Renglon etiqueta="Resultado del período (antes de impuesto)" valor={data.utilAntes} nivel={0} raya="doble" />
+            </tbody>
+          </table>
 
-            {(data.gastosFin.length > 0 || data.otrosRes.length > 0) && (
-              <>
-                <SeccionTitulo label="Gastos Financieros y Otros" color={C.slate} />
-                {data.gastosFin.map(c => <Row key={c.id} label={c.nombre} valor={c.saldo} nivel={1} />)}
-                {data.otrosRes.map(c => <Row key={c.id} label={c.nombre} valor={c.saldo} nivel={1} />)}
-                <Row separador />
-              </>
-            )}
-
-            <Row separador />
-            <Row label="RESULTADO DEL PERÍODO (antes de impuesto)" valor={data.utilAntes} total />
-          </tbody>
-        </table>
-
-        {/* Estimación tributaria — informativa, fuera de los estados */}
-        <div className="px-4 py-3 border-t" style={{ borderColor: C.border, background: "#fffbeb" }}>
-          <p className="text-[10px] font-black uppercase tracking-widest mb-2" style={{ color: C.amber }}>
-            Estimación tributaria — no contabilizada
-          </p>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-600">
-              Impuesto 1ª Categoría estimado ({(data.tasaImpuesto * 100).toFixed(1).replace(".", ",")}%)
-            </span>
-            <span className="font-mono font-bold text-slate-700">{fmt(data.impuestoEstim)}</span>
+          {/* Estimación tributaria — informativa, fuera de los estados */}
+          <div className="mt-6 pt-3 border-t border-dashed border-cuaderno-columna">
+            <Titulo as="h3" tamano="sm">Estimación tributaria, no contabilizada</Titulo>
+            <LineaGuia etiqueta={`Impuesto 1ª Categoría estimado (${(data.tasaImpuesto * 100).toFixed(1).replace(".", ",")}%)`}>
+              <Cifra valor={data.impuestoEstim} escala="pesos" vacio="0" />
+            </LineaGuia>
+            <LineaGuia etiqueta="Resultado después del impuesto estimado">
+              <Cifra valor={data.utilDespuesEst} escala="pesos" vacio="0" />
+            </LineaGuia>
+            <p className="m-0 mt-2 text-[15px] leading-snug text-cuaderno-grafito">
+              Cálculo referencial sobre la utilidad financiera. El impuesto efectivo se determina
+              sobre la Renta Líquida Imponible en el F22 y no está registrado en asientos, por eso
+              no forma parte del resultado ni del patrimonio informados.
+            </p>
           </div>
-          <div className="flex items-center justify-between text-xs mt-1">
-            <span className="text-slate-600">Resultado después del impuesto estimado</span>
-            <span className="font-mono font-bold" style={{ color: data.utilDespuesEst >= 0 ? C.teal : "#dc2626" }}>
-              {fmt(data.utilDespuesEst)}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2 leading-snug">
-            Cálculo referencial sobre la utilidad financiera. El impuesto efectivo se determina
-            sobre la Renta Líquida Imponible en el F22 y no está registrado en asientos, por eso
-            no forma parte del resultado ni del patrimonio informados.
-          </p>
         </div>
-      </div>
+      </Informe>
     </div>
   );
 }
@@ -604,42 +455,29 @@ export default function ContabilidadEstados() {
   const saldosDelAnio = saldosAnio();
 
   const VISTAS = [
-    { id: "balance8", label: "Balance 8 col.",        icon: "📋" },
-    { id: "esf",      label: "Estado de Situación",   icon: "🏦" },
-    { id: "erp",      label: "Estado de Resultados",  icon: "📈" },
+    { id: "balance8", label: "Balance 8 col."        },
+    { id: "esf",      label: "Estado de Situación"   },
+    { id: "erp",      label: "Estado de Resultados"  },
   ];
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-        <div>
-          <h1 className="text-xl font-black text-slate-900">Estados Financieros</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Calculados en tiempo real desde los asientos del período</p>
-        </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
-          <PeriodoSelector />
-          <button
-            onClick={() => setShowExport(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-teal-700 to-emerald-600 text-white font-bold rounded-xl text-sm shadow-md shadow-teal-200 hover:shadow-lg transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            Exportar PDF
-          </button>
-        </div>
-      </div>
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+      <FechaHoja />
 
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
-        {VISTAS.map(v => (
-          <button key={v.id} onClick={() => setVistaActiva(v.id)}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5
-              ${vistaActiva === v.id ? "bg-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-            style={vistaActiva === v.id ? { color: C.navy } : {}}>
-            <span>{v.icon}</span>{v.label}
-          </button>
-        ))}
-      </div>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Titulo>Estados Financieros</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Calculados en tiempo real desde los asientos del período</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <PeriodoSelector />
+          <Boton variante="primario" onClick={() => setShowExport(true)}>
+            <IconoDocumento tamano={15} /> Exportar PDF
+          </Boton>
+        </div>
+      </header>
+
+      <Pestanas opciones={VISTAS} valor={vistaActiva} onCambiar={setVistaActiva} />
 
       {vistaActiva === "balance8" && <Balance8Col cuentas={cuentas} saldosMap={saldosAcum} periodo={periodoActivo} />}
       {vistaActiva === "esf"      && <ESF cuentas={cuentas} saldosMap={saldosAcum} saldosAnioMap={saldosDelAnio} periodo={periodoActivo} />}

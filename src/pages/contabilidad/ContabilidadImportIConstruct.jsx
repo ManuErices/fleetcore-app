@@ -1,6 +1,10 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { fmt, normalizaRut, leerTextoDetectando, repararMojibake } from "./ContabilidadContext";
+import {
+  ModalCuaderno, Boton, Campo, Cifra, Titulo, Nota, Resaltado, VistoBueno, LineaGuia, Pestanas,
+  casoTitulo, IconoBajar, IconoLapiz, IconoSubir, IconoAnterior, IconoSiguiente,
+} from "../finanzas/cuaderno";
 
 // Función para corregir dobles codificaciones UTF-8 en strings Latin1
 // Reparación de doble codificación.
@@ -812,34 +816,27 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
 }
 
 // ─── Componentes UI ───────────────────────────────────────────────────────────
-function StepDot({ n, label, active, done }) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black transition-all
-        ${done  ? "bg-emerald-500 text-white shadow-lg shadow-emerald-200"
-        : active ? "bg-slate-900 text-white shadow-lg shadow-slate-300"
-                 : "bg-slate-100 text-slate-400"}`}>
-        {done ? <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg> : n}
-      </div>
-      <span className={`text-[10px] font-bold uppercase tracking-wider whitespace-nowrap
-        ${active ? "text-slate-900" : done ? "text-emerald-600" : "text-slate-400"}`}>{label}</span>
-    </div>
-  );
-}
-
+// Pasos del asistente escritos en una línea, como un índice: el paso en curso
+// resaltado y los ya hechos con visto bueno.
 function Stepper({ step }) {
   const steps = ["Archivo", "Revisar", "Confirmar"];
   return (
-    <div className="flex items-center gap-0 justify-center px-4 py-3">
-      {steps.map((s, i) => (
-        <React.Fragment key={i}>
-          <StepDot n={i+1} label={s} active={step===i} done={step>i} />
-          {i < steps.length-1 && (
-            <div className={`flex-1 h-px mx-2 transition-all ${step>i ? "bg-emerald-400" : "bg-slate-200"}`} />
-          )}
-        </React.Fragment>
-      ))}
-    </div>
+    <ol className="m-0 p-0 list-none flex flex-wrap items-center gap-x-3 gap-y-1 text-[17px]">
+      {steps.map((s, i) => {
+        const active = step === i;
+        const done   = step > i;
+        return (
+          <React.Fragment key={i}>
+            <li aria-current={active ? "step" : undefined}
+              className={`flex items-center gap-1.5 ${active ? "text-cuaderno-tinta" : done ? "text-cuaderno-verde" : "text-cuaderno-grafito"}`}>
+              {done ? <VistoBueno tamano={15} titulo="Hecho" /> : <span>{i+1}.</span>}
+              {active ? <Resaltado color="durazno">{s}</Resaltado> : <span>{s}</span>}
+            </li>
+            {i < steps.length-1 && <li aria-hidden="true" className="text-cuaderno-columna">—</li>}
+          </React.Fragment>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -946,151 +943,130 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
   // Facturas del proveedor para el panel de detalle
   const facturas = asiento._facturas || [];
 
-  const badgeStyle = asiento._esNC
-    ? { background:"#fce7f3", color:"#9d174d" }
-    : asiento._esVenta
-    ? { background:"#dbeafe", color:"#1e40af" }
-    : asiento._esCombustible
-    ? { background:"#fef3c7", color:"#92400e" }
-    : { background:"#eef2ff", color:"#4338ca" };
+  // Etiqueta de la categoría: resaltador pastel según el tipo de documento
+  const colorCategoria = asiento._esNC ? "rosa" : asiento._esVenta ? "lavanda" : asiento._esCombustible ? "durazno" : "menta";
+
+  const pestanas = [
+    { id:"asiento",   label:"Asiento contable" },
+    { id:"facturas",  label:`Documentos (${facturas.length})` },
+    ...(!asiento._esNC ? [{ id:"categoria", label:"Cambiar categoría" }] : []),
+  ];
 
   return (
-    <div className={`rounded-2xl border-2 transition-all overflow-hidden relative
-      ${isDuplicado ? "border-slate-200 opacity-50" :
-        asiento._esNC ? "border-pink-200 bg-pink-50/10" : cuadrado ? "border-slate-200 hover:border-slate-300" : "border-amber-300 bg-amber-50/20"}`}>
+    <div className={`relative border-b border-cuaderno-renglon ${isDuplicado ? "opacity-50" : ""}`}>
 
       {/* Overlay duplicado */}
       {isDuplicado && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 rounded-2xl">
-          <span className="text-xs font-black text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full flex items-center gap-1.5">
-            🔁 Ya importado — se omitirá
-          </span>
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-cuaderno-tarjeta/60">
+          <Resaltado color="lavanda" className="text-[16px]">Ya importado — se omitirá</Resaltado>
         </div>
       )}
 
       {/* ── Cabecera (siempre visible) ── */}
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${asiento._esNC ? "bg-pink-400" : cuadrado ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
-
+      <div className="flex items-center gap-3 px-1 py-2.5">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-black text-slate-800 truncate">{asiento._razonSocial}</p>
-          <div className="flex items-center flex-wrap gap-1.5 mt-0.5">
-            <span className="text-[10px] text-slate-400 font-mono">{asiento._rut}</span>
-            <span className="text-[10px] text-slate-300">·</span>
-            {/* Badge categoría — NC no permite cambio */}
+          <p className="m-0 text-[18px] leading-snug text-cuaderno-tinta truncate">{casoTitulo(asiento._razonSocial)}</p>
+          <div className="flex items-center flex-wrap gap-x-2 gap-y-1 text-[14px] text-cuaderno-grafito">
+            <span>{asiento._rut}</span>
+            <span aria-hidden="true">·</span>
+            {/* Categoría — NC no permite cambio */}
             {asiento._esNC ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={badgeStyle}>
-                {asiento._esVenta ? "🔴 NC Emitida" : "🔴 Nota de Crédito"}
-              </span>
+              <Resaltado color={colorCategoria}>{asiento._esVenta ? "NC emitida" : "Nota de crédito"}</Resaltado>
             ) : asiento._esVenta ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={badgeStyle}>
-                🔵 {asiento._clasificacion}
-              </span>
+              <Resaltado color={colorCategoria}>{asiento._clasificacion}</Resaltado>
             ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); setExpanded(true); setTab("categoria"); }}
-              className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 transition-all hover:opacity-80 border border-transparent hover:border-current"
-              style={badgeStyle}
-              title="Clic para cambiar categoría"
-            >
-              {asiento._esCombustible ? "⛽ " : ""}{asiento._clasificacion}
-              <svg className="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-              </svg>
-            </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setExpanded(true); setTab("categoria"); }}
+                className="inline-flex items-center gap-1 text-cuaderno-tinta hover:underline underline-offset-[3px] focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40 rounded-sm"
+                title="Clic para cambiar categoría"
+              >
+                <Resaltado color={colorCategoria}>{asiento._clasificacion}</Resaltado>
+                <IconoLapiz tamano={13} className="text-cuaderno-grafito" />
+              </button>
             )}
-            <span className="text-[10px] text-slate-300">·</span>
-            <span className="text-[10px] text-slate-400">{asiento._nDocs} doc{asiento._nDocs>1?"s":""}</span>
+            <span aria-hidden="true">·</span>
+            <span>{asiento._nDocs} doc{asiento._nDocs>1?"s":""}</span>
           </div>
         </div>
 
-        <div className="text-right flex-shrink-0 mr-1">
-          <p className="text-sm font-black text-slate-800 tabular-nums">{fmt(asiento._totalTotal)}</p>
-          {!cuadrado && <p className="text-[10px] text-amber-600 font-bold">⚠ Descuadrado</p>}
+        <div className="text-right flex-shrink-0">
+          <p className="m-0 text-[18px]"><Cifra valor={asiento._totalTotal} escala="pesos" vacio="$0" /></p>
+          {!cuadrado && <p className="m-0 text-[14px] text-cuaderno-roja">Descuadrado</p>}
         </div>
 
         {/* Botón expand */}
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-100 transition-colors flex-shrink-0"
-        >
-          <svg className={`w-4 h-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-          </svg>
-        </button>
+        <Boton variante="icono" className="w-10 h-10 border-cuaderno-columna"
+          aria-label={expanded ? "Ocultar detalle" : "Ver detalle"} aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}>
+          <IconoBajar className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </Boton>
       </div>
 
       {/* ── Panel expandible ── */}
       {expanded && (
-        <div className="border-t border-slate-100">
-          {/* Tabs */}
-          <div className="flex border-b border-slate-100 bg-slate-50/50">
-            {[
-              { id:"asiento",   label:"Asiento contable", icon:"📒" },
-              { id:"facturas",  label:`Documentos (${facturas.length})`, icon:"🧾" },
-              ...(!asiento._esNC ? [{ id:"categoria", label:"Cambiar categoría", icon:"🏷️" }] : []),
-            ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex-1 py-2 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all border-b-2
-                  ${tab===t.id ? "border-indigo-500 text-indigo-700 bg-white" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-                <span>{t.icon}</span>{t.label}
-              </button>
-            ))}
-          </div>
+        <div className="pb-4 pl-3 ml-1 border-l-[1.5px] border-cuaderno-margen space-y-3">
+          <Pestanas opciones={pestanas} valor={tab} onCambiar={setTab} className="[&>button]:text-[17px] [&>button]:min-h-[40px]" />
 
           {/* ── Tab: Asiento contable ── */}
           {tab === "asiento" && (
-            <div className="px-4 pb-4 pt-3 space-y-2 bg-white">
-              <div className="grid grid-cols-12 gap-1 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-1 border-b border-slate-100">
-                <div className="col-span-5">Cuenta</div>
-                <div className="col-span-3 text-right">Debe</div>
-                <div className="col-span-3 text-right">Haber</div>
-                <div className="col-span-1"/>
-              </div>
-              {asiento.lineas.map((linea, li) => (
-                <div key={li} className="grid grid-cols-12 gap-1 items-center">
-                  <div className="col-span-5">
-                    <select value={linea.cuentaId} onChange={e => updateLinea(li,"cuentaId",e.target.value)}
-                      className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-400 bg-white font-medium text-slate-700">
-                      <option value="">— Seleccionar —</option>
-                      {cuentas.filter(c=>c.activa!==false).map(c=>(
-                        <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>
-                      ))}
-                    </select>
-                    <input value={linea.descripcion||""} onChange={e=>updateLinea(li,"descripcion",e.target.value)}
-                      className="w-full text-[10px] px-2 py-1 mt-0.5 border border-slate-100 rounded-lg focus:outline-none text-slate-400 bg-slate-50"
-                      placeholder="Descripción..." />
-                  </div>
-                  <div className="col-span-3">
-                    <input type="number" value={linea.debe||""} onChange={e=>updateLinea(li,"debe",e.target.value)}
-                      className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-400 text-right font-mono bg-white"
-                      placeholder="0"/>
-                  </div>
-                  <div className="col-span-3">
-                    <input type="number" value={linea.haber||""} onChange={e=>updateLinea(li,"haber",e.target.value)}
-                      className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-red-400 text-right font-mono bg-white"
-                      placeholder="0"/>
-                  </div>
-                  <div className="col-span-1"/>
-                </div>
-              ))}
-              <div className={`flex justify-between pt-2 border-t border-slate-100 text-xs font-black
-                ${cuadrado ? "text-emerald-700" : "text-amber-700"}`}>
-                <span>Debe: {fmt(sumDebe)}</span>
-                <span>{cuadrado ? "✓ Cuadrado" : `⚠ Diferencia ${fmt(Math.abs(sumDebe-sumHaber))}`}</span>
-                <span>Haber: {fmt(sumHaber)}</span>
-              </div>
+            <div className="space-y-2">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-left py-1 pr-2">Cuenta</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-right py-1 px-2 w-[22%]">Debe</th>
+                    <th className="font-normal text-[15px] text-cuaderno-grafito text-right py-1 pl-2 w-[22%]">Haber</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {asiento.lineas.map((linea, li) => (
+                    <tr key={li} className="border-b border-cuaderno-renglon align-top">
+                      <td className="py-1.5 pr-2">
+                        <Campo as="select" aria-label="Cuenta" value={linea.cuentaId} onChange={e => updateLinea(li,"cuentaId",e.target.value)}>
+                          <option value="">— Seleccionar —</option>
+                          {cuentas.filter(c=>c.activa!==false).map(c=>(
+                            <option key={c.id} value={c.id}>{c.codigo} {c.nombre}</option>
+                          ))}
+                        </Campo>
+                        <input value={linea.descripcion||""} onChange={e=>updateLinea(li,"descripcion",e.target.value)}
+                          aria-label="Descripción"
+                          className="w-full mt-0.5 px-1 bg-transparent border-0 border-b border-dashed border-cuaderno-columna text-[14px] text-cuaderno-grafito focus:outline-none focus:border-cuaderno-tinta"
+                          placeholder="Descripción..." />
+                      </td>
+                      <td className="py-1.5 px-2">
+                        <Campo type="number" aria-label="Debe" value={linea.debe||""} onChange={e=>updateLinea(li,"debe",e.target.value)}
+                          className="[&>input]:text-right" placeholder="0" />
+                      </td>
+                      <td className="py-1.5 pl-2">
+                        <Campo type="number" aria-label="Haber" value={linea.haber||""} onChange={e=>updateLinea(li,"haber",e.target.value)}
+                          className="[&>input]:text-right" placeholder="0" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="text-[17px]">
+                    <td className="pt-2 pr-2">
+                      {cuadrado
+                        ? <span className="inline-flex items-center gap-1.5 text-cuaderno-verde"><VistoBueno titulo="" /> Cuadrado</span>
+                        : <span className="text-cuaderno-roja">Diferencia <Cifra valor={Math.abs(sumDebe-sumHaber)} escala="pesos" color="roja" /></span>}
+                    </td>
+                    <td className="pt-2 px-2 text-right"><Cifra valor={sumDebe} escala="pesos" raya="total" vacio="$0" /></td>
+                    <td className="pt-2 pl-2 text-right"><Cifra valor={sumHaber} escala="pesos" raya="total" vacio="$0" /></td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           )}
 
           {/* ── Tab: Documentos del proveedor ── */}
           {tab === "facturas" && (
-            <div className="bg-white">
+            <div>
               {facturas.length === 0 ? (
-                <p className="text-center text-slate-400 text-xs py-6">Sin facturas</p>
+                <p className="m-0 py-4 text-center font-ligada text-[17px] text-cuaderno-grafito">Sin facturas</p>
               ) : (
-                <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
+                <ul className="m-0 p-0 list-none max-h-64 overflow-y-auto">
                   {facturas.map((f, fi) => {
                     const total   = parseFloat(String(f["Monto Total"]||"0").replace(/[^0-9.-]/g,""))||0;
                     const refs    = f["Referencias"] || "";
@@ -1102,68 +1078,68 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
                     // Palabras clave para ayudar a identificar el gasto
                     const pistas  = [centro, rendic, refs].filter(Boolean).join(" · ").slice(0,120);
                     return (
-                      <div key={fi} className="px-4 py-2.5 flex items-start gap-3 hover:bg-slate-50/50 transition-colors">
+                      <li key={fi} className="py-2 pr-1 flex items-start gap-3 border-b border-cuaderno-renglon">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-black text-slate-500 font-mono">F°{folio}</span>
-                            <span className="text-[10px] text-slate-300">·</span>
-                            <span className="text-[10px] text-slate-400">{fecha}</span>
+                          <div className="flex items-center flex-wrap gap-x-2 text-[16px]">
+                            <span className="text-cuaderno-tinta">F°{folio}</span>
+                            <span aria-hidden="true" className="text-cuaderno-columna">·</span>
+                            <span className="text-cuaderno-grafito">{fecha}</span>
                             {tipo.toLowerCase().includes("exent") && (
-                              <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 rounded-full font-bold">Exenta</span>
+                              <Resaltado color="lavanda" className="text-[14px]">Exenta</Resaltado>
                             )}
                           </div>
                           {pistas && (
-                            <p className="text-[10px] text-slate-400 mt-0.5 truncate" title={pistas}>
+                            <p className="m-0 text-[14px] text-cuaderno-grafito truncate" title={pistas}>
                               {pistas}
                             </p>
                           )}
                           {refs && refs.toLowerCase().includes("guía") && (
-                            <p className="text-[10px] text-amber-600 font-semibold mt-0.5">
-                              🚛 Con guía de despacho
+                            <p className="m-0 text-[14px] text-cuaderno-grafito">
+                              Con guía de despacho
                             </p>
                           )}
                         </div>
-                        <p className="text-xs font-black text-slate-700 tabular-nums flex-shrink-0">{fmt(total)}</p>
-                      </div>
+                        <p className="m-0 text-[16px] flex-shrink-0"><Cifra valor={total} escala="pesos" vacio="$0" /></p>
+                      </li>
                     );
                   })}
-                </div>
+                </ul>
               )}
             </div>
           )}
 
           {/* ── Tab: Cambiar categoría ── */}
           {tab === "categoria" && (
-            <div className="bg-white px-4 pb-4 pt-3">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-3">
+            <div>
+              <p className="m-0 mb-2 text-[15px] text-cuaderno-grafito">
                 Selecciona la categoría correcta — se recalcularán las cuentas automáticamente
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div role="radiogroup" aria-label="Categoría" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {CATEGORIAS.map(categ => {
                   const activa = categ.label === asiento._clasificacion;
                   return (
                     <button
                       key={categ.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={activa}
                       onClick={() => handleCategoria(categ)}
-                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-all border-2
+                      className={`flex items-center gap-2 min-h-[48px] px-3 py-1.5 rounded-md border-[1.5px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40
                         ${activa
-                          ? "border-indigo-500 bg-indigo-50 text-indigo-800"
-                          : "border-slate-100 hover:border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                          ? "border-cuaderno-tinta bg-cuaderno-hoja text-cuaderno-tinta"
+                          : "border-cuaderno-columna/70 text-cuaderno-grafito hover:border-cuaderno-tinta/60 hover:text-cuaderno-tinta"}`}
                     >
-                      <span className="text-base flex-shrink-0">{categ.icon}</span>
-                      <div className="min-w-0">
-                        <p className="truncate">{categ.label}</p>
-                        <p className="text-[9px] font-normal opacity-60 truncate">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[16px]">
+                          {activa ? <Resaltado color="menta">{categ.label}</Resaltado> : categ.label}
+                        </span>
+                        <span className="block truncate text-[13px] text-cuaderno-grafito">
                           {categ.esCombustible ? "Con imp. específico Ley 18.502" :
                            categ.tipo === "costo" ? "Costo operacional" :
                            categ.tipo === "gasto_fin" ? "Gasto financiero" : "Gasto administración"}
-                        </p>
-                      </div>
-                      {activa && (
-                        <svg className="w-4 h-4 text-indigo-500 flex-shrink-0 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/>
-                        </svg>
-                      )}
+                        </span>
+                      </span>
+                      {activa && <VistoBueno titulo="Elegida" tamano={16} />}
                     </button>
                   );
                 })}
@@ -1351,298 +1327,200 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
-      style={{ background: "rgba(2,6,23,0.75)", backdropFilter: "blur(6px)" }}>
-      <div className="w-full max-w-2xl my-auto" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <ModalCuaderno
+      titulo="Importar desde iConstruct"
+      subtitulo="Centralización automática de facturas de proveedores"
+      onClose={handleClose}
+      ancho="max-w-3xl"
+      cerrarAlClicFuera={false}
+      pie={
+        step === 1 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Boton variante="texto" onClick={() => { reset(); }}>
+              <IconoAnterior /> Cambiar archivo
+            </Boton>
+            <Boton variante="primario" onClick={handleImportar}>
+              Importar {stats.nNuevos} asiento{stats.nNuevos!==1?"s":""}{stats.nDuplicados>0?` (+${stats.nDuplicados} omitidos)`:""}
+            </Boton>
+          </div>
+        ) : step === 2 && progreso >= 100 ? (
+          <div className="flex justify-end">
+            <Boton variante="primario" onClick={handleClose}>
+              Ver en Libro Diario <IconoSiguiente />
+            </Boton>
+          </div>
+        ) : null
+      }>
 
-        {/* Card principal */}
-        <div className="bg-white rounded-3xl overflow-hidden shadow-2xl"
-          style={{ boxShadow: "0 32px 80px -12px rgba(0,0,0,0.35)" }}>
+      <Stepper step={step < 2 ? step : (progreso < 100 ? 2 : 2)} />
 
-          {/* Header con gradiente sutil */}
-          <div className="relative overflow-hidden" style={{
-            background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 100%)"
-          }}>
-            <div className="absolute inset-0 opacity-20"
-              style={{ backgroundImage: "radial-gradient(circle at 80% 20%, #60a5fa 0%, transparent 50%)" }} />
-            <div className="relative px-6 pt-6 pb-5">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl"
-                    style={{ background: "rgba(255,255,255,0.12)" }}>🏗️</div>
-                  <div>
-                    <h2 className="text-white font-black text-lg tracking-tight">Importar desde iConstruct</h2>
-                    <p className="text-blue-300 text-xs mt-0.5">Centralización automática de facturas de proveedores</p>
-                  </div>
-                </div>
-                <button onClick={handleClose}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                  </svg>
-                </button>
-              </div>
-              <div className="mt-5">
-                <Stepper step={step < 2 ? step : (progreso < 100 ? 2 : 2)} />
-              </div>
-            </div>
+      {/* ── STEP 0: Subir archivo ── */}
+      {step === 0 && (
+        <>
+          {/* Período */}
+          <Campo type="month" etiqueta="Período a contabilizar" value={periodo}
+            onChange={e => setPeriodo(e.target.value)}
+            className="max-w-xs"
+            ayuda="Se detecta automáticamente desde las fechas del archivo. Puedes ajustarlo manualmente." />
+
+          {/* Drop zone */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => inputRef.current?.click()}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+            className="cursor-pointer rounded-md border-[1.5px] border-dashed border-cuaderno-columna bg-cuaderno-hoja hover:border-cuaderno-tinta transition-colors p-8 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-cuaderno-tinta/40"
+          >
+            <IconoSubir tamano={28} className="mx-auto mb-3 text-cuaderno-grafito" />
+            <p className="m-0 font-ligada text-[19px] text-cuaderno-tinta">Arrastra el archivo Excel aquí</p>
+            <p className="m-0 mt-1 text-[16px] text-cuaderno-grafito">
+              o <span className="text-cuaderno-tinta underline underline-offset-[3px] decoration-cuaderno-columna">haz clic para seleccionar</span>
+            </p>
+            <ul className="m-0 mt-4 p-0 list-none space-y-1 text-[15px] text-cuaderno-grafito">
+              <li><Resaltado color="lavanda">RCV SII</Resaltado> — CSV del Registro de Compras</li>
+              <li><Resaltado color="menta">iConstruct</Resaltado> — Documentos.xlsx</li>
+            </ul>
+            <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+              onChange={e => handleFile(e.target.files[0])} />
           </div>
 
-          {/* Body */}
-          <div className="p-6 space-y-5 max-h-[65vh] overflow-y-auto">
+          {/* Resumen del proceso */}
+          <ol className="m-0 p-0 list-none grid grid-cols-1 sm:grid-cols-3 gap-x-5 gap-y-2">
+            {[
+              { title: "Lectura", desc: "Lee todas las facturas del archivo" },
+              { title: "Clasificación", desc: "Asigna cuenta de gasto por tipo de proveedor" },
+              { title: "Revisión manual", desc: "Edita cuenta o montos antes de importar" },
+            ].map((item, i) => (
+              <li key={item.title} className="border-t border-cuaderno-renglon pt-2">
+                <p className="m-0 text-[17px] text-cuaderno-tinta">{i+1}. {item.title}</p>
+                <p className="m-0 text-[14px] text-cuaderno-grafito">{item.desc}</p>
+              </li>
+            ))}
+          </ol>
 
-            {/* ── STEP 0: Subir archivo ── */}
-            {step === 0 && (
-              <>
-                {/* Período */}
-                <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl">
-                  <div className="w-8 h-8 rounded-xl bg-slate-200 flex items-center justify-center text-slate-600 text-sm">📅</div>
-                  <div className="flex-1">
-                    <p className="text-xs font-black text-slate-700">Período a contabilizar</p>
-                    <p className="text-[10px] text-slate-400">Se detecta automáticamente desde las fechas del archivo. Puedes ajustarlo manualmente.</p>
-                  </div>
-                  <input type="month" value={periodo}
-                    onChange={e => setPeriodo(e.target.value)}
-                    className="px-3 py-2 text-sm font-bold border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 bg-white"
-                  />
-                </div>
-
-                {/* Drop zone */}
-                <div
-                  onClick={() => inputRef.current?.click()}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
-                  className="group cursor-pointer rounded-2xl border-2 border-dashed transition-all p-10 text-center"
-                  style={{ borderColor: "#c7d2fe", background: "linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%)" }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = "#6366f1"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = "#c7d2fe"}
-                >
-                  <div className="text-5xl mb-4">📊</div>
-                  <p className="font-black text-slate-800 text-base">Arrastra el archivo Excel aquí</p>
-                  <p className="text-slate-400 text-sm mt-1">o <span className="text-indigo-600 font-bold underline underline-offset-2">haz clic para seleccionar</span></p>
-                  <div className="mt-4 space-y-2">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-100 rounded-full">
-                      <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wider">📋 RCV SII — CSV del Registro de Compras</span>
-                    </div>
-                    <div className="block">
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">📊 iConstruct — Documentos.xlsx</span>
-                      </div>
-                    </div>
-                  </div>
-                  <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
-                    onChange={e => handleFile(e.target.files[0])} />
-                </div>
-
-                {/* Resumen del proceso */}
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { icon: "🔍", title: "Lectura", desc: "Lee todas las facturas del archivo" },
-                    { icon: "🧠", title: "Clasificación", desc: "Asigna cuenta de gasto por tipo de proveedor" },
-                    { icon: "✏️", title: "Revisión manual", desc: "Edita cuenta o montos antes de importar" },
-                  ].map(item => (
-                    <div key={item.title} className="p-3 rounded-xl bg-slate-50 text-center">
-                      <div className="text-2xl mb-1">{item.icon}</div>
-                      <p className="text-xs font-black text-slate-700">{item.title}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">{item.desc}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {errores.length > 0 && (
-                  <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
-                    {errores.map((e,i) => (
-                      <p key={i} className="text-xs text-red-700 font-semibold flex items-center gap-2">
-                        <span>⚠</span>{e}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* ── STEP 1: Revisión y edición ── */}
-            {step === 1 && (
-              <>
-                {/* KPIs */}
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { label: "Documentos",   val: stats.docs,            color: "#1e40af", bg: "#eff6ff" },
-                    { label: "Proveedores",  val: stats.proveedores,     color: "#7c3aed", bg: "#f5f3ff" },
-                    { label: "Neto + Exento",val: fmt(stats.totalNeto),  color: "#065f46", bg: "#ecfdf5" },
-                    { label: "IVA CF",       val: fmt(stats.totalIVA),   color: "#b45309", bg: "#fffbeb" },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-2xl p-3 text-center"
-                      style={{ background: k.bg }}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: k.color, opacity: 0.7 }}>{k.label}</p>
-                      <p className="text-sm font-black mt-0.5 tabular-nums" style={{ color: k.color }}>{k.val}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Badge período detectado + formato */}
-                <div className="flex items-center gap-2 flex-wrap p-3 bg-blue-50 border border-blue-200 rounded-2xl">
-                  <span className="text-lg">📅</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-black text-blue-800">
-                      Período detectado: <span className="text-blue-600">{periodo}</span>
-                    </p>
-                    <p className="text-[10px] text-blue-500 mt-0.5">
-                      Derivado automáticamente de las fechas de los documentos
-                    </p>
-                  </div>
-                  <input type="month" value={periodo}
-                    onChange={e => setPeriodo(e.target.value)}
-                    className="px-2 py-1 text-xs font-bold border border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-blue-700 flex-shrink-0"
-                  />
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-full
-                    ${formato === "rcv_sii"   ? "bg-emerald-100 text-emerald-700" :
-                      formato === "rcv_venta" ? "bg-blue-100 text-blue-700" :
-                                                "bg-indigo-100 text-indigo-700"}`}>
-                    {formato === "rcv_sii"   ? "✓ RCV SII — Registro de Compras" :
-                     formato === "rcv_venta" ? "✓ RCV SII — Registro de Ventas" :
-                                              "✓ iConstruct — Documentos.xlsx"}
-                  </span>
-                  {formato === "rcv_sii" && (
-                    <span className="text-[10px] text-slate-400">Impuesto específico combustible leído directamente del SII</span>
-                  )}
-                  {formato === "rcv_venta" && (
-                    <span className="text-[10px] text-slate-400">Genera asientos de venta: Cuentas por Cobrar / Ingresos + IVA Débito</span>
-                  )}
-                </div>
-
-                {/* Alerta duplicados */}
-                {stats.nDuplicados > 0 && (
-                  <div className="flex items-center gap-3 p-3 bg-slate-100 border border-slate-300 rounded-2xl">
-                    <span className="text-xl">🔁</span>
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-700 font-black">
-                        {stats.nDuplicados} asiento{stats.nDuplicados>1?"s ya estaban":"  ya estaba"} importado{stats.nDuplicados>1?"s":""} — se omitirán automáticamente
-                      </p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        Se importarán {stats.nNuevos} asiento{stats.nNuevos!==1?"s":""} nuevo{stats.nNuevos!==1?"s":""}
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {stats.nDuplicados === 0 && stats.proveedores > 0 && (
-                  <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                    <span className="text-sm">✅</span>
-                    <p className="text-[11px] text-emerald-700 font-semibold">Sin duplicados — todos los {stats.proveedores} asientos son nuevos</p>
-                  </div>
-                )}
-
-                {/* Alerta descuadres */}
-                {stats.descuadrados > 0 && (
-                  <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-2xl">
-                    <span className="text-xl">⚠️</span>
-                    <p className="text-xs text-amber-800 font-semibold">
-                      {stats.descuadrados} asiento{stats.descuadrados>1?"s":""} con diferencia de cuadre —
-                      expándelos para corregir manualmente.
-                    </p>
-                  </div>
-                )}
-
-                {/* Info edición */}
-                <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  <span>Haz clic en cada proveedor para ver y editar las líneas del asiento antes de importar</span>
-                </div>
-
-                {/* Lista de asientos editables */}
-                <div className="space-y-2">
-                  {asientos.map((a, i) => (
-                    <ProveedorCard
-                      key={i}
-                      idx={i}
-                      asiento={a}
-                      cuentas={cuentas}
-                      onChange={handleUpdateAsiento}
-                      isDuplicado={!!(a.importHash && duplicados.has(a.importHash))}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* ── STEP 2: Importando / Listo ── */}
-            {step === 2 && (
-              <div className="py-8 text-center space-y-5">
-                {progreso < 100 ? (
-                  <>
-                    <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center text-3xl"
-                      style={{ background: "linear-gradient(135deg, #1e3a5f, #1d4ed8)" }}>
-                      🏗️
-                    </div>
-                    <div>
-                      <p className="font-black text-slate-800 text-lg">Importando asientos...</p>
-                      <p className="text-slate-400 text-sm mt-1">{importados} de {asientos.length} proveedores</p>
-                    </div>
-                    <div className="mx-auto w-full max-w-xs">
-                      <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                        <div className="h-2.5 rounded-full transition-all duration-500"
-                          style={{ width:`${progreso}%`, background:"linear-gradient(90deg,#3b82f6,#6366f1)" }}/>
-                      </div>
-                      <p className="text-indigo-600 font-black text-2xl mt-3">{progreso}%</p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center text-3xl bg-emerald-100">
-                      ✅
-                    </div>
-                    <div>
-                      <p className="font-black text-slate-800 text-xl">¡Importación completada!</p>
-                      <p className="text-slate-500 text-sm mt-1">
-                        {importados} asiento{importados!==1?"s":""} nuevo{importados!==1?"s":""} en <strong>{periodo}</strong>
-                        {saltados > 0 && <span className="text-slate-400"> · {saltados} duplicado{saltados!==1?"s":""} omitido{saltados!==1?"s":""}</span>}
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto">
-                      {[
-                        { label:"Importados",  val:importados,       color:"#1e40af" },
-                        { label:"Omitidos",    val:saltados,         color:"#64748b" },
-                        { label:"Total CxP",   val:fmt(stats.total), color:"#065f46" },
-                      ].map(k=>(
-                        <div key={k.label} className="bg-slate-50 rounded-xl p-3 text-center">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase">{k.label}</p>
-                          <p className="text-sm font-black mt-0.5 tabular-nums" style={{color:k.color}}>{k.val}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <button onClick={handleClose}
-                      className="px-8 py-3 rounded-2xl text-white text-sm font-black shadow-lg transition-all hover:shadow-xl"
-                      style={{ background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)" }}>
-                      Ver en Libro Diario →
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Footer con botones */}
-          {step === 1 && (
-            <div className="px-6 pb-6 pt-2 flex gap-3 border-t border-slate-100">
-              <button onClick={() => { reset(); }}
-                className="flex-1 py-3 rounded-2xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all">
-                ← Cambiar archivo
-              </button>
-              <button
-                onClick={handleImportar}
-                className="flex-1 py-3 rounded-2xl text-white text-sm font-black shadow-lg transition-all hover:shadow-xl"
-                style={{ background:"linear-gradient(135deg,#0f172a,#1d4ed8)" }}
-              >
-                Importar {stats.nNuevos} asiento{stats.nNuevos!==1?"s":""}{stats.nDuplicados>0?` (+${stats.nDuplicados} omitidos)`:""} →
-              </button>
+          {errores.length > 0 && (
+            <div className="space-y-1">
+              {errores.map((e,i) => (
+                <Nota key={i} etiqueta="Error:">{e}</Nota>
+              ))}
             </div>
           )}
+        </>
+      )}
+
+      {/* ── STEP 1: Revisión y edición ── */}
+      {step === 1 && (
+        <>
+          {/* Resumen */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+            <LineaGuia etiqueta="Documentos">{stats.docs}</LineaGuia>
+            <LineaGuia etiqueta="Proveedores">{stats.proveedores}</LineaGuia>
+            <LineaGuia etiqueta="Neto + exento"><Cifra valor={stats.totalNeto} escala="pesos" vacio="$0" /></LineaGuia>
+            <LineaGuia etiqueta="IVA CF"><Cifra valor={stats.totalIVA} escala="pesos" vacio="$0" /></LineaGuia>
+          </div>
+
+          {/* Período detectado + formato */}
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <Campo type="month" etiqueta="Período detectado" value={periodo}
+              onChange={e => setPeriodo(e.target.value)}
+              className="max-w-[14rem]"
+              ayuda="Derivado automáticamente de las fechas de los documentos" />
+            <div className="min-w-0 flex-1 text-[16px]">
+              <Resaltado color={formato === "rcv_venta" ? "lavanda" : "menta"}>
+                {formato === "rcv_sii"   ? "RCV SII — Registro de Compras" :
+                 formato === "rcv_venta" ? "RCV SII — Registro de Ventas" :
+                                          "iConstruct — Documentos.xlsx"}
+              </Resaltado>
+              {formato === "rcv_sii" && (
+                <p className="m-0 mt-1 text-[14px] text-cuaderno-grafito">Impuesto específico combustible leído directamente del SII</p>
+              )}
+              {formato === "rcv_venta" && (
+                <p className="m-0 mt-1 text-[14px] text-cuaderno-grafito">Genera asientos de venta: Cuentas por Cobrar / Ingresos + IVA Débito</p>
+              )}
+            </div>
+          </div>
+
+          {/* Alerta duplicados */}
+          {stats.nDuplicados > 0 && (
+            <Nota etiqueta="Ojo:" tono="grafito">
+              {stats.nDuplicados} asiento{stats.nDuplicados>1?"s ya estaban":"  ya estaba"} importado{stats.nDuplicados>1?"s":""} — se omitirán automáticamente.
+              {" "}Se importarán {stats.nNuevos} asiento{stats.nNuevos!==1?"s":""} nuevo{stats.nNuevos!==1?"s":""}.
+            </Nota>
+          )}
+          {stats.nDuplicados === 0 && stats.proveedores > 0 && (
+            <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-grafito">
+              <VistoBueno titulo="" /> Sin duplicados — todos los {stats.proveedores} asientos son nuevos
+            </p>
+          )}
+
+          {/* Alerta descuadres */}
+          {stats.descuadrados > 0 && (
+            <Nota etiqueta="Ojo:">
+              {stats.descuadrados} asiento{stats.descuadrados>1?"s":""} con diferencia de cuadre —
+              expándelos para corregir manualmente.
+            </Nota>
+          )}
+
+          {/* Info edición */}
+          <p className="m-0 text-[15px] text-cuaderno-grafito">
+            Haz clic en cada proveedor para ver y editar las líneas del asiento antes de importar
+          </p>
+
+          {/* Lista de asientos editables */}
+          <div className="border-t-[1.5px] border-cuaderno-tinta">
+            {asientos.map((a, i) => (
+              <ProveedorCard
+                key={i}
+                idx={i}
+                asiento={a}
+                cuentas={cuentas}
+                onChange={handleUpdateAsiento}
+                isDuplicado={!!(a.importHash && duplicados.has(a.importHash))}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── STEP 2: Importando / Listo ── */}
+      {step === 2 && (
+        <div className="py-4 text-center space-y-4">
+          {progreso < 100 ? (
+            <>
+              <div role="status">
+                <p className="m-0 font-ligada text-[20px] text-cuaderno-tinta">Importando asientos...</p>
+                <p className="m-0 mt-1 text-[16px] text-cuaderno-grafito">{importados} de {asientos.length} proveedores</p>
+              </div>
+              <div className="mx-auto w-full max-w-xs">
+                <div className="w-full h-1.5 rounded-full bg-cuaderno-renglon overflow-hidden"
+                  role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progreso}>
+                  <div className="h-full bg-cuaderno-tinta transition-all duration-500" style={{ width:`${progreso}%` }}/>
+                </div>
+                <p className="m-0 mt-2 text-[22px] text-cuaderno-tinta">{progreso}%</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <Titulo as="h3" tamano="md" className="flex items-center justify-center gap-2">
+                  <VistoBueno tamano={20} titulo="" /> Importación completada
+                </Titulo>
+                <p className="m-0 mt-1 text-[16px] text-cuaderno-grafito">
+                  {importados} asiento{importados!==1?"s":""} nuevo{importados!==1?"s":""} en <span className="text-cuaderno-tinta">{periodo}</span>
+                  {saltados > 0 && <span> · {saltados} duplicado{saltados!==1?"s":""} omitido{saltados!==1?"s":""}</span>}
+                </p>
+              </div>
+              <div className="max-w-sm mx-auto text-left">
+                <LineaGuia etiqueta="Importados">{importados}</LineaGuia>
+                <LineaGuia etiqueta="Omitidos">{saltados}</LineaGuia>
+                <LineaGuia etiqueta="Total CxP"><Cifra valor={stats.total} escala="pesos" raya="total" vacio="$0" /></LineaGuia>
+              </div>
+            </>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+    </ModalCuaderno>
   );
 }

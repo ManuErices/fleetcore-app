@@ -2,7 +2,10 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
-import { useContabilidad, PeriodoSelector, fmt, fmtM, MESES, MESES_S } from "./ContabilidadContext";
+import { useContabilidad, PeriodoSelector, MESES, MESES_S } from "./ContabilidadContext";
+import {
+  Cifra, Titulo, Hoja, LineaGuia, Nota, Resaltado, Campo, Pestanas, FechaHoja,
+} from "../finanzas/cuaderno";
 import { vidaUtilTributaria, VIDA_UTIL_TRIB } from "./ContabilidadDepreciacion";
 
 // ─── Tabla vida útil tributaria SII (años) ────────────────────────────────────
@@ -71,30 +74,56 @@ function useActivos() {
 }
 
 
-// ─── Utilidades ───────────────────────────────────────────────────────────────
-function KpiTrib({ label, value, sub, color = "text-slate-800", bg = "bg-white" }) {
+// ─── Piezas de presentación ───────────────────────────────────────────────────
+/** Resumen de un formulario: concepto ······· cifra, con una nota menor debajo. */
+function ResumenTrib({ filas }) {
   return (
-    <div className={`glass-card rounded-xl p-4 ${bg}`}>
-      <p className="text-xs text-slate-500 font-semibold">{label}</p>
-      <p className={`text-xl font-black mt-1 ${color}`}>{value}</p>
-      {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
+    <div className="grid gap-x-10 sm:grid-cols-2 mb-2">
+      {filas.map((f, i) => (
+        <div key={i}>
+          <LineaGuia etiqueta={f.etiqueta}>
+            <Cifra valor={f.valor} escala="pesos" vacio="$0" raya={f.raya || "ninguna"} />
+          </LineaGuia>
+          {f.nota && <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{f.nota}</p>}
+        </div>
+      ))}
     </div>
   );
 }
 
-function FilaTrib({ label, valor, indent = false, negrita = false, colorValor = "text-slate-700", separador = false }) {
-  if (separador) return <tr><td colSpan={2} className="h-px bg-slate-100" /></tr>;
+/**
+ * Renglón de un cuadro tributario.
+ *  raya: "ninguna" | "total" (subtotal) | "doble" (resultado a pagar o recibir)
+ *  color: color de la cifra ("auto" la deja en tinta y roja si es negativa)
+ */
+function FilaTrib({ label, valor, indent = false, raya = "ninguna", color = "auto", vacio = "0", separador = false }) {
+  if (separador) return <tr aria-hidden="true"><td colSpan={2} className="h-2 p-0" /></tr>;
+  const conRaya = raya !== "ninguna";
   return (
-    <tr className={negrita ? "bg-slate-50" : "hover:bg-purple-50/10"}>
-      <td className={`px-4 py-2 text-sm ${negrita ? "font-black text-slate-800" : "text-slate-600"}`}
-        style={{ paddingLeft: indent ? "32px" : "16px" }}>
+    <tr className={conRaya ? "" : "border-b border-cuaderno-renglon"}>
+      <td className="py-1.5 pr-3 text-[17px]" style={{ paddingLeft: indent ? "18px" : "0" }}>
         {label}
       </td>
-      <td className={`px-4 py-2 text-right text-sm font-mono ${negrita ? "font-black" : "font-semibold"} ${colorValor}`}>
-        {fmt(valor)}
+      <td className={`py-1.5 text-right text-[17px] ${conRaya ? "pt-2.5" : ""}`}>
+        <Cifra valor={valor} escala="pesos" raya={raya} color={color} vacio={vacio} />
       </td>
     </tr>
   );
+}
+
+function SeccionTrib({ etiqueta, menor = false }) {
+  return (
+    <tr>
+      <td colSpan={2} className={menor ? "pt-3 pb-0.5 text-[15px] text-cuaderno-grafito" : "pt-4 pb-1"}>
+        {menor ? etiqueta : <Titulo as="h3" tamano="sm">{etiqueta}</Titulo>}
+      </td>
+    </tr>
+  );
+}
+
+/** Marca escrita a la derecha del título de cada hoja (norma, fuente). */
+function Marca({ children }) {
+  return <span className="text-[15px] text-cuaderno-grafito">{children}</span>;
 }
 
 // ─── F29 — Declaración mensual IVA ───────────────────────────────────────────
@@ -135,53 +164,47 @@ function FormularioF29({ cuentas, saldosMap, periodoActivo, remanenteArrastrado 
   const mesLabel = MESES[parseInt(mes) - 1];
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-4 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-white font-black text-sm">Formulario 29 — Declaración IVA</p>
-          <p className="text-blue-200 text-xs">Período {mesLabel} {anno}</p>
-        </div>
-        <span className="px-3 py-1 bg-white/20 text-white text-xs font-black rounded-full">SII Chile</span>
-      </div>
+    <Hoja titulo="Formulario 29 — Declaración IVA" extra={<Marca>SII Chile</Marca>}>
+      <p className="m-0 mb-3 text-[16px] text-cuaderno-grafito">Período {mesLabel} {anno}</p>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3 p-4">
-        <KpiTrib label="IVA Débito" value={fmtM(data.ivaDebito)} sub="Ventas gravadas × 19%" color="text-red-600" />
-        <KpiTrib label="IVA Crédito" value={fmtM(data.ivaCredito)} sub="Compras con IVA" color="text-emerald-600" />
-        <KpiTrib label={data.totalF29 > 0 ? "A Pagar" : "Sin pago"} value={fmtM(data.totalF29)} sub="Neto F29" color={data.totalF29 > 0 ? "text-red-700" : "text-emerald-700"} />
-      </div>
+      <ResumenTrib filas={[
+        { etiqueta: "IVA Débito",  valor: data.ivaDebito,  nota: "Ventas gravadas × 19%" },
+        { etiqueta: "IVA Crédito", valor: data.ivaCredito, nota: "Compras con IVA" },
+        { etiqueta: data.totalF29 > 0
+            ? <Resaltado color="rosa">A Pagar</Resaltado>
+            : <Resaltado color="menta">Sin pago</Resaltado>,
+          valor: data.totalF29, nota: "Neto F29", raya: "doble" },
+      ]} />
 
       {/* Detalle cuadro */}
-      <table className="w-full border-t border-slate-100">
-        <tbody>
-          <FilaTrib label="IVA Débito Fiscal (línea 1)" valor={data.ivaDebito} />
-          <FilaTrib label="IVA Crédito Fiscal del mes (línea 20)" valor={data.ivaCredito} indent />
-          {data.remanenteAnterior > 0 && (
-            <FilaTrib label="Remanente crédito fiscal mes anterior (línea 77)" valor={data.remanenteAnterior} indent colorValor="text-emerald-600" />
-          )}
-          <FilaTrib label="Crédito fiscal total" valor={data.creditoTotal} indent negrita />
-          <FilaTrib separador />
-          <FilaTrib label="IVA determinado" valor={data.ivaLine3} negrita />
-          {data.remanente > 0 && <FilaTrib label="Remanente para el próximo mes (línea 504)" valor={data.remanente} colorValor="text-emerald-600" />}
-          <FilaTrib separador />
-          <FilaTrib label="PPM del período (línea 62)" valor={data.ppm} indent colorValor="text-blue-600" />
-          <FilaTrib separador />
-          <FilaTrib label="TOTAL A PAGAR F29 (IVA + PPM)" valor={data.totalF29} negrita colorValor={data.totalF29 > 0 ? "font-black text-red-700" : "font-black text-emerald-700"} />
-        </tbody>
-      </table>
+      <div className="max-w-2xl">
+        <table className="w-full border-collapse">
+          <tbody>
+            <SeccionTrib etiqueta="Cuadro de IVA" />
+            <FilaTrib label="IVA Débito Fiscal (línea 1)" valor={data.ivaDebito} />
+            <FilaTrib label="IVA Crédito Fiscal del mes (línea 20)" valor={data.ivaCredito} indent />
+            {data.remanenteAnterior > 0 && (
+              <FilaTrib label="Remanente crédito fiscal mes anterior (línea 77)" valor={data.remanenteAnterior} indent />
+            )}
+            <FilaTrib label="Crédito fiscal total" valor={data.creditoTotal} indent raya="total" />
+            <FilaTrib separador />
+            <FilaTrib label="IVA determinado" valor={data.ivaLine3} raya="total" />
+            {data.remanente > 0 && <FilaTrib label="Remanente para el próximo mes (línea 504)" valor={data.remanente} color="verde" />}
+            <FilaTrib separador />
+            <FilaTrib label="PPM del período (línea 62)" valor={data.ppm} indent />
+            <FilaTrib separador />
+            <FilaTrib label="Total a pagar F29 (IVA + PPM)" valor={data.totalF29} raya="doble" />
+          </tbody>
+        </table>
 
-      {/* Advertencia */}
-      <div className="px-4 py-3 bg-amber-50 border-t border-amber-100 flex items-start gap-2">
-        <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <p className="text-xs text-amber-700">
+        {/* Advertencia */}
+        <Nota etiqueta="Ojo:" tono="grafito" className="mt-4">
           Calculado sobre los asientos del período. El remanente arrastrado se toma a valor
           nominal: el Art. 27 del DL 825 exige reajustarlo por la variación de la UTM, así que
           contrástalo con el certificado del SII antes de presentar.
-        </p>
+        </Nota>
       </div>
-    </div>
+    </Hoja>
   );
 }
 
@@ -216,51 +239,36 @@ function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
   }, [cuentas, saldosMap, tasaPPM]);
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      <div className="bg-gradient-to-r from-violet-700 to-purple-600 px-4 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-white font-black text-sm">PPM — Pagos Provisionales Mensuales</p>
-          <p className="text-violet-200 text-xs">Art. 84 LIR — Determinación mensual</p>
-        </div>
-      </div>
+    <Hoja titulo="PPM — Pagos Provisionales Mensuales" extra={<Marca>Art. 84 LIR</Marca>}>
+      <p className="m-0 mb-3 text-[16px] text-cuaderno-grafito">Art. 84 LIR — Determinación mensual</p>
 
-      <div className="p-4 space-y-4">
+      <div className="max-w-2xl space-y-4">
         {/* Tasa configurable */}
-        <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-xl border-2 border-purple-200">
-          <div className="flex-1">
-            <p className="text-xs font-black text-purple-700">Tasa PPM aplicable</p>
-            <p className="text-[11px] text-purple-500">Determinada en la renta anterior o provisional</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <input type="number" value={tasaPPM} onChange={e => setTasaPPM(parseFloat(e.target.value) || 0)}
-              step="0.1" min="0" max="100"
-              className="w-20 px-3 py-1.5 border-2 border-purple-300 rounded-xl text-sm font-black text-center focus:outline-none focus:border-purple-500" />
-            <span className="text-sm font-black text-purple-700">%</span>
-          </div>
-        </div>
+        <Campo etiqueta="Tasa PPM aplicable (%)" ayuda="Determinada en la renta anterior o provisional"
+          type="number" value={tasaPPM} onChange={e => setTasaPPM(parseFloat(e.target.value) || 0)}
+          step="0.1" min="0" max="100" className="w-64" />
 
         {/* Cuadro */}
-        <table className="w-full">
+        <table className="w-full border-collapse">
           <tbody>
             <FilaTrib label="Ingresos brutos del período" valor={data.totalIngresos} />
-            <FilaTrib label={`Tasa PPM (${tasaPPM}%)`} valor={data.ppmObligatorio} negrita colorValor="text-purple-700" />
+            <FilaTrib label={`Tasa PPM (${tasaPPM}%)`} valor={data.ppmObligatorio} raya="total" />
             <FilaTrib separador />
             <FilaTrib label="PPM registrado en asientos" valor={data.ppmRegistrado} indent />
-            <FilaTrib label={data.diferencia > 0 ? "PPM pendiente de registrar" : "PPM en exceso"} valor={Math.abs(data.diferencia)}
-              negrita colorValor={data.diferencia > 0 ? "font-black text-red-600" : "font-black text-emerald-600"} />
+            <FilaTrib label={data.diferencia > 0
+                ? <Resaltado color="rosa">PPM pendiente de registrar</Resaltado>
+                : <Resaltado color="menta">PPM en exceso</Resaltado>}
+              valor={Math.abs(data.diferencia)} raya="doble" />
           </tbody>
         </table>
 
         {data.diferencia > 0.01 && (
-          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
-            <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-xs text-red-700 font-semibold">Falta registrar el asiento de PPM por {fmt(data.diferencia)}. Ir al Libro Diario y crear un asiento Debe: PPM / Haber: Banco.</p>
-          </div>
+          <Nota etiqueta="Ojo:">
+            Falta registrar el asiento de PPM por <Cifra valor={data.diferencia} escala="pesos" color="heredar" />. Ir al Libro Diario y crear un asiento Debe: PPM / Haber: Banco.
+          </Nota>
         )}
       </div>
-    </div>
+    </Hoja>
   );
 }
 
@@ -312,52 +320,51 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
   }, [cuentas, saldosMap, activos, tasaImpuesto, mesesTranscurridos, depreciacionContabilizada]);
 
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      <div className="bg-gradient-to-r from-slate-700 to-slate-600 px-4 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-white font-black text-sm">Formulario 22 — Declaración Anual Renta</p>
-          <p className="text-slate-400 text-xs">Determinación Renta Líquida Imponible</p>
-        </div>
-        <span className="px-3 py-1 bg-white/10 text-white text-xs font-black rounded-full">Art. 29–33 LIR</span>
-      </div>
+    <Hoja titulo="Formulario 22 — Declaración Anual Renta" extra={<Marca>Art. 29–33 LIR</Marca>}>
+      <p className="m-0 mb-3 text-[16px] text-cuaderno-grafito">Determinación Renta Líquida Imponible</p>
 
-      {/* KPIs F22 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4">
-        <KpiTrib label="Ingresos Brutos" value={fmtM(data.ingresosBrutos)} color="text-emerald-600" />
-        <KpiTrib label="Renta Liq. Imponible" value={fmtM(data.rli)} color={data.rli >= 0 ? "text-slate-800" : "text-red-600"} />
-        <KpiTrib label="Impuesto 1ª Cat." value={fmtM(data.impuesto1Cat)} color="text-red-600" />
-        <KpiTrib label={data.saldoF22 > 0 ? "A Pagar F22" : "Devolución"} value={fmtM(data.saldoF22 || data.devolucion)} color={data.saldoF22 > 0 ? "text-red-700" : "text-emerald-700"} />
-      </div>
+      <ResumenTrib filas={[
+        { etiqueta: "Ingresos Brutos",      valor: data.ingresosBrutos },
+        { etiqueta: "Renta Liq. Imponible", valor: data.rli },
+        { etiqueta: "Impuesto 1ª Cat.",     valor: data.impuesto1Cat },
+        { etiqueta: data.saldoF22 > 0
+            ? <Resaltado color="rosa">A Pagar F22</Resaltado>
+            : <Resaltado color="menta">Devolución</Resaltado>,
+          valor: data.saldoF22 || data.devolucion, raya: "doble" },
+      ]} />
 
-      <table className="w-full border-t border-slate-100">
-        <tbody>
-          <tr className="bg-slate-50"><td colSpan={2} className="px-4 py-2 text-xs font-black text-slate-500 uppercase tracking-wider">Determinación RLI</td></tr>
-          <FilaTrib label="Resultado financiero del período" valor={data.utilidadFinanciera} />
-          <FilaTrib separador />
-          <tr className="bg-slate-50"><td colSpan={2} className="px-4 py-1.5 text-xs font-bold text-slate-500">Agregados y Deducciones</td></tr>
-          <FilaTrib label="Depreciación contabilizada (agregar)" valor={data.depreciacionContable} indent />
-          {Math.abs(data.depTeorica - data.depreciacionContable) > 1000 && (
-            <tr><td colSpan={2} className="px-4 py-2 bg-amber-50 text-[11px] text-amber-700 leading-snug">
-              La depreciación teórica de la flota para este tramo es {fmt(data.depTeorica)}, pero
-              en los asientos hay {fmt(data.depreciacionContable)}. Genera el asiento de depreciación
-              antes de usar esta RLI.
-            </td></tr>
-          )}
-          <FilaTrib label="Depreciación tributaria (deducir)" valor={data.depreciacionTrib} indent colorValor="text-emerald-600" />
-          <FilaTrib label="Diferencia temporaria neta" valor={data.difTemp} indent colorValor={data.difTemp !== 0 ? "text-amber-600" : "text-slate-400"} />
-          <FilaTrib separador />
-          <FilaTrib label="RENTA LÍQUIDA IMPONIBLE" valor={data.rli} negrita colorValor={data.rli >= 0 ? "font-black text-slate-800" : "font-black text-red-600"} />
-          <FilaTrib separador />
-          <FilaTrib label={`Impuesto 1ª Categoría (${(data.tasaPrimCat*100).toFixed(1).replace(".", ",")}%)`} valor={data.impuesto1Cat} negrita />
-          <FilaTrib label="Menos: PPM acumulado" valor={data.ppmAcumulado} indent colorValor="text-emerald-600" />
-          <FilaTrib separador />
-          {data.saldoF22 > 0
-            ? <FilaTrib label="IMPUESTO A PAGAR F22" valor={data.saldoF22} negrita colorValor="font-black text-red-700" />
-            : <FilaTrib label="DEVOLUCIÓN ESPERADA" valor={data.devolucion} negrita colorValor="font-black text-emerald-700" />
-          }
-        </tbody>
-      </table>
-    </div>
+      <div className="max-w-2xl">
+        <table className="w-full border-collapse">
+          <tbody>
+            <SeccionTrib etiqueta="Determinación RLI" />
+            <FilaTrib label="Resultado financiero del período" valor={data.utilidadFinanciera} />
+            <SeccionTrib etiqueta="Agregados y Deducciones" menor />
+            <FilaTrib label="Depreciación contabilizada (agregar)" valor={data.depreciacionContable} indent />
+            {Math.abs(data.depTeorica - data.depreciacionContable) > 1000 && (
+              <tr><td colSpan={2} className="py-2 pl-[18px]">
+                <Nota etiqueta="Ojo:">
+                  La depreciación teórica de la flota para este tramo es <Cifra valor={data.depTeorica} escala="pesos" color="heredar" vacio="0" />, pero
+                  en los asientos hay <Cifra valor={data.depreciacionContable} escala="pesos" color="heredar" vacio="0" />. Genera el asiento de depreciación
+                  antes de usar esta RLI.
+                </Nota>
+              </td></tr>
+            )}
+            <FilaTrib label="Depreciación tributaria (deducir)" valor={data.depreciacionTrib} indent />
+            <FilaTrib label="Diferencia temporaria neta" valor={data.difTemp} indent />
+            <FilaTrib separador />
+            <FilaTrib label="Renta Líquida Imponible" valor={data.rli} raya="total" />
+            <FilaTrib separador />
+            <FilaTrib label={`Impuesto 1ª Categoría (${(data.tasaPrimCat*100).toFixed(1).replace(".", ",")}%)`} valor={data.impuesto1Cat} />
+            <FilaTrib label="Menos: PPM acumulado" valor={data.ppmAcumulado} indent />
+            <FilaTrib separador />
+            {data.saldoF22 > 0
+              ? <FilaTrib label={<Resaltado color="rosa">Impuesto a pagar F22</Resaltado>} valor={data.saldoF22} raya="doble" />
+              : <FilaTrib label={<Resaltado color="menta">Devolución esperada</Resaltado>} valor={data.devolucion} raya="doble" />
+            }
+          </tbody>
+        </table>
+      </div>
+    </Hoja>
   );
 }
 
@@ -396,120 +403,112 @@ function ImpuestoDiferido({ cuentas, saldosMap, tasaImpuesto = 0.27 }) {
   const sinActivos = activos.length === 0;
   const sinValores = activos.length > 0 && depContableAnual === 0 && depTributariaAnual === 0;
 
+  const tasaTexto = (tasaImpuesto*100).toFixed(1).replace(".", ",");
+  // Diferencia por activo: contable sobre tributaria genera pasivo (rosa);
+  // tributaria sobre contable, activo (menta). Se escribe en valor absoluto.
+  const MarcaDif = ({ dif }) => dif > 0
+    ? <span className="ml-1.5 text-[13px] text-cuaderno-roja">pasivo</span>
+    : dif < 0 ? <span className="ml-1.5 text-[13px] text-cuaderno-verde">activo</span> : null;
+
   return (
-    <div className="glass-card rounded-xl overflow-hidden">
-      <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 px-4 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-white font-black text-sm">Impuesto Diferido — NIC 12</p>
-          <p className="text-indigo-200 text-xs">Diferencias temporarias imponibles y deducibles</p>
-        </div>
-        <span className="px-3 py-1 bg-white/20 text-white text-xs font-semibold rounded-full">
-          {activos.length} activo{activos.length !== 1 ? "s" : ""}
-        </span>
-      </div>
+    <Hoja titulo="Impuesto Diferido — NIC 12"
+      extra={<Marca>{activos.length} activo{activos.length !== 1 ? "s" : ""}</Marca>}>
+      <p className="m-0 mb-3 text-[16px] text-cuaderno-grafito">Diferencias temporarias imponibles y deducibles</p>
 
       {/* Aviso sin activos registrados */}
       {sinActivos && (
-        <div className="px-4 py-6 text-center">
-          <p className="text-slate-400 text-sm font-semibold">No hay activos registrados en el módulo de Activos Fijos.</p>
-          <p className="text-slate-400 text-xs mt-1">Agrega activos con valor de compra y vida útil para calcular diferencias temporarias.</p>
+        <div className="py-10 text-center space-y-2">
+          <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">No hay activos registrados en el módulo de Activos Fijos.</p>
+          <p className="m-0 text-[16px] text-cuaderno-grafito">Agrega activos con valor de compra y vida útil para calcular diferencias temporarias.</p>
         </div>
       )}
 
       {/* Aviso activos sin valor */}
       {sinValores && (
-        <div className="px-4 py-4">
-          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-            <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            <p className="text-xs text-amber-700 font-semibold">
-              Hay {activos.length} activo{activos.length !== 1 ? "s" : ""} registrado{activos.length !== 1 ? "s" : ""}, pero ninguno tiene valor de compra ingresado. Edítalos en el módulo de Activos Fijos para calcular las diferencias.
-            </p>
-          </div>
-        </div>
+        <Nota etiqueta="Ojo:">
+          Hay {activos.length} activo{activos.length !== 1 ? "s" : ""} registrado{activos.length !== 1 ? "s" : ""}, pero ninguno tiene valor de compra ingresado. Edítalos en el módulo de Activos Fijos para calcular las diferencias.
+        </Nota>
       )}
 
       {/* Tabla resumen */}
       {!sinActivos && !sinValores && (
-        <>
-          <table className="w-full">
-            <tbody>
-              <FilaTrib label="Depreciación contable anual (flota)" valor={depContableAnual} />
-              <FilaTrib label={`Depreciación tributaria anual (SII)`} valor={depTributariaAnual} indent colorValor="text-emerald-600" />
-              <FilaTrib separador />
-              <FilaTrib label="Diferencia temporaria neta"
-                valor={Math.abs(difTemp)}
-                negrita
-                colorValor={difTemp !== 0 ? "text-amber-600" : "text-slate-400"} />
-              <FilaTrib separador />
-              {activoDiferido > 0 && (
-                <FilaTrib label={`Activo por impuesto diferido (${(tasaImpuesto*100).toFixed(1).replace(".", ",")}%)`} valor={activoDiferido} negrita colorValor="font-black text-emerald-600" />
-              )}
-              {pasivoDiferido > 0 && (
-                <FilaTrib label={`Pasivo por impuesto diferido (${(tasaImpuesto*100).toFixed(1).replace(".", ",")}%)`} valor={pasivoDiferido} negrita colorValor="font-black text-red-600" />
-              )}
-              {difTemp === 0 && (
-                <FilaTrib label="Sin diferencias temporarias" valor={0} colorValor="text-slate-300" />
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-6">
+          <div className="max-w-2xl">
+            <table className="w-full border-collapse">
+              <tbody>
+                <FilaTrib label="Depreciación contable anual (flota)" valor={depContableAnual} />
+                <FilaTrib label={`Depreciación tributaria anual (SII)`} valor={depTributariaAnual} indent />
+                <FilaTrib separador />
+                <FilaTrib label="Diferencia temporaria neta" valor={Math.abs(difTemp)} raya="total" />
+                <FilaTrib separador />
+                {activoDiferido > 0 && (
+                  <FilaTrib label={<Resaltado color="menta">Activo por impuesto diferido ({tasaTexto}%)</Resaltado>} valor={activoDiferido} raya="doble" />
+                )}
+                {pasivoDiferido > 0 && (
+                  <FilaTrib label={<Resaltado color="rosa">Pasivo por impuesto diferido ({tasaTexto}%)</Resaltado>} valor={pasivoDiferido} raya="doble" />
+                )}
+                {difTemp === 0 && (
+                  <FilaTrib label="Sin diferencias temporarias" valor={0} color="grafito" />
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {/* Detalle por activo */}
           {detalle.length > 0 && (
-            <div className="border-t border-slate-100">
-              <div className="px-4 py-2 bg-slate-50">
-                <p className="text-xs font-black text-slate-500 uppercase tracking-wider">Detalle por activo</p>
-              </div>
+            <div>
+              <Titulo as="h3" tamano="sm">Detalle por activo</Titulo>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+                <table className="w-full border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100">
-                      <th className="px-4 py-2 text-left font-bold text-slate-500">Activo</th>
-                      <th className="px-4 py-2 text-center font-bold text-slate-500">V. Útil Cont.</th>
-                      <th className="px-4 py-2 text-center font-bold text-slate-500">V. Útil Trib. SII</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500">Dep. Contable</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500">Dep. Tributaria</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500">Diferencia</th>
+                    <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                      <th className="font-normal text-[15px] text-left text-cuaderno-grafito px-2 py-2">Activo</th>
+                      <th className="font-normal text-[15px] text-center text-cuaderno-grafito px-2 py-2 whitespace-nowrap">V. Útil Cont.</th>
+                      <th className="font-normal text-[15px] text-center text-cuaderno-grafito px-2 py-2 whitespace-nowrap">V. Útil Trib. SII</th>
+                      <th className="font-normal text-[15px] text-right text-cuaderno-grafito px-2 py-2 whitespace-nowrap">Dep. Contable</th>
+                      <th className="font-normal text-[15px] text-right text-cuaderno-grafito px-2 py-2 whitespace-nowrap">Dep. Tributaria</th>
+                      <th className="font-normal text-[15px] text-right text-cuaderno-grafito px-2 py-2">Diferencia</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
+                  <tbody>
                     {detalle.map((d, i) => (
-                      <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}>
-                        <td className="px-4 py-2 font-semibold text-slate-700 max-w-[180px] truncate">{d.nombre}</td>
-                        <td className="px-4 py-2 text-center text-slate-500">{d.vidaC > 0 ? `${d.vidaC} años` : "—"}</td>
-                        <td className="px-4 py-2 text-center text-slate-500">{d.vidaT} años</td>
-                        <td className="px-4 py-2 text-right font-semibold text-slate-700">{fmt(d.depC)}</td>
-                        <td className="px-4 py-2 text-right font-semibold text-emerald-700">{fmt(d.depT)}</td>
-                        <td className={`px-4 py-2 text-right font-bold ${d.dif > 0 ? "text-red-600" : d.dif < 0 ? "text-emerald-600" : "text-slate-300"}`}>
-                          {d.dif !== 0 ? fmt(Math.abs(d.dif)) : "—"}
-                          {d.dif > 0 && <span className="ml-1 text-[10px]">▲</span>}
-                          {d.dif < 0 && <span className="ml-1 text-[10px]">▼</span>}
+                      <tr key={i} className="border-b border-cuaderno-renglon">
+                        <td className="px-2 py-1.5 text-[17px] max-w-[220px] truncate">{d.nombre}</td>
+                        <td className="px-2 py-1.5 text-[16px] text-center text-cuaderno-grafito">{d.vidaC > 0 ? `${d.vidaC} años` : "—"}</td>
+                        <td className="px-2 py-1.5 text-[16px] text-center text-cuaderno-grafito">{d.vidaT} años</td>
+                        <td className="px-2 py-1.5 text-[16px] text-right"><Cifra valor={d.depC} escala="pesos" vacio="0" /></td>
+                        <td className="px-2 py-1.5 text-[16px] text-right"><Cifra valor={d.depT} escala="pesos" vacio="0" /></td>
+                        <td className="px-2 py-1.5 text-[16px] text-right whitespace-nowrap">
+                          {d.dif !== 0
+                            ? <><Cifra valor={Math.abs(d.dif)} escala="pesos" /><MarcaDif dif={d.dif} /></>
+                            : <span className="text-cuaderno-grafito">—</span>}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr className="bg-indigo-50 border-t-2 border-indigo-200">
-                      <td className="px-4 py-2 font-black text-slate-800" colSpan={3}>TOTAL</td>
-                      <td className="px-4 py-2 text-right font-black text-slate-800">{fmt(depContableAnual)}</td>
-                      <td className="px-4 py-2 text-right font-black text-emerald-700">{fmt(depTributariaAnual)}</td>
-                      <td className={`px-4 py-2 text-right font-black ${difTemp > 0 ? "text-red-700" : difTemp < 0 ? "text-emerald-700" : "text-slate-300"}`}>
-                        {difTemp !== 0 ? fmt(Math.abs(difTemp)) : "—"}
+                    <tr>
+                      <td className="px-2 pt-3 pb-2 text-[17px]" colSpan={3}>Total</td>
+                      <td className="px-2 pt-3 pb-2 text-[16px] text-right"><Cifra valor={depContableAnual} escala="pesos" raya="total" vacio="0" /></td>
+                      <td className="px-2 pt-3 pb-2 text-[16px] text-right"><Cifra valor={depTributariaAnual} escala="pesos" raya="total" vacio="0" /></td>
+                      <td className="px-2 pt-3 pb-2 text-[16px] text-right whitespace-nowrap">
+                        {difTemp !== 0
+                          ? <><Cifra valor={Math.abs(difTemp)} escala="pesos" raya="doble" /><MarcaDif dif={difTemp} /></>
+                          : <span className="text-cuaderno-grafito">—</span>}
                       </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
-              <div className="px-4 py-3 bg-indigo-50 border-t border-indigo-100">
-                <p className="text-xs text-indigo-600 font-semibold">
-                  Vida útil tributaria según tabla SII: Maquinaria 10 años · Vehículo 7 años · Herramienta 3 años · Otro 5 años.
-                  Las diferencias generan {pasivoDiferido > 0 ? "un pasivo" : "un activo"} por impuesto diferido bajo NIC 12.
-                </p>
-              </div>
+              <Nota etiqueta="Nota:" tono="grafito" className="mt-3">
+                Vida útil tributaria según tabla SII: Maquinaria 10 años · Vehículo 7 años · Herramienta 3 años · Otro 5 años.
+                Las diferencias generan {pasivoDiferido > 0 ? "un pasivo" : "un activo"} por impuesto diferido bajo NIC 12.
+              </Nota>
             </div>
           )}
-        </>
+        </div>
       )}
-    </div>
+    </Hoja>
   );
 }
 
@@ -558,37 +557,27 @@ export default function ContabilidadTributario() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+      <FechaHoja />
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900">Módulo Tributario</h1>
-          <p className="text-xs text-slate-500 mt-0.5">F29 · PPM · F22 · Impuesto diferido</p>
+          <Titulo>Módulo Tributario</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">F29 · PPM · F22 · Impuesto diferido</p>
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
+        <div className="flex flex-wrap items-end gap-3">
           <PeriodoSelector />
         </div>
-      </div>
+      </header>
 
       {/* Aviso SII */}
-      <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border-2 border-amber-200 rounded-xl">
-        <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <p className="text-xs text-amber-700 font-semibold">
-          Los cálculos son aproximaciones basadas en los asientos registrados. Siempre valida con tu contador o directamente en el portal SII antes de presentar declaraciones.
-        </p>
-      </div>
+      <Nota etiqueta="Ojo:">
+        Los cálculos son aproximaciones basadas en los asientos registrados. Siempre valida con tu contador o directamente en el portal SII antes de presentar declaraciones.
+      </Nota>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
-        {VISTAS.map(v => (
-          <button key={v.id} onClick={() => setVistaActiva(v.id)}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${vistaActiva === v.id ? "bg-white text-purple-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-            {v.label}
-          </button>
-        ))}
-      </div>
+      <Pestanas opciones={VISTAS} valor={vistaActiva} onCambiar={setVistaActiva} />
 
       {vistaActiva === "f29"  && <FormularioF29 cuentas={cuentas} saldosMap={saldosMes} periodoActivo={periodoActivo} remanenteArrastrado={remanenteArrastrado} />}
       {vistaActiva === "ppm"  && <ModuloPPM cuentas={cuentas} saldosMap={saldosMes} asientos={asientos} periodoActivo={periodoActivo} />}
