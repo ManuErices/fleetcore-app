@@ -168,13 +168,17 @@ export function detectarTipoRCV(filas) {
 }
 
 // Tipos de documento: suman o restan. Los demás se ignoran y se informan.
-const DOCS_SUMA  = new Set([30, 32, 33, 34, 43, 45, 46, 55, 56, 914]);
-const DOCS_RESTA = new Set([60, 61]);
+// 39/41 boletas, 110/111 factura y ND de exportación, 112 NC de exportación
+// (solo aparecen en ventas).
+const DOCS_SUMA  = new Set([30, 32, 33, 34, 39, 41, 43, 45, 46, 55, 56, 110, 111, 914]);
+const DOCS_RESTA = new Set([60, 61, 112]);
 export const NOMBRE_DOC = {
   30: "Factura (papel)", 32: "Factura exenta (papel)", 33: "Factura", 34: "Factura exenta",
   43: "Liquidación factura", 45: "Factura de compra (papel)", 46: "Factura de compra",
   55: "Nota de débito (papel)", 56: "Nota de débito", 60: "Nota de crédito (papel)",
   61: "Nota de crédito", 914: "Declaración de ingreso (importación)",
+  39: "Boleta", 41: "Boleta exenta", 110: "Factura de exportación",
+  111: "Nota de débito de exportación", 112: "Nota de crédito de exportación",
 };
 
 // ─── Otros impuestos del RCV ("Codigo Otro Impuesto") ─────────────────────────
@@ -308,9 +312,13 @@ export function resumirRCVVentas(filas) {
   const r = {
     tipo: "ventas", documentos: 0, ignorados: {},
     neto: 0, exento: 0, ncNeto: 0, ncExento: 0, iva: 0, total: 0,
-    creditoConstructora: 0,
+    otrosImpuestos: 0, creditoConstructora: 0, sinExplicar: 0,
+    notasCredito: [],   // { folio, cliente, monto, refTipo, refFolio, anula }
+    noDelGiro: {},      // { "Activo Fijo": { docs, monto } } ventas que no son del giro
     porTipo: {}, meses: {},
   };
+  const facturas = {};  // folio → { neto, exento } para saber si una NC anula el documento
+  const filasValidas = [];
   for (const fila of filas || []) {
     const get = lector(fila);
     const tipoDoc = parseInt(String(get("Tipo Doc")).trim(), 10) || 0;
@@ -319,21 +327,52 @@ export function resumirRCVVentas(filas) {
       if (tipoDoc) r.ignorados[tipoDoc] = (r.ignorados[tipoDoc] || 0) + 1;
       continue;
     }
+    filasValidas.push({ get, tipoDoc, resta });
+    if (suma) facturas[String(get("Folio")).trim()] = { neto: Math.abs(numero(get("Monto Neto"))), exento: Math.abs(numero(get("Monto Exento"))) };
+  }
+  for (const { get, tipoDoc, resta } of filasValidas) {
     const s = resta ? -1 : 1;
-    const v = col => Math.abs(numero(get(col)));
+    const v = (...cols) => Math.abs(numero(get(...cols)));
     const neto = v("Monto Neto"), exento = v("Monto Exento"), total = v("Monto total");
-    r.documentos++;
+    const iva = v("Monto IVA"), otro = v("Valor Otro Imp.", "Valor Otro Impuesto");
+    if (neto || exento || total) r.documentos++;
     if (resta) { r.ncNeto += neto; r.ncExento += exento; }
     else { r.neto += neto; r.exento += exento; }
-    r.iva += s * v("Monto IVA");
+    r.iva += s * iva;
+    r.otrosImpuestos += s * otro;
     r.total += s * total;
+    r.sinExplicar += s * (total - neto - exento - iva - otro);
     r.creditoConstructora += s * v("Credito empresa constructora");
+
+    if (resta) {
+      const refFolio = String(get("Folio Docto. Referencia")).trim();
+      const ref = facturas[refFolio];
+      r.notasCredito.push({
+        folio: String(get("Folio")).trim(),
+        cliente: String(get("Razon Social")).trim(),
+        monto: neto + exento,
+        refTipo: parseInt(String(get("Tipo Docto. Referencia")), 10) || 0,
+        refFolio,
+        // Anula el documento si lo rebaja completo (la NC vuelve a dejarlo en cero)
+        anula: !!ref && Math.abs(ref.neto + ref.exento - neto - exento) < 1,
+      });
+    }
+
+    // Venta de activo fijo o de bienes raíces: el ingreso es el precio, pero en
+    // 14 A se rebaja su valor tributario no depreciado (ese costo no está aquí).
+    const tipoVenta = String(get("Tipo Venta")).trim();
+    if (tipoVenta && !/giro/i.test(tipoVenta)) {
+      const g = r.noDelGiro[tipoVenta] ||= { docs: 0, monto: 0 };
+      g.docs++; g.monto += s * (neto + exento);
+    }
+
     const pt = r.porTipo[tipoDoc] ||= { docs: 0, neto: 0, exento: 0, total: 0 };
     pt.docs++; pt.neto += neto; pt.exento += exento; pt.total += total;
     const m = mesDe(get("Fecha Docto"));
     if (m) { const k = `${m.anio}-${m.mes}`; r.meses[k] = (r.meses[k] || 0) + 1; }
   }
   r.monto = Math.round(r.neto + r.exento - r.ncNeto - r.ncExento);
+  r.sinExplicar = Math.round(r.sinExplicar);
   r.mesSugerido = mesMasFrecuente(r.meses);
   return r;
 }
