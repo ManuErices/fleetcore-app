@@ -200,12 +200,19 @@ export function resumirRCVCompras(filas, { dieselRecuperablePct = 0 } = {}) {
     const ivaRec = v("Monto IVA Recuperable");
     const ivaNoRec = v(["Monto Iva No Recuperable", "Monto IVA No Recuperable"]);
     const ivaUsoComun = v("IVA uso Comun");
-    const sinDerecho = v("Impto. Sin Derecho a Credito");
+    // El SII informa la parte sin derecho a crédito de un "otro impuesto" en
+    // DOS columnas: "Impto. Sin Derecho a Credito" y "Valor Otro Impuesto"
+    // (ej. gasolina, código 35: mismo monto en ambas, y el total lo incluye una
+    // sola vez). Si la fila trae otro impuesto, ya se cuenta por su código.
+    const sinDerechoCol = v("Impto. Sin Derecho a Credito");
     const otroValor = v("Valor Otro Impuesto");
     const otroCod = parseInt(String(get("Codigo Otro Impuesto")).split(".")[0], 10) || 0;
     const afNeto = v("Monto Neto Activo Fijo");
+    const sinDerecho = otroValor ? 0 : sinDerechoCol;
 
-    r.documentos++;
+    // Un documento con varios "otros impuestos" trae filas extra sin montos
+    // (solo código y valor): suman el impuesto pero no son otro documento.
+    if (neto || exento || total) r.documentos++;
     if (resta) { r.ncNeto += neto; r.ncExento += exento; }
     else { r.neto += neto; r.exento += exento; }
     r.ivaRecuperable  += s * ivaRec;

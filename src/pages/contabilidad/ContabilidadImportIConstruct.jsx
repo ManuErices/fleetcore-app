@@ -207,7 +207,9 @@ function normalizarRCV(fila) {
   const ivaRetenido  = codOtroImp === 15 ? valorOtroImp : 0;
   const otroNoRec    = valorOtroImp - impEspec - ivaRetenido;
   const ivaNoRec     = n(fila["Monto Iva No Recuperable"] || fila["Monto IVA No Recuperable"]);
-  const sinDerecho   = n(fila["Impto. Sin Derecho a Credito"]);
+  // Si la fila trae "otro impuesto", la columna sin derecho a crédito repite
+  // ese mismo monto (ej. gasolina código 35): no se suma dos veces.
+  const sinDerecho   = valorOtroImp ? 0 : n(fila["Impto. Sin Derecho a Credito"]);
   const impNoRecuperable = otroNoRec + ivaNoRec + sinDerecho;
   const esComb       = impEspec > 0;
 
