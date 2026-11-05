@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, setDoc, doc, query, orderBy, where, serverTimestamp } from "firebase/firestore";
+import { collection, getDoc, getDocs, addDoc, updateDoc, deleteDoc, setDoc, doc, query, orderBy, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import {
+  REGIMENES_TRIBUTARIOS, CONFIG_TRIBUTARIA_DEFECTO,
+  tasaPrimeraCategoria as tasaPrimeraCategoriaPara,
+} from "../../lib/contabilidad/tributario";
 
 const ContabilidadContext = createContext(null);
 
@@ -98,14 +102,10 @@ export const TIPOS_CUENTA = [
 export const TIPOS_MAP = Object.fromEntries(TIPOS_CUENTA.map(t => [t.id, t]));
 
 // ─── Régimen tributario ───────────────────────────────────────────────────────
-// La tasa de Primera Categoría estaba fija en 27% dentro de los componentes.
-// Depende del régimen al que esté acogida la empresa, así que se configura acá
-// y se lee desde un solo lugar. Verificar la tasa vigente con el SII: cambia.
-export const REGIMENES_TRIBUTARIOS = [
-  { id: "14A",  label: "Régimen General (14 A, semi integrado)", tasa: 0.27 },
-  { id: "14D3", label: "Pyme Pro (14 D N°3)",                    tasa: 0.25 },
-  { id: "14D8", label: "Pyme Transparente (14 D N°8)",           tasa: 0    },
-];
+// La tasa depende del régimen Y del año comercial (14 D N°3 bajó a 12,5% en
+// 2025-2027). Las reglas viven en src/lib/contabilidad/tributario.js y el
+// régimen elegido se guarda en empresas/{id}/config/tributario.
+export { REGIMENES_TRIBUTARIOS };
 
 // ─── Plan de cuentas base (precargado) ────────────────────────────────────────
 export const CUENTAS_BASE = [
@@ -155,11 +155,30 @@ export function ContabilidadProvider({ children }) {
   const [periodoActivo, setPeriodoActivo] = useState(mesKey());
   // Reglas de clasificación aprendidas: { [rutNormalizado]: { rut, razonSocial, cuentaId, cuentaNombre, categoriaLabel, categoriaIcon } }
   const [reglasGasto, setReglasGasto] = useState({});
-  // Régimen tributario de la empresa — determina la tasa de Primera Categoría
-  const [regimen, setRegimen] = useState("14A");
-  const tasaPrimeraCategoria =
-    REGIMENES_TRIBUTARIOS.find(r => r.id === regimen)?.tasa ?? 0.27;
-  const setTasaPrimeraCategoria = setRegimen;
+  // Configuración tributaria de la empresa (régimen, PPM, diésel recuperable).
+  // Se comparte con el Flujo Mensual: un solo régimen para toda la contabilidad.
+  const [configTributaria, setConfigTributaria] = useState(CONFIG_TRIBUTARIA_DEFECTO);
+  useEffect(() => {
+    if (!empresaId) return;
+    let cancelado = false;
+    getDoc(doc(db, "empresas", empresaId, "config", "tributario"))
+      .then(snap => { if (!cancelado && snap.exists()) setConfigTributaria({ ...CONFIG_TRIBUTARIA_DEFECTO, ...snap.data() }); })
+      .catch(e => console.error("Error cargando config tributaria:", e));
+    return () => { cancelado = true; };
+  }, [empresaId]);
+  const guardarConfigTributaria = useCallback(async (cambios) => {
+    const nueva = { ...configTributaria, ...cambios };
+    setConfigTributaria(nueva);
+    if (empresaId) {
+      await setDoc(doc(db, "empresas", empresaId, "config", "tributario"),
+        { ...nueva, updatedAt: serverTimestamp() }, { merge: true });
+    }
+  }, [configTributaria, empresaId]);
+  const regimen = configTributaria.regimen;
+  // Tasa del año del período activo (antes era fija en 27%)
+  const anioPeriodoActivo = parseInt(String(periodoActivo).slice(0, 4), 10);
+  const tasaPrimeraCategoria = tasaPrimeraCategoriaPara(regimen, anioPeriodoActivo);
+  const setTasaPrimeraCategoria = (r) => guardarConfigTributaria({ regimen: r });
 
   // Cargar plan de cuentas
   const cargarCuentas = useCallback(async () => {
@@ -844,6 +863,7 @@ export function ContabilidadProvider({ children }) {
       periodoCerrado, generarAsientoCierre, reversarAsiento, siguienteCorrelativo,
       eliminarCuenta, fusionarCuentas,
       tasaPrimeraCategoria, setTasaPrimeraCategoria, REGIMENES_TRIBUTARIOS,
+      regimen, configTributaria, guardarConfigTributaria,
       guardarAsiento, eliminarAsiento, guardarCuenta, buscarHashesExistentes,
       reglasGasto, cargarReglas, guardarReglaGasto, eliminarReglaGasto,
       reglasDesdeHistorial, reglasEfectivas, limpiarReglasAutomaticas, repararNombresProveedores,
