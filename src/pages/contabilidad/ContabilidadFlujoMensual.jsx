@@ -7,7 +7,7 @@ import { fmt, MESES, MESES_S, useContabilidad, leerTextoDetectando } from "./Con
 import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
-  repartirRCVPorMes, aplicarAporteRCV, aportesRCV,
+  repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV,
 } from "../../lib/contabilidad/tributario";
 
 /**
@@ -69,6 +69,8 @@ const FILAS_BASE = [
   { id: "gastos_financieros", label: "Gastos financieros", signo: -1 },
   { id: "leasing",        label: "Leasing",        signo: -1 },
   { id: "patentes",       label: "Patentes y contribuciones", signo: -1 },
+  { id: "depreciacion",   label: "Depreciación (14 A)", signo: -1 },
+  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: -1 },
 ];
 
 const vacio12 = () => Array(12).fill(0);
@@ -191,7 +193,10 @@ async function leerFilasRCV(file) {
     const texto = await leerTextoDetectando(file);
     const lineas = texto.split(/\r?\n/);
     if (lineas.length && !lineas[0].endsWith(";_extra")) lineas[0] += ";_extra";
-    const wb = XLSX.read(lineas.join("\n"), { type: "string", raw: false, FS: ";" });
+    // raw: true = todo como texto. Con raw: false, XLSX leía "01/02/2026" como
+    // 2 de enero (mm/dd) y lo convertía en número de serie: las facturas caían
+    // en meses equivocados y algunas se perdían.
+    const wb = XLSX.read(lineas.join("\n"), { type: "string", raw: true, FS: ";" });
     return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
   }
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
@@ -210,7 +215,34 @@ function LineaDesglose({ label, valor, signo = "", tenue = false, fuerte = false
   );
 }
 
-function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onCerrar }) {
+/**
+ * Todo lo que se muestra y se carga de un RCV, recalculable cuando cambian las
+ * reglas de proveedores o el % de diésel: resumen total, reparto por mes y,
+ * en compras, cuánto va a cada fila (Compras, Leasing, Gastos financieros…).
+ */
+function calcularRCV(filasRaw, tipo, config) {
+  const opts = { dieselRecuperablePct: config.dieselRecuperablePct, regimen: config.regimen };
+  const resumen = tipo === "compras" ? resumirRCVCompras(filasRaw, opts) : resumirRCVVentas(filasRaw);
+  const reparto = repartirRCVPorMes(filasRaw, tipo, opts);
+  if (tipo !== "compras") {
+    return { resumen, reparto, proveedores: [],
+      destinos: { ingresos: { monto: resumen.monto, documentos: resumen.documentos, reparto } } };
+  }
+  const { grupos, proveedores } = separarRCVPorFila(filasRaw, config.reglasFilaRCV || {});
+  const destinos = {};
+  Object.entries(grupos).forEach(([filaId, filas]) => {
+    const r = resumirRCVCompras(filas, opts);
+    destinos[filaId] = { monto: r.monto, documentos: r.documentos, reparto: repartirRCVPorMes(filas, "compras", opts) };
+  });
+  // Control: lo que se reparte en filas tiene que sumar el total del archivo
+  const sumaDestinos = Object.values(destinos).reduce((t, d) => t + d.monto, 0);
+  const sumaMeses = Object.values(destinos).reduce((t, d) => t + d.reparto.reduce((u, m) => u + m.monto, 0), 0);
+  const descuadre = Math.max(Math.abs(sumaDestinos - resumen.monto), Math.abs(sumaMeses - resumen.monto));
+  return { resumen, reparto, destinos, proveedores, descuadre };
+}
+
+function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActual, onAplicar, onCambiarRegla, onCerrar }) {
+  const resumen = { ...calculo.resumen, reparto: calculo.reparto };
   const [mes, setMes] = useState(mesInicial);
   const [criterio, setCriterio] = useState("docto");
   const [aplicando, setAplicando] = useState(false);
@@ -230,7 +262,7 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
       <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-5 py-4">
           <p className="text-white font-black text-sm">RCV {esCompras ? "Compras" : "Ventas"} · {resumen.documentos} documentos</p>
-          <p className="text-purple-200 text-xs">Así se calcula la fila {fila}</p>
+          <p className="text-purple-200 text-xs">{archivo} · así se calcula la fila {fila}</p>
         </div>
 
         <div className="px-5 py-4 space-y-4">
@@ -244,6 +276,10 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
               <LineaDesglose label="Otros impuestos no recuperables" valor={resumen.otrosCosto} signo="+"
                 nota={otros.length ? "Detalle por código abajo" : undefined} />
             </>}
+            {esCompras && resumen.activoFijoExcluido !== 0 && (
+              <LineaDesglose label="Activo fijo (se deprecia, no es gasto del mes)" valor={-resumen.activoFijoExcluido} signo="−"
+                nota="14 A: la compra se capitaliza; el gasto es la depreciación (fila Depreciación)." />
+            )}
             <LineaDesglose label={`= ${fila}`} valor={resumen.monto} fuerte />
           </div>
 
@@ -258,7 +294,7 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
               {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue />}
             </>}
             <LineaDesglose label="Total documentos" valor={resumen.total} tenue />
-            {esCompras && resumen.activoFijoNeto !== 0 && (
+            {esCompras && resumen.activoFijoNeto !== 0 && resumen.activoFijoExcluido === 0 && (
               <LineaDesglose label="…de lo cual es activo fijo (neto)" valor={resumen.activoFijoNeto} tenue
                 nota="En 14 D N°3 se rebaja completo (depreciación instantánea): ya está dentro de Compras." />
             )}
@@ -285,7 +321,12 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
             </div>
           )}
 
-          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || !esCompras) && (
+          {calculo.descuadre > 1 && (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
+              El reparto por mes y por fila no suma el total del archivo (diferencia {fmt(calculo.descuadre)}). No se puede cargar: avisa a soporte con este archivo.
+            </p>
+          )}
+          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || (!esCompras && regimen === "14D3")) && (
             <div className="space-y-2">
               {revisar.length > 0 && (
                 <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -302,10 +343,38 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
                   Documentos que no se consideran: {ignorados.map(([t, n]) => `${NOMBRE_DOC[t] || "tipo " + t} (${n})`).join(", ")}.
                 </p>
               )}
-              {!esCompras && (
+              {!esCompras && regimen === "14D3" && (
                 <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                   El RCV registra las ventas cuando se emiten. En 14 D N°3 el ingreso cuenta cuando se percibe (una factura cedida en factoring se considera percibida al cederse). Ajusta el mes si lo cobraste en otro.
                 </p>
+              )}
+            </div>
+          )}
+
+          {esCompras && (
+            <div>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Se reparte en estas filas</p>
+              {Object.keys(FILAS_DESTINO_RCV).filter(id => calculo.destinos[id]).map(id => (
+                <LineaDesglose key={id} label={`${FILAS_DESTINO_RCV[id]} · ${calculo.destinos[id].documentos} doc.`} valor={calculo.destinos[id].monto} />
+              ))}
+              {calculo.proveedores.length > 0 && (
+                <div className="mt-2 rounded-lg border border-slate-200 divide-y divide-slate-100">
+                  <p className="px-3 py-1.5 text-[11px] text-slate-500">
+                    Leasing, bancos y factoring facturan, así que vienen en el RCV de compras. Aquí eliges a qué fila va cada uno; la regla queda guardada para los próximos meses. La Base Imponible no cambia, solo el detalle.
+                  </p>
+                  {calculo.proveedores.map(pv => (
+                    <div key={pv.rut} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                      <span className="text-xs text-slate-600 min-w-0">
+                        <span className="block truncate">{pv.nombre}</span>
+                        <span className="text-[10px] text-slate-400">{pv.rutTxt} · {pv.docs} doc.{pv.sugerido && " · ¿financiero?"}</span>
+                      </span>
+                      <select value={pv.fila} onChange={e => onCambiarRegla(pv, e.target.value)}
+                        className={`px-2 py-1 text-xs border-2 rounded-lg focus:outline-none ${pv.sugerido ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+                        {Object.entries(FILAS_DESTINO_RCV).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -354,9 +423,9 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
           <button onClick={onCerrar} className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700">Cancelar</button>
           <button
             onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}
-            disabled={aplicando}
+            disabled={aplicando || calculo.descuadre > 1}
             className="px-4 py-2 rounded-xl text-xs font-black bg-purple-700 text-white hover:bg-purple-800 disabled:bg-slate-200 disabled:text-slate-400">
-            {aplicando ? "Cargando…" : `Cargar ${fmt(resumen.monto)} en ${fila}`}
+            {aplicando ? "Cargando…" : `Cargar ${fmt(resumen.monto)}`}
           </button>
         </div>
       </div>
@@ -507,12 +576,9 @@ export default function ContabilidadFlujoMensual() {
       const filas = await leerFilasRCV(file);
       const tipo = detectarTipoRCV(filas);
       if (!tipo) { setErrorRcv("El archivo no parece un RCV del SII (falta la columna RUT Proveedor o Rut cliente)."); return; }
-      const resumen = tipo === "compras"
-        ? resumirRCVCompras(filas, { dieselRecuperablePct: configTributaria.dieselRecuperablePct })
-        : resumirRCVVentas(filas);
-      if (!resumen.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
-      const reparto = repartirRCVPorMes(filas, tipo, { dieselRecuperablePct: configTributaria.dieselRecuperablePct });
-      setRcv({ ...resumen, reparto, archivo: file.name });
+      const prueba = tipo === "compras" ? resumirRCVCompras(filas) : resumirRCVVentas(filas);
+      if (!prueba.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
+      setRcv({ filas, tipo, archivo: file.name });
     } catch (e) {
       console.error("Error leyendo RCV:", e);
       setErrorRcv(`No se pudo leer el archivo: ${e.message}`);
@@ -520,36 +586,65 @@ export default function ContabilidadFlujoMensual() {
       if (inputRcv.current) inputRcv.current.value = "";
     }
   }
-  async function aplicarRCV({ criterio, mes }) {
-    const filaId = rcv.tipo === "compras" ? "compras" : "ingresos";
-    const p = rcv.mesSugerido || { anio, mes };
-    const periodo = `${p.anio}-${String(p.mes + 1).padStart(2, "0")}`;
-    const asignaciones = criterio === "docto"
-      ? rcv.reparto
-      : [{ anio, mes, monto: rcv.monto, documentos: rcv.documentos }];
+  // Se recalcula si cambian las reglas de proveedores o el % de diésel
+  const calculoRcv = useMemo(
+    () => (rcv ? calcularRCV(rcv.filas, rcv.tipo, configTributaria) : null),
+    [rcv, configTributaria]);
 
-    // Aporte por año → por mes
-    const porAnio = {};
-    asignaciones.forEach(a => {
-      const y = porAnio[a.anio] ||= { porMes: {}, documentosPorMes: {} };
-      y.porMes[a.mes] = (y.porMes[a.mes] || 0) + a.monto;
-      y.documentosPorMes[a.mes] = (y.documentosPorMes[a.mes] || 0) + a.documentos;
+  function cambiarReglaProveedor(pv, fila) {
+    const reglas = { ...(configTributaria.reglasFilaRCV || {}), [pv.rut]: { fila, nombre: pv.nombre } };
+    guardarConfigTributaria({ reglasFilaRCV: reglas }).catch(e => {
+      console.error("Error guardando regla de proveedor:", e);
+      alert("No se pudo guardar la regla. Intenta nuevamente.");
     });
-    // Años a tocar: los del nuevo reparto y los que este período tocó antes
-    const antes = data.rcv?.periodos?.[filaId]?.[periodo]?.otrosAnios || [];
-    const otrosAnios = [...new Set([...Object.keys(porAnio).map(Number), ...antes])].filter(y => y !== anio);
+  }
+
+  async function aplicarRCV({ criterio, mes }) {
+    const c = calculoRcv;
+    const r = c.resumen;
+    const p = r.mesSugerido || { anio, mes };
+    const periodo = `${p.anio}-${String(p.mes + 1).padStart(2, "0")}`;
+    // En compras se recorren TODAS las filas destino, aunque hoy no reciban
+    // nada: así, si un proveedor cambió de fila, se borra su aporte anterior.
+    const filasDestino = rcv.tipo === "compras" ? Object.keys(FILAS_DESTINO_RCV) : ["ingresos"];
+
+    // filaId → año → { porMes, documentosPorMes }
+    const aportes = {};
+    const anios = new Set([anio]);
+    filasDestino.forEach(filaId => {
+      const dest = c.destinos[filaId];
+      const asign = !dest ? []
+        : criterio === "docto" ? dest.reparto
+        : [{ anio, mes, monto: dest.monto, documentos: dest.documentos }];
+      const porAnio = aportes[filaId] = {};
+      asign.forEach(a => {
+        const y = porAnio[a.anio] ||= { porMes: {}, documentosPorMes: {} };
+        y.porMes[a.mes] = (y.porMes[a.mes] || 0) + a.monto;
+        y.documentosPorMes[a.mes] = (y.documentosPorMes[a.mes] || 0) + a.documentos;
+        anios.add(a.anio);
+      });
+      // Años que este período tocó antes en esta fila
+      (data.rcv?.periodos?.[filaId]?.[periodo]?.otrosAnios || []).forEach(y => anios.add(y));
+    });
+    const otrosAnios = [...anios].filter(y => y !== anio);
 
     // Se guarda el desglose junto al monto para poder explicar la cifra después
-    const traza = {
-      archivo: rcv.archivo, documentos: rcv.documentos, monto: rcv.monto, criterio,
-      neto: rcv.neto, exento: rcv.exento, nc: rcv.ncNeto + rcv.ncExento,
+    const trazaBase = {
+      archivo: rcv.archivo, documentos: r.documentos, montoArchivo: r.monto, criterio,
+      neto: r.neto, exento: r.exento, nc: r.ncNeto + r.ncExento,
       ...(rcv.tipo === "compras" ? {
-        ivaNoRecuperable: rcv.ivaNoRecuperable, impSinDerecho: rcv.impSinDerecho,
-        otrosCosto: rcv.otrosCosto, otrosRecuperable: rcv.otrosRecuperable,
-        activoFijoNeto: rcv.activoFijoNeto,
+        ivaNoRecuperable: r.ivaNoRecuperable, impSinDerecho: r.impSinDerecho,
+        otrosCosto: r.otrosCosto, otrosRecuperable: r.otrosRecuperable,
+        activoFijoNeto: r.activoFijoNeto,
       } : {}),
       cargadoEn: new Date().toISOString(),
     };
+    const aplicarTodo = (docAnio, y, extra = {}) => filasDestino.reduce((acc, filaId) =>
+      aplicarAporteRCV(acc, filaId, periodo, aportes[filaId][y]?.porMes || {}, {
+        ...trazaBase, ...extra,
+        monto: c.destinos[filaId]?.monto || 0,
+        documentosPorMes: aportes[filaId][y]?.documentosPorMes || {},
+      }), docAnio);
 
     // Otros años (ej. facturas de diciembre que llegan en el RCV de enero):
     // se escriben de inmediato en el documento de ese año.
@@ -558,9 +653,7 @@ export default function ContabilidadFlujoMensual() {
         const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
         const snap = await getDoc(ref);
         const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
-        const nuevo = aplicarAporteRCV(base, filaId, periodo, porAnio[y]?.porMes || {},
-          { ...traza, documentosPorMes: porAnio[y]?.documentosPorMes || {} });
-        await setDoc(ref, { ...nuevo, updatedAt: serverTimestamp() });
+        await setDoc(ref, { ...aplicarTodo(base, y), updatedAt: serverTimestamp() });
       }
     } catch (e) {
       console.error("Error guardando el RCV en otro año:", e);
@@ -568,8 +661,7 @@ export default function ContabilidadFlujoMensual() {
       return;
     }
 
-    setData(d => aplicarAporteRCV(d, filaId, periodo, porAnio[anio]?.porMes || {},
-      { ...traza, documentosPorMes: porAnio[anio]?.documentosPorMes || {}, otrosAnios }));
+    setData(d => aplicarTodo(d, anio, { otrosAnios }));
     setRcv(null);
   }
   const valorFila = (id, mes) => num(data.filas.find(f => f.id === id)?.valores[mes]);
@@ -591,7 +683,9 @@ export default function ContabilidadFlujoMensual() {
       if (!aportesRCV(data, "compras", i).length) return;
       ["arriendos", "rendiciones"].forEach(id => {
         const f = data.filas.find(x => x.id === id);
-        if (f && num(f.valores[i]) > 0) dobleConteo.push({ mes: i, fila: f.label });
+        // Solo lo escrito a mano (lo que vino del RCV ya está separado de Compras)
+        const desdeRcv = aportesRCV(data, id, i).reduce((s, a) => s + a.monto, 0);
+        if (f && num(f.valores[i]) - desdeRcv > 0) dobleConteo.push({ mes: i, fila: f.label });
       });
     });
     const totalIngresos = sum(data.filas.filter(f => f.signo === 1).flatMap(f => f.valores));
@@ -680,13 +774,16 @@ export default function ContabilidadFlujoMensual() {
         </div>
       )}
 
-      {rcv && (
+      {rcv && calculoRcv && (
         <ModalRCV
-          resumen={rcv}
+          calculo={calculoRcv}
+          archivo={rcv.archivo}
+          regimen={configTributaria.regimen}
           anioActivo={anio}
-          mesInicial={rcv.mesSugerido?.anio === anio ? rcv.mesSugerido.mes : new Date().getMonth()}
+          mesInicial={calculoRcv.resumen.mesSugerido?.anio === anio ? calculoRcv.resumen.mesSugerido.mes : new Date().getMonth()}
           valorActual={m => valorFila(rcv.tipo === "compras" ? "compras" : "ingresos", m)}
           onAplicar={aplicarRCV}
+          onCambiarRegla={cambiarReglaProveedor}
           onCerrar={() => setRcv(null)}
         />
       )}
@@ -717,7 +814,11 @@ export default function ContabilidadFlujoMensual() {
             <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-4 py-3">
               <p className="text-white font-black text-sm">Flujo de Movimientos {anio}</p>
               <div className="flex items-center justify-between gap-3">
-                <p className="text-purple-200 text-xs">Montos netos de IVA, por mes en que se pagan o perciben</p>
+                <p className="text-purple-200 text-xs">
+                  {configTributaria.regimen === "14A"
+                    ? "Montos netos de IVA, en el mes del documento (14 A: base devengada)"
+                    : "Montos netos de IVA, por mes en que se pagan o perciben"}
+                </p>
                 <button onClick={() => setVerAyuda(v => !v)} className="text-[11px] font-bold text-white/90 hover:text-white underline underline-offset-2 whitespace-nowrap">
                   {verAyuda ? "Ocultar criterios" : "Cómo se calcula cada fila"}
                 </button>

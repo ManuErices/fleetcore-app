@@ -52,11 +52,42 @@ export function tasaPPMSugerida(config, anio) {
 }
 
 // regimen vacío = sin definir: se usa 27% (14 A) y la planilla pide elegirlo.
+// ─── Proveedores que no son "Compras" ─────────────────────────────────────────
+// Las cuotas de leasing y las comisiones de bancos y factoring llegan con
+// factura, así que vienen en el RCV de compras. Al importar se mueven a su
+// propia fila (reclasificación: la Base Imponible no cambia). Llave = RUT sin
+// puntos ni guion. Se editan desde el resumen de importación.
+export const FILAS_DESTINO_RCV = {
+  compras: "Compras",
+  leasing: "Leasing",
+  gastos_financieros: "Gastos financieros",
+  arriendos: "Arriendos",
+};
+export const REGLAS_FILA_RCV_DEFECTO = {
+  "778266059": { fila: "leasing", nombre: "XCMG Finance Chile S.A." },
+  "901460000": { fila: "leasing", nombre: "Servicios Financieros Progreso S.A." },
+  "761776215": { fila: "gastos_financieros", nombre: "Cumplo Chile SpA" },
+  "763815706": { fila: "gastos_financieros", nombre: "Interfactor S.A." },
+  "970040005": { fila: "gastos_financieros", nombre: "Banco de Chile" },
+  "97080000K": { fila: "gastos_financieros", nombre: "Banco BICE" },
+  "97036000K": { fila: "gastos_financieros", nombre: "Banco Santander-Chile" },
+  "970180001": { fila: "gastos_financieros", nombre: "Scotiabank Chile" },
+  "970300007": { fila: "gastos_financieros", nombre: "BancoEstado" },
+  "970060006": { fila: "gastos_financieros", nombre: "Banco BCI" },
+  "970230009": { fila: "gastos_financieros", nombre: "Banco Itaú" },
+  "970530002": { fila: "gastos_financieros", nombre: "Banco Security" },
+};
+// Nombres que suenan a financiamiento: se sugieren si no tienen regla.
+const PATRON_FINANCIERO = /leasing|factor|banco|bank|financ|cumplo|tanner|credito/i;
+
+export const normalizarRut = (rut) => String(rut || "").replace(/[^0-9kK]/g, "").toUpperCase();
+
 export const CONFIG_TRIBUTARIA_DEFECTO = {
   regimen: "",
   ingresosSobre50milUF: false,
   tasaPPM14A: 0,          // % — solo se usa en 14 A
-  dieselRecuperablePct: 0 // % del imp. específico diésel que se recupera (Ley 18.502)
+  dieselRecuperablePct: 0, // % del imp. específico diésel que se recupera (Ley 18.502)
+  reglasFilaRCV: REGLAS_FILA_RCV_DEFECTO,
 };
 
 /**
@@ -79,8 +110,8 @@ export function impuestoMensualAcumulado(baseMensual, tasa) {
 
 // ─── Cómo se calcula cada fila (se muestra en la planilla) ────────────────────
 export const AYUDA_FILAS = {
-  ingresos: "Ventas netas: neto + exento − NC emitidas, sin IVA. En 14 D N°3 cuenta cuando se percibe (factura cedida en factoring = percibida al cederse).",
-  compras: "RCV compras: neto + exento − NC recibidas + IVA no recuperable + otros impuestos no recuperables. El IVA crédito no es gasto. En 14 D N°3 el activo fijo se rebaja completo al pagarse.",
+  ingresos: "Ventas netas: neto + exento − NC emitidas, sin IVA. En 14 A cuenta en el mes de la factura (devengado). En 14 D N°3 cuando se percibe (factura cedida en factoring = percibida al cederse).",
+  compras: "RCV compras: neto + exento − NC recibidas + IVA no recuperable + otros impuestos no recuperables. El IVA crédito no es gasto. En 14 A va en el mes de la factura y el activo fijo NO entra (se deprecia); en 14 D N°3 entra completo al pagarse.",
   remuneraciones: "Bruto pagado (imponible + colación y movilización) + aportes del empleador: seguro de cesantía (2,4% indefinido / 3,0% plazo fijo u obra), mutual y aporte de la reforma previsional. Las cotizaciones del trabajador y el impuesto único ya van dentro del bruto.",
   arriendos: "Sin factura: monto pagado. Con factura afecta: solo el neto. Con factura exenta: el total. Si viene con factura ya está en Compras: no cargarla aquí.",
   honorarios: "Monto BRUTO de la boleta (la retención va al SII por F29, es parte del bruto, no un costo adicional).",
@@ -89,6 +120,8 @@ export const AYUDA_FILAS = {
   gastos_financieros: "Intereses, comisiones bancarias y comisiones/intereses de factoring pagados.",
   leasing: "Cuotas de leasing pagadas en el mes.",
   patentes: "Patente municipal, contribuciones y permisos de circulación pagados.",
+  depreciacion: "Solo 14 A: depreciación tributaria del activo fijo (normal o acelerada, tabla de vida útil del SII). La compra del activo no es gasto, lo es su depreciación. En 14 D N°3 se deja en cero (el activo ya se rebajó en Compras).",
+  correccion_monetaria: "Solo 14 A: corrección monetaria del capital propio tributario y de los activos (art. 41 LIR). Si el IPC sube, normalmente es un cargo (resta). La calcula la contadora al cierre; se puede cargar mensual o en diciembre.",
 };
 
 // ─── RCV: lectura de columnas ─────────────────────────────────────────────────
@@ -113,7 +146,13 @@ const numero = v => {
   return Number.isFinite(x) ? x : 0;
 };
 function mesDe(fechaStr) {
-  const m = String(fechaStr || "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (fechaStr instanceof Date && !isNaN(fechaStr)) return { anio: fechaStr.getFullYear(), mes: fechaStr.getMonth() };
+  // Número de serie de Excel (archivo .xlsx con fechas reales)
+  if (typeof fechaStr === "number" && fechaStr > 30000 && fechaStr < 80000) {
+    const d = new Date(Math.round((fechaStr - 25569) * 86400000));
+    return { anio: d.getUTCFullYear(), mes: d.getUTCMonth() };
+  }
+  const m = String(fechaStr || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (m) return { anio: +m[3], mes: +m[2] - 1 };
   const iso = String(fechaStr || "").match(/(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return { anio: +iso[1], mes: +iso[2] - 1 };
@@ -169,7 +208,7 @@ export function nombreOtroImpuesto(codigo) {
  * El IVA recuperable, el IVA de uso común (factor de proporcionalidad 1) y el
  * diésel recuperable (según % configurado) no son gasto.
  */
-export function resumirRCVCompras(filas, { dieselRecuperablePct = 0 } = {}) {
+export function resumirRCVCompras(filas, { dieselRecuperablePct = 0, regimen = "" } = {}) {
   const r = {
     tipo: "compras", documentos: 0, ignorados: {},
     neto: 0, exento: 0, ncNeto: 0, ncExento: 0,
@@ -251,7 +290,11 @@ export function resumirRCVCompras(filas, { dieselRecuperablePct = 0 } = {}) {
   });
 
   r.netoNeto = r.neto + r.exento - r.ncNeto - r.ncExento;
-  r.monto = Math.round(r.netoNeto + r.ivaNoRecuperable + r.impSinDerecho + r.otrosCosto);
+  // 14 A: el activo fijo no es gasto del mes, se capitaliza y se deprecia
+  // (art. 31 N°5 LIR). En 14 D N°3 se rebaja completo (depreciación
+  // instantánea), así que queda dentro de Compras.
+  r.activoFijoExcluido = regimen === "14A" ? r.activoFijoNeto : 0;
+  r.monto = Math.round(r.netoNeto - r.activoFijoExcluido + r.ivaNoRecuperable + r.impSinDerecho + r.otrosCosto);
   r.sinExplicar = Math.round(r.sinExplicar);
   r.mesSugerido = mesMasFrecuente(r.meses);
   return r;
@@ -314,10 +357,14 @@ export function repartirRCVPorMes(filas, tipo, opciones = {}) {
     ? f => resumirRCVCompras(f, opciones)
     : f => resumirRCVVentas(f);
   const grupos = new Map();
+  // Si una fila no trae fecha legible, va al mes del documento anterior o, si
+  // es la primera, al período del archivo. Nunca se descarta: el reparto
+  // tiene que sumar exactamente el total del archivo.
+  const total = resumir(filas);
   let ultimo = null;
   for (const fila of filas || []) {
     const get = lector(fila);
-    const m = mesDe(get("Fecha Docto")) || ultimo;
+    const m = mesDe(get("Fecha Docto")) || ultimo || total.mesSugerido;
     if (!m) continue;
     ultimo = m;
     const k = `${m.anio}-${m.mes}`;
@@ -384,4 +431,36 @@ export function aportesRCV(doc, filaId, mes) {
     out.push({ periodo: `${doc.anio}-${String(mes + 1).padStart(2, "0")}`, monto: leg.monto, archivo: leg.archivo, documentos: leg.documentos });
   }
   return out;
+}
+
+/**
+ * Separa las filas del RCV de compras según la fila del flujo a la que van
+ * (por RUT del proveedor). Las filas de continuación sin RUT siguen al
+ * documento anterior. Devuelve también los proveedores con regla y los que
+ * parecen financieros pero no tienen regla (sugerencias).
+ */
+export function separarRCVPorFila(filas, reglas = {}) {
+  const grupos = {};
+  const proveedores = {}; // rut → { rut, nombre, fila, docs, conRegla, sugerido }
+  let ultimaFila = "compras";
+  let ultimoRut = null;
+  for (const fila of filas || []) {
+    const get = lector(fila);
+    const rutTxt = String(get("RUT Proveedor")).trim();
+    const rut = normalizarRut(rutTxt) || ultimoRut;
+    const destino = rut ? (reglas[rut]?.fila || "compras") : ultimaFila;
+    if (rutTxt) {
+      ultimoRut = rut;
+      const nombre = String(get("Razon Social")).trim();
+      const p = proveedores[rut] ||= {
+        rut, rutTxt, nombre, fila: destino, docs: 0,
+        conRegla: !!reglas[rut], sugerido: !reglas[rut] && PATRON_FINANCIERO.test(nombre),
+      };
+      p.docs++;
+    }
+    ultimaFila = destino;
+    (grupos[destino] ||= []).push(fila);
+  }
+  const relevantes = Object.values(proveedores).filter(p => p.conRegla || p.sugerido);
+  return { grupos, proveedores: relevantes };
 }
