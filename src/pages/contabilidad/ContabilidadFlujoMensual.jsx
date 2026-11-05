@@ -14,6 +14,9 @@ import {
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
   repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV,
 } from "../../lib/contabilidad/tributario";
+import {
+  APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
+} from "../../lib/contabilidad/remuneraciones";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -424,6 +427,82 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   );
 }
 
+function ModalRemuneraciones({ resumen, archivo, anioActivo, onAplicar, onCerrar }) {
+  const [aplicando, setAplicando] = useState(false);
+  const r = resumen;
+  const periodoTxt = r.anio != null ? `${MESES[r.mes]} ${r.anio}` : "";
+  return (
+    <ModalCuaderno
+      titulo="Libro de remuneraciones"
+      subtitulo={`${archivo} · ${r.trabajadores} trabajadores · ${periodoTxt}`}
+      onClose={onCerrar}
+      ancho="max-w-2xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando || r.anio == null}
+            onClick={async () => { setAplicando(true); try { await onAplicar(); } finally { setAplicando(false); } }}>
+            {aplicando ? "Cargando…" : `Cargar en ${periodoTxt.toLowerCase()}`}
+          </Boton>
+        </div>
+      }
+    >
+      <section>
+        <Titulo as="h3" tamano="sm">Remuneraciones</Titulo>
+        <LineaDesglose label="Remuneración total (imponible + no imponible)" valor={r.haberes} signo="+" />
+        <LineaDesglose label="Indemnizaciones del finiquito (van a Finiquitos)" valor={-r.indemnizaciones} signo="−" />
+        {APORTES_EMPLEADOR.filter(a => r.aportes[a.id]).map(a => (
+          <LineaDesglose key={a.id} label={a.nombre} valor={r.aportes[a.id]} signo="+" />
+        ))}
+        <LineaDesglose label="Remuneraciones" valor={r.remuneraciones} signo="=" fuerte />
+      </section>
+
+      {(r.indemnizaciones !== 0 || r.descuentoAFC !== 0) && (
+        <section>
+          <Titulo as="h3" tamano="sm">Finiquitos</Titulo>
+          <LineaDesglose label="Indemnización por años de servicio" valor={r.ias} signo="+" />
+          <LineaDesglose label="Vacaciones pendientes (feriado proporcional)" valor={r.vacaciones} signo="+" />
+          {r.descuentoAFC !== 0 && (
+            <LineaDesglose label="Descuento AFC" valor={-r.descuentoAFC} signo="−"
+              nota="Art. 13 Ley 19.728: lo que la empresa aportó a la cuenta de cesantía se imputa a la indemnización; no lo paga ahora." />
+          )}
+          <LineaDesglose label="Finiquitos" valor={r.finiquitos} signo="=" fuerte />
+        </section>
+      )}
+
+      <section>
+        <Titulo as="h3" tamano="sm">No se suma (ya está dentro de la remuneración total)</Titulo>
+        <LineaDesglose label="Descuentos legales del trabajador (AFP, salud, cesantía)" valor={r.descuentosLegales} tenue />
+        <LineaDesglose label="Impuesto único" valor={r.impuestos} tenue />
+        <LineaDesglose label="Anticipos y otros descuentos" valor={r.otrosDescuentos} tenue />
+        <LineaDesglose label="Líquido a pago" valor={r.liquido} tenue />
+      </section>
+
+      {(r.duplicados.length > 0 || r.sobreTope > 0 || r.faltan.length > 0) && (
+        <section className="space-y-2">
+          {r.faltan.length > 0 && <Nota etiqueta="Ojo:">Al libro le faltan columnas: {r.faltan.join(", ")}.</Nota>}
+          {r.duplicados.length > 0 && (
+            <Nota etiqueta="Ojo:">
+              El libro repite el finiquito de {r.duplicados.map(d => casoTitulo(d.nombre)).join(", ")}: aparece como documento aparte y otra vez dentro de su liquidación del mes, por el mismo monto (<Cifra valor={r.montoDuplicados} escala="pesos" color="heredar" /> en total). Se cuenta una sola vez. Confirma en Talana que no se pagó dos veces.
+            </Nota>
+          )}
+          {r.sobreTope > 0 && (
+            <Nota etiqueta="Nota:" tono="grafito">
+              {r.sobreTope === 1 ? "Un trabajador gana" : `${r.sobreTope} trabajadores ganan`} sobre el tope imponible: se usa la remuneración total, no la imponible. Si son socios, su sueldo solo es gasto si trabajan efectivamente en la empresa y es de mercado.
+            </Nota>
+          )}
+        </section>
+      )}
+
+      <p className="m-0 text-[14px] text-cuaderno-grafito">
+        Se carga en {periodoTxt.toLowerCase()}, el mes al que corresponden las remuneraciones (devengado), aunque se paguen al mes siguiente. Si vuelves a importar este mes, se reemplaza lo anterior (no se duplica) y los montos escritos a mano se mantienen.
+        {r.anio != null && r.anio !== anioActivo && ` Como es de ${r.anio}, se guarda de inmediato en ese año.`}
+      </p>
+    </ModalCuaderno>
+  );
+}
+
 function ConfigTributaria({ config, onCambiar, anio, tasa, tasaPPM }) {
   const sinRegimen = !config.regimen;
   const pct = v => `${(v * 100).toLocaleString("es-CL", { maximumFractionDigits: 3 })}%`;
@@ -473,6 +552,7 @@ export default function ContabilidadFlujoMensual() {
   const [guardando, setGuardando] = useState(false);
   const [nuevaFila, setNuevaFila] = useState({ abierto: false, label: "", signo: -1 });
   const [rcv, setRcv]             = useState(null);   // resumen del RCV que se está por cargar
+  const [rem, setRem]             = useState(null);   // libro de remuneraciones que se está por cargar
   const [errorRcv, setErrorRcv]   = useState("");
   const [verAyuda, setVerAyuda]   = useState(false);
   const inputRcv = useRef(null);
@@ -580,9 +660,21 @@ export default function ContabilidadFlujoMensual() {
     setErrorRcv("");
     if (!file) return;
     try {
+      // Libro de remuneraciones (Excel de Talana): se reconoce por la columna
+      // "Rut del Trabajador" y se resume aparte.
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+        if (detectarLibroRemuneraciones(arr) >= 0) {
+          const r = resumirLibroRemuneraciones(arr);
+          if (!r?.documentos) { setErrorRcv("El libro de remuneraciones no trae trabajadores."); return; }
+          setRem({ ...r, archivo: file.name });
+          return;
+        }
+      }
       const filas = await leerFilasRCV(file);
       const tipo = detectarTipoRCV(filas);
-      if (!tipo) { setErrorRcv("El archivo no parece un RCV del SII (falta la columna RUT Proveedor o Rut cliente)."); return; }
+      if (!tipo) { setErrorRcv("El archivo no es un RCV del SII ni un libro de remuneraciones (no se encontró RUT Proveedor, Rut cliente ni Rut del Trabajador)."); return; }
       const prueba = tipo === "compras" ? resumirRCVCompras(filas) : resumirRCVVentas(filas);
       if (!prueba.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
       setRcv({ filas, tipo, archivo: file.name });
@@ -671,6 +763,35 @@ export default function ContabilidadFlujoMensual() {
     setData(d => aplicarTodo(d, anio, { otrosAnios }));
     setRcv(null);
   }
+  // Libro de remuneraciones → filas Remuneraciones y Finiquitos del mes del libro
+  async function aplicarRemuneraciones() {
+    const r = rem;
+    const periodo = `${r.anio}-${String(r.mes + 1).padStart(2, "0")}`;
+    const traza = {
+      archivo: r.archivo, documentos: r.documentos, trabajadores: r.trabajadores,
+      haberes: r.haberes, aportes: r.totalAportes, ias: r.ias, vacaciones: r.vacaciones,
+      descuentoAFC: r.descuentoAFC, duplicadosOmitidos: r.montoDuplicados,
+      cargadoEn: new Date().toISOString(),
+    };
+    const aplicar = d => [["remuneraciones", r.remuneraciones], ["finiquitos", r.finiquitos]].reduce((acc, [filaId, monto]) =>
+      aplicarAporteRCV(acc, filaId, periodo, monto ? { [r.mes]: monto } : {}, { ...traza, monto, documentosPorMes: { [r.mes]: r.trabajadores } }), d);
+    if (r.anio === anio) {
+      setData(aplicar);
+    } else {
+      try {
+        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(r.anio));
+        const snap = await getDoc(ref);
+        const base = snap.exists() ? normalizar(snap.data(), r.anio) : docVacio(r.anio);
+        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base))), updatedAt: serverTimestamp() });
+      } catch (e) {
+        console.error("Error guardando remuneraciones:", e);
+        alert(`No se pudo guardar en ${r.anio}. Intenta nuevamente.`);
+        return;
+      }
+    }
+    setRem(null);
+  }
+
   const valorFila = (id, mes) => num(data.filas.find(f => f.id === id)?.valores[mes]);
 
   // ── Cálculos derivados ──
@@ -747,8 +868,8 @@ export default function ContabilidadFlujoMensual() {
           <input ref={inputRcv} type="file" accept=".csv,.xlsx,.xls" className="hidden"
             onChange={e => abrirRCV(e.target.files?.[0])} />
           <Boton variante="primario" onClick={() => inputRcv.current?.click()}
-            aria-label="Importar CSV del Registro de Compras o de Ventas descargado de Mi SII">
-            <IconoSubir tamano={14} /> Importar RCV
+            aria-label="Importar RCV de compras o ventas del SII, o libro de remuneraciones de Talana">
+            <IconoSubir tamano={14} /> Importar archivo
           </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
             {errorGuardado
@@ -774,6 +895,11 @@ export default function ContabilidadFlujoMensual() {
         <Nota etiqueta="Ojo:">
           Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
         </Nota>
+      )}
+
+      {rem && (
+        <ModalRemuneraciones resumen={rem} archivo={rem.archivo} anioActivo={anio}
+          onAplicar={aplicarRemuneraciones} onCerrar={() => setRem(null)} />
       )}
 
       {rcv && calculoRcv && (
@@ -823,7 +949,7 @@ export default function ContabilidadFlujoMensual() {
               {configTributaria.regimen === "14A"
                 ? "Montos netos de IVA, en el mes del documento (14 A, base devengada)."
                 : "Montos netos de IVA, en el mes en que se pagan o perciben."}
-              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene del RCV; toca una celda para corregirla.
+              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV o libro de remuneraciones); toca una celda para corregirla.
             </p>
 
             {verAyuda && (
@@ -854,7 +980,7 @@ export default function ContabilidadFlujoMensual() {
                         const aportes = aportesRCV(data, f.id, i);
                         return (
                           <CeldaInput key={i} value={v} rcv={aportes.length > 0}
-                            titulo={aportes.length ? "Desde RCV: " + aportes.map(a => `${a.periodo} ${fmt(a.monto)}${a.documentos ? ` (${a.documentos} doc.)` : ""}`).join(" + ") : undefined}
+                            titulo={aportes.length ? "Importado: " + aportes.map(a => `${a.periodo} ${fmt(a.monto)}${a.documentos ? ` (${a.documentos} doc.)` : ""}`).join(" + ") : undefined}
                             onChange={val => setValorFila(f.id, i, val)} />
                         );
                       })}
