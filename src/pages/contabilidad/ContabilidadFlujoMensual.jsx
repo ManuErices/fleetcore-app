@@ -7,6 +7,7 @@ import { fmt, MESES, MESES_S, useContabilidad, leerTextoDetectando } from "./Con
 import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
+  repartirRCVPorMes, aplicarAporteRCV, aportesRCV,
 } from "../../lib/contabilidad/tributario";
 
 /**
@@ -42,7 +43,9 @@ import {
  *     impuestoAuto: true,       // Impto calculado con la tasa del régimen
  *     ppm:      [12 números],   // informativo — PPM cancelado
  *     multas:   [12 números],   // multas/intereses por mora — restan de la Utilidad
- *     rcv: { compras: { [mes]: resumen }, ingresos: { [mes]: resumen } },
+ *     rcv: { periodos: { compras: { "2026-02": { porMes: { [mes]: monto }, archivo, ... } } } },
+ *          // lo que aporta cada período del RCV a cada mes del año (reimportar
+ *          // un período reemplaza su aporte; no duplica)
  *     updatedAt: serverTimestamp(),
  *   }
  *
@@ -209,10 +212,15 @@ function LineaDesglose({ label, valor, signo = "", tenue = false, fuerte = false
 
 function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onCerrar }) {
   const [mes, setMes] = useState(mesInicial);
+  const [criterio, setCriterio] = useState("docto");
+  const [aplicando, setAplicando] = useState(false);
   const esCompras = resumen.tipo === "compras";
   const fila = esCompras ? "Compras" : "Ingresos";
-  const anioArchivo = resumen.mesSugerido?.anio;
-  const otroAnio = anioArchivo && anioArchivo !== anioActivo;
+  const reparto = resumen.reparto || [];
+  const variosMeses = reparto.length > 1;
+  const otrosAnios = [...new Set(reparto.filter(r => r.anio !== anioActivo).map(r => r.anio))];
+  const p = resumen.mesSugerido;
+  const periodoTxt = p ? `${MESES[p.mes].toLowerCase()} ${p.anio}` : "";
   const otros = Object.values(resumen.otros || {});
   const revisar = otros.filter(o => o.tipo === "revisar");
   const ignorados = Object.entries(resumen.ignorados || {});
@@ -302,28 +310,53 @@ function ModalRCV({ resumen, anioActivo, mesInicial, valorActual, onAplicar, onC
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <span className="text-xs font-semibold text-slate-600">Cargar en</span>
-            <select value={mes} onChange={e => setMes(parseInt(e.target.value, 10))}
-              className="px-2 py-1.5 text-xs border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-400">
-              {MESES.map((m, i) => <option key={m} value={i}>{m} {anioActivo}</option>)}
-            </select>
-            {valorActual(mes) !== 0 && (
-              <span className="text-[11px] text-slate-500">reemplaza {fmt(valorActual(mes))}</span>
+          <div className="space-y-2 pt-1">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Dónde se carga</p>
+            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+              <input type="radio" checked={criterio === "docto"} onChange={() => setCriterio("docto")} className="mt-0.5 accent-purple-700" />
+              <span>
+                <b>En el mes de cada documento</b> (devengado)
+                {variosMeses && <span className="block text-[11px] text-slate-500">El RCV de {periodoTxt} trae documentos de {reparto.length} meses.</span>}
+              </span>
+            </label>
+            {criterio === "docto" && (
+              <div className="ml-6 rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {reparto.map(r => (
+                  <div key={`${r.anio}-${r.mes}`} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="text-xs text-slate-600">
+                      {MESES[r.mes]} {r.anio} <span className="text-slate-400">· {r.documentos} doc.</span>
+                      {r.anio !== anioActivo && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700">se guarda en {r.anio}</span>}
+                    </span>
+                    <span className="text-xs font-mono text-slate-700">{fmt(r.monto)}</span>
+                  </div>
+                ))}
+              </div>
             )}
-          </div>
-          {otroAnio && (
-            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              El archivo es de {anioArchivo} y estás viendo {anioActivo}. Cambia de año antes de cargarlo.
+            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer flex-wrap">
+              <input type="radio" checked={criterio === "mes"} onChange={() => setCriterio("mes")} className="accent-purple-700" />
+              <b>Todo en un mes</b>
+              <select value={mes} onChange={e => { setMes(parseInt(e.target.value, 10)); setCriterio("mes"); }}
+                className="px-2 py-1 text-xs border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-400">
+                {MESES.map((m, i) => <option key={m} value={i}>{m} {anioActivo}</option>)}
+              </select>
+              {criterio === "mes" && valorActual(mes) !== 0 && (
+                <span className="text-[11px] text-slate-500">hoy tiene {fmt(valorActual(mes))}</span>
+              )}
+            </label>
+            <p className="text-[11px] text-slate-500">
+              Si ya habías importado este período, se reemplaza lo que aportó antes (no se duplica). Los montos que escribiste a mano se mantienen.
+              {criterio === "docto" && otrosAnios.length > 0 && ` Lo de ${otrosAnios.join(", ")} se guarda de inmediato en ese año.`}
             </p>
-          )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50">
           <button onClick={onCerrar} className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700">Cancelar</button>
-          <button onClick={() => onAplicar(mes)} disabled={otroAnio}
+          <button
+            onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}
+            disabled={aplicando}
             className="px-4 py-2 rounded-xl text-xs font-black bg-purple-700 text-white hover:bg-purple-800 disabled:bg-slate-200 disabled:text-slate-400">
-            Cargar {fmt(resumen.monto)} en {fila}
+            {aplicando ? "Cargando…" : `Cargar ${fmt(resumen.monto)} en ${fila}`}
           </button>
         </div>
       </div>
@@ -478,7 +511,8 @@ export default function ContabilidadFlujoMensual() {
         ? resumirRCVCompras(filas, { dieselRecuperablePct: configTributaria.dieselRecuperablePct })
         : resumirRCVVentas(filas);
       if (!resumen.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
-      setRcv({ ...resumen, archivo: file.name });
+      const reparto = repartirRCVPorMes(filas, tipo, { dieselRecuperablePct: configTributaria.dieselRecuperablePct });
+      setRcv({ ...resumen, reparto, archivo: file.name });
     } catch (e) {
       console.error("Error leyendo RCV:", e);
       setErrorRcv(`No se pudo leer el archivo: ${e.message}`);
@@ -486,11 +520,28 @@ export default function ContabilidadFlujoMensual() {
       if (inputRcv.current) inputRcv.current.value = "";
     }
   }
-  function aplicarRCV(mes) {
+  async function aplicarRCV({ criterio, mes }) {
     const filaId = rcv.tipo === "compras" ? "compras" : "ingresos";
+    const p = rcv.mesSugerido || { anio, mes };
+    const periodo = `${p.anio}-${String(p.mes + 1).padStart(2, "0")}`;
+    const asignaciones = criterio === "docto"
+      ? rcv.reparto
+      : [{ anio, mes, monto: rcv.monto, documentos: rcv.documentos }];
+
+    // Aporte por año → por mes
+    const porAnio = {};
+    asignaciones.forEach(a => {
+      const y = porAnio[a.anio] ||= { porMes: {}, documentosPorMes: {} };
+      y.porMes[a.mes] = (y.porMes[a.mes] || 0) + a.monto;
+      y.documentosPorMes[a.mes] = (y.documentosPorMes[a.mes] || 0) + a.documentos;
+    });
+    // Años a tocar: los del nuevo reparto y los que este período tocó antes
+    const antes = data.rcv?.periodos?.[filaId]?.[periodo]?.otrosAnios || [];
+    const otrosAnios = [...new Set([...Object.keys(porAnio).map(Number), ...antes])].filter(y => y !== anio);
+
     // Se guarda el desglose junto al monto para poder explicar la cifra después
     const traza = {
-      archivo: rcv.archivo, documentos: rcv.documentos, monto: rcv.monto,
+      archivo: rcv.archivo, documentos: rcv.documentos, monto: rcv.monto, criterio,
       neto: rcv.neto, exento: rcv.exento, nc: rcv.ncNeto + rcv.ncExento,
       ...(rcv.tipo === "compras" ? {
         ivaNoRecuperable: rcv.ivaNoRecuperable, impSinDerecho: rcv.impSinDerecho,
@@ -499,13 +550,26 @@ export default function ContabilidadFlujoMensual() {
       } : {}),
       cargadoEn: new Date().toISOString(),
     };
-    setData(d => ({
-      ...d,
-      filas: d.filas.map(f => f.id === filaId
-        ? { ...f, valores: f.valores.map((v, i) => (i === mes ? rcv.monto : v)) }
-        : f),
-      rcv: { ...d.rcv, [filaId]: { ...(d.rcv?.[filaId] || {}), [mes]: traza } },
-    }));
+
+    // Otros años (ej. facturas de diciembre que llegan en el RCV de enero):
+    // se escriben de inmediato en el documento de ese año.
+    try {
+      for (const y of otrosAnios) {
+        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
+        const snap = await getDoc(ref);
+        const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
+        const nuevo = aplicarAporteRCV(base, filaId, periodo, porAnio[y]?.porMes || {},
+          { ...traza, documentosPorMes: porAnio[y]?.documentosPorMes || {} });
+        await setDoc(ref, { ...nuevo, updatedAt: serverTimestamp() });
+      }
+    } catch (e) {
+      console.error("Error guardando el RCV en otro año:", e);
+      alert(`No se pudo guardar la parte de ${otrosAnios.join(", ")}. No se cargó nada; intenta nuevamente.`);
+      return;
+    }
+
+    setData(d => aplicarAporteRCV(d, filaId, periodo, porAnio[anio]?.porMes || {},
+      { ...traza, documentosPorMes: porAnio[anio]?.documentosPorMes || {}, otrosAnios }));
     setRcv(null);
   }
   const valorFila = (id, mes) => num(data.filas.find(f => f.id === id)?.valores[mes]);
@@ -523,8 +587,8 @@ export default function ContabilidadFlujoMensual() {
     const ppmSugerido = ingresosMes.map(v => Math.round(Math.max(0, v) * tasaPPM));
     // Doble conteo: meses con Compras cargadas del RCV y Arriendos/Rendiciones a mano
     const dobleConteo = [];
-    Object.keys(data.rcv?.compras || {}).forEach(k => {
-      const i = Number(k);
+    MESES.forEach((_, i) => {
+      if (!aportesRCV(data, "compras", i).length) return;
       ["arriendos", "rendiciones"].forEach(id => {
         const f = data.filas.find(x => x.id === id);
         if (f && num(f.valores[i]) > 0) dobleConteo.push({ mes: i, fila: f.label });
@@ -691,11 +755,11 @@ export default function ContabilidadFlujoMensual() {
                         <span title={AYUDA_FILAS[f.id] || undefined} className={AYUDA_FILAS[f.id] ? "cursor-help underline decoration-dotted decoration-slate-300 underline-offset-2" : ""}>{f.label}</span>
                       </td>
                       {f.valores.map((v, i) => {
-                        const traza = data.rcv?.[f.id]?.[i];
-                        const desdeRcv = traza && num(v) === traza.monto;
+                        const aportes = aportesRCV(data, f.id, i);
+                        const desdeRcv = aportes.length > 0;
                         return (
                           <td key={i} className="px-0.5 py-0.5 relative"
-                            title={desdeRcv ? `Desde RCV (${traza.archivo}, ${traza.documentos} doc.)` : undefined}>
+                            title={desdeRcv ? "Desde RCV: " + aportes.map(a => `${a.periodo} ${fmt(a.monto)}${a.documentos ? ` (${a.documentos} doc.)` : ""}`).join(" + ") : undefined}>
                             {desdeRcv && <span className="absolute top-0.5 left-1 w-1.5 h-1.5 rounded-full bg-purple-500" />}
                             <CeldaInput value={v} onChange={val => setValorFila(f.id, i, val)} />
                           </td>
