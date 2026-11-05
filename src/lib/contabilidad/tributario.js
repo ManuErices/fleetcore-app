@@ -52,11 +52,42 @@ export function tasaPPMSugerida(config, anio) {
 }
 
 // regimen vacío = sin definir: se usa 27% (14 A) y la planilla pide elegirlo.
+// ─── Proveedores que no son "Compras" ─────────────────────────────────────────
+// Las cuotas de leasing y las comisiones de bancos y factoring llegan con
+// factura, así que vienen en el RCV de compras. Al importar se mueven a su
+// propia fila (reclasificación: la Base Imponible no cambia). Llave = RUT sin
+// puntos ni guion. Se editan desde el resumen de importación.
+export const FILAS_DESTINO_RCV = {
+  compras: "Compras",
+  leasing: "Leasing",
+  gastos_financieros: "Gastos financieros",
+  arriendos: "Arriendos",
+};
+export const REGLAS_FILA_RCV_DEFECTO = {
+  "778266059": { fila: "leasing", nombre: "XCMG Finance Chile S.A." },
+  "901460000": { fila: "leasing", nombre: "Servicios Financieros Progreso S.A." },
+  "761776215": { fila: "gastos_financieros", nombre: "Cumplo Chile SpA" },
+  "763815706": { fila: "gastos_financieros", nombre: "Interfactor S.A." },
+  "970040005": { fila: "gastos_financieros", nombre: "Banco de Chile" },
+  "97080000K": { fila: "gastos_financieros", nombre: "Banco BICE" },
+  "97036000K": { fila: "gastos_financieros", nombre: "Banco Santander-Chile" },
+  "970180001": { fila: "gastos_financieros", nombre: "Scotiabank Chile" },
+  "970300007": { fila: "gastos_financieros", nombre: "BancoEstado" },
+  "970060006": { fila: "gastos_financieros", nombre: "Banco BCI" },
+  "970230009": { fila: "gastos_financieros", nombre: "Banco Itaú" },
+  "970530002": { fila: "gastos_financieros", nombre: "Banco Security" },
+};
+// Nombres que suenan a financiamiento: se sugieren si no tienen regla.
+const PATRON_FINANCIERO = /leasing|factor|banco|bank|financ|cumplo|tanner|credito/i;
+
+export const normalizarRut = (rut) => String(rut || "").replace(/[^0-9kK]/g, "").toUpperCase();
+
 export const CONFIG_TRIBUTARIA_DEFECTO = {
   regimen: "",
   ingresosSobre50milUF: false,
   tasaPPM14A: 0,          // % — solo se usa en 14 A
-  dieselRecuperablePct: 0 // % del imp. específico diésel que se recupera (Ley 18.502)
+  dieselRecuperablePct: 0, // % del imp. específico diésel que se recupera (Ley 18.502)
+  reglasFilaRCV: REGLAS_FILA_RCV_DEFECTO,
 };
 
 /**
@@ -384,4 +415,36 @@ export function aportesRCV(doc, filaId, mes) {
     out.push({ periodo: `${doc.anio}-${String(mes + 1).padStart(2, "0")}`, monto: leg.monto, archivo: leg.archivo, documentos: leg.documentos });
   }
   return out;
+}
+
+/**
+ * Separa las filas del RCV de compras según la fila del flujo a la que van
+ * (por RUT del proveedor). Las filas de continuación sin RUT siguen al
+ * documento anterior. Devuelve también los proveedores con regla y los que
+ * parecen financieros pero no tienen regla (sugerencias).
+ */
+export function separarRCVPorFila(filas, reglas = {}) {
+  const grupos = {};
+  const proveedores = {}; // rut → { rut, nombre, fila, docs, conRegla, sugerido }
+  let ultimaFila = "compras";
+  let ultimoRut = null;
+  for (const fila of filas || []) {
+    const get = lector(fila);
+    const rutTxt = String(get("RUT Proveedor")).trim();
+    const rut = normalizarRut(rutTxt) || ultimoRut;
+    const destino = rut ? (reglas[rut]?.fila || "compras") : ultimaFila;
+    if (rutTxt) {
+      ultimoRut = rut;
+      const nombre = String(get("Razon Social")).trim();
+      const p = proveedores[rut] ||= {
+        rut, rutTxt, nombre, fila: destino, docs: 0,
+        conRegla: !!reglas[rut], sugerido: !reglas[rut] && PATRON_FINANCIERO.test(nombre),
+      };
+      p.docs++;
+    }
+    ultimaFila = destino;
+    (grupos[destino] ||= []).push(fila);
+  }
+  const relevantes = Object.values(proveedores).filter(p => p.conRegla || p.sugerido);
+  return { grupos, proveedores: relevantes };
 }
