@@ -69,6 +69,8 @@ const FILAS_BASE = [
   { id: "gastos_financieros", label: "Gastos financieros", signo: -1 },
   { id: "leasing",        label: "Leasing",        signo: -1 },
   { id: "patentes",       label: "Patentes y contribuciones", signo: -1 },
+  { id: "depreciacion",   label: "Depreciación (14 A)", signo: -1 },
+  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: -1 },
 ];
 
 const vacio12 = () => Array(12).fill(0);
@@ -191,7 +193,10 @@ async function leerFilasRCV(file) {
     const texto = await leerTextoDetectando(file);
     const lineas = texto.split(/\r?\n/);
     if (lineas.length && !lineas[0].endsWith(";_extra")) lineas[0] += ";_extra";
-    const wb = XLSX.read(lineas.join("\n"), { type: "string", raw: false, FS: ";" });
+    // raw: true = todo como texto. Con raw: false, XLSX leía "01/02/2026" como
+    // 2 de enero (mm/dd) y lo convertía en número de serie: las facturas caían
+    // en meses equivocados y algunas se perdían.
+    const wb = XLSX.read(lineas.join("\n"), { type: "string", raw: true, FS: ";" });
     return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
   }
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
@@ -216,7 +221,7 @@ function LineaDesglose({ label, valor, signo = "", tenue = false, fuerte = false
  * en compras, cuánto va a cada fila (Compras, Leasing, Gastos financieros…).
  */
 function calcularRCV(filasRaw, tipo, config) {
-  const opts = { dieselRecuperablePct: config.dieselRecuperablePct };
+  const opts = { dieselRecuperablePct: config.dieselRecuperablePct, regimen: config.regimen };
   const resumen = tipo === "compras" ? resumirRCVCompras(filasRaw, opts) : resumirRCVVentas(filasRaw);
   const reparto = repartirRCVPorMes(filasRaw, tipo, opts);
   if (tipo !== "compras") {
@@ -229,10 +234,14 @@ function calcularRCV(filasRaw, tipo, config) {
     const r = resumirRCVCompras(filas, opts);
     destinos[filaId] = { monto: r.monto, documentos: r.documentos, reparto: repartirRCVPorMes(filas, "compras", opts) };
   });
-  return { resumen, reparto, destinos, proveedores };
+  // Control: lo que se reparte en filas tiene que sumar el total del archivo
+  const sumaDestinos = Object.values(destinos).reduce((t, d) => t + d.monto, 0);
+  const sumaMeses = Object.values(destinos).reduce((t, d) => t + d.reparto.reduce((u, m) => u + m.monto, 0), 0);
+  const descuadre = Math.max(Math.abs(sumaDestinos - resumen.monto), Math.abs(sumaMeses - resumen.monto));
+  return { resumen, reparto, destinos, proveedores, descuadre };
 }
 
-function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onAplicar, onCambiarRegla, onCerrar }) {
+function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActual, onAplicar, onCambiarRegla, onCerrar }) {
   const resumen = { ...calculo.resumen, reparto: calculo.reparto };
   const [mes, setMes] = useState(mesInicial);
   const [criterio, setCriterio] = useState("docto");
@@ -267,6 +276,10 @@ function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onApl
               <LineaDesglose label="Otros impuestos no recuperables" valor={resumen.otrosCosto} signo="+"
                 nota={otros.length ? "Detalle por código abajo" : undefined} />
             </>}
+            {esCompras && resumen.activoFijoExcluido !== 0 && (
+              <LineaDesglose label="Activo fijo (se deprecia, no es gasto del mes)" valor={-resumen.activoFijoExcluido} signo="−"
+                nota="14 A: la compra se capitaliza; el gasto es la depreciación (fila Depreciación)." />
+            )}
             <LineaDesglose label={`= ${fila}`} valor={resumen.monto} fuerte />
           </div>
 
@@ -281,7 +294,7 @@ function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onApl
               {resumen.creditoConstructora !== 0 && <LineaDesglose label="Crédito especial empresa constructora" valor={resumen.creditoConstructora} tenue />}
             </>}
             <LineaDesglose label="Total documentos" valor={resumen.total} tenue />
-            {esCompras && resumen.activoFijoNeto !== 0 && (
+            {esCompras && resumen.activoFijoNeto !== 0 && resumen.activoFijoExcluido === 0 && (
               <LineaDesglose label="…de lo cual es activo fijo (neto)" valor={resumen.activoFijoNeto} tenue
                 nota="En 14 D N°3 se rebaja completo (depreciación instantánea): ya está dentro de Compras." />
             )}
@@ -308,7 +321,12 @@ function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onApl
             </div>
           )}
 
-          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || !esCompras) && (
+          {calculo.descuadre > 1 && (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-semibold">
+              El reparto por mes y por fila no suma el total del archivo (diferencia {fmt(calculo.descuadre)}). No se puede cargar: avisa a soporte con este archivo.
+            </p>
+          )}
+          {(revisar.length > 0 || Math.abs(resumen.sinExplicar || 0) > 10 || ignorados.length > 0 || (!esCompras && regimen === "14D3")) && (
             <div className="space-y-2">
               {revisar.length > 0 && (
                 <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -325,7 +343,7 @@ function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onApl
                   Documentos que no se consideran: {ignorados.map(([t, n]) => `${NOMBRE_DOC[t] || "tipo " + t} (${n})`).join(", ")}.
                 </p>
               )}
-              {!esCompras && (
+              {!esCompras && regimen === "14D3" && (
                 <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                   El RCV registra las ventas cuando se emiten. En 14 D N°3 el ingreso cuenta cuando se percibe (una factura cedida en factoring se considera percibida al cederse). Ajusta el mes si lo cobraste en otro.
                 </p>
@@ -405,7 +423,7 @@ function ModalRCV({ calculo, archivo, anioActivo, mesInicial, valorActual, onApl
           <button onClick={onCerrar} className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700">Cancelar</button>
           <button
             onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}
-            disabled={aplicando}
+            disabled={aplicando || calculo.descuadre > 1}
             className="px-4 py-2 rounded-xl text-xs font-black bg-purple-700 text-white hover:bg-purple-800 disabled:bg-slate-200 disabled:text-slate-400">
             {aplicando ? "Cargando…" : `Cargar ${fmt(resumen.monto)}`}
           </button>
@@ -760,6 +778,7 @@ export default function ContabilidadFlujoMensual() {
         <ModalRCV
           calculo={calculoRcv}
           archivo={rcv.archivo}
+          regimen={configTributaria.regimen}
           anioActivo={anio}
           mesInicial={calculoRcv.resumen.mesSugerido?.anio === anio ? calculoRcv.resumen.mesSugerido.mes : new Date().getMonth()}
           valorActual={m => valorFila(rcv.tipo === "compras" ? "compras" : "ingresos", m)}
@@ -795,7 +814,11 @@ export default function ContabilidadFlujoMensual() {
             <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-4 py-3">
               <p className="text-white font-black text-sm">Flujo de Movimientos {anio}</p>
               <div className="flex items-center justify-between gap-3">
-                <p className="text-purple-200 text-xs">Montos netos de IVA, por mes en que se pagan o perciben</p>
+                <p className="text-purple-200 text-xs">
+                  {configTributaria.regimen === "14A"
+                    ? "Montos netos de IVA, en el mes del documento (14 A: base devengada)"
+                    : "Montos netos de IVA, por mes en que se pagan o perciben"}
+                </p>
                 <button onClick={() => setVerAyuda(v => !v)} className="text-[11px] font-bold text-white/90 hover:text-white underline underline-offset-2 whitespace-nowrap">
                   {verAyuda ? "Ocultar criterios" : "Cómo se calcula cada fila"}
                 </button>

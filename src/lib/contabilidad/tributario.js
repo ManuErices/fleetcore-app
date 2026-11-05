@@ -110,8 +110,8 @@ export function impuestoMensualAcumulado(baseMensual, tasa) {
 
 // ─── Cómo se calcula cada fila (se muestra en la planilla) ────────────────────
 export const AYUDA_FILAS = {
-  ingresos: "Ventas netas: neto + exento − NC emitidas, sin IVA. En 14 D N°3 cuenta cuando se percibe (factura cedida en factoring = percibida al cederse).",
-  compras: "RCV compras: neto + exento − NC recibidas + IVA no recuperable + otros impuestos no recuperables. El IVA crédito no es gasto. En 14 D N°3 el activo fijo se rebaja completo al pagarse.",
+  ingresos: "Ventas netas: neto + exento − NC emitidas, sin IVA. En 14 A cuenta en el mes de la factura (devengado). En 14 D N°3 cuando se percibe (factura cedida en factoring = percibida al cederse).",
+  compras: "RCV compras: neto + exento − NC recibidas + IVA no recuperable + otros impuestos no recuperables. El IVA crédito no es gasto. En 14 A va en el mes de la factura y el activo fijo NO entra (se deprecia); en 14 D N°3 entra completo al pagarse.",
   remuneraciones: "Bruto pagado (imponible + colación y movilización) + aportes del empleador: seguro de cesantía (2,4% indefinido / 3,0% plazo fijo u obra), mutual y aporte de la reforma previsional. Las cotizaciones del trabajador y el impuesto único ya van dentro del bruto.",
   arriendos: "Sin factura: monto pagado. Con factura afecta: solo el neto. Con factura exenta: el total. Si viene con factura ya está en Compras: no cargarla aquí.",
   honorarios: "Monto BRUTO de la boleta (la retención va al SII por F29, es parte del bruto, no un costo adicional).",
@@ -120,6 +120,8 @@ export const AYUDA_FILAS = {
   gastos_financieros: "Intereses, comisiones bancarias y comisiones/intereses de factoring pagados.",
   leasing: "Cuotas de leasing pagadas en el mes.",
   patentes: "Patente municipal, contribuciones y permisos de circulación pagados.",
+  depreciacion: "Solo 14 A: depreciación tributaria del activo fijo (normal o acelerada, tabla de vida útil del SII). La compra del activo no es gasto, lo es su depreciación. En 14 D N°3 se deja en cero (el activo ya se rebajó en Compras).",
+  correccion_monetaria: "Solo 14 A: corrección monetaria del capital propio tributario y de los activos (art. 41 LIR). Si el IPC sube, normalmente es un cargo (resta). La calcula la contadora al cierre; se puede cargar mensual o en diciembre.",
 };
 
 // ─── RCV: lectura de columnas ─────────────────────────────────────────────────
@@ -144,7 +146,13 @@ const numero = v => {
   return Number.isFinite(x) ? x : 0;
 };
 function mesDe(fechaStr) {
-  const m = String(fechaStr || "").match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (fechaStr instanceof Date && !isNaN(fechaStr)) return { anio: fechaStr.getFullYear(), mes: fechaStr.getMonth() };
+  // Número de serie de Excel (archivo .xlsx con fechas reales)
+  if (typeof fechaStr === "number" && fechaStr > 30000 && fechaStr < 80000) {
+    const d = new Date(Math.round((fechaStr - 25569) * 86400000));
+    return { anio: d.getUTCFullYear(), mes: d.getUTCMonth() };
+  }
+  const m = String(fechaStr || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (m) return { anio: +m[3], mes: +m[2] - 1 };
   const iso = String(fechaStr || "").match(/(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return { anio: +iso[1], mes: +iso[2] - 1 };
@@ -200,7 +208,7 @@ export function nombreOtroImpuesto(codigo) {
  * El IVA recuperable, el IVA de uso común (factor de proporcionalidad 1) y el
  * diésel recuperable (según % configurado) no son gasto.
  */
-export function resumirRCVCompras(filas, { dieselRecuperablePct = 0 } = {}) {
+export function resumirRCVCompras(filas, { dieselRecuperablePct = 0, regimen = "" } = {}) {
   const r = {
     tipo: "compras", documentos: 0, ignorados: {},
     neto: 0, exento: 0, ncNeto: 0, ncExento: 0,
@@ -282,7 +290,11 @@ export function resumirRCVCompras(filas, { dieselRecuperablePct = 0 } = {}) {
   });
 
   r.netoNeto = r.neto + r.exento - r.ncNeto - r.ncExento;
-  r.monto = Math.round(r.netoNeto + r.ivaNoRecuperable + r.impSinDerecho + r.otrosCosto);
+  // 14 A: el activo fijo no es gasto del mes, se capitaliza y se deprecia
+  // (art. 31 N°5 LIR). En 14 D N°3 se rebaja completo (depreciación
+  // instantánea), así que queda dentro de Compras.
+  r.activoFijoExcluido = regimen === "14A" ? r.activoFijoNeto : 0;
+  r.monto = Math.round(r.netoNeto - r.activoFijoExcluido + r.ivaNoRecuperable + r.impSinDerecho + r.otrosCosto);
   r.sinExplicar = Math.round(r.sinExplicar);
   r.mesSugerido = mesMasFrecuente(r.meses);
   return r;
@@ -345,10 +357,14 @@ export function repartirRCVPorMes(filas, tipo, opciones = {}) {
     ? f => resumirRCVCompras(f, opciones)
     : f => resumirRCVVentas(f);
   const grupos = new Map();
+  // Si una fila no trae fecha legible, va al mes del documento anterior o, si
+  // es la primera, al período del archivo. Nunca se descarta: el reparto
+  // tiene que sumar exactamente el total del archivo.
+  const total = resumir(filas);
   let ultimo = null;
   for (const fila of filas || []) {
     const get = lector(fila);
-    const m = mesDe(get("Fecha Docto")) || ultimo;
+    const m = mesDe(get("Fecha Docto")) || ultimo || total.mesSugerido;
     if (!m) continue;
     ultimo = m;
     const k = `${m.anio}-${m.mes}`;

@@ -1244,7 +1244,10 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
         if (lineas.length > 0 && !lineas[0].endsWith(";_extra")) {
           lineas[0] = lineas[0] + ";_extra";
         }
-        const wb  = XLSX.read(lineas.join("\n"), { type: "string", raw: false, FS: ";" });
+        // raw: true = cada celda se lee como texto. Sin esto XLSX interpreta las
+        // fechas dd/mm/aaaa como mm/dd ("01/02/2026" quedaba 2 de enero) y las
+        // convierte en número, y los documentos caían en otro período.
+        const wb  = XLSX.read(lineas.join("\n"), { type: "string", raw: true, FS: ";" });
         const ws  = wb.Sheets[wb.SheetNames[0]];
         await procesar(XLSX.utils.sheet_to_json(ws, { defval: "" }));
       } catch (err) { setErrores([`Error CSV: ${err.message}`]); }
