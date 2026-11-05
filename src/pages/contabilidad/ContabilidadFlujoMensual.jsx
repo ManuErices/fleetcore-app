@@ -576,7 +576,7 @@ export default function ContabilidadFlujoMensual() {
             onChange={e => abrirRCV(e.target.files?.[0])} />
           <button
             onClick={() => inputRcv.current?.click()}
-            title="CSV del Registro de Compras o de Ventas descargado de Mi SII"
+            aria-label="Importar CSV del Registro de Compras o de Ventas descargado de Mi SII"
             className="px-3 py-2.5 rounded-xl text-xs font-black bg-white border-2 border-purple-200 text-purple-700 hover:bg-purple-50 whitespace-nowrap"
           >
             Importar RCV
