@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useContabilidad, PeriodoSelector, TIPOS_MAP, fmt, MESES, normalizaRut } from "./ContabilidadContext";
+import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
+import {
+  Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, Aviso, VistoBueno, Boton, Campo, ModalCuaderno,
+  Segmentado, FechaHoja, IconoCerrar, IconoLapiz, IconoBorrar, IconoBajar, IconoMas, IconoDocumento,
+  IconoSubir, IconoAnterior, IconoSiguiente,
+} from "../finanzas/cuaderno";
 import * as XLSX from "xlsx";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -23,6 +28,33 @@ const CATEGORIAS_RAPIDAS = [
   { label: "Gastos Varios", icon: "🧾" },
 ];
 
+// ─── Piezas locales de presentación ──────────────────────────────────────────
+// Renglón subrayado compacto para las líneas del asiento (Campo trae etiqueta;
+// aquí la etiqueta va en la cabecera de la tabla).
+const RENGLON = "min-h-[36px] w-full border-0 border-b-[1.5px] border-cuaderno-tinta/70 bg-transparent px-1 text-[16px] text-cuaderno-tinta focus:outline-none focus:border-cuaderno-tinta";
+const CHECK = "w-4 h-4 accent-cuaderno-tinta cursor-pointer";
+
+// Flecha de reverso con el mismo trazo fino de los íconos del cuaderno
+const IconoReversar = ({ tamano = 16, className = "" }) => (
+  <svg width={tamano} height={tamano} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+    strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`flex-shrink-0 ${className}`}>
+    <path d="M2.5 6.5 H10 A3.5 3.5 0 0 1 10 13.5 H8 M5.5 3.5 L2.5 6.5 L5.5 9.5" />
+  </svg>
+);
+
+// Los detalles reclasificados guardan el ícono de la categoría al inicio; en
+// pantalla se muestran sin él (el cuaderno no lleva emojis). El dato no cambia.
+const sinIcono = (t) => String(t || "").replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "");
+
+// Sumas de debe y haber de un asiento, para mostrarlas y marcar si no cuadra
+function cuadraturaAsiento(a) {
+  const lineas = a.lineas || [];
+  if (!lineas.length) return { debe: a.totalDebe || 0, haber: a.totalDebe || 0, descuadrado: false };
+  const debe = lineas.reduce((s, l) => s + (parseFloat(l.debe) || 0), 0);
+  const haber = lineas.reduce((s, l) => s + (parseFloat(l.haber) || 0), 0);
+  return { debe, haber, descuadrado: Math.abs(debe - haber) >= 0.01 };
+}
+
 // ─── Modal asiento ────────────────────────────────────────────────────────────
 const LINEA_EMPTY = { cuentaId: "", cuentaNombre: "", debe: "", haber: "", descripcion: "" };
 const ASIENTO_EMPTY = {
@@ -36,34 +68,36 @@ function LineaAsiento({ linea, idx, cuentas, onChange, onRemove, canRemove }) {
   const set = (k, v) => onChange(idx, { ...linea, [k]: v });
   const cuenta = cuentas.find(c => c.id === linea.cuentaId);
   return (
-    <div className="grid grid-cols-12 gap-2 items-start py-2 border-b border-slate-100 last:border-0">
+    <div className="grid grid-cols-12 gap-3 items-start py-2 border-b border-cuaderno-renglon last:border-0">
       <div className="col-span-5">
-        <select value={linea.cuentaId} onChange={e => {
+        <select value={linea.cuentaId} aria-label="Cuenta" onChange={e => {
           const c = cuentas.find(x => x.id === e.target.value);
           onChange(idx, { ...linea, cuentaId: e.target.value, cuentaNombre: c?.nombre || "" });
         }}
-          className="w-full px-2 py-1.5 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-purple-500 text-xs">
+          className={RENGLON}>
           <option value="">— Seleccionar cuenta —</option>
           {cuentas.filter(c => c.activa !== false).map(c => (
             <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>
           ))}
         </select>
-        <input value={linea.descripcion} onChange={e => set("descripcion", e.target.value)} placeholder="Detalle..." className="w-full mt-1 px-2 py-1 border border-slate-100 rounded-lg text-xs text-slate-500 focus:outline-none focus:border-purple-300" />
+        <input value={linea.descripcion} onChange={e => set("descripcion", e.target.value)} placeholder="Detalle..." aria-label="Detalle"
+          className="w-full mt-1 min-h-[30px] border-0 border-b border-cuaderno-renglon bg-transparent px-1 text-[14px] text-cuaderno-grafito focus:outline-none focus:border-cuaderno-tinta" />
       </div>
       <div className="col-span-3">
-        <input type="number" value={linea.debe} onChange={e => set("debe", e.target.value)} placeholder="0"
-          className="w-full px-2 py-1.5 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 text-xs text-right font-mono"
+        <input type="number" value={linea.debe} onChange={e => set("debe", e.target.value)} placeholder="0" aria-label="Debe"
+          className={`${RENGLON} text-right`}
           onFocus={() => { if (linea.haber) set("haber", ""); }} />
       </div>
       <div className="col-span-3">
-        <input type="number" value={linea.haber} onChange={e => set("haber", e.target.value)} placeholder="0"
-          className="w-full px-2 py-1.5 border-2 border-slate-200 rounded-lg focus:outline-none focus:border-red-400 text-xs text-right font-mono"
+        <input type="number" value={linea.haber} onChange={e => set("haber", e.target.value)} placeholder="0" aria-label="Haber"
+          className={`${RENGLON} text-right`}
           onFocus={() => { if (linea.debe) set("debe", ""); }} />
       </div>
-      <div className="col-span-1 flex justify-center pt-1.5">
+      <div className="col-span-1 flex justify-center">
         {canRemove && (
-          <button onClick={() => onRemove(idx)} className="w-6 h-6 rounded-lg bg-red-50 hover:bg-red-100 text-red-400 flex items-center justify-center transition-all">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={() => onRemove(idx)} aria-label="Quitar línea" title="Quitar línea"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40">
+            <IconoCerrar tamano={13} />
           </button>
         )}
       </div>
@@ -107,111 +141,81 @@ function ModalAsiento({ isOpen, onClose, editando, onSave, cuentas, periodoActiv
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-auto overflow-hidden">
-        <div className="bg-gradient-to-r from-purple-700 to-violet-600 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="font-black text-base">{editando ? "Editar Asiento" : "Nuevo Asiento"}</h2>
-              <p className="text-white/70 text-xs">Libro Diario</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          {/* Cabecera del asiento */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">Fecha <span className="text-red-500">*</span></label>
-              <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">Tipo</label>
-              <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm">
-                <option value="manual">Manual</option>
-                <option value="ajuste">Ajuste</option>
-                <option value="apertura">Apertura</option>
-                <option value="cierre">Cierre</option>
-                <option value="depreciacion">Depreciación</option>
-                <option value="iva">IVA</option>
-              </select>
-            </div>
-            <div className="col-span-2 sm:col-span-1">
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">Glosa <span className="text-red-500">*</span></label>
-              <input value={form.glosa} onChange={e => setForm(f => ({ ...f, glosa: e.target.value }))} placeholder="Descripción del asiento..." className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 text-sm" />
-            </div>
-          </div>
-
-          {/* Tabla de líneas */}
-          <div className="border-2 border-slate-100 rounded-xl overflow-hidden">
-            <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100">
-              <div className="col-span-5 text-xs font-black text-slate-500 uppercase">Cuenta / Detalle</div>
-              <div className="col-span-3 text-xs font-black text-slate-500 uppercase text-right">Debe</div>
-              <div className="col-span-3 text-xs font-black text-slate-500 uppercase text-right">Haber</div>
-              <div className="col-span-1" />
-            </div>
-            <div className="px-3 divide-y divide-slate-50">
-              {form.lineas.map((linea, idx) => (
-                <LineaAsiento key={idx} linea={linea} idx={idx} cuentas={cuentas}
-                  onChange={setLinea} onRemove={removeLinea} canRemove={form.lineas.length > 2} />
-              ))}
-            </div>
-            {/* Totales */}
-            <div className="px-3 py-3 bg-slate-50 border-t-2 border-slate-100 grid grid-cols-12 gap-2">
-              <div className="col-span-5 flex items-center">
-                <button onClick={addLinea} className="flex items-center gap-1.5 text-xs font-bold text-purple-600 hover:text-purple-700 transition-colors">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                  Agregar línea
-                </button>
-              </div>
-              <div className="col-span-3 text-right">
-                <p className="text-xs text-slate-400 font-semibold">Total Debe</p>
-                <p className="text-sm font-black text-emerald-600 font-mono">{fmt(totalDebe)}</p>
-              </div>
-              <div className="col-span-3 text-right">
-                <p className="text-xs text-slate-400 font-semibold">Total Haber</p>
-                <p className="text-sm font-black text-red-500 font-mono">{fmt(totalHaber)}</p>
-              </div>
-              <div className="col-span-1 flex items-center justify-center">
-                {totalDebe > 0 && (
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${cuadrado ? "bg-emerald-100" : "bg-red-100"}`}>
-                    {cuadrado
-                      ? <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                      : <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                    }
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Aviso diferencia */}
-          {totalDebe > 0 && !cuadrado && (
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl">
-              <svg className="w-4 h-4 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <p className="text-xs font-bold text-red-600">El asiento no cuadra — diferencia de {fmt(diferencia)}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="px-5 pb-5 flex gap-3">
-          <button onClick={onClose} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">Cancelar</button>
+    <ModalCuaderno
+      titulo={editando ? "Editar asiento" : "Nuevo asiento"}
+      subtitulo="Libro Diario"
+      onClose={onClose}
+      ancho="max-w-3xl"
+      cerrarAlClicFuera={false}
+      bloqueado={saving}
+      pie={
+        <div className="flex items-center gap-3">
+          <Boton variante="texto" onClick={onClose}>Cancelar</Boton>
           <div className="flex-1" />
-          <button onClick={handleSubmit} disabled={saving || !cuadrado || !form.glosa}
-            className="px-5 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">
-            {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>{editando ? "Guardar cambios" : "Registrar asiento"}</>}
-          </button>
+          <Boton variante="primario" onClick={handleSubmit} disabled={saving || !cuadrado || !form.glosa}>
+            {saving ? "Guardando…" : (editando ? "Guardar cambios" : "Registrar asiento")}
+          </Boton>
+        </div>
+      }
+    >
+      {/* Cabecera del asiento */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <Campo etiqueta={<span>Fecha <span className="text-cuaderno-roja">*</span></span>} type="date"
+          value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
+        <Campo as="select" etiqueta="Tipo" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+          <option value="manual">Manual</option>
+          <option value="ajuste">Ajuste</option>
+          <option value="apertura">Apertura</option>
+          <option value="cierre">Cierre</option>
+          <option value="depreciacion">Depreciación</option>
+          <option value="iva">IVA</option>
+        </Campo>
+        <Campo className="col-span-2 sm:col-span-1" etiqueta={<span>Glosa <span className="text-cuaderno-roja">*</span></span>}
+          value={form.glosa} onChange={e => setForm(f => ({ ...f, glosa: e.target.value }))} placeholder="Descripción del asiento..." />
+      </div>
+
+      {/* Líneas */}
+      <div>
+        <div className="grid grid-cols-12 gap-3 pb-1.5 shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+          <div className="col-span-5 text-[15px] text-cuaderno-grafito">Cuenta / Detalle</div>
+          <div className="col-span-3 text-[15px] text-cuaderno-grafito text-right">Debe</div>
+          <div className="col-span-3 text-[15px] text-cuaderno-grafito text-right">Haber</div>
+          <div className="col-span-1" />
+        </div>
+        <div>
+          {form.lineas.map((linea, idx) => (
+            <LineaAsiento key={idx} linea={linea} idx={idx} cuentas={cuentas}
+              onChange={setLinea} onRemove={removeLinea} canRemove={form.lineas.length > 2} />
+          ))}
+        </div>
+        {/* Totales */}
+        <div className="grid grid-cols-12 gap-3 pt-3 items-end">
+          <div className="col-span-5">
+            <Boton variante="texto" className="min-h-[36px] text-[16px]" onClick={addLinea}>
+              <IconoMas tamano={13} /> Agregar línea
+            </Boton>
+          </div>
+          <div className="col-span-3 text-right">
+            <p className="m-0 text-[13px] text-cuaderno-grafito">Total Debe</p>
+            <span className="text-[17px]"><Cifra valor={totalDebe} escala="pesos" vacio="$0" raya="total" /></span>
+          </div>
+          <div className="col-span-3 text-right">
+            <p className="m-0 text-[13px] text-cuaderno-grafito">Total Haber</p>
+            <span className="text-[17px]"><Cifra valor={totalHaber} escala="pesos" vacio="$0" raya="total" /></span>
+          </div>
+          <div className="col-span-1 flex justify-center pb-1">
+            {totalDebe > 0 && (cuadrado
+              ? <VistoBueno tamano={18} titulo="Cuadrado" />
+              : <IconoCerrar tamano={14} className="text-cuaderno-roja" />)}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Aviso diferencia */}
+      {totalDebe > 0 && !cuadrado && (
+        <Nota etiqueta="Ojo:">El asiento no cuadra — diferencia de <Cifra valor={diferencia} escala="pesos" color="heredar" /></Nota>
+      )}
+    </ModalCuaderno>
   );
 }
 
@@ -227,91 +231,93 @@ function AsientoDetalle({ asiento, onElegir }) {
     setShowReclasif(false);
   };
 
+  const { debe: sumaDebe, haber: sumaHaber, descuadrado } = cuadraturaAsiento(asiento);
+
   return (
-    <div className="border-t border-slate-100">
+    <div className="px-4 sm:px-8 pt-1 pb-4">
       {/* Tabla de líneas */}
-      <div className="px-4 pb-3">
-        <table className="w-full mt-2">
-          <thead>
-            <tr className="text-[10px] font-black text-slate-400 uppercase">
-              <th className="text-left py-1.5 pr-2">Cuenta</th>
-              <th className="text-left py-1.5 hidden sm:table-cell">Detalle</th>
-              <th className="text-right py-1.5 px-2">Debe</th>
-              <th className="text-right py-1.5">Haber</th>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b border-cuaderno-columna">
+            <th className="font-normal text-[14px] text-cuaderno-grafito text-left py-1.5 pr-2">Cuenta</th>
+            <th className="font-normal text-[14px] text-cuaderno-grafito text-left py-1.5 hidden sm:table-cell">Detalle</th>
+            <th className="font-normal text-[14px] text-cuaderno-grafito text-right py-1.5 px-2">Debe</th>
+            <th className="font-normal text-[14px] text-cuaderno-grafito text-right py-1.5">Haber</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(asiento.lineas || []).map((l, i) => (
+            <tr key={i} className="border-b border-cuaderno-renglon">
+              <td className="py-1.5 pr-2 text-[15px]">{l.cuentaNombre || l.cuentaId}</td>
+              <td className="py-1.5 hidden sm:table-cell text-[14px] text-cuaderno-grafito">{sinIcono(l.descripcion)}</td>
+              <td className="py-1.5 px-2 text-right text-[15px]">
+                {parseFloat(l.debe) > 0 && <Cifra valor={parseFloat(l.debe)} escala="pesos" />}
+              </td>
+              <td className="py-1.5 text-right text-[15px]">
+                {parseFloat(l.haber) > 0 && <Cifra valor={parseFloat(l.haber)} escala="pesos" />}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {(asiento.lineas || []).map((l, i) => (
-              <tr key={i} className="border-t border-slate-50">
-                <td className="py-1.5 pr-2">
-                  <p className="text-xs font-semibold text-slate-700">{l.cuentaNombre || l.cuentaId}</p>
-                </td>
-                <td className="py-1.5 hidden sm:table-cell">
-                  <p className="text-xs text-slate-400">{l.descripcion}</p>
-                </td>
-                <td className="py-1.5 px-2 text-right">
-                  {parseFloat(l.debe) > 0 && <span className="text-xs font-mono font-bold text-emerald-600">{fmt(l.debe)}</span>}
-                </td>
-                <td className="py-1.5 text-right">
-                  {parseFloat(l.haber) > 0 && <span className="text-xs font-mono font-bold text-red-500">{fmt(l.haber)}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot className="border-t-2 border-slate-200">
-            <tr>
-              <td colSpan={2} className="py-1.5 text-xs font-black text-slate-500">TOTALES</td>
-              <td className="py-1.5 px-2 text-right text-xs font-black font-mono text-emerald-600">{fmt(asiento.totalDebe)}</td>
-              <td className="py-1.5 text-right text-xs font-black font-mono text-red-500">{fmt(asiento.totalDebe)}</td>
-            </tr>
-          </tfoot>
-        </table>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={2} className="py-2 text-[15px]">
+              <span className="hidden sm:inline">Totales</span>
+            </td>
+            <td className="py-2 px-2 text-right text-[15px]"><Cifra valor={sumaDebe} escala="pesos" vacio="$0" raya="total" /></td>
+            <td className="py-2 text-right text-[15px]"><Cifra valor={sumaHaber} escala="pesos" vacio="$0" raya="total" /></td>
+          </tr>
+        </tfoot>
+      </table>
 
-        {/* Botón reclasificar (solo asientos automáticos) */}
-        {asiento.tipo === "automatico" && (
-          <div className="mt-3 pt-3 border-t border-slate-100">
-            <button
-              onClick={() => setShowReclasif(!showReclasif)}
-              className="flex items-center gap-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              {showReclasif ? "Cancelar" : "Reclasificar cuenta de gasto"}
-            </button>
+      {descuadrado && (
+        <Nota etiqueta="Ojo:" className="mt-2">
+          este asiento no cuadra: el debe y el haber difieren en <Cifra valor={Math.abs(sumaDebe - sumaHaber)} escala="pesos" color="heredar" />.
+        </Nota>
+      )}
 
-            {showReclasif && (
-              <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                {CATEGORIAS_RAPIDAS.map(cat => (
-                  <button
-                    key={cat.label}
-                    onClick={() => handleReclasificar(cat)}
-                    disabled={saving}
-                    className="flex items-center gap-1.5 px-2 py-2 rounded-xl border-2 border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 text-left text-[10px] font-bold text-slate-600 transition-all disabled:opacity-50"
-                  >
-                    <span className="text-sm flex-shrink-0">{cat.icon}</span>
-                    <span className="truncate">{cat.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Reclasificar (solo asientos automáticos) */}
+      {asiento.tipo === "automatico" && (
+        <div className="mt-3 pt-2 border-t border-cuaderno-renglon">
+          <Boton variante="texto" className="min-h-[36px] text-[15px]" onClick={() => setShowReclasif(!showReclasif)}>
+            {showReclasif ? "Cancelar" : "Reclasificar cuenta de gasto"}
+          </Boton>
+
+          {showReclasif && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {CATEGORIAS_RAPIDAS.map(cat => (
+                <button
+                  key={cat.label}
+                  onClick={() => handleReclasificar(cat)}
+                  disabled={saving}
+                  className="min-h-[36px] px-2 rounded-md border-[1.5px] border-cuaderno-columna/70 text-left text-[14px] leading-tight text-cuaderno-grafito hover:border-cuaderno-tinta/60 hover:text-cuaderno-tinta hover:bg-cuaderno-hoja disabled:opacity-50"
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Badge tipo asiento ───────────────────────────────────────────────────────
-const TIPO_COLORS = {
-  manual: "bg-slate-100 text-slate-600",
-  ajuste: "bg-blue-100 text-blue-700",
-  apertura: "bg-emerald-100 text-emerald-700",
-  cierre: "bg-slate-700 text-white",
-  depreciacion: "bg-amber-100 text-amber-700",
-  iva: "bg-purple-100 text-purple-700",
-  automatico: "bg-violet-100 text-violet-700",
+// ─── Etiqueta del tipo de asiento ─────────────────────────────────────────────
+const TIPO_RESALTADO = {
+  ajuste: "lavanda",
+  apertura: "menta",
+  depreciacion: "durazno",
+  iva: "lavanda",
 };
+
+function EtiquetaTipo({ tipo }) {
+  const texto = tipo || "manual";
+  const color = TIPO_RESALTADO[texto];
+  return color
+    ? <Resaltado color={color} className="text-[13px]">{texto}</Resaltado>
+    : <span className="text-[13px] text-cuaderno-grafito">{texto}</span>;
+}
 
 // Detecta si un asiento es una Nota de Crédito por su glosa
 const esNotaCredito = (a) => a.glosa?.startsWith("NC —") || a.glosa?.startsWith("NCE —") || (a.origen === "iconstruye" && a.glosa?.startsWith("NC"));
@@ -447,7 +453,6 @@ function CuentaGastoChip({ asiento, onElegir }) {
   if (!lineaGasto) return null; // ventas/NC u otros asientos sin línea de gasto
 
   const catActual = categoriaDeLinea(lineaGasto);
-  const icon = catActual ? catActual.icon : "🏷";
   const label = catActual ? catActual.label : (lineaGasto.cuentaNombre || "Sin categoría");
 
   const elegir = async (cat) => {
@@ -461,19 +466,19 @@ function CuentaGastoChip({ asiento, onElegir }) {
     <span className="relative inline-flex">
       <button
         onClick={e => { e.stopPropagation(); setAbierto(o => !o); }}
-        title="Click para cambiar la categoría de gasto"
-        className="group inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors max-w-[260px]"
+        title="Clic para cambiar la categoría de gasto"
+        aria-expanded={abierto}
+        className="inline-flex items-center gap-1 min-h-[28px] max-w-[260px] text-[14px] text-cuaderno-tinta rounded-sm hover:bg-cuaderno-hoja"
       >
-        <span className="flex-shrink-0">{icon}</span>
-        <span className="truncate">{label}</span>
+        <Resaltado color="lavanda" className="truncate">{label}</Resaltado>
         {guardando
-          ? <span className="w-2.5 h-2.5 border border-amber-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          : <svg className={`w-2.5 h-2.5 flex-shrink-0 opacity-50 transition-transform ${abierto ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>}
+          ? <span className="text-[12px] text-cuaderno-grafito flex-shrink-0">…</span>
+          : <IconoBajar tamano={11} className={`text-cuaderno-grafito transition-transform ${abierto ? "rotate-180" : ""}`} />}
       </button>
 
       {abierto && (
         <>
-          {/* Capa para cerrar al hacer click fuera */}
+          {/* Capa para cerrar al hacer clic fuera */}
           <button
             onClick={e => { e.stopPropagation(); setAbierto(false); }}
             className="fixed inset-0 z-40 cursor-default"
@@ -481,9 +486,9 @@ function CuentaGastoChip({ asiento, onElegir }) {
           />
           <div
             onClick={e => e.stopPropagation()}
-            className="absolute left-0 top-full mt-1 z-50 w-[300px] sm:w-[380px] bg-white rounded-xl shadow-xl border border-slate-100 p-2"
+            className="cuaderno absolute left-0 top-full mt-1 z-50 w-[300px] sm:w-[380px] bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md shadow-[0_16px_32px_-16px_rgb(var(--cuaderno-tinta)/0.45)] p-3"
           >
-            <p className="text-[10px] font-black text-slate-400 uppercase px-1 pb-1.5">Categoría de gasto</p>
+            <p className="m-0 pb-2 text-[14px] text-cuaderno-grafito">Categoría de gasto</p>
             <div className="grid grid-cols-2 gap-1.5">
               {CATEGORIAS_RAPIDAS.map(cat => {
                 const sel = catActual?.label === cat.label;
@@ -492,13 +497,12 @@ function CuentaGastoChip({ asiento, onElegir }) {
                     key={cat.label}
                     disabled={guardando}
                     onClick={e => { e.stopPropagation(); elegir(cat); }}
-                    className={`flex items-center gap-1.5 px-2 py-2 rounded-lg border-2 text-left text-[10px] font-bold transition-all disabled:opacity-50
-                      ${sel
-                        ? "border-amber-300 bg-amber-50 text-amber-700"
-                        : "border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600"}`}
+                    aria-pressed={sel}
+                    className={`min-h-[36px] px-2 rounded-md border-[1.5px] text-left text-[14px] leading-tight disabled:opacity-50 ${sel
+                      ? "border-cuaderno-tinta bg-cuaderno-hoja text-cuaderno-tinta"
+                      : "border-cuaderno-columna/70 text-cuaderno-grafito hover:border-cuaderno-tinta/60 hover:text-cuaderno-tinta"}`}
                   >
-                    <span className="text-sm flex-shrink-0">{cat.icon}</span>
-                    <span className="truncate">{cat.label}</span>
+                    {sel ? <Resaltado color="lavanda">{cat.label}</Resaltado> : cat.label}
                   </button>
                 );
               })}
@@ -654,167 +658,146 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
   const cuentasPasivo = cuentas.filter(c => c.activa !== false && ["pasivo_corriente", "pasivo_no_corriente"].includes(c.tipo));
   const cuentasTodas = cuentas.filter(c => c.activa !== false);
 
+  const cerrar = () => { onClose(); resetear(); };
+  const textoImportar = saving ? "Guardando…" : `Importar ${modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}`;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto overflow-hidden">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-lg">📋</div>
-            <div>
-              <h2 className="font-black text-base">Importar Honorarios SII</h2>
-              <p className="text-white/70 text-xs">Boletas recibidas — período {periodoActivo}</p>
-            </div>
-          </div>
-          <button onClick={() => { onClose(); resetear(); }} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        {/* Pasos */}
-        <div className="flex border-b border-slate-100">
-          {[{ n: 1, label: "Cargar archivo" }, { n: 2, label: "Revisar datos" }, { n: 3, label: "Mapear cuentas" }].map(s => (
-            <div key={s.n} className={`flex-1 py-2.5 text-center text-xs font-bold ${paso === s.n ? "text-emerald-700 border-b-2 border-emerald-600" : "text-slate-400"}`}>
-              <span className={`inline-flex w-5 h-5 rounded-full mr-1 items-center justify-center text-[10px] font-black ${paso > s.n ? "bg-emerald-100 text-emerald-600" : paso === s.n ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
-                {paso > s.n ? "✓" : s.n}
-              </span>
-              {s.label}
-            </div>
-          ))}
-        </div>
-        <div className="p-5 space-y-4">
-          {/* Paso 1 */}
-          {paso === 1 && (
-            <div className="space-y-4">
-              <div className="p-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
-                <p className="font-black">¿Cómo obtener el archivo?</p>
-                <ol className="list-decimal list-inside space-y-0.5 text-emerald-700">
-                  <li>SII → Mi SII → Servicios online</li>
-                  <li>Boletas de Honorarios Electrónicas → Honorarios Recibidos</li>
-                  <li>Selecciona el período y descarga el Excel (.xlsx)</li>
-                </ol>
-              </div>
-              <label className="flex flex-col items-center gap-3 p-8 border-2 border-dashed border-slate-300 hover:border-emerald-400 rounded-2xl cursor-pointer transition-colors group">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-50 group-hover:bg-emerald-100 flex items-center justify-center">
-                  <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                </div>
-                <div className="text-center">
-                  <p className="font-bold text-slate-700">Seleccionar archivo Excel</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Archivo .xlsx de Honorarios Recibidos del SII</p>
-                </div>
-                <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="hidden" />
-              </label>
-              {error && <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl"><svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><p className="text-xs text-red-700 font-semibold">{error}</p></div>}
-            </div>
-          )}
-          {/* Paso 2 */}
-          {paso === 2 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                {[{ label: "Boletas", value: filas.length, color: "text-slate-800" }, { label: "Total Bruto", value: fmt(totales.bruto), color: "text-emerald-700" }, { label: "Retención", value: fmt(totales.retenido), color: "text-amber-600" }].map(k => (
-                  <div key={k.label} className="bg-slate-50 rounded-xl p-3 text-center">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">{k.label}</p>
-                    <p className={`text-sm font-black mt-0.5 ${k.color}`}>{k.value}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="border-2 border-slate-100 rounded-xl overflow-hidden">
-                <div className="max-h-56 overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr className="text-[10px] font-black text-slate-500 uppercase">
-                        <th className="px-3 py-2 text-left">Nombre</th>
-                        <th className="px-3 py-2 text-left">Fecha</th>
-                        <th className="px-3 py-2 text-right">Bruto</th>
-                        <th className="px-3 py-2 text-right">Retención</th>
-                        <th className="px-3 py-2 text-right">Líquido</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {filas.map((f, i) => (
-                        <tr key={i} className="hover:bg-slate-50">
-                          <td className="px-3 py-2"><p className="font-semibold text-slate-700 truncate max-w-32">{f.nombre}</p><p className="text-[10px] text-slate-400">{f.rut}</p></td>
-                          <td className="px-3 py-2 text-slate-500">{f.fecha}</td>
-                          <td className="px-3 py-2 text-right font-mono text-slate-700">{fmt(f.bruto)}</td>
-                          <td className="px-3 py-2 text-right font-mono text-amber-600">{f.retenido > 0 ? fmt(f.retenido) : "—"}</td>
-                          <td className="px-3 py-2 text-right font-mono text-emerald-700">{fmt(f.pagado)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-                      <tr className="font-black text-xs">
-                        <td colSpan={2} className="px-3 py-2 text-slate-600">TOTALES ({filas.length} boletas)</td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-800">{fmt(totales.bruto)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-amber-700">{fmt(totales.retenido)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-emerald-800">{fmt(totales.pagado)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-600 mb-2">¿Cómo registrar los asientos?</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {[{ id: "consolidado", label: "Consolidado", desc: "1 asiento con el total del mes" }, { id: "detallado", label: "Detallado", desc: "1 asiento por cada prestador" }].map(m => (
-                    <button key={m.id} onClick={() => setModo(m.id)} className={`p-3 rounded-xl border-2 text-left transition-all ${modo === m.id ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"}`}>
-                      <p className={`text-xs font-black ${modo === m.id ? "text-emerald-700" : "text-slate-700"}`}>{m.label}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{m.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {/* Paso 3 */}
-          {paso === 3 && (
-            <div className="space-y-4">
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                <p className="text-xs text-amber-700 font-semibold">Asiento: <strong>Debe</strong> Honorarios (bruto) / <strong>Haber</strong> Retención x Pagar + Líquido x Pagar.</p>
-              </div>
-              {[
-                { label: "Cuenta Honorarios (gasto) *", hint: "Gasto bruto — DEBE", val: ctaHonorarios, set: setCtaHonorarios, lista: cuentasGasto },
-                ...(totales.retenido > 0 ? [{ label: "Retención Honorarios x Pagar", hint: "Pasivo retención 10.75% — HABER", val: ctaRetencion, set: setCtaRetencion, lista: cuentasPasivo }] : []),
-                { label: "Honorarios Líquidos x Pagar *", hint: "Monto pagado — HABER", val: ctaLiquido, set: setCtaLiquido, lista: cuentasTodas },
-              ].map(f => (
-                <div key={f.label}>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">{f.label}</label>
-                  <p className="text-[10px] text-slate-400 mb-1.5">{f.hint}</p>
-                  <select value={f.val} onChange={e => f.set(e.target.value)} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 text-sm">
-                    <option value="">— Seleccionar cuenta —</option>
-                    {f.lista.map(c => <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>)}
-                  </select>
-                </div>
-              ))}
-              {error && <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl"><svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><p className="text-xs text-red-700 font-semibold">{error}</p></div>}
-            </div>
-          )}
-        </div>
-        {/* Footer */}
-        <div className="px-5 pb-5 flex gap-3">
-          <button onClick={() => { onClose(); resetear(); }} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">Cancelar</button>
-          {paso > 1 && <button onClick={() => setPaso(p => p - 1)} className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm flex items-center gap-1.5"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>Atrás</button>}
+    <ModalCuaderno
+      titulo="Importar Honorarios SII"
+      subtitulo={`Boletas recibidas — período ${periodoActivo}`}
+      onClose={cerrar}
+      ancho="max-w-2xl"
+      cerrarAlClicFuera={false}
+      bloqueado={saving}
+      pie={
+        <div className="flex flex-wrap items-center gap-3">
+          <Boton variante="texto" onClick={cerrar}>Cancelar</Boton>
+          {paso > 1 && <Boton variante="texto" onClick={() => setPaso(p => p - 1)}><IconoAnterior tamano={14} />Atrás</Boton>}
           <div className="flex-1" />
           {paso < 3 && filas.length > 0 && (() => {
             // Si las cuentas ya están auto-resueltas, desde el paso 2 se importa directo
             const autoOk = cuentasAutoResueltas(ctaHonorarios, ctaRetencion, ctaLiquido);
             if (paso === 2 && autoOk) {
-              return (
-                <button onClick={handleImportar} disabled={saving}
-                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">
-                  {saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>Importar {modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}</>}
-                </button>
-              );
+              return <Boton variante="primario" onClick={handleImportar} disabled={saving}>{textoImportar}</Boton>;
             }
             return (
-              <button onClick={() => setPaso(p => p + 1)}
-                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">
-                Siguiente<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-              </button>
+              <Boton variante="primario" onClick={() => setPaso(p => p + 1)}>
+                Siguiente<IconoSiguiente tamano={14} />
+              </Boton>
             );
           })()}
-          {paso === 3 && <button onClick={handleImportar} disabled={saving} className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 disabled:opacity-40 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-md">{saving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Guardando...</> : <>Importar {modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}</>}</button>}
+          {paso === 3 && <Boton variante="primario" onClick={handleImportar} disabled={saving}>{textoImportar}</Boton>}
         </div>
-      </div>
-    </div>
+      }
+    >
+      {/* Pasos */}
+      <ol className="m-0 p-0 list-none flex flex-wrap gap-x-6 gap-y-1 border-b border-cuaderno-azul -mt-1">
+        {[{ n: 1, label: "Cargar archivo" }, { n: 2, label: "Revisar datos" }, { n: 3, label: "Mapear cuentas" }].map(s => (
+          <li key={s.n} aria-current={paso === s.n ? "step" : undefined}
+            className={`min-h-[36px] -mb-px flex items-center gap-1.5 border-b-2 text-[16px] ${paso === s.n ? "border-cuaderno-tinta text-cuaderno-tinta" : "border-transparent text-cuaderno-grafito"}`}>
+            {paso > s.n ? <VistoBueno tamano={13} titulo="Listo" /> : <span>{s.n}.</span>}
+            {s.label}
+          </li>
+        ))}
+      </ol>
+
+      {/* Paso 1 */}
+      {paso === 1 && (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <p className="m-0 text-[17px]">¿Cómo obtener el archivo?</p>
+            <ol className="m-0 pl-5 list-decimal space-y-0.5 text-[16px] text-cuaderno-grafito">
+              <li>SII → Mi SII → Servicios online</li>
+              <li>Boletas de Honorarios Electrónicas → Honorarios Recibidos</li>
+              <li>Selecciona el período y descarga el Excel (.xlsx)</li>
+            </ol>
+          </div>
+          <label className="flex flex-col items-center gap-2 p-8 rounded-md border-[1.5px] border-dashed border-cuaderno-columna hover:border-cuaderno-tinta hover:bg-cuaderno-papel cursor-pointer text-center">
+            <IconoSubir tamano={22} className="text-cuaderno-grafito" />
+            <span className="text-[18px] text-cuaderno-tinta underline decoration-cuaderno-columna underline-offset-4">Seleccionar archivo Excel</span>
+            <span className="text-[14px] text-cuaderno-grafito">Archivo .xlsx de Honorarios Recibidos del SII</span>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} className="sr-only" />
+          </label>
+          {error && <Nota etiqueta="Ojo:">{error}</Nota>}
+        </div>
+      )}
+
+      {/* Paso 2 */}
+      {paso === 2 && (
+        <div className="space-y-4">
+          <div className="grid gap-x-8 sm:grid-cols-3">
+            <LineaGuia etiqueta="Boletas">{filas.length}</LineaGuia>
+            <LineaGuia etiqueta="Total bruto"><Cifra valor={totales.bruto} escala="pesos" vacio="$0" /></LineaGuia>
+            <LineaGuia etiqueta="Retención"><Cifra valor={totales.retenido} escala="pesos" vacio="$0" /></LineaGuia>
+          </div>
+          <div className="max-h-56 overflow-y-auto border border-cuaderno-renglon rounded-md">
+            <table className="w-full border-collapse">
+              <thead className="sticky top-0 bg-cuaderno-tarjeta">
+                <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                  <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2">Nombre</th>
+                  <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2">Fecha</th>
+                  <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2">Bruto</th>
+                  <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2">Retención</th>
+                  <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2">Líquido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filas.map((f, i) => (
+                  <tr key={i} className="border-b border-cuaderno-renglon">
+                    <td className="px-2 py-1.5">
+                      <p className="m-0 text-[16px] leading-tight truncate max-w-32">{f.nombre}</p>
+                      <p className="m-0 text-[13px] text-cuaderno-grafito">{f.rut}</p>
+                    </td>
+                    <td className="px-2 py-1.5 text-[15px] text-cuaderno-grafito whitespace-nowrap">{f.fecha}</td>
+                    <td className="px-2 py-1.5 text-right text-[16px]"><Cifra valor={f.bruto} escala="pesos" vacio="0" /></td>
+                    <td className="px-2 py-1.5 text-right text-[16px]">{f.retenido > 0 ? <Cifra valor={f.retenido} escala="pesos" /> : <span className="text-cuaderno-grafito">—</span>}</td>
+                    <td className="px-2 py-1.5 text-right text-[16px]"><Cifra valor={f.pagado} escala="pesos" vacio="0" /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={2} className="px-2 py-2 text-[16px]">Totales ({filas.length} boletas)</td>
+                  <td className="px-2 py-2 text-right text-[16px]"><Cifra valor={totales.bruto} escala="pesos" vacio="$0" raya="total" /></td>
+                  <td className="px-2 py-2 text-right text-[16px]"><Cifra valor={totales.retenido} escala="pesos" vacio="$0" raya="total" /></td>
+                  <td className="px-2 py-2 text-right text-[16px]"><Cifra valor={totales.pagado} escala="pesos" vacio="$0" raya="total" /></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div>
+            <Segmentado
+              etiqueta="¿Cómo registrar los asientos?"
+              opciones={[{ id: "consolidado", label: "Consolidado" }, { id: "detallado", label: "Detallado" }]}
+              valor={modo}
+              onCambiar={setModo}
+            />
+            <p className="m-0 mt-1.5 text-[14px] text-cuaderno-grafito">
+              {modo === "consolidado" ? "1 asiento con el total del mes" : "1 asiento por cada prestador"}
+            </p>
+          </div>
+          {error && <Nota etiqueta="Ojo:">{error}</Nota>}
+        </div>
+      )}
+
+      {/* Paso 3 */}
+      {paso === 3 && (
+        <div className="space-y-4">
+          <Nota etiqueta="Asiento:" tono="grafito">Debe Honorarios (bruto) / Haber Retención x Pagar + Líquido x Pagar.</Nota>
+          {[
+            { label: "Cuenta Honorarios (gasto) *", hint: "Gasto bruto — DEBE", val: ctaHonorarios, set: setCtaHonorarios, lista: cuentasGasto },
+            ...(totales.retenido > 0 ? [{ label: "Retención Honorarios x Pagar", hint: "Pasivo retención 10.75% — HABER", val: ctaRetencion, set: setCtaRetencion, lista: cuentasPasivo }] : []),
+            { label: "Honorarios Líquidos x Pagar *", hint: "Monto pagado — HABER", val: ctaLiquido, set: setCtaLiquido, lista: cuentasTodas },
+          ].map(f => (
+            <Campo key={f.label} as="select" etiqueta={f.label} ayuda={f.hint} value={f.val} onChange={e => f.set(e.target.value)}>
+              <option value="">— Seleccionar cuenta —</option>
+              {f.lista.map(c => <option key={c.id} value={c.id}>{c.codigo} — {c.nombre}</option>)}
+            </Campo>
+          ))}
+          {error && <Nota etiqueta="Ojo:">{error}</Nota>}
+        </div>
+      )}
+    </ModalCuaderno>
   );
 }
 
@@ -1085,361 +1068,302 @@ export default function ContabilidadLibroDiario() {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
+    <div className="cuaderno px-8 pt-5 pb-10 space-y-5">
+
+      <FechaHoja />
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-slate-900">Libro Diario</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Asientos del período</p>
+          <Titulo>Libro Diario</Titulo>
+          <p className="m-0 text-[17px] text-cuaderno-grafito">Asientos del período</p>
         </div>
-        <div className="flex items-center gap-2 sm:ml-auto">
+        <div className="flex flex-wrap items-end gap-3">
           <PeriodoSelector />
-          {/* Botón Auto-clasificar (aplica reglas aprendidas por proveedor) */}
-          <button
+          {/* Auto-clasificar (aplica reglas aprendidas por proveedor) */}
+          <Boton
+            variante="secundario"
             onClick={autoClasificar}
             disabled={autoClasif?.procesando}
             title="Aplica las categorías aprendidas a los asientos del período cuyo proveedor ya tiene una regla"
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-500 text-white font-bold rounded-xl text-sm shadow-md shadow-amber-200 hover:shadow-lg transition-all disabled:opacity-60"
           >
             {autoClasif?.procesando ? (
-              <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />{autoClasif.hechos}/{autoClasif.total}</>
+              <>Clasificando… {autoClasif.hechos}/{autoClasif.total}</>
             ) : autoClasif ? (
-              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>{autoClasif.hechos > 0 ? `${autoClasif.hechos} clasificados` : "Sin pendientes"}</>
+              <><VistoBueno tamano={14} titulo="" />{autoClasif.hechos > 0 ? `${autoClasif.hechos} clasificados` : "Sin pendientes"}</>
             ) : (
-              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Auto-clasificar{nPorClasificar > 0 ? ` (${nPorClasificar})` : ""}</>
+              <>Auto-clasificar{nPorClasificar > 0 && <Aviso critico={false}>{nPorClasificar}</Aviso>}</>
             )}
-          </button>
-          {/* Botón Exportar PDF */}
-          <button
-            onClick={() => setShowExport(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-teal-700 to-emerald-600 text-white font-bold rounded-xl text-sm shadow-md shadow-teal-200 hover:shadow-lg transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            Exportar PDF
-          </button>
-          {/* Botón Importar — dropdown unificado */}
+          </Boton>
+          <Boton variante="secundario" onClick={() => setShowExport(true)}>
+            <IconoDocumento tamano={15} /> Exportar PDF
+          </Boton>
+          {/* Importar — menú unificado */}
           <div className="relative" ref={importMenuRef}>
-            <button
-              onClick={() => setShowImportMenu(v => !v)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-700 to-blue-600 text-white font-bold rounded-xl text-sm shadow-md shadow-indigo-200 hover:shadow-lg transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-              Importar
-              <svg className={`w-3.5 h-3.5 transition-transform ${showImportMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
-            </button>
+            <Boton variante="secundario" onClick={() => setShowImportMenu(v => !v)} aria-expanded={showImportMenu}>
+              <IconoSubir tamano={15} /> Importar
+              <IconoBajar tamano={13} className={`transition-transform ${showImportMenu ? "rotate-180" : ""}`} />
+            </Boton>
             {showImportMenu && (
-              <div className="absolute right-0 top-full mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-100 z-30 overflow-hidden">
+              <div className="absolute right-0 top-full mt-1.5 w-60 z-30 bg-cuaderno-tarjeta border border-cuaderno-columna rounded-md shadow-[0_16px_32px_-16px_rgb(var(--cuaderno-tinta)/0.45)] overflow-hidden">
                 <button
                   onClick={() => { setShowImportMenu(false); setShowImport(true); }}
-                  className="flex items-center gap-3 w-full px-4 py-3 hover:bg-indigo-50 transition-colors text-left"
+                  className="block w-full px-4 py-2.5 text-left hover:bg-cuaderno-hoja"
                 >
-                  <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-slate-800">iConstruct / iConstruye</p>
-                    <p className="text-[10px] text-slate-400">Compras, ventas, NC</p>
-                  </div>
+                  <span className="block text-[17px] text-cuaderno-tinta">iConstruct / iConstruye</span>
+                  <span className="block text-[14px] text-cuaderno-grafito">Compras, ventas, NC</span>
                 </button>
-                <div className="border-t border-slate-100" />
+                <div className="border-t border-cuaderno-renglon" />
                 <button
                   onClick={() => { setShowImportMenu(false); setShowHonModal(true); }}
-                  className="flex items-center gap-3 w-full px-4 py-3 hover:bg-emerald-50 transition-colors text-left"
+                  className="block w-full px-4 py-2.5 text-left hover:bg-cuaderno-hoja"
                 >
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-slate-800">Honorarios SII</p>
-                    <p className="text-[10px] text-slate-400">Boletas recibidas (.xlsx)</p>
-                  </div>
+                  <span className="block text-[17px] text-cuaderno-tinta">Honorarios SII</span>
+                  <span className="block text-[14px] text-cuaderno-grafito">Boletas recibidas (.xlsx)</span>
                 </button>
               </div>
             )}
           </div>
-          <button
-            onClick={() => { setEditando(null); setShowModal(true); }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-700 to-violet-600 text-white font-bold rounded-xl text-sm shadow-md shadow-purple-200 hover:shadow-lg transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Nuevo asiento
-          </button>
+          <Boton variante="primario" onClick={() => { setEditando(null); setShowModal(true); }}>
+            <IconoMas tamano={14} /> Nuevo asiento
+          </Boton>
         </div>
-      </div>
+      </header>
 
-      {/* KPIs rápidos */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Asientos", value: totales.count, color: "text-slate-800" },
-          { label: "Total Debe", value: fmt(totales.debe), color: "text-emerald-600" },
-          { label: "Total Haber", value: fmt(totales.debe), color: "text-red-500" },
-        ].map(k => (
-          <div key={k.label} className="glass-card rounded-xl p-3 sm:p-4">
-            <p className="text-xs text-slate-400 font-semibold">{k.label}</p>
-            <p className={`text-base sm:text-lg font-black mt-0.5 ${k.color}`}>{k.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Filtros + Ordenamiento */}
-      <div className="glass-card rounded-xl p-4 space-y-3">
-        {/* Fila 1: Búsqueda + Tipo */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-1">
-            <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar por glosa, proveedor o cuenta..."
-              className="w-full pl-9 pr-4 py-2 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-purple-400 text-sm" />
-            {busqueda && (
-              <button onClick={() => setBusqueda("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            )}
-          </div>
-          <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}
-            className="px-3 py-2 border-2 border-slate-200 rounded-xl text-sm font-semibold focus:outline-none focus:border-purple-400 bg-white min-w-40">
-            <option value="todos">Todos los tipos</option>
-            <optgroup label="Por origen">
-              <option value="compra">🛒 Compras (RCV/iConstruct)</option>
-              <option value="venta">🔵 Ventas (RCV)</option>
-              <option value="nota_credito">🔴 Notas de Crédito</option>
-            </optgroup>
-            <optgroup label="Por tipo">
-              <option value="honorarios">📋 Honorarios SII</option>
-              <option value="automatico">Automático</option>
-              <option value="manual">Manual</option>
-              <option value="ajuste">Ajuste</option>
-              <option value="depreciacion">Depreciación</option>
-              <option value="iva">IVA</option>
-            </optgroup>
-          </select>
+      {/* Resumen */}
+      <Hoja titulo="Resumen">
+        <div className="grid gap-x-12 sm:grid-cols-3">
+          <LineaGuia etiqueta="Asientos">{totales.count}</LineaGuia>
+          <LineaGuia etiqueta="Total Debe"><Cifra valor={totales.debe} escala="pesos" vacio="$0" raya="total" /></LineaGuia>
+          <LineaGuia etiqueta="Total Haber"><Cifra valor={totales.debe} escala="pesos" vacio="$0" raya="total" /></LineaGuia>
         </div>
+      </Hoja>
 
-        {/* Fila 2: Chips de ordenamiento */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Ordenar:</span>
-          {[
-            { campo: "fecha", label: "Fecha" },
-            { campo: "glosa", label: "Proveedor" },
-            { campo: "monto", label: "Monto" },
-            { campo: "tipo", label: "Tipo" },
-            { campo: "origen", label: "Origen" },
-          ].map(({ campo, label }) => {
-            const activo = ordenCampo === campo;
-            return (
-              <button key={campo} onClick={() => toggleOrden(campo)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all
-                  ${activo
-                    ? "border-purple-400 bg-purple-50 text-purple-700"
-                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}>
-                {label}
-                {activo && (
-                  <svg className={`w-3 h-3 transition-transform ${ordenDir === "desc" ? "rotate-180" : ""}`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                  </svg>
-                )}
-              </button>
-            );
-          })}
-          {/* Contador resultados */}
-          <span className="ml-auto text-[11px] text-slate-400">
+      {/* Asientos */}
+      <Hoja titulo="Asientos"
+        extra={
+          <>
+            <Campo etiqueta="Buscar" type="search" className="w-64"
+              value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Glosa, proveedor o cuenta" />
+            <Campo as="select" etiqueta="Tipo" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+              <option value="todos">Todos los tipos</option>
+              <optgroup label="Por origen">
+                <option value="compra">Compras (RCV/iConstruct)</option>
+                <option value="venta">Ventas (RCV)</option>
+                <option value="nota_credito">Notas de Crédito</option>
+              </optgroup>
+              <optgroup label="Por tipo">
+                <option value="honorarios">Honorarios SII</option>
+                <option value="automatico">Automático</option>
+                <option value="manual">Manual</option>
+                <option value="ajuste">Ajuste</option>
+                <option value="depreciacion">Depreciación</option>
+                <option value="iva">IVA</option>
+              </optgroup>
+            </Campo>
+          </>
+        }>
+
+        {/* Ordenamiento + contador */}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2 pb-3">
+          <Segmentado
+            etiqueta="Ordenar por"
+            opciones={[
+              { campo: "fecha", label: "Fecha" },
+              { campo: "glosa", label: "Proveedor" },
+              { campo: "monto", label: "Monto" },
+              { campo: "tipo", label: "Tipo" },
+              { campo: "origen", label: "Origen" },
+            ].map(({ campo, label }) => ({
+              id: campo,
+              label: ordenCampo === campo ? `${label} ${ordenDir === "desc" ? "↓" : "↑"}` : label,
+            }))}
+            valor={ordenCampo}
+            onCambiar={toggleOrden}
+          />
+          <span className="ml-auto text-[15px] text-cuaderno-grafito">
             {asientosFiltrados.length} de {asientos.length} asientos
-            {filtroTipo !== "todos" || busqueda ? ` · filtrado` : ""}
+            {filtroTipo !== "todos" || busqueda ? " · filtrado" : ""}
           </span>
-          {/* Limpiar filtros */}
           {(filtroTipo !== "todos" || busqueda) && (
-            <button onClick={() => { setFiltroTipo("todos"); setBusqueda(""); }}
-              className="text-[10px] font-bold text-purple-600 hover:text-purple-800 px-2 py-1 rounded-lg hover:bg-purple-50 transition-all">
-              Limpiar ×
-            </button>
+            <Boton variante="texto" className="min-h-[36px] text-[15px]"
+              onClick={() => { setFiltroTipo("todos"); setBusqueda(""); }}>
+              limpiar filtros
+            </Boton>
           )}
         </div>
-      </div>
 
-      {/* Barra de acciones masivas */}
-      {isAdmin && !loadingAsientos && asientosFiltrados.length > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-xl">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs font-black text-slate-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id))}
-                ref={el => {
-                  if (el) {
-                    const allSelected = asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id));
-                    const someSelected = asientosFiltrados.some(a => asientosSeleccionados.includes(a.id));
-                    el.indeterminate = someSelected && !allSelected;
-                  }
-                }}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    const newSelection = Array.from(new Set([...asientosSeleccionados, ...asientosFiltrados.map(a => a.id)]));
-                    setAsientosSeleccionados(newSelection);
-                  } else {
-                    const filteredIds = new Set(asientosFiltrados.map(a => a.id));
-                    setAsientosSeleccionados(asientosSeleccionados.filter(id => !filteredIds.has(id)));
-                  }
-                }}
-                className="w-4 h-4 text-purple-600 border-2 border-slate-300 rounded focus:ring-purple-500 cursor-pointer"
-              />
-              <span>Seleccionar todo ({asientosFiltrados.length})</span>
-            </label>
-            {asientosSeleccionados.length > 0 && (
-              <span className="text-[10px] text-purple-700 font-bold bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-lg">
-                {asientosSeleccionados.length} seleccionado(s)
-              </span>
-            )}
-          </div>
-          {asientosSeleccionados.length > 0 && (
-            <button
-              onClick={handleEliminarSeleccionados}
-              disabled={isDeletingBulk}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold rounded-xl text-xs transition-all disabled:opacity-50"
-            >
-              {isDeletingBulk ? (
-                <div className="w-3.5 h-3.5 border-2 border-red-700 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              )}
-              <span>Eliminar seleccionados ({asientosSeleccionados.length})</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Lista de asientos */}
-      {loadingAsientos ? (
-        <div className="flex items-center justify-center h-40">
-          <div className="w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : asientosFiltrados.length === 0 ? (
-        <div className="glass-card rounded-xl py-16 text-center">
-          <p className="text-3xl mb-3">📒</p>
-          <p className="text-slate-600 font-bold">Sin asientos en este período</p>
-          <p className="text-slate-400 text-sm mt-1">Registra el primer asiento contable</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {asientosFiltrados.map((a, idx) => (
-            <div key={a.id} className="glass-card rounded-xl overflow-hidden">
-              {/* Cabecera del asiento */}
-              <div
-                onClick={() => setExpandido(expandido === a.id ? null : a.id)}
-                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-purple-50/30 transition-colors"
-              >
-                {isAdmin && (
-                  <div onClick={(e) => e.stopPropagation()} className="flex items-center pr-1 flex-shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={asientosSeleccionados.includes(a.id)}
-                      onChange={() => {
-                        if (asientosSeleccionados.includes(a.id)) {
-                          setAsientosSeleccionados(asientosSeleccionados.filter(id => id !== a.id));
-                        } else {
-                          setAsientosSeleccionados([...asientosSeleccionados, a.id]);
-                        }
-                      }}
-                      className="w-4 h-4 text-purple-600 border-2 border-slate-300 rounded focus:ring-purple-500 cursor-pointer"
-                    />
-                  </div>
-                )}
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={esNotaCredito(a)
-                    ? { background: "linear-gradient(135deg, #db2777, #be185d)" }
-                    : esVenta(a)
-                      ? { background: "linear-gradient(135deg, #1d4ed8, #2563eb)" }
-                      : { background: "linear-gradient(135deg, #7e22ce, #6d28d9)" }}>
-                  <span className="text-white text-xs font-black">
-                    {esNotaCredito(a) ? "NC" : esVenta(a) ? "V" : idx + 1}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {a.numero && (
-                        <span className="text-[10px] font-mono font-black text-slate-400 flex-shrink-0">
-                          N° {a.numero}
-                        </span>
-                      )}
-                      {a.reversado && (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex-shrink-0 uppercase">
-                          Reversado
-                        </span>
-                      )}
-                      {a.origen === "reverso" && (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 flex-shrink-0 uppercase">
-                          Reverso
-                        </span>
-                      )}
-                      <p className={`text-sm font-bold truncate ${a.reversado ? "text-slate-400 line-through" : "text-slate-800"}`}>{a.glosa}</p>
-                    </div>
-                    {esNotaCredito(a) ? (
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 bg-pink-100 text-pink-700">
-                        {a.origen === "rcv_venta" ? "nc emitida" : "nota de crédito"}
-                      </span>
-                    ) : esVenta(a) ? (
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 bg-blue-100 text-blue-700">
-                        venta
-                      </span>
-                    ) : (
-                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${TIPO_COLORS[a.tipo] || "bg-slate-100 text-slate-600"}`}>
-                        {a.tipo || "manual"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <p className="text-xs text-slate-400">{a.fecha}</p>
-                    <p className="text-xs text-slate-400">{a.lineas?.length || 0} líneas</p>
-                    <CuentaGastoChip asiento={a} onElegir={reclasificarYAprender} />
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-black text-slate-800">{fmt(a.totalDebe)}</p>
-                  <p className="text-[10px] text-slate-400">Debe / Haber</p>
-                </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  {(!a.origen || ["manual","reverso"].includes(a.origen)) && !a.reversado && (
-                    <button onClick={e => { e.stopPropagation(); setEditando(a); setShowModal(true); }}
-                      title="Editar"
-                      className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-purple-100 hover:text-purple-700 text-slate-500 flex items-center justify-center transition-all">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                    </button>
-                  )}
-                  {!a.reversado && a.origen !== "reverso" && (
-                    <button onClick={e => { e.stopPropagation(); handleReversar(a); }}
-                      disabled={deletingId === a.id}
-                      title="Reversar"
-                      className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-amber-100 hover:text-amber-700 text-slate-500 flex items-center justify-center transition-all disabled:opacity-40">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4m-4 4l4 4" /></svg>
-                    </button>
-                  )}
-                  <button onClick={e => { e.stopPropagation(); handleEliminar(a.id); }}
-                    disabled={deletingId === a.id}
-                    className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-500 flex items-center justify-center transition-all disabled:opacity-40">
-                    {deletingId === a.id
-                      ? <div className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
-                      : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
-                  </button>
-                  <svg className={`w-4 h-4 text-slate-400 transition-transform ${expandido === a.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Detalle expandido */}
-              {expandido === a.id && (
-                <AsientoDetalle asiento={a} onElegir={reclasificarYAprender} />
+        {/* Acciones masivas */}
+        {isAdmin && !loadingAsientos && asientosFiltrados.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 py-2 border-t border-cuaderno-renglon">
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-[16px] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id))}
+                  ref={el => {
+                    if (el) {
+                      const allSelected = asientosFiltrados.length > 0 && asientosFiltrados.every(a => asientosSeleccionados.includes(a.id));
+                      const someSelected = asientosFiltrados.some(a => asientosSeleccionados.includes(a.id));
+                      el.indeterminate = someSelected && !allSelected;
+                    }
+                  }}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      const newSelection = Array.from(new Set([...asientosSeleccionados, ...asientosFiltrados.map(a => a.id)]));
+                      setAsientosSeleccionados(newSelection);
+                    } else {
+                      const filteredIds = new Set(asientosFiltrados.map(a => a.id));
+                      setAsientosSeleccionados(asientosSeleccionados.filter(id => !filteredIds.has(id)));
+                    }
+                  }}
+                  className={CHECK}
+                />
+                <span>Seleccionar todo ({asientosFiltrados.length})</span>
+              </label>
+              {asientosSeleccionados.length > 0 && (
+                <Resaltado color="lavanda" className="text-[15px]">{asientosSeleccionados.length} seleccionado(s)</Resaltado>
               )}
             </div>
-          ))}
-        </div>
-      )}
+            {asientosSeleccionados.length > 0 && (
+              <Boton variante="texto" className="min-h-[36px] text-[16px] text-cuaderno-roja decoration-cuaderno-roja/50"
+                onClick={handleEliminarSeleccionados} disabled={isDeletingBulk}>
+                <IconoBorrar tamano={14} />
+                {isDeletingBulk ? "Eliminando…" : `Eliminar seleccionados (${asientosSeleccionados.length})`}
+              </Boton>
+            )}
+          </div>
+        )}
+
+        {/* Lista de asientos */}
+        {loadingAsientos ? (
+          <p className="m-0 py-12 text-center text-[18px] text-cuaderno-grafito">Buscando los asientos…</p>
+        ) : asientosFiltrados.length === 0 ? (
+          <div className="py-12 text-center space-y-2">
+            <p className="m-0 font-ligada font-light text-[22px] leading-[1.6]">Sin asientos en este período</p>
+            <p className="m-0 text-[16px] text-cuaderno-grafito">Registra el primer asiento contable</p>
+          </div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                {isAdmin && <th className="w-8"><span className="sr-only">Seleccionar</span></th>}
+                <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2 whitespace-nowrap hidden md:table-cell">N°</th>
+                <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2 whitespace-nowrap hidden sm:table-cell">Fecha</th>
+                <th className="font-normal text-[15px] text-cuaderno-grafito text-left px-2 py-2">Glosa</th>
+                <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2">Debe</th>
+                <th className="font-normal text-[15px] text-cuaderno-grafito text-right px-2 py-2 hidden sm:table-cell">Haber</th>
+                <th className="w-32"><span className="sr-only">Acciones</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {asientosFiltrados.map((a) => {
+                const { debe: sumaDebe, haber: sumaHaber, descuadrado } = cuadraturaAsiento(a);
+                const abierto = expandido === a.id;
+                const alternar = () => setExpandido(abierto ? null : a.id);
+                return (
+                  <React.Fragment key={a.id}>
+                    <tr
+                      onClick={alternar}
+                      onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) alternar(); }}
+                      tabIndex={0}
+                      aria-expanded={abierto}
+                      className={`group align-top cursor-pointer hover:bg-cuaderno-papel focus:outline-none focus-visible:bg-cuaderno-papel ${abierto ? "bg-cuaderno-papel" : "border-b border-cuaderno-renglon"}`}
+                    >
+                      {isAdmin && (
+                        <td className="pl-1 pr-1 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Seleccionar asiento ${a.numero || ""}`}
+                            checked={asientosSeleccionados.includes(a.id)}
+                            onChange={() => {
+                              if (asientosSeleccionados.includes(a.id)) {
+                                setAsientosSeleccionados(asientosSeleccionados.filter(id => id !== a.id));
+                              } else {
+                                setAsientosSeleccionados([...asientosSeleccionados, a.id]);
+                              }
+                            }}
+                            className={CHECK}
+                          />
+                        </td>
+                      )}
+                      <td className="px-2 py-2 text-[15px] text-cuaderno-grafito whitespace-nowrap hidden md:table-cell">
+                        {a.numero || "—"}
+                      </td>
+                      <td className="px-2 py-2 text-[15px] text-cuaderno-grafito whitespace-nowrap hidden sm:table-cell">{a.fecha}</td>
+                      <td className="px-2 py-2 min-w-0">
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <span className={`text-[17px] leading-tight ${a.reversado ? "text-cuaderno-grafito line-through" : ""}`}>{a.glosa}</span>
+                          {a.reversado && <Resaltado color="durazno" className="text-[13px]">reversado</Resaltado>}
+                          {a.origen === "reverso" && <span className="text-[13px] text-cuaderno-grafito">reverso</span>}
+                          {esNotaCredito(a) ? (
+                            <Resaltado color="rosa" className="text-[13px]">{a.origen === "rcv_venta" ? "nc emitida" : "nota de crédito"}</Resaltado>
+                          ) : esVenta(a) ? (
+                            <Resaltado color="menta" className="text-[13px]">venta</Resaltado>
+                          ) : (
+                            <EtiquetaTipo tipo={a.tipo} />
+                          )}
+                          {descuadrado && <Resaltado color="rosa" className="text-[13px]">no cuadra</Resaltado>}
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap text-[14px] text-cuaderno-grafito">
+                          <span className="sm:hidden">{a.fecha}</span>
+                          <span>{a.lineas?.length || 0} líneas</span>
+                          <CuentaGastoChip asiento={a} onElegir={reclasificarYAprender} />
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-right text-[16px] whitespace-nowrap">
+                        <Cifra valor={sumaDebe} escala="pesos" vacio="0" />
+                      </td>
+                      <td className="px-2 py-2 text-right text-[16px] whitespace-nowrap hidden sm:table-cell">
+                        <Cifra valor={sumaHaber} escala="pesos" vacio="0" />
+                      </td>
+                      <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-0.5">
+                          {(!a.origen || ["manual","reverso"].includes(a.origen)) && !a.reversado && (
+                            <button onClick={() => { setEditando(a); setShowModal(true); }}
+                              title="Editar" aria-label="Editar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                              <IconoLapiz tamano={14} />
+                            </button>
+                          )}
+                          {!a.reversado && a.origen !== "reverso" && (
+                            <button onClick={() => handleReversar(a)}
+                              disabled={deletingId === a.id}
+                              title="Reversar" aria-label="Reversar"
+                              className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja disabled:opacity-50">
+                              <IconoReversar tamano={14} />
+                            </button>
+                          )}
+                          <button onClick={() => handleEliminar(a.id)}
+                            disabled={deletingId === a.id}
+                            title="Eliminar" aria-label="Eliminar"
+                            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-roja hover:bg-cuaderno-rosa/40 disabled:opacity-50">
+                            {deletingId === a.id ? <span className="text-[12px]">…</span> : <IconoBorrar tamano={14} />}
+                          </button>
+                          <button onClick={alternar} aria-label={abierto ? "Ocultar detalle" : "Ver detalle"}
+                            className="w-8 h-8 rounded-md flex items-center justify-center text-cuaderno-grafito hover:text-cuaderno-tinta hover:bg-cuaderno-hoja">
+                            <IconoBajar tamano={14} className={`transition-transform ${abierto ? "rotate-180" : ""}`} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Detalle expandido */}
+                    {abierto && (
+                      <tr className="border-b border-cuaderno-renglon bg-cuaderno-papel">
+                        <td colSpan={isAdmin ? 7 : 6} className="p-0">
+                          <AsientoDetalle asiento={a} onElegir={reclasificarYAprender} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Hoja>
 
       <ModalAsiento isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }}
         editando={editando} onSave={guardarAsientoYAprender} cuentas={cuentas} periodoActivo={periodoActivo} />
