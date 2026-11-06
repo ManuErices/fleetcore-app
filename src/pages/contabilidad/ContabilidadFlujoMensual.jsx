@@ -95,6 +95,7 @@ function docVacio(anio) {
     impuestoAuto: true,
     ppm: vacio12(),
     multas: vacio12(),
+    perdidaArrastre: 0,
     rcv: {},
   };
 }
@@ -133,6 +134,7 @@ function normalizar(raw, anio) {
     impuestoAuto: typeof raw.impuestoAuto === "boolean" ? raw.impuestoAuto : !impuesto.some(v => v !== 0),
     ppm: fix12(raw.ppm),
     multas: fix12(raw.multas),
+    perdidaArrastre: Math.abs(num(raw.perdidaArrastre)),
     rcv: raw.rcv && typeof raw.rcv === "object" ? raw.rcv : {},
   };
 }
@@ -1032,7 +1034,7 @@ export default function ContabilidadFlujoMensual() {
   const calc = useMemo(() => {
     const baseImponible = vacio12();
     data.filas.forEach(f => f.valores.forEach((v, i) => { baseImponible[i] += f.signo * num(v); }));
-    const impuesto = data.impuestoAuto ? impuestoMensualAcumulado(baseImponible, tasa) : data.impuesto.map(num);
+    const impuesto = data.impuestoAuto ? impuestoMensualAcumulado(baseImponible, tasa, data.perdidaArrastre) : data.impuesto.map(num);
     const utilidad = baseImponible.map((v, i) => v - impuesto[i] - num(data.multas[i]));
     const ingresosMes = vacio12();
     data.filas.filter(f => f.signo === 1).forEach(f => f.valores.forEach((v, i) => { ingresosMes[i] += num(v); }));
@@ -1057,6 +1059,9 @@ export default function ContabilidadFlujoMensual() {
       baseImponible, utilidad, filasTotales,
       totalBaseImponible: sum(baseImponible),
       totalUtilidad: sum(utilidad),
+      // Renta líquida después de rebajar la pérdida de años anteriores; si
+      // queda negativa, es la pérdida que pasa al año siguiente.
+      rentaTrasPerdida: sum(baseImponible) - num(data.perdidaArrastre),
       totalIngresos, totalGastos,
       impuesto, ppmSugerido, dobleConteo,
       totalImpuesto: sum(impuesto),
@@ -1168,6 +1173,19 @@ export default function ContabilidadFlujoMensual() {
               <LineaGuia etiqueta="Ingresos"><Cifra valor={calc.totalIngresos} escala="pesos" vacio="$0" /></LineaGuia>
               <LineaGuia etiqueta="Gastos"><Cifra valor={-calc.totalGastos} escala="pesos" vacio="$0" /></LineaGuia>
               <LineaGuia etiqueta="Base imponible"><Cifra valor={calc.totalBaseImponible} escala="pesos" vacio="$0" raya="total" /></LineaGuia>
+              <div className="flex flex-wrap items-end justify-between gap-3 py-1">
+                <Campo etiqueta={`Pérdida tributaria de años anteriores (al 31/12/${anio - 1})`} className="w-72"
+                  inputMode="numeric" placeholder="0"
+                  value={data.perdidaArrastre ? Number(data.perdidaArrastre).toLocaleString("es-CL") : ""}
+                  ayuda="Sale del F22 del año anterior. Se rebaja de la base antes de calcular el impuesto."
+                  onChange={e => setData(d => ({ ...d, perdidaArrastre: num(e.target.value.replace(/\./g, "")) }))} />
+                {data.perdidaArrastre > 0 && <Cifra valor={-data.perdidaArrastre} escala="pesos" />}
+              </div>
+              {data.perdidaArrastre > 0 && (
+                <LineaGuia etiqueta={calc.rentaTrasPerdida >= 0 ? "Renta líquida imponible" : `Pérdida que pasa a ${anio + 1}`}>
+                  <Cifra valor={calc.rentaTrasPerdida} escala="pesos" vacio="$0" raya="total" />
+                </LineaGuia>
+              )}
               <LineaGuia etiqueta={`Impuesto (${(tasa * 100).toLocaleString("es-CL")}% de la base acumulada)`}><Cifra valor={-calc.totalImpuesto} escala="pesos" vacio="$0" /></LineaGuia>
               {calc.totalMultas !== 0 && <LineaGuia etiqueta="Multas"><Cifra valor={-calc.totalMultas} escala="pesos" /></LineaGuia>}
               <LineaGuia etiqueta="Utilidad líquida"><Cifra valor={calc.totalUtilidad} escala="pesos" vacio="$0" raya="doble" /></LineaGuia>
@@ -1199,7 +1217,7 @@ export default function ContabilidadFlujoMensual() {
                 {data.filas.filter(f => AYUDA_FILAS[f.id]).map(f => (
                   <p key={f.id} className="m-0 text-[15px]"><Resaltado color="durazno">{f.label}</Resaltado> {AYUDA_FILAS[f.id]}</p>
                 ))}
-                <p className="m-0 text-[15px]"><Resaltado color="durazno">Impuesto</Resaltado> Base imponible acumulada del año × tasa del régimen. Cada mes muestra cuánto cambia el impuesto anual; un mes con pérdida lo reduce.</p>
+                <p className="m-0 text-[15px]"><Resaltado color="durazno">Impuesto</Resaltado> (Base imponible acumulada del año − pérdida de años anteriores) × tasa del régimen. Cada mes muestra cuánto cambia el impuesto anual; un mes con pérdida lo reduce.</p>
                 <p className="m-0 text-[15px]"><Resaltado color="durazno">Multas</Resaltado> Multas e intereses fiscales: no rebajan la base imponible (no son deducibles), pero sí restan de la utilidad porque son salida de caja.</p>
               </div>
             )}
