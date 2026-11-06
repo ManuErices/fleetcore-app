@@ -6,7 +6,7 @@ import * as XLSX from "xlsx";
 import { fmt, MESES, MESES_S, useContabilidad, leerTextoDetectando } from "./ContabilidadContext";
 import {
   Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, Campo, ModalCuaderno,
-  Segmentado, Casilla, FechaHoja, GraficoBarras, casoTitulo,
+  Segmentado, Casilla, FechaHoja, GraficoBarras, casoTitulo, casoOracion,
   IconoAnterior, IconoSiguiente, IconoSubir, IconoMas, IconoBorrar,
 } from "../finanzas/cuaderno";
 import {
@@ -18,6 +18,7 @@ import {
   APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
 } from "../../lib/contabilidad/remuneraciones";
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
+import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -428,6 +429,95 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   );
 }
 
+function ModalKardex({ resumen, archivo, regimen, onAplicar, onCerrar }) {
+  const [aplicando, setAplicando] = useState(false);
+  const [verActivos, setVerActivos] = useState(false);
+  const r = resumen;
+  const exceso = r.totalFormulaAnterior - r.total;
+  return (
+    <ModalCuaderno
+      titulo={`Depreciación ${r.anio} desde el kardex`}
+      subtitulo={`${archivo} · hoja ${r.hoja} (cierre) · ${r.activos.length} activos`}
+      onClose={onCerrar}
+      ancho="max-w-2xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando}
+            onClick={async () => { setAplicando(true); try { await onAplicar(); } finally { setAplicando(false); } }}>
+            {aplicando ? "Cargando…" : <>Cargar <Cifra valor={r.total} escala="pesos" color="heredar" /> en Depreciación</>}
+          </Boton>
+        </div>
+      }
+    >
+      {regimen && regimen !== "14A" && (
+        <Nota etiqueta="Ojo:">Estás en un régimen Pro Pyme: ahí el activo fijo se rebaja completo al comprarlo y la fila Depreciación no se usa. Cárgala solo si la empresa está en 14 A.</Nota>
+      )}
+      <section>
+        <Titulo as="h3" tamano="sm">Cómo se calcula</Titulo>
+        <p className="m-0 mb-2 text-[15px] text-cuaderno-grafito">
+          Depreciación lineal sobre lo que queda por depreciar: valor residual al cierre de {r.anioBase} ÷ meses de vida útil que le quedan. Cada activo termina exactamente en cero al fin de su vida útil.
+        </p>
+        {Object.entries(r.porCuenta).map(([cta, v]) => (
+          <LineaDesglose key={cta} label={casoOracion(cta)} valor={v} signo="+" />
+        ))}
+        <LineaDesglose label={`Depreciación ${r.anio}`} valor={r.total} signo="=" fuerte />
+        <LineaDesglose label={`Valor residual al cierre de ${r.anioBase}`} valor={r.residualTotal} tenue />
+        <p className="m-0 mt-1 text-[14px] text-cuaderno-grafito">Se reparte mes a mes: <Cifra valor={r.porMes[0]} escala="pesos" color="heredar" /> en enero{r.porMes[11] !== r.porMes[0] ? "; baja en los meses en que algún activo termina su vida útil" : " y lo mismo cada mes"}.</p>
+      </section>
+
+      {exceso > 1000 && (
+        <section>
+          <Nota etiqueta="Ojo:">
+            El kardex calculaba la depreciación como valor <Resaltado color="rosa">bruto</Resaltado> ÷ meses restantes × 12. Como divide el valor completo por una vida que se acorta, la cuota sube cada año y al final se deprecia más que el costo del activo. Con esa fórmula {r.anio} daría <Cifra valor={r.totalFormulaAnterior} escala="pesos" color="heredar" />, es decir <Cifra valor={exceso} escala="pesos" color="heredar" /> de más. Revisen con la contadora los años anteriores: en {r.anioBase} se rebajaron <Cifra valor={r.depreciacionAnioBase} escala="pesos" color="heredar" />.
+          </Nota>
+        </section>
+      )}
+
+      <section>
+        <Boton variante="texto" onClick={() => setVerActivos(v => !v)}>{verActivos ? "Ocultar activos" : `Ver los ${r.activos.length} activos`}</Boton>
+        {verActivos && (
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full border-collapse text-[15px]">
+              <thead>
+                <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                  {["Activo", "Residual", "Meses", `${r.anio}`].map((t, i) => (
+                    <th key={t} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 ? "text-left" : "text-right"}`}>{t}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {r.activos.map((a, i) => (
+                  <tr key={i} className="border-b border-cuaderno-renglon">
+                    <td className="px-2 py-1"><span className="block max-w-[280px] truncate">{casoOracion(a.descripcion)}</span><span className="text-[12px] text-cuaderno-grafito">{casoOracion(a.cuenta)}</span></td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={a.residual} escala="pesos" /></td>
+                    <td className="px-2 py-1 text-right">{a.restante}</td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={a.delAnio} escala="pesos" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {r.omitidos.length > 0 && (
+          <p className="m-0 mt-2 text-[14px] text-cuaderno-grafito">No se deprecian: {r.omitidos.map(o => `${casoOracion(o.descripcion)} (${o.motivo})`).join(", ")}.</p>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <Nota etiqueta="Nota:" tono="grafito">
+          En 14 A el activo fijo también lleva corrección monetaria (art. 41 LIR): se reajusta por IPC al cierre y la depreciación se calcula sobre el valor reajustado. El kardex no la aplica desde 2023. Cárgala en la fila Corrección monetaria cuando la contadora la calcule.
+        </Nota>
+        <Nota etiqueta="Nota:" tono="grafito">
+          Las vidas útiles salen del kardex. Revisen con la contadora que calcen con la tabla del SII (por ejemplo, dos camiones están a 15 años y el resto de los vehículos a 7) y si conviene depreciación acelerada para equipos nuevos.
+        </Nota>
+        <p className="m-0 text-[14px] text-cuaderno-grafito">Si vuelves a importar el kardex, se reemplaza lo anterior. Si compran o venden un activo, actualicen el kardex y vuelvan a importarlo.</p>
+      </section>
+    </ModalCuaderno>
+  );
+}
+
 function ModalHonorarios({ resumen, archivo, anioActivo, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
   const r = resumen;
@@ -636,6 +726,7 @@ export default function ContabilidadFlujoMensual() {
   const [rcv, setRcv]             = useState(null);   // resumen del RCV que se está por cargar
   const [rem, setRem]             = useState(null);   // libro de remuneraciones que se está por cargar
   const [hon, setHon]             = useState(null);   // informe de boletas de honorarios que se está por cargar
+  const [kdx, setKdx]             = useState(null);   // depreciación calculada desde el kardex
   const [errorRcv, setErrorRcv]   = useState("");
   const [verAyuda, setVerAyuda]   = useState(false);
   const inputRcv = useRef(null);
@@ -754,6 +845,14 @@ export default function ContabilidadFlujoMensual() {
           ? XLSX.read(await leerTextoDetectando(file), { type: "string", raw: true })
           : XLSX.read(buf, { type: "array" });
         const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+        // Kardex de activo fijo: una hoja por año con "V. Residual" y "Restante"
+        const hojas = Object.fromEntries(wb.SheetNames.map(n => [n, XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "" })]));
+        if (detectarKardex(hojas).length) {
+          const k = depreciacionDesdeKardex(hojas, anio);
+          if (!k) { setErrorRcv(`El kardex no tiene una hoja de un año anterior a ${anio} para proyectar la depreciación.`); return; }
+          setKdx({ ...k, archivo: file.name });
+          return;
+        }
         if (detectarHonorarios(arr)) {
           const h = resumirHonorarios(arr);
           if (!h || (!h.boletas && !h.anuladas)) { setErrorRcv("El informe de honorarios no trae boletas."); return; }
@@ -769,7 +868,7 @@ export default function ContabilidadFlujoMensual() {
       }
       const filas = await leerFilasRCV(file);
       const tipo = detectarTipoRCV(filas);
-      if (!tipo) { setErrorRcv("No se reconoce el archivo. Sirven: RCV de compras o ventas del SII (CSV), informe de boletas de honorarios recibidas del SII y libro de remuneraciones de Talana."); return; }
+      if (!tipo) { setErrorRcv("No se reconoce el archivo. Sirven: RCV de compras o ventas del SII (CSV), informe de boletas de honorarios recibidas del SII, libro de remuneraciones de Talana y kardex de activo fijo."); return; }
       const prueba = tipo === "compras" ? resumirRCVCompras(filas) : resumirRCVVentas(filas);
       if (!prueba.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
       setRcv({ filas, tipo, archivo: file.name });
@@ -914,6 +1013,17 @@ export default function ContabilidadFlujoMensual() {
     setHon(null);
   }
 
+  // Kardex → fila Depreciación del año que se está viendo
+  function aplicarKardex() {
+    const k = kdx;
+    const porMes = Object.fromEntries(k.porMes.map((v, m) => [m, v]).filter(([, v]) => v));
+    setData(d => aplicarAporteRCV(d, "depreciacion", `kardex-${k.anio}`, porMes, {
+      archivo: k.archivo, hoja: k.hoja, activos: k.activos.length, monto: k.total,
+      residual: Math.round(k.residualTotal), cargadoEn: new Date().toISOString(),
+    }));
+    setKdx(null);
+  }
+
   const valorFila = (id, mes) => num(data.filas.find(f => f.id === id)?.valores[mes]);
 
   // ── Cálculos derivados ──
@@ -990,7 +1100,7 @@ export default function ContabilidadFlujoMensual() {
           <input ref={inputRcv} type="file" accept=".csv,.xlsx,.xls" className="hidden"
             onChange={e => abrirRCV(e.target.files?.[0])} />
           <Boton variante="primario" onClick={() => inputRcv.current?.click()}
-            aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII o libro de remuneraciones de Talana">
+            aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII, libro de remuneraciones de Talana o kardex de activo fijo">
             <IconoSubir tamano={14} /> Importar archivo
           </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
@@ -1017,6 +1127,11 @@ export default function ContabilidadFlujoMensual() {
         <Nota etiqueta="Ojo:">
           Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
         </Nota>
+      )}
+
+      {kdx && (
+        <ModalKardex resumen={kdx} archivo={kdx.archivo} regimen={configTributaria.regimen}
+          onAplicar={aplicarKardex} onCerrar={() => setKdx(null)} />
       )}
 
       {hon && (
@@ -1076,7 +1191,7 @@ export default function ContabilidadFlujoMensual() {
               {configTributaria.regimen === "14A"
                 ? "Montos netos de IVA, en el mes del documento (14 A, base devengada)."
                 : "Montos netos de IVA, en el mes en que se pagan o perciben."}
-              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV, honorarios o libro de remuneraciones); toca una celda para corregirla.
+              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV, honorarios, remuneraciones o kardex); toca una celda para corregirla.
             </p>
 
             {verAyuda && (
