@@ -96,8 +96,11 @@ export const CONFIG_TRIBUTARIA_DEFECTO = {
  * impuesto ya "devengado" en meses anteriores y la suma de los 12 meses es
  * exactamente el impuesto anual. Nunca baja de cero en el acumulado.
  */
-export function impuestoMensualAcumulado(baseMensual, tasa) {
-  let acum = 0, impAnterior = 0;
+// perdidaArrastre: pérdida tributaria de años anteriores (art. 31 N°3 LIR).
+// Se rebaja de la base acumulada desde enero, sin tope (a 2026 no hay límite
+// vigente para imputarla).
+export function impuestoMensualAcumulado(baseMensual, tasa, perdidaArrastre = 0) {
+  let acum = -Math.abs(Number(perdidaArrastre) || 0), impAnterior = 0;
   return baseMensual.map(v => {
     acum += Number(v) || 0;
     // Se redondea el acumulado (no cada mes) para que la suma cuadre al peso
