@@ -124,7 +124,7 @@ export const AYUDA_FILAS = {
   leasing: "Cuotas de leasing pagadas en el mes.",
   patentes: "Patente municipal, contribuciones y permisos de circulación pagados.",
   depreciacion: "Solo 14 A: depreciación tributaria del activo fijo (normal o acelerada, tabla de vida útil del SII). La compra del activo no es gasto, lo es su depreciación. En 14 D N°3 se deja en cero (el activo ya se rebajó en Compras).",
-  correccion_monetaria: "Solo 14 A: corrección monetaria del capital propio tributario y de los activos (art. 41 LIR). Si el IPC sube, normalmente es un cargo (resta). La calcula la contadora al cierre; se puede cargar mensual o en diciembre.",
+  correccion_monetaria: "Solo 14 A (art. 41 LIR). Se escribe con su signo: positivo si es abono (aumenta la base), negativo si es cargo. Abono = activo fijo neto × variación del IPC; cargo = capital propio tributario inicial × variación del IPC. Factor del año: IPC de noviembre anterior a noviembre del año (desfase de un mes). La cifra definitiva la calcula la contadora al cierre.",
 };
 
 // ─── RCV: lectura de columnas ─────────────────────────────────────────────────

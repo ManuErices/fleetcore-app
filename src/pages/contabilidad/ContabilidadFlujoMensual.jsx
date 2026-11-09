@@ -80,7 +80,8 @@ const FILAS_BASE = [
   { id: "leasing",        label: "Leasing",        signo: -1 },
   { id: "patentes",       label: "Patentes y contribuciones", signo: -1 },
   { id: "depreciacion",   label: "Depreciación (14 A)", signo: -1 },
-  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: -1 },
+  // Signo +: el valor se escribe con su signo (abono positivo, cargo negativo)
+  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: 1 },
 ];
 
 const vacio12 = () => Array(12).fill(0);
@@ -107,7 +108,9 @@ function normalizar(raw, anio) {
   const filas = filasRaw.map(f => ({
     id: f.id || ("custom_" + Math.random().toString(36).slice(2)),
     label: f.label || "Sin nombre",
-    signo: f.signo === -1 ? -1 : 1,
+    // Las filas fijas toman el signo de FILAS_BASE (así un cambio de criterio,
+    // como el de Corrección monetaria, llega también a los años ya guardados)
+    signo: (f.fija && FILAS_BASE.find(b => b.id === f.id)?.signo) || (f.signo === -1 ? -1 : 1),
     fija: !!f.fija,
     valores: Array.isArray(f.valores) && f.valores.length === 12 ? f.valores.map(num) : vacio12(),
   }));
