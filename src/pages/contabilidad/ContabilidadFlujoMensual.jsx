@@ -19,6 +19,7 @@ import {
 } from "../../lib/contabilidad/remuneraciones";
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
+import { detectarRendiciones, resumirRendiciones, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -434,6 +435,87 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   );
 }
 
+function ModalRendiciones({ filas, archivo, anioActivo, onAplicar, onCerrar }) {
+  const [aplicando, setAplicando] = useState(false);
+  const [op, setOp] = useState({ incluirEnRevision: true, incluirComprobantes: true, incluirFacturasNoRecibidas: false });
+  const r = useMemo(() => resumirRendiciones(filas, op), [filas, op]);
+  const otrosAnios = [...new Set(r.reparto.filter(m => m.anio !== anioActivo).map(m => m.anio))];
+  const periodoTxt = r.periodo ? `${MESES[r.periodo.mes].toLowerCase()} ${r.periodo.anio}` : "";
+  return (
+    <ModalCuaderno
+      titulo="Rendiciones de gastos"
+      subtitulo={`${archivo} · ${r.documentos} gastos · reporte de ${periodoTxt}`}
+      onClose={onCerrar}
+      ancho="max-w-2xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando || !r.periodo}
+            onClick={async () => { setAplicando(true); try { await onAplicar(r); } finally { setAplicando(false); } }}>
+            {aplicando ? "Cargando…" : <>Cargar <Cifra valor={r.total} escala="pesos" color="heredar" /> en Rendiciones</>}
+          </Boton>
+        </div>
+      }
+    >
+      <section>
+        <Titulo as="h3" tamano="sm">Qué entra y qué no</Titulo>
+        {Object.entries(CLASES_RENDICION).filter(([k]) => r.clases[k].docs).map(([k, def]) => {
+          const entra = k === "boleta" || (k === "comprobante" && op.incluirComprobantes) || (k === "facturaNoRecibida" && op.incluirFacturasNoRecibidas);
+          return (
+            <LineaDesglose key={k} label={`${def.nombre} · ${r.clases[k].docs} doc.`} valor={r.clases[k].monto}
+              signo={entra ? "+" : ""} tenue={!entra} />
+          );
+        })}
+        <LineaDesglose label="Rendiciones" valor={r.total} signo="=" fuerte />
+        {r.rechazados.docs > 0 && <LineaDesglose label={`Gastos rechazados · ${r.rechazados.docs} (no entran)`} valor={r.rechazados.monto} tenue />}
+      </section>
+
+      <section className="space-y-3">
+        <Casilla marcada={op.incluirEnRevision} onCambiar={v => setOp(o => ({ ...o, incluirEnRevision: v }))}
+          descripcion={`${r.enRevision.docs} gastos por ${Number(Math.round(r.enRevision.monto)).toLocaleString("es-CL")} aún no se aprueban. Son gasto del mes si tienen respaldo; si después se rechazan, vuelve a importar.`}>
+          Incluir gastos en revisión
+        </Casilla>
+        {r.clases.comprobante.docs > 0 && (
+          <Casilla marcada={op.incluirComprobantes} onCambiar={v => setOp(o => ({ ...o, incluirComprobantes: v }))}
+            descripcion="Transferencias sin boleta ni factura. Son gasto real, pero el SII puede rechazarlas si no hay otro respaldo (contrato, cotización). Si el proveedor también emitió factura a la empresa, ya está en Compras.">
+            Incluir comprobantes de egreso
+          </Casilla>
+        )}
+        {r.clases.facturaNoRecibida.docs > 0 && (
+          <Casilla marcada={op.incluirFacturasNoRecibidas} onCambiar={v => setOp(o => ({ ...o, incluirFacturasNoRecibidas: v }))}
+            descripcion="Rindegastos no las encontró en el SII. Si están a nombre de la empresa van a aparecer en un RCV posterior (y se contarían dos veces); si están a nombre de otra persona, no son buen respaldo.">
+            Incluir facturas que no llegaron al RCV
+          </Casilla>
+        )}
+      </section>
+
+      {Object.keys(r.porCategoria).length > 0 && (
+        <section>
+          <Titulo as="h3" tamano="sm">Por categoría</Titulo>
+          {Object.entries(r.porCategoria).sort((a, b) => b[1] - a[1]).map(([cat, v]) => (
+            <LineaDesglose key={cat} label={casoOracion(cat)} valor={v} />
+          ))}
+        </section>
+      )}
+
+      <section>
+        <Titulo as="h3" tamano="sm">En qué mes se carga</Titulo>
+        {r.reparto.map(m => (
+          <LineaGuia key={`${m.anio}-${m.mes}`} className="min-h-[30px] text-[17px]"
+            etiqueta={<span>{MESES[m.mes]} {m.anio} <span className="text-[14px] text-cuaderno-grafito">· {m.documentos} doc.</span>{m.anio !== anioActivo && <Resaltado color="lavanda" className="ml-1 text-[14px]">se guarda en {m.anio}</Resaltado>}</span>}>
+            <Cifra valor={m.monto} escala="pesos" vacio="0" />
+          </LineaGuia>
+        ))}
+        <p className="m-0 mt-2 text-[14px] text-cuaderno-grafito">
+          Cada gasto va al mes de su fecha de emisión (14 A). En esos meses, lo importado reemplaza lo que esté escrito a mano. Si vuelves a importar el reporte de {periodoTxt}, se reemplaza lo que aportó antes.
+          {otrosAnios.length > 0 && ` Lo de ${otrosAnios.join(", ")} se guarda de inmediato en ese año.`}
+        </p>
+      </section>
+    </ModalCuaderno>
+  );
+}
+
 function ModalKardex({ resumen, archivo, regimen, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
   const [verActivos, setVerActivos] = useState(false);
@@ -732,6 +814,7 @@ export default function ContabilidadFlujoMensual() {
   const [rem, setRem]             = useState(null);   // libro de remuneraciones que se está por cargar
   const [hon, setHon]             = useState(null);   // informe de boletas de honorarios que se está por cargar
   const [kdx, setKdx]             = useState(null);   // depreciación calculada desde el kardex
+  const [rend, setRend]           = useState(null);   // reporte de rendiciones (filas crudas)
   const [errorRcv, setErrorRcv]   = useState("");
   const [verAyuda, setVerAyuda]   = useState(false);
   const inputRcv = useRef(null);
@@ -858,6 +941,10 @@ export default function ContabilidadFlujoMensual() {
           setKdx({ ...k, archivo: file.name });
           return;
         }
+        if (detectarRendiciones(arr) >= 0) {
+          setRend({ filas: arr, archivo: file.name });
+          return;
+        }
         if (detectarHonorarios(arr)) {
           const h = resumirHonorarios(arr);
           if (!h || (!h.boletas && !h.anuladas)) { setErrorRcv("El informe de honorarios no trae boletas."); return; }
@@ -873,7 +960,7 @@ export default function ContabilidadFlujoMensual() {
       }
       const filas = await leerFilasRCV(file);
       const tipo = detectarTipoRCV(filas);
-      if (!tipo) { setErrorRcv("No se reconoce el archivo. Sirven: RCV de compras o ventas del SII (CSV), informe de boletas de honorarios recibidas del SII, libro de remuneraciones de Talana y kardex de activo fijo."); return; }
+      if (!tipo) { setErrorRcv("No se reconoce el archivo. Sirven: RCV de compras o ventas del SII (CSV), informe de boletas de honorarios recibidas del SII, libro de remuneraciones de Talana, reporte de gastos de Rindegastos y kardex de activo fijo."); return; }
       const prueba = tipo === "compras" ? resumirRCVCompras(filas) : resumirRCVVentas(filas);
       if (!prueba.documentos) { setErrorRcv("El archivo no tiene facturas ni notas de crédito/débito."); return; }
       setRcv({ filas, tipo, archivo: file.name });
@@ -1018,6 +1105,47 @@ export default function ContabilidadFlujoMensual() {
     setHon(null);
   }
 
+  // Rendiciones → fila Rendiciones, cada gasto en el mes de su emisión; los
+  // meses de otro año se guardan de inmediato en ese año.
+  async function aplicarRendiciones(r) {
+    const periodo = `${r.periodo.anio}-${String(r.periodo.mes + 1).padStart(2, "0")}`;
+    const porAnio = {};
+    r.reparto.forEach(m => {
+      const y = porAnio[m.anio] ||= { porMes: {}, documentosPorMes: {} };
+      y.porMes[m.mes] = m.monto; y.documentosPorMes[m.mes] = m.documentos;
+    });
+    const antes = data.rcv?.periodos?.rendiciones?.[periodo]?.otrosAnios || [];
+    const otrosAnios = [...new Set([...Object.keys(porAnio).map(Number), ...antes])].filter(y => y !== anio);
+    const traza = { archivo: rend.archivo, documentos: r.documentos, monto: r.total, opciones: r.opciones, cargadoEn: new Date().toISOString() };
+    // En los meses que trae el reporte, lo importado reemplaza la estimación
+    // escrita a mano (ej. 6.000.000 fijos): la celda queda = suma de lo importado.
+    const aplicar = (d, y, extra = {}) => {
+      const nuevo = aplicarAporteRCV(d, "rendiciones", periodo, porAnio[y]?.porMes || {},
+        { ...traza, ...extra, documentosPorMes: porAnio[y]?.documentosPorMes || {} });
+      const meses = Object.keys(porAnio[y]?.porMes || {}).map(Number);
+      return {
+        ...nuevo,
+        filas: nuevo.filas.map(f => f.id !== "rendiciones" ? f : {
+          ...f, valores: f.valores.map((v, m) => meses.includes(m) ? aportesRCV(nuevo, "rendiciones", m).reduce((t, a) => t + a.monto, 0) : v),
+        }),
+      };
+    };
+    try {
+      for (const y of otrosAnios) {
+        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
+        const snap = await getDoc(ref);
+        const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
+        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base, y))), updatedAt: serverTimestamp() });
+      }
+    } catch (e) {
+      console.error("Error guardando rendiciones en otro año:", e);
+      alert(`No se pudo guardar la parte de ${otrosAnios.join(", ")}. No se cargó nada; intenta nuevamente.`);
+      return;
+    }
+    setData(d => aplicar(d, anio, { otrosAnios }));
+    setRend(null);
+  }
+
   // Kardex → fila Depreciación del año que se está viendo
   function aplicarKardex() {
     const k = kdx;
@@ -1108,7 +1236,7 @@ export default function ContabilidadFlujoMensual() {
           <input ref={inputRcv} type="file" accept=".csv,.xlsx,.xls" className="hidden"
             onChange={e => abrirRCV(e.target.files?.[0])} />
           <Boton variante="primario" onClick={() => inputRcv.current?.click()}
-            aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII, libro de remuneraciones de Talana o kardex de activo fijo">
+            aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII, libro de remuneraciones de Talana, rendiciones de Rindegastos o kardex de activo fijo">
             <IconoSubir tamano={14} /> Importar archivo
           </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
@@ -1135,6 +1263,11 @@ export default function ContabilidadFlujoMensual() {
         <Nota etiqueta="Ojo:">
           Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
         </Nota>
+      )}
+
+      {rend && (
+        <ModalRendiciones filas={rend.filas} archivo={rend.archivo} anioActivo={anio}
+          onAplicar={aplicarRendiciones} onCerrar={() => setRend(null)} />
       )}
 
       {kdx && (
@@ -1212,7 +1345,7 @@ export default function ContabilidadFlujoMensual() {
               {configTributaria.regimen === "14A"
                 ? "Montos netos de IVA, en el mes del documento (14 A, base devengada)."
                 : "Montos netos de IVA, en el mes en que se pagan o perciben."}
-              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV, honorarios, remuneraciones o kardex); toca una celda para corregirla.
+              {" "}Lo resaltado en <Resaltado color="lavanda">lavanda</Resaltado> viene importado (RCV, honorarios, remuneraciones, rendiciones o kardex); toca una celda para corregirla.
             </p>
 
             {verAyuda && (
