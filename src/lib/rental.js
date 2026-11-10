@@ -93,6 +93,23 @@ export const MEDIOS_PAGO = ["Transferencia", "Cheque", "Vale vista", "Efectivo",
 
 export const CLP = (n) => "$" + Math.round(Number(n || 0)).toLocaleString("es-CL");
 
+// Las cotizaciones pueden emitirse en pesos o en UF. En UF las tarifas y los
+// totales se guardan con 2 decimales (`netoUF`, `ivaUF`, `totalUF`), y `neto`,
+// `iva` y `total` quedan en pesos a la UF de referencia (`valorUF`) para que
+// los KPI y las sumas sigan siendo en pesos.
+export const MONEDAS_COTIZACION = { CLP: "Pesos (CLP)", UF: "UF" };
+
+export const UF = (n) =>
+  "UF " + Number(n || 0).toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Formatea un monto en la moneda indicada ("UF" o pesos). */
+export const fmtMoneda = (n, moneda) => (moneda === "UF" ? UF(n) : CLP(n));
+
+const redondear = (n, decimales = 0) => {
+  const f = 10 ** decimales;
+  return Math.round((Number(n) || 0) * f) / f;
+};
+
 // Normaliza cualquier tarifa a un ingreso mensual neto estimado.
 // Supuestos: mes = 1, día ≈ 30/mes, hora ≈ horasMesReferencia (default 180).
 export function ingresoMensualLinea(linea, horasMesReferencia = 180) {
@@ -107,15 +124,40 @@ export function ingresoMensualLinea(linea, horasMesReferencia = 180) {
 }
 
 // Único lugar donde se aplica el 19%.
-export function desglosarIVA(neto, { afectoIVA = true } = {}) {
-  const n = Math.round(Number(neto || 0));
-  const iva = afectoIVA ? Math.round(n * IVA_TASA) : 0;
-  return { neto: n, iva, total: n + iva };
+// `decimales: 2` para montos en UF; los pesos se redondean al entero.
+export function desglosarIVA(neto, { afectoIVA = true, decimales = 0 } = {}) {
+  const n = redondear(neto, decimales);
+  const iva = afectoIVA ? redondear(n * IVA_TASA, decimales) : 0;
+  return { neto: n, iva, total: redondear(n + iva, decimales) };
 }
 
 export function totalesDocumento(lineas, opts = {}) {
   const neto = (lineas || []).reduce((s, l) => s + ingresoMensualLinea(l), 0);
   return desglosarIVA(neto, opts);
+}
+
+/**
+ * Totales de una cotización en su moneda y en pesos.
+ * Devuelve { moneda, valorUF, enMoneda: {neto, iva, total}, neto, iva, total }
+ * donde neto/iva/total son siempre pesos (en UF, a la UF de referencia; null
+ * si no hay valor de UF).
+ */
+export function totalesCotizacion(lineas, { afectoIVA = true, moneda = "CLP", valorUF = null } = {}) {
+  if (moneda !== "UF") {
+    const t = totalesDocumento(lineas, { afectoIVA });
+    return { moneda: "CLP", valorUF: null, enMoneda: t, ...t };
+  }
+  const enMoneda = totalesDocumento(lineas, { afectoIVA, decimales: 2 });
+  const uf = Number(valorUF) > 0 ? Number(valorUF) : null;
+  const pesos = (n) => (uf ? Math.round(n * uf) : null);
+  return {
+    moneda: "UF",
+    valorUF: uf,
+    enMoneda,
+    neto: pesos(enMoneda.neto),
+    iva: pesos(enMoneda.iva),
+    total: pesos(enMoneda.total),
+  };
 }
 
 // ============================================================
@@ -429,18 +471,31 @@ export async function listRentalQuotes(empresaId, filters = {}) {
 }
 
 export async function upsertRentalQuote(empresaId, quote) {
-  if (!quote.clienteId) throw new Error("Selecciona un cliente");
+  // Una cotización rápida no tiene ficha: basta con el nombre en `clienteManual`.
+  if (!quote.clienteId && !quote.clienteManual?.nombre) throw new Error("Selecciona un cliente");
   const lineas = (quote.lineas || []).filter((l) => l.machineId && Number(l.tarifaValor) > 0);
   if (!lineas.length) throw new Error("Agrega al menos un equipo con su tarifa");
 
-  const { neto, iva, total } = totalesDocumento(lineas, { afectoIVA: quote.afectoIVA !== false });
+  const moneda = quote.moneda === "UF" ? "UF" : "CLP";
+  const valorUF = Number(quote.valorUF) > 0 ? Number(quote.valorUF) : null;
+  if (moneda === "UF" && !valorUF) {
+    throw new Error("Indica el valor de la UF de referencia para la cotización");
+  }
+  const t = totalesCotizacion(lineas, { afectoIVA: quote.afectoIVA !== false, moneda, valorUF });
+  const { neto, iva, total } = t;
   const fecha = quote.fecha || new Date().toISOString();
   const validezDias = Number(quote.validezDias) || 15;
 
   const data = {
     clienteId: quote.clienteId,
     clienteNombre: quote.clienteNombre || "",
-    lineas: lineas.map(normalizarLinea),
+    clienteManual: quote.clienteId ? null : (quote.clienteManual || null),
+    lineas: lineas.map((l) => normalizarLinea(l, moneda)),
+    moneda,
+    valorUF: moneda === "UF" ? valorUF : null,
+    netoUF: moneda === "UF" ? t.enMoneda.neto : null,
+    ivaUF: moneda === "UF" ? t.enMoneda.iva : null,
+    totalUF: moneda === "UF" ? t.enMoneda.total : null,
     fecha,
     validezDias,
     fechaVencimiento: sumarDias(fecha, validezDias),
@@ -796,7 +851,7 @@ export async function upsertRentalContract(empresaId, contract) {
   const data = {
     clienteId: contract.clienteId,
     clienteNombre: contract.clienteNombre || "",
-    lineas: lineas.map(normalizarLinea),
+    lineas: lineas.map((l) => normalizarLinea(l)),
     fechaInicio: contract.fechaInicio || "",
     fechaFin: contract.fechaFin || "",
     estado: contract.estado || "borrador",
@@ -807,6 +862,8 @@ export async function upsertRentalContract(empresaId, contract) {
     cotizacionNumero: contract.cotizacionNumero || "",
     ocId: contract.ocId || null,
     ocNumero: contract.ocNumero || "",
+    monedaCotizacion: contract.monedaCotizacion || "CLP",
+    valorUFConversion: contract.valorUFConversion || null,
     netoMensual: neto, ivaMensual: iva, totalMensual: total,
     updatedAt: serverTimestamp(),
   };
@@ -845,10 +902,27 @@ export async function crearContratoDesdeCotizacion(empresaId, quote, extra = {})
     throw new Error("La fecha de término no puede ser anterior a la de inicio");
   }
 
+  // Contratos, OC y estados de pago trabajan en pesos: una cotización en UF
+  // se convierte a la UF que se indique al generar el contrato. La tarifa
+  // original en UF queda en cada línea (`tarifaValorUF`) como referencia.
+  let lineas = quote.lineas || [];
+  let conversionUF = {};
+  if (quote.moneda === "UF") {
+    const valorUF = Number(extra.valorUF);
+    if (!(valorUF > 0)) throw new Error("Indica el valor de la UF para convertir las tarifas a pesos");
+    lineas = lineas.map((l) => ({
+      ...l,
+      tarifaValorUF: Number(l.tarifaValor || 0),
+      tarifaValor: Math.round(Number(l.tarifaValor || 0) * valorUF),
+    }));
+    conversionUF = { monedaCotizacion: "UF", valorUFConversion: valorUF };
+  }
+
   const contratoId = await upsertRentalContract(empresaId, {
+    ...conversionUF,
     clienteId: quote.clienteId,
     clienteNombre: quote.clienteNombre,
-    lineas: quote.lineas || [],
+    lineas,
     fechaInicio: extra.fechaInicio,
     fechaFin: extra.fechaFin || "",
     estado: extra.estado || "activo",
@@ -1417,13 +1491,16 @@ function sumarDias(fechaISO, dias) {
   return base.toISOString().slice(0, 10);
 }
 
-function normalizarLinea(l) {
-  return {
+// `tarifaValor` va en la moneda del documento: pesos enteros o UF con 2 decimales.
+function normalizarLinea(l, moneda = "CLP") {
+  const linea = {
     machineId: l.machineId,
     code: l.code || "",
     descripcion: l.descripcion || "",
     tarifaTipo: l.tarifaTipo || "mes",
-    tarifaValor: Number(l.tarifaValor || 0),
+    tarifaValor: redondear(l.tarifaValor, moneda === "UF" ? 2 : 0),
     cantidadEstimada: l.cantidadEstimada === "" || l.cantidadEstimada == null ? null : Number(l.cantidadEstimada),
   };
+  if (Number(l.tarifaValorUF) > 0) linea.tarifaValorUF = Number(l.tarifaValorUF);
+  return linea;
 }

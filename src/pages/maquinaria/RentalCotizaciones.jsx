@@ -8,9 +8,10 @@ import {
   aceptarCotizacion, rechazarCotizacion, crearContratoDesdeCotizacion,
   uploadQuoteFile, deleteQuoteFile,
   estadoEfectivoCotizacion, diasVigenciaCotizacion,
-  ingresoMensualLinea, totalesDocumento,
-  CLP, ESTADOS_COTIZACION,
+  ingresoMensualLinea, totalesCotizacion,
+  CLP, UF, fmtMoneda, ESTADOS_COTIZACION,
 } from "../../lib/rental";
+import { obtenerIndicadores } from "../../lib/finanzas/monedas";
 import {
   Kpi, Chip, Badge, Aviso, Estado, Dato, Seccion, Campo, Selector, AreaTexto,
   Modal, Panel, BotonPrimario, BotonSecundario, Adjuntos, fmtFecha,
@@ -236,8 +237,17 @@ function FilaCotizacion({ quote, onAbrir }) {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-lg font-black text-slate-900">{CLP(quote.total)}</p>
-          <p className="text-[11px] text-slate-400">total mensual con IVA</p>
+          {quote.moneda === "UF" ? (
+            <>
+              <p className="text-lg font-black text-slate-900">{UF(quote.totalUF)}</p>
+              <p className="text-[11px] text-slate-400">total mensual con IVA · ≈ {CLP(quote.total)}</p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-black text-slate-900">{CLP(quote.total)}</p>
+              <p className="text-[11px] text-slate-400">total mensual con IVA</p>
+            </>
+          )}
         </div>
       </div>
     </button>
@@ -260,6 +270,8 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
     quote.clienteManual ? { ...quote.clienteManual, _noRegistrado: true } : null
   );
   const oc = purchaseOrders.find((o) => o.id === quote.ocId);
+  const esUF = quote.moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, quote.moneda);
   const bloqueada = quote.estado === "aceptada" || quote.estado === "rechazada";
 
   const eliminar = async () => {
@@ -357,6 +369,13 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
             />
             <Dato label="Plazo estimado" valor={quote.plazoMeses ? `${quote.plazoMeses} meses` : "No definido"} />
             <Dato label="RUT del cliente" valor={cliente?.rut} />
+            {esUF && (
+              <Dato
+                label="Moneda"
+                valor="UF"
+                extra={quote.valorUF ? `UF de referencia ${CLP(quote.valorUF)}` : ""}
+              />
+            )}
             {oc && (
               <Dato
                 label="Orden de compra"
@@ -381,23 +400,26 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
                       <p className="text-xs text-slate-400">
                         {[
                           m?.code,
-                          `${CLP(l.tarifaValor)} por ${l.tarifaTipo}`,
+                          `${fmt(l.tarifaValor)} por ${l.tarifaTipo}`,
                           l.cantidadEstimada ? `${l.cantidadEstimada} ${l.tarifaTipo}(s)` : null,
                         ].filter(Boolean).join(" · ")}
                       </p>
                     </div>
-                    <p className="text-sm font-black text-slate-900 shrink-0">{CLP(ingresoMensualLinea(l))}</p>
+                    <p className="text-sm font-black text-slate-900 shrink-0">{fmt(ingresoMensualLinea(l))}</p>
                   </div>
                 );
               })}
               <div className="p-3 space-y-1 bg-slate-50 rounded-b-2xl">
-                <LineaTotal label="Neto mensual" valor={CLP(quote.neto)} />
-                <LineaTotal label={quote.afectoIVA === false ? "Exento de IVA" : "IVA 19%"} valor={CLP(quote.iva)} />
-                <LineaTotal label="Total mensual" valor={CLP(quote.total)} destacado />
+                <LineaTotal label="Neto mensual" valor={fmt(esUF ? quote.netoUF : quote.neto)} />
+                <LineaTotal label={quote.afectoIVA === false ? "Exento de IVA" : "IVA 19%"} valor={fmt(esUF ? quote.ivaUF : quote.iva)} />
+                <LineaTotal label="Total mensual" valor={fmt(esUF ? quote.totalUF : quote.total)} destacado />
+                {esUF && quote.total != null && (
+                  <LineaTotal label="Equivalente en pesos (UF de referencia)" valor={CLP(quote.total)} />
+                )}
                 {quote.plazoMeses > 0 && (
                   <LineaTotal
                     label={`Estimado por ${quote.plazoMeses} meses`}
-                    valor={CLP(Number(quote.total || 0) * quote.plazoMeses)}
+                    valor={fmt(Number((esUF ? quote.totalUF : quote.total) || 0) * quote.plazoMeses)}
                   />
                 )}
               </div>
@@ -532,6 +554,12 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
       <Aviso tono="info">
         El monto neto de la OC es el tope que podrás facturar en estados de pago. Si se agota, se amplía con una enmienda.
       </Aviso>
+      {quote.moneda === "UF" && (
+        <Aviso tono="alerta">
+          La cotización está en UF ({UF(quote.netoUF)} netos al mes). La OC se registra en pesos: el monto
+          sugerido usa la UF de referencia de la cotización ({CLP(quote.valorUF)}).
+        </Aviso>
+      )}
 
       <Seccion>
         <Campo label="N° de orden de compra" value={f.numeroOC} onChange={(v) => set("numeroOC", v)} placeholder="OC-45821" />
@@ -615,11 +643,25 @@ function ModalRechazar({ empresaId, quote, onClose, onListo }) {
 }
 
 function ModalContrato({ empresaId, quote, onClose, onListo }) {
+  const esUF = quote.moneda === "UF";
   const [f, setF] = useState({
     fechaInicio: new Date().toISOString().slice(0, 10),
     fechaFin: "",
     proyectoDestino: "",
+    valorUF: esUF ? quote.valorUF || "" : "",
   });
+  const [ufHoy, setUfHoy] = useState(null);
+
+  // Se propone la UF del día; queda editable por si el contrato usa otra fecha.
+  useEffect(() => {
+    if (!esUF) return;
+    obtenerIndicadores(empresaId).then((ind) => {
+      if (ind?.uf) {
+        setUfHoy(ind);
+        setF((p) => ({ ...p, valorUF: Math.round(ind.uf * 100) / 100 }));
+      }
+    });
+  }, [esUF, empresaId]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -628,9 +670,10 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
   const guardar = async () => {
     setError("");
     if (!f.fechaInicio) return setError("Indica la fecha de inicio del contrato");
+    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF para convertir las tarifas");
     setSaving(true);
     try {
-      await crearContratoDesdeCotizacion(empresaId, quote, f);
+      await crearContratoDesdeCotizacion(empresaId, quote, { ...f, valorUF: Number(f.valorUF) || null });
       onListo();
     } catch (e) {
       setError(e.message);
@@ -662,6 +705,22 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
         <Campo label="Fecha de inicio" type="date" value={f.fechaInicio} onChange={(v) => set("fechaInicio", v)} />
         <Campo label="Fecha de término" type="date" value={f.fechaFin} onChange={(v) => set("fechaFin", v)} ayuda="Opcional" />
         <Campo label="Obra o faena de destino" value={f.proyectoDestino} onChange={(v) => set("proyectoDestino", v)} full />
+        {esUF && (
+          <Campo
+            label="Valor UF para convertir a pesos"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda={
+              Number(f.valorUF) > 0
+                ? `Neto mensual: ${UF(quote.netoUF)} = ${CLP(Number(quote.netoUF || 0) * Number(f.valorUF))}` +
+                  (ufHoy ? ` · UF del ${fmtFecha(ufHoy.fecha)}` : "")
+                : "Los contratos y estados de pago se llevan en pesos"
+            }
+            full
+          />
+        )}
       </Seccion>
     </Modal>
   );
@@ -672,6 +731,8 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
 // ============================================================
 function VistaImpresion({ quote, machines, cliente, onClose }) {
   const { empresa } = useEmpresa();
+  const esUF = quote.moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, quote.moneda);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 print:bg-white print:p-0">
@@ -753,9 +814,9 @@ function VistaImpresion({ quote, machines, cliente, onClose }) {
                         <p className="text-xs text-slate-500">{[m.marca, m.modelo, m.code].filter(Boolean).join(" · ")}</p>
                       )}
                     </td>
-                    <td className="py-2.5 text-slate-600">{CLP(l.tarifaValor)} / {l.tarifaTipo}</td>
+                    <td className="py-2.5 text-slate-600">{fmt(l.tarifaValor)} / {l.tarifaTipo}</td>
                     <td className="py-2.5 text-right text-slate-600">{l.cantidadEstimada || "—"}</td>
-                    <td className="py-2.5 text-right font-bold">{CLP(ingresoMensualLinea(l))}</td>
+                    <td className="py-2.5 text-right font-bold">{fmt(ingresoMensualLinea(l))}</td>
                   </tr>
                 );
               })}
@@ -766,15 +827,15 @@ function VistaImpresion({ quote, machines, cliente, onClose }) {
             <div className="w-64 space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-500">Neto</span>
-                <span className="font-bold">{CLP(quote.neto)}</span>
+                <span className="font-bold">{fmt(esUF ? quote.netoUF : quote.neto)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">{quote.afectoIVA === false ? "Exento" : "IVA 19%"}</span>
-                <span className="font-bold">{CLP(quote.iva)}</span>
+                <span className="font-bold">{fmt(esUF ? quote.ivaUF : quote.iva)}</span>
               </div>
               <div className="flex justify-between border-t-2 border-slate-900 pt-1.5">
                 <span className="font-black uppercase text-xs">Total mensual</span>
-                <span className="text-lg font-black">{CLP(quote.total)}</span>
+                <span className="text-lg font-black">{fmt(esUF ? quote.totalUF : quote.total)}</span>
               </div>
             </div>
           </div>
@@ -787,7 +848,10 @@ function VistaImpresion({ quote, machines, cliente, onClose }) {
           )}
 
           <p className="mt-10 text-xs text-slate-400">
-            Los valores no incluyen traslado ni combustible salvo indicación expresa. Precios en pesos chilenos.
+            Los valores no incluyen traslado ni combustible salvo indicación expresa.{" "}
+            {esUF
+              ? `Precios en Unidades de Fomento (UF).${quote.valorUF ? ` UF de referencia: ${CLP(quote.valorUF)}.` : ""}`
+              : "Precios en pesos chilenos."}
           </p>
         </div>
       </div>
@@ -817,7 +881,10 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
     afectoIVA: quote?.afectoIVA !== false,
     condiciones: quote?.condiciones || "",
     estado: quote?.estado || "borrador",
+    moneda: quote?.moneda === "UF" ? "UF" : "CLP",
+    valorUF: quote?.valorUF || "",
   });
+  const [ufDia, setUfDia] = useState(null);
   const [lineas, setLineas] = useState(
     quote?.lineas?.length
       ? quote.lineas
@@ -828,13 +895,44 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const setManual = (k, v) => setF((p) => ({ ...p, clienteManual: { ...p.clienteManual, [k]: v } }));
 
+  const esUF = f.moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, f.moneda);
+  const valorUF = Number(f.valorUF) > 0 ? Number(f.valorUF) : null;
+
+  // UF del día (mindicador.cl, o la última guardada). En una cotización nueva
+  // queda como UF de referencia; al editar se respeta la que ya tenía.
+  useEffect(() => {
+    obtenerIndicadores(empresaId).then((ind) => {
+      if (!ind?.uf) return;
+      setUfDia(ind);
+      setF((p) => (p.valorUF ? p : { ...p, valorUF: Math.round(ind.uf * 100) / 100 }));
+    });
+  }, [empresaId]);
+
   const totales = useMemo(
-    () => totalesDocumento(
+    () => totalesCotizacion(
       lineas.filter((l) => l.machineId && Number(l.tarifaValor) > 0),
-      { afectoIVA: f.afectoIVA }
+      { afectoIVA: f.afectoIVA, moneda: f.moneda, valorUF }
     ),
-    [lineas, f.afectoIVA]
+    [lineas, f.afectoIVA, f.moneda, valorUF]
   );
+
+  // Al cambiar de moneda se convierten las tarifas ya escritas con la UF de
+  // referencia, para no reinterpretar $1.500.000 como UF 1.500.000.
+  const cambiarMoneda = (nueva) => {
+    if (nueva === f.moneda) return;
+    if (valorUF) {
+      setLineas((prev) => prev.map((l) => {
+        const v = Number(l.tarifaValor);
+        if (!(v > 0)) return l;
+        return {
+          ...l,
+          tarifaValor: nueva === "UF" ? Math.round((v / valorUF) * 100) / 100 : Math.round(v * valorUF),
+        };
+      }));
+    }
+    set("moneda", nueva);
+  };
 
   const cambiarLinea = (i, campo, valor) => {
     setLineas((prev) => prev.map((l, idx) => {
@@ -844,7 +942,11 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
         const m = machines.find((x) => x.id === valor);
         nueva.code = m?.code || "";
         nueva.descripcion = m?.name || "";
-        if (!nueva.tarifaValor && m?.tarifaArriendoMes) nueva.tarifaValor = m.tarifaArriendoMes;
+        // La tarifa de la ficha está en pesos.
+        if (!nueva.tarifaValor && m?.tarifaArriendoMes) {
+          if (!esUF) nueva.tarifaValor = m.tarifaArriendoMes;
+          else if (valorUF) nueva.tarifaValor = Math.round((m.tarifaArriendoMes / valorUF) * 100) / 100;
+        }
       }
       return nueva;
     }));
@@ -860,6 +962,7 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
     }
     const validas = lineas.filter((l) => l.machineId && Number(l.tarifaValor) > 0);
     if (!validas.length) return setError("Agrega al menos un equipo con su tarifa");
+    if (esUF && !valorUF) return setError("Indica el valor de la UF de referencia");
 
     setSaving(true);
     try {
@@ -877,6 +980,7 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
           ? Object.fromEntries(Object.entries(clienteManual).map(([k, v]) => [k, String(v || "").trim()]))
           : null,
         fecha: new Date(`${f.fecha}T12:00:00`).toISOString(),
+        valorUF: esUF ? valorUF : null,
         clienteNombre: esManual ? clienteManual.nombre.trim() : (cliente?.nombre || ""),
         lineas: validas,
       });
@@ -972,6 +1076,30 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
           ]}
           placeholder=""
         />
+        <Selector
+          label="Moneda"
+          value={f.moneda}
+          onChange={cambiarMoneda}
+          opciones={[
+            { value: "CLP", label: "Pesos (CLP)" },
+            { value: "UF", label: "UF" },
+          ]}
+          placeholder=""
+        />
+        {esUF ? (
+          <Campo
+            label="Valor UF de referencia"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda={
+              ufDia
+                ? `UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}. Solo para mostrar el equivalente en pesos`
+                : "Solo para mostrar el equivalente en pesos"
+            }
+          />
+        ) : <div />}
       </Seccion>
 
       <div>
@@ -1021,7 +1149,8 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
                 </select>
                 <input
                   type="number"
-                  placeholder="Valor tarifa"
+                  step={esUF ? "0.01" : "1"}
+                  placeholder={esUF ? "Valor tarifa (UF)" : "Valor tarifa"}
                   value={l.tarifaValor}
                   onChange={(e) => cambiarLinea(i, "tarifaValor", e.target.value)}
                   className="border-2 border-slate-200 rounded-lg p-2 text-sm"
@@ -1037,7 +1166,8 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
 
               {l.machineId && Number(l.tarifaValor) > 0 && (
                 <p className="text-xs font-bold text-slate-500 text-right">
-                  Aporta {CLP(ingresoMensualLinea(l))} netos al mes
+                  Aporta {fmt(ingresoMensualLinea(l))} netos al mes
+                  {esUF && valorUF ? ` (≈ ${CLP(ingresoMensualLinea(l) * valorUF)})` : ""}
                 </p>
               )}
             </div>
@@ -1048,7 +1178,7 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
       <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1.5">
         <div className="flex justify-between text-sm">
           <span className="text-slate-300">Neto mensual</span>
-          <span className="font-bold">{CLP(totales.neto)}</span>
+          <span className="font-bold">{fmt(totales.enMoneda.neto)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <label className="flex items-center gap-2 cursor-pointer text-slate-300">
@@ -1060,15 +1190,18 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
             />
             Afecto a IVA 19%
           </label>
-          <span className="font-bold">{CLP(totales.iva)}</span>
+          <span className="font-bold">{fmt(totales.enMoneda.iva)}</span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-700 pt-2">
           <span className="text-xs font-black uppercase text-slate-300">Total mensual</span>
-          <span className="text-xl font-black">{CLP(totales.total)}</span>
+          <span className="text-xl font-black">{fmt(totales.enMoneda.total)}</span>
         </div>
+        {esUF && totales.total != null && (
+          <p className="text-xs text-slate-400 text-right">≈ {CLP(totales.total)} a la UF de referencia</p>
+        )}
         {Number(f.plazoMeses) > 0 && (
           <p className="text-xs text-slate-400 text-right">
-            Por {f.plazoMeses} meses: {CLP(totales.total * Number(f.plazoMeses))}
+            Por {f.plazoMeses} meses: {fmt(totales.enMoneda.total * Number(f.plazoMeses))}
           </p>
         )}
       </div>
