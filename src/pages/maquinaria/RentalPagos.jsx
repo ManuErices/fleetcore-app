@@ -10,9 +10,23 @@ import {
   listRentalContracts, listRentalClients, listRentalPurchaseOrders,
   suggestPaymentsForContract, saldoContrato,
   estadoEfectivoEEPP, montoTotalEEPP, diasParaVencer, diasVencidoEEPP, agingCobranza,
-  desglosarIVA,
-  CLP, ESTADOS_EEPP, MEDIOS_PAGO,
+  desgloseEnMoneda, monedaDe,
+  CLP, UF, fmtMoneda, ESTADOS_EEPP, MEDIOS_PAGO,
 } from "../../lib/rental";
+import { obtenerIndicadores } from "../../lib/finanzas/monedas";
+
+// UF del día (mindicador.cl o la última guardada), para proponerla al cobrar.
+function useUFDelDia(empresaId, activo = true) {
+  const [ind, setInd] = useState(null);
+  useEffect(() => {
+    if (!activo) return;
+    let vivo = true;
+    obtenerIndicadores(empresaId).then((r) => { if (vivo && r?.uf) setInd(r); });
+    return () => { vivo = false; };
+  }, [empresaId, activo]);
+  return ind;
+}
+const uf2 = (n) => Math.round(Number(n) * 100) / 100;
 import {
   Kpi, Chip, Badge, Aviso, Estado, Dato, Seccion, Campo, Selector, AreaTexto,
   Modal, Panel, BotonPrimario, BotonSecundario, Adjuntos, BarraConsumo, fmtFecha, fmtPeriodo,
@@ -317,6 +331,9 @@ function FilaEEPP({ eepp, vista, onAbrir }) {
 
         <div className="text-right shrink-0">
           <p className="text-lg font-black text-slate-900">{CLP(montoTotalEEPP(eepp))}</p>
+          {eepp.moneda === "UF" && eepp.totalUF != null && (
+            <p className="text-[11px] text-slate-500 font-semibold">{UF(eepp.totalUF)}</p>
+          )}
           {ef === "pagado" ? (
             <p className="text-[11px] text-emerald-600 font-bold">Pagado {fmtFecha(eepp.fechaPago)}</p>
           ) : mora > 0 ? (
@@ -458,6 +475,14 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
 
           {/* Montos */}
           <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1.5">
+            {eepp.moneda === "UF" && (
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-300">Neto en UF</span>
+                <span className="font-bold">
+                  {UF(eepp.netoUF)}{eepp.valorUF ? ` × ${CLP(eepp.valorUF)}` : ""}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-slate-300">Neto</span>
               <span className="font-bold">{CLP(eepp.neto)}</span>
@@ -676,7 +701,11 @@ function ModalFacturar({ empresaId, eepp, cliente, onClose, onListo }) {
 
       <Seccion>
         <Campo label="N° de factura" value={f.numero} onChange={(v) => set("numero", v)} placeholder="00012345" />
-        <Campo label="Total facturado" type="number" value={f.total} onChange={(v) => set("total", v)} ayuda={`Del estado de pago: ${CLP(eepp.total)}`} />
+        <Campo label="Total facturado" type="number" value={f.total} onChange={(v) => set("total", v)} ayuda={
+          eepp.moneda === "UF"
+            ? `Del estado de pago: ${UF(eepp.totalUF)} = ${CLP(eepp.total)} a UF ${CLP(eepp.valorUF)}. Si facturas con la UF de otro día, ajusta el total`
+            : `Del estado de pago: ${CLP(eepp.total)}`
+        } />
         <Campo label="Fecha de emisión" type="date" value={f.fechaEmision} onChange={(v) => set("fechaEmision", v)} />
         <Campo
           label="Días de pago"
@@ -949,6 +978,14 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
   const contrato = contracts.find((c) => c.id === contratoId);
   const cliente = clients.find((c) => c.id === contrato?.clienteId);
   const saldo = contrato ? saldoContrato(contrato, purchaseOrders, payments) : null;
+  const esUF = monedaDe(contrato) === "UF";
+  const fmt = (n) => fmtMoneda(n, monedaDe(contrato));
+  const ufDia = useUFDelDia(empresaId);
+  const [valorUF, setValorUF] = useState("");
+  useEffect(() => {
+    if (!esUF) return;
+    setValorUF(ufDia?.uf ? uf2(ufDia.uf) : contrato?.valorUF || "");
+  }, [esUF, ufDia, contrato]);
 
   // Períodos ya emitidos, para no duplicar.
   const yaEmitidos = useMemo(() => {
@@ -964,13 +1001,14 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
     return suggestPaymentsForContract(contrato, {
       prorratear,
       diasPago: cliente?.diasPago ?? 30,
+      valorUF: Number(valorUF) || null,
     });
-  }, [contrato, prorratear, cliente]);
+  }, [contrato, prorratear, cliente, valorUF]);
 
   const disponibles = sugeridos.filter((s) => !yaEmitidos.has(s.periodo));
 
   const marcados = disponibles.filter((s) => seleccion[s.periodo]);
-  const netoMarcado = marcados.reduce((s, x) => s + x.neto, 0);
+  const netoMarcado = Math.round(marcados.reduce((s, x) => s + x.neto, 0) * 100) / 100;
   const excede = saldo && saldo.autorizado > 0 && netoMarcado > saldo.saldo;
 
   const alternar = (periodo) => setSeleccion((p) => ({ ...p, [periodo]: !p[periodo] }));
@@ -983,6 +1021,7 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
   const guardar = async () => {
     setError("");
     if (!marcados.length) return setError("Selecciona al menos un período");
+    if (esUF && !(Number(valorUF) > 0)) return setError("Indica el valor de la UF con que se cobra");
     setSaving(true);
     try {
       let creados = 0;
@@ -1032,16 +1071,32 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
           <div className="flex justify-between text-sm mb-2">
             <span className="text-slate-500 font-semibold">Saldo autorizado</span>
             <span className={`font-black ${saldo.saldo <= 0 ? "text-red-600" : "text-slate-900"}`}>
-              {CLP(saldo.saldo)}
+              {fmt(saldo.saldo)}
             </span>
           </div>
           <BarraConsumo pct={saldo.pct} />
           <p className="text-[11px] text-slate-400 mt-1">
             {saldo.autorizado > 0
-              ? `${saldo.pct}% consumido de ${CLP(saldo.autorizado)} netos autorizados`
+              ? `${saldo.pct}% consumido de ${fmt(saldo.autorizado)} netos autorizados`
               : "Este contrato no tiene OC asociada, así que no hay tope de control."}
           </p>
         </div>
+      )}
+
+      {contrato && esUF && (
+        <Campo
+          label="Valor UF con que se cobra"
+          type="number"
+          step="0.01"
+          value={valorUF}
+          onChange={setValorUF}
+          ayuda={
+            ufDia
+              ? `Contrato en UF. UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}. Los pesos de cada estado de pago se calculan con este valor`
+              : "Contrato en UF. Los pesos de cada estado de pago se calculan con este valor"
+          }
+          full
+        />
       )}
 
       {contrato && (
@@ -1101,8 +1156,8 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-black text-slate-900">{CLP(s.total)}</p>
-                  <p className="text-[11px] text-slate-400">{CLP(s.neto)} neto</p>
+                  <p className="text-sm font-black text-slate-900">{s.total != null ? CLP(s.total) : fmt(s.totalUF)}</p>
+                  <p className="text-[11px] text-slate-400">{fmt(s.neto)} neto</p>
                 </div>
               </label>
             ))}
@@ -1114,11 +1169,11 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
                 <span className={excede ? "text-red-700 font-semibold" : "text-slate-300"}>
                   {marcados.length} período(s) · neto
                 </span>
-                <span className={`font-black ${excede ? "text-red-700" : ""}`}>{CLP(netoMarcado)}</span>
+                <span className={`font-black ${excede ? "text-red-700" : ""}`}>{fmt(netoMarcado)}</span>
               </div>
               {excede && (
                 <p className="text-xs font-bold text-red-700 mt-2">
-                  Supera el saldo autorizado ({CLP(saldo.saldo)}). Registra una enmienda en el contrato
+                  Supera el saldo autorizado ({fmt(saldo.saldo)}). Registra una enmienda en el contrato
                   o selecciona menos períodos.
                 </p>
               )}
@@ -1139,7 +1194,9 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
     ocId: eepp?.ocId || "",
     periodo: eepp?.periodo || new Date().toISOString().slice(0, 7),
     concepto: eepp?.concepto || "",
-    neto: eepp?.neto || "",
+    // En un contrato en UF el neto se escribe en UF.
+    neto: (eepp?.moneda === "UF" ? eepp?.netoUF : eepp?.neto) || "",
+    valorUF: eepp?.valorUF || "",
     afectoIVA: eepp?.afectoIVA !== false,
     fechaEmision: eepp?.fechaEmision || new Date().toISOString().slice(0, 10),
     fechaVencimiento: eepp?.fechaVencimiento || "",
@@ -1151,7 +1208,15 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
 
   const contrato = contracts.find((c) => c.id === f.contratoId);
   const saldo = contrato ? saldoContrato(contrato, purchaseOrders, payments) : null;
-  const totales = desglosarIVA(f.neto, { afectoIVA: f.afectoIVA });
+  const moneda = monedaDe(contrato);
+  const esUF = moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, moneda);
+  const totales = desgloseEnMoneda(f.neto, { moneda, valorUF: Number(f.valorUF) || null, afectoIVA: f.afectoIVA });
+
+  const ufDia = useUFDelDia(empresaId, esUF);
+  useEffect(() => {
+    if (esUF && ufDia?.uf) setF((p) => (p.valorUF ? p : { ...p, valorUF: uf2(ufDia.uf) }));
+  }, [esUF, ufDia]);
 
   const ocsDelContrato = purchaseOrders.filter(
     (o) => o.contratoId === f.contratoId && o.estado !== "anulada"
@@ -1161,6 +1226,7 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
     setError("");
     if (!f.contratoId) return setError("Selecciona el contrato al que pertenece");
     if (!Number(f.neto)) return setError("Ingresa el monto neto");
+    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF con que se cobra");
     setSaving(true);
     try {
       await upsertRentalPayment(empresaId, {
@@ -1206,7 +1272,7 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
             onChange={(v) => set("ocId", v)}
             opciones={ocsDelContrato.map((o) => ({
               value: o.id,
-              label: `N° ${o.numeroOC}${o.tipo === "enmienda" ? " (enmienda)" : ""} — ${CLP(o.montoNeto)}`,
+              label: `N° ${o.numeroOC}${o.tipo === "enmienda" ? " (enmienda)" : ""} — ${o.moneda === "UF" ? UF(o.montoNetoUF) : CLP(o.montoNeto)}`,
             }))}
             placeholder="Automático: la primera con saldo"
             full
@@ -1218,7 +1284,7 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
         <div className="bg-white border-2 border-slate-100 rounded-2xl p-3">
           <div className="flex justify-between text-sm mb-2">
             <span className="text-slate-500 font-semibold">Saldo autorizado</span>
-            <span className={`font-black ${saldo.saldo <= 0 ? "text-red-600" : "text-slate-900"}`}>{CLP(saldo.saldo)}</span>
+            <span className={`font-black ${saldo.saldo <= 0 ? "text-red-600" : "text-slate-900"}`}>{fmt(saldo.saldo)}</span>
           </div>
           <BarraConsumo pct={saldo.pct} />
         </div>
@@ -1226,7 +1292,23 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
 
       <Seccion titulo="Detalle">
         <Campo label="Período" value={f.periodo} onChange={(v) => set("periodo", v)} placeholder="2026-09" />
-        <Campo label="Monto neto" type="number" value={f.neto} onChange={(v) => set("neto", v)} />
+        <Campo
+          label={esUF ? "Monto neto (UF)" : "Monto neto"}
+          type="number"
+          step={esUF ? "0.01" : "1"}
+          value={f.neto}
+          onChange={(v) => set("neto", v)}
+        />
+        {esUF && (
+          <Campo
+            label="Valor UF con que se cobra"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda={ufDia ? `UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}` : "El contrato está en UF"}
+          />
+        )}
         <Campo label="Fecha de emisión" type="date" value={f.fechaEmision} onChange={(v) => set("fechaEmision", v)} />
         <Campo label="Vencimiento" type="date" value={f.fechaVencimiento} onChange={(v) => set("fechaVencimiento", v)} />
         <Campo label="Concepto" value={f.concepto} onChange={(v) => set("concepto", v)} full placeholder="Arriendo septiembre 2026" />
@@ -1236,7 +1318,9 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
       <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1.5">
         <div className="flex justify-between text-sm">
           <span className="text-slate-300">Neto</span>
-          <span className="font-bold">{CLP(totales.neto)}</span>
+          <span className="font-bold">
+            {esUF ? `${fmt(totales.netoUF)} = ${CLP(totales.neto)}` : CLP(totales.neto)}
+          </span>
         </div>
         <div className="flex justify-between text-sm">
           <label className="flex items-center gap-2 cursor-pointer text-slate-300">

@@ -7,10 +7,11 @@ import {
   listRentalClients, listRentalPurchaseOrders, listRentalPayments,
   saldoContrato, saldoOC, agregarEnmiendaContrato,
   uploadContractFile, deleteContractFile,
-  ingresoMensualLinea, totalesDocumento,
+  ingresoMensualLinea, totalesCotizacion, monedaDe,
   estadoEfectivoEEPP, montoTotalEEPP,
-  CLP, ESTADOS_CONTRATO, ESTADOS_EEPP, ESTADOS_OC,
+  CLP, UF, fmtMoneda, ESTADOS_CONTRATO, ESTADOS_EEPP, ESTADOS_OC,
 } from "../../lib/rental";
+import { obtenerIndicadores } from "../../lib/finanzas/monedas";
 import {
   Kpi, Chip, Badge, Aviso, Estado, Dato, Seccion, Campo, Selector, AreaTexto,
   Modal, Panel, BotonPrimario, BotonSecundario, Adjuntos, BarraConsumo, fmtFecha, fmtPeriodo,
@@ -30,6 +31,9 @@ const CATEGORIAS_ARCHIVO = {
   acta_entrega: "Acta de entrega",
   otro: "Otro documento",
 };
+
+// Neto de la OC en su propia moneda.
+const netoOCMostrar = (oc) => (oc?.moneda === "UF" ? oc.montoNetoUF : oc?.montoNeto);
 
 // Días que faltan para que termine el contrato (null si es indefinido).
 function diasParaTermino(contrato) {
@@ -119,7 +123,7 @@ export default function RentalContratos() {
     return {
       activos: activos.length,
       mensual: activos.reduce((s, c) => s + Number(c.totalMensual || 0), 0),
-      saldo: activos.reduce((s, c) => s + (saldos[c.id]?.saldo || 0), 0),
+      saldo: activos.reduce((s, c) => s + (saldos[c.id]?.saldoPesos || 0), 0),
       enmienda: activos.filter((c) => saldos[c.id]?.requiereEnmienda).length,
     };
   }, [contracts, saldos]);
@@ -273,8 +277,17 @@ function FilaContrato({ contrato, saldo, onAbrir }) {
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-lg font-black text-slate-900">{CLP(contrato.totalMensual)}</p>
-          <p className="text-[11px] text-slate-400">total mensual</p>
+          {contrato.moneda === "UF" ? (
+            <>
+              <p className="text-lg font-black text-slate-900">{UF(contrato.totalMensualUF)}</p>
+              <p className="text-[11px] text-slate-400">total mensual · ≈ {CLP(contrato.totalMensual)}</p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-black text-slate-900">{CLP(contrato.totalMensual)}</p>
+              <p className="text-[11px] text-slate-400">total mensual</p>
+            </>
+          )}
         </div>
       </div>
 
@@ -282,9 +295,9 @@ function FilaContrato({ contrato, saldo, onAbrir }) {
         <div className="mt-3">
           <BarraConsumo pct={s.pct} />
           <div className="flex justify-between text-[11px] text-slate-400 mt-1">
-            <span>{s.pct}% facturado de {CLP(s.autorizado)} netos</span>
+            <span>{s.pct}% facturado de {fmtMoneda(s.autorizado, s.moneda)} netos</span>
             <span className={s.saldo <= 0 ? "text-red-600 font-bold" : ""}>
-              Saldo {CLP(s.saldo)}
+              Saldo {fmtMoneda(s.saldo, s.moneda)}
             </span>
           </div>
         </div>
@@ -302,6 +315,7 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
   const [trabajando, setTrabajando] = useState(false);
 
   const s = saldo || {};
+  const fmt = (n) => fmtMoneda(n, monedaDe(contrato));
   const cliente = clients.find((c) => c.id === contrato.clienteId);
   const eepps = payments.filter((p) => p.contratoId === contrato.id);
   const activo = contrato.estado === "activo";
@@ -396,7 +410,7 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
           )}
           {s.requiereEnmienda && !s.agotado && (
             <Aviso tono="alerta">
-              Vas en el {s.pct}% del monto autorizado. Queda {CLP(s.saldo)} por facturar: conviene pedir la enmienda ahora.
+              Vas en el {s.pct}% del monto autorizado. Queda {fmt(s.saldo)} por facturar: conviene pedir la enmienda ahora.
             </Aviso>
           )}
 
@@ -406,15 +420,15 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
                 <p className="text-[11px] text-slate-400">Autorizado</p>
-                <p className="text-base font-black text-slate-900">{CLP(s.autorizado)}</p>
+                <p className="text-base font-black text-slate-900">{fmt(s.autorizado)}</p>
               </div>
               <div>
                 <p className="text-[11px] text-slate-400">Facturado</p>
-                <p className="text-base font-black text-slate-700">{CLP(s.consumido)}</p>
+                <p className="text-base font-black text-slate-700">{fmt(s.consumido)}</p>
               </div>
               <div>
                 <p className="text-[11px] text-slate-400">Saldo</p>
-                <p className={`text-base font-black ${s.saldo <= 0 ? "text-red-600" : "text-emerald-600"}`}>{CLP(s.saldo)}</p>
+                <p className={`text-base font-black ${s.saldo <= 0 ? "text-red-600" : "text-emerald-600"}`}>{fmt(s.saldo)}</p>
               </div>
             </div>
             <BarraConsumo pct={s.pct} />
@@ -441,8 +455,8 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-sm font-black text-slate-900">{CLP(oc.montoNeto)}</p>
-                        <p className="text-[11px] text-slate-400">saldo {CLP(so.saldo)}</p>
+                        <p className="text-sm font-black text-slate-900">{fmtMoneda(netoOCMostrar(oc), so.moneda)}</p>
+                        <p className="text-[11px] text-slate-400">saldo {fmtMoneda(so.saldo, so.moneda)}</p>
                       </div>
                     </div>
                     {(oc.archivos || []).length > 0 && (
@@ -475,7 +489,22 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
             <Dato label="RUT del cliente" valor={cliente?.rut} />
             <Dato label="Condición de pago" valor={`${cliente?.diasPago ?? 30} días`} />
             {contrato.cotizacionNumero && <Dato label="Cotización de origen" valor={contrato.cotizacionNumero} />}
-            <Dato label="Facturación mensual" valor={CLP(contrato.totalMensual)} extra={`${CLP(contrato.netoMensual)} neto`} />
+            {contrato.moneda === "UF" ? (
+              <>
+                <Dato
+                  label="Facturación mensual"
+                  valor={UF(contrato.totalMensualUF)}
+                  extra={`${UF(contrato.netoMensualUF)} neto`}
+                />
+                <Dato
+                  label="Equivalente en pesos"
+                  valor={CLP(contrato.totalMensual)}
+                  extra={contrato.valorUF ? `a UF ${CLP(contrato.valorUF)} (referencia)` : ""}
+                />
+              </>
+            ) : (
+              <Dato label="Facturación mensual" valor={CLP(contrato.totalMensual)} extra={`${CLP(contrato.netoMensual)} neto`} />
+            )}
           </div>
 
           {/* Equipos */}
@@ -489,10 +518,10 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-slate-800">{m?.name || l.descripcion || l.code || "Equipo"}</p>
                       <p className="text-xs text-slate-400">
-                        {[m?.code, `${CLP(l.tarifaValor)} por ${l.tarifaTipo}`].filter(Boolean).join(" · ")}
+                        {[m?.code, `${fmt(l.tarifaValor)} por ${l.tarifaTipo}`].filter(Boolean).join(" · ")}
                       </p>
                     </div>
-                    <p className="text-sm font-black text-slate-900 shrink-0">{CLP(ingresoMensualLinea(l))}</p>
+                    <p className="text-sm font-black text-slate-900 shrink-0">{fmt(ingresoMensualLinea(l))}</p>
                   </div>
                 );
               })}
@@ -527,7 +556,9 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-black text-slate-900">{CLP(montoTotalEEPP(p))}</p>
-                      <p className="text-[11px] text-slate-400">{CLP(p.neto)} neto</p>
+                      <p className="text-[11px] text-slate-400">
+                        {p.moneda === "UF" ? `${UF(p.netoUF)} neto` : `${CLP(p.neto)} neto`}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -579,13 +610,22 @@ function FichaContrato({ empresaId, contrato, saldo, machines, clients, payments
 // Enmienda: nueva OC que amplía el monto autorizado
 // ============================================================
 function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
+  const esUF = monedaDe(contrato) === "UF";
+  const fmt = (n) => fmtMoneda(n, monedaDe(contrato));
   const [f, setF] = useState({
     numeroOC: "",
     fechaEmision: new Date().toISOString().slice(0, 10),
     fechaVencimiento: "",
     montoNeto: "",
+    valorUF: esUF ? contrato.valorUF || "" : "",
     observaciones: "",
   });
+  useEffect(() => {
+    if (!esUF) return;
+    obtenerIndicadores(empresaId).then((ind) => {
+      if (ind?.uf) setF((p) => ({ ...p, valorUF: Math.round(ind.uf * 100) / 100 }));
+    });
+  }, [esUF, empresaId]);
   const [archivo, setArchivo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -597,6 +637,7 @@ function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
     setError("");
     if (!f.numeroOC.trim()) return setError("Ingresa el número de la nueva orden de compra");
     if (!Number(f.montoNeto)) return setError("Ingresa el monto neto que amplía la enmienda");
+    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF de la OC");
     setSaving(true);
     try {
       await agregarEnmiendaContrato(empresaId, contrato, f, archivo);
@@ -630,7 +671,23 @@ function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
 
       <Seccion>
         <Campo label="N° de la nueva OC" value={f.numeroOC} onChange={(v) => set("numeroOC", v)} placeholder="OC-45990" />
-        <Campo label="Monto neto que amplía" type="number" value={f.montoNeto} onChange={(v) => set("montoNeto", v)} />
+        <Campo
+          label={esUF ? "Monto neto que amplía (UF)" : "Monto neto que amplía"}
+          type="number"
+          step={esUF ? "0.01" : "1"}
+          value={f.montoNeto}
+          onChange={(v) => set("montoNeto", v)}
+        />
+        {esUF && (
+          <Campo
+            label="Valor UF de la OC"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda="Contrato en UF: solo se usa para el equivalente en pesos"
+          />
+        )}
         <Campo label="Fecha de emisión" type="date" value={f.fechaEmision} onChange={(v) => set("fechaEmision", v)} />
         <Campo label="Vigencia hasta" type="date" value={f.fechaVencimiento} onChange={(v) => set("fechaVencimiento", v)} ayuda="Opcional" />
         <AreaTexto label="Observaciones" rows={2} value={f.observaciones} onChange={(v) => set("observaciones", v)} />
@@ -639,18 +696,18 @@ function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
       <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1.5 text-sm">
         <div className="flex justify-between">
           <span className="text-slate-300">Autorizado hoy</span>
-          <span className="font-bold">{CLP(saldo?.autorizado)}</span>
+          <span className="font-bold">{fmt(saldo?.autorizado)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-300">Esta enmienda</span>
-          <span className="font-bold">{CLP(f.montoNeto)}</span>
+          <span className="font-bold">{fmt(f.montoNeto)}</span>
         </div>
         <div className="flex justify-between border-t border-slate-700 pt-2">
           <span className="text-xs font-black uppercase text-slate-300">Nuevo autorizado</span>
-          <span className="text-lg font-black">{CLP(nuevoTotal)}</span>
+          <span className="text-lg font-black">{fmt(nuevoTotal)}</span>
         </div>
         <p className="text-xs text-slate-400 text-right">
-          Saldo disponible quedaría en {CLP(nuevoTotal - Number(saldo?.consumido || 0))}
+          Saldo disponible quedaría en {fmt(nuevoTotal - Number(saldo?.consumido || 0))}
         </p>
       </div>
 
@@ -685,7 +742,10 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
     proyectoDestino: contrato?.proyectoDestino || "",
     condiciones: contrato?.condiciones || "",
     afectoIVA: contrato?.afectoIVA !== false,
+    moneda: monedaDe(contrato),
+    valorUF: contrato?.valorUF || "",
   });
+  const [ufDia, setUfDia] = useState(null);
   const [lineas, setLineas] = useState(
     contrato?.lineas?.length
       ? contrato.lineas
@@ -695,13 +755,38 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
   const [error, setError] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+  const esUF = f.moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, f.moneda);
+  const valorUF = Number(f.valorUF) > 0 ? Number(f.valorUF) : null;
+
+  useEffect(() => {
+    obtenerIndicadores(empresaId).then((ind) => {
+      if (!ind?.uf) return;
+      setUfDia(ind);
+      setF((p) => (p.valorUF ? p : { ...p, valorUF: Math.round(ind.uf * 100) / 100 }));
+    });
+  }, [empresaId]);
+
   const totales = useMemo(
-    () => totalesDocumento(
+    () => totalesCotizacion(
       lineas.filter((l) => l.machineId && Number(l.tarifaValor) > 0),
-      { afectoIVA: f.afectoIVA }
+      { afectoIVA: f.afectoIVA, moneda: f.moneda, valorUF }
     ),
-    [lineas, f.afectoIVA]
+    [lineas, f.afectoIVA, f.moneda, valorUF]
   );
+
+  // Al cambiar de moneda se convierten las tarifas ya escritas.
+  const cambiarMoneda = (nueva) => {
+    if (nueva === f.moneda) return;
+    if (valorUF) {
+      setLineas((prev) => prev.map((l) => {
+        const v = Number(l.tarifaValor);
+        if (!(v > 0)) return l;
+        return { ...l, tarifaValor: nueva === "UF" ? Math.round((v / valorUF) * 100) / 100 : Math.round(v * valorUF) };
+      }));
+    }
+    set("moneda", nueva);
+  };
 
   const cambiarLinea = (i, campo, valor) => {
     setLineas((prev) => prev.map((l, idx) => {
@@ -711,7 +796,11 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
         const m = machines.find((x) => x.id === valor);
         nueva.code = m?.code || "";
         nueva.descripcion = m?.name || "";
-        if (!nueva.tarifaValor && m?.tarifaArriendoMes) nueva.tarifaValor = m.tarifaArriendoMes;
+        // La tarifa de la ficha está en pesos.
+        if (!nueva.tarifaValor && m?.tarifaArriendoMes) {
+          if (!esUF) nueva.tarifaValor = m.tarifaArriendoMes;
+          else if (valorUF) nueva.tarifaValor = Math.round((m.tarifaArriendoMes / valorUF) * 100) / 100;
+        }
       }
       return nueva;
     }));
@@ -722,6 +811,7 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
     if (!f.clienteId) return setError("Selecciona un cliente");
     const validas = lineas.filter((l) => l.machineId && Number(l.tarifaValor) > 0);
     if (!validas.length) return setError("Agrega al menos un equipo con su tarifa");
+    if (esUF && !valorUF) return setError("Indica el valor de la UF de referencia");
 
     setSaving(true);
     try {
@@ -734,6 +824,7 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
         ocId: contrato?.ocId,
         ocNumero: contrato?.ocNumero,
         ...f,
+        valorUF: esUF ? valorUF : null,
         clienteNombre: cliente?.nombre || "",
         lineas: validas,
       });
@@ -790,6 +881,31 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
           placeholder=""
         />
         <Campo label="Obra o faena" value={f.proyectoDestino} onChange={(v) => set("proyectoDestino", v)} />
+        <Selector
+          label="Moneda"
+          value={f.moneda}
+          onChange={cambiarMoneda}
+          opciones={[
+            { value: "CLP", label: "Pesos (CLP)" },
+            { value: "UF", label: "UF" },
+          ]}
+          placeholder=""
+          ayuda={contrato ? "No se puede cambiar si ya tiene OC o estados de pago" : undefined}
+        />
+        {esUF ? (
+          <Campo
+            label="Valor UF de referencia"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda={
+              ufDia
+                ? `UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}. Para el equivalente en pesos; cada estado de pago usa la UF del cobro`
+                : "Para el equivalente en pesos; cada estado de pago usa la UF del cobro"
+            }
+          />
+        ) : <div />}
       </Seccion>
 
       <div>
@@ -839,7 +955,8 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
                 </select>
                 <input
                   type="number"
-                  placeholder="Valor tarifa"
+                  step={esUF ? "0.01" : "1"}
+                  placeholder={esUF ? "Valor tarifa (UF)" : "Valor tarifa"}
                   value={l.tarifaValor}
                   onChange={(e) => cambiarLinea(i, "tarifaValor", e.target.value)}
                   className="border-2 border-slate-200 rounded-lg p-2 text-sm"
@@ -860,7 +977,7 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
       <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-1.5">
         <div className="flex justify-between text-sm">
           <span className="text-slate-300">Neto mensual</span>
-          <span className="font-bold">{CLP(totales.neto)}</span>
+          <span className="font-bold">{fmt(totales.enMoneda.neto)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <label className="flex items-center gap-2 cursor-pointer text-slate-300">
@@ -872,12 +989,15 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
             />
             Afecto a IVA 19%
           </label>
-          <span className="font-bold">{CLP(totales.iva)}</span>
+          <span className="font-bold">{fmt(totales.enMoneda.iva)}</span>
         </div>
         <div className="flex justify-between items-center border-t border-slate-700 pt-2">
           <span className="text-xs font-black uppercase text-slate-300">Total mensual</span>
-          <span className="text-xl font-black">{CLP(totales.total)}</span>
+          <span className="text-xl font-black">{fmt(totales.enMoneda.total)}</span>
         </div>
+        {esUF && totales.total != null && (
+          <p className="text-xs text-slate-400 text-right">≈ {CLP(totales.total)} a la UF de referencia</p>
+        )}
       </div>
 
       <AreaTexto label="Condiciones" rows={3} value={f.condiciones} onChange={(v) => set("condiciones", v)} />
