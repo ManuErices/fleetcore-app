@@ -135,6 +135,9 @@ Each platform improvement is a GitHub issue labeled `mejora`. Flow: `proponer_me
 - The agent defaults to proposals for cash-flow changes (`crear_propuesta_flujo`, `editar_propuesta_flujo`, `comparar_propuesta_flujo`), and opens them with `navegar_a` + `propuesta_id`.
 
 
+### Rental de maquinaria: moneda (CLP / UF)
+Cotizaciones, OC, contratos y estados de pago (`src/lib/rental.js`, pages `src/pages/maquinaria/Rental*.jsx`) can be in pesos or UF (`moneda`). The quote (or a manual contract) sets it; its OC, contract, enmiendas and EEPP inherit it, and a contract's currency can't change once it has OC/EEPP. In UF, tariffs and amounts are stored with 2 decimals in `*UF` fields (`netoUF`, `montoNetoUF`, `netoMensualUF`…) and the usual fields (`neto`, `montoNeto`, `netoMensual`, `total`…) stay in **pesos** (at the document's `valorUF`), so cobranza, rentabilidad and KPIs keep summing pesos. OC/contract balances are controlled in the document currency (`saldoOC`/`saldoContrato` return `moneda` and `saldoPesos` for cross-document sums). Each EEPP in UF stores the UF it is billed with; the UF of the day comes from `obtenerIndicadores` (`src/lib/finanzas/monedas.js`).
+
 ### Diseño de Contabilidad
 Contabilidad uses the same "cuaderno" design system as Finanzas: `AppShellLayout variante="cuaderno"`, `html.cuaderno-activo` while mounted, and every screen/modal built from `src/pages/finanzas/cuaderno.jsx` (Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, Boton, Campo, ModalCuaderno…). In Contabilidad every amount uses `<Cifra escala="pesos">` (Cifra's default divides by 1000). No gradients, bold, emojis or colored pills. The printed PDFs (`ContabilidadExportPDF.jsx` generators) keep their own design.
 

@@ -7,7 +7,7 @@ import {
   uploadClientFile, deleteClientFile, documentosFaltantes,
   resumenCliente, saldoOC, estadoEfectivoEEPP, montoTotalEEPP, diasVencidoEEPP,
   formatRut, limpiarRut, validaRut,
-  CLP, TIPOS_DOC_CLIENTE, ESTADOS_CONTRATO, ESTADOS_COTIZACION, ESTADOS_EEPP, ESTADOS_OC,
+  CLP, UF, fmtMoneda, TIPOS_DOC_CLIENTE, ESTADOS_CONTRATO, ESTADOS_COTIZACION, ESTADOS_EEPP, ESTADOS_OC,
 } from "../../lib/rental";
 import { extraerDatosEstatutos, sePuedeLeer } from "../../lib/extraerEstatutos";
 import {
@@ -438,7 +438,7 @@ function FichaCliente({ empresaId, client, resumen, payments, puedeEditar, onClo
                   c.fechaInicio ? `desde ${fmtFecha(c.fechaInicio)}` : null,
                   c.fechaFin ? `hasta ${fmtFecha(c.fechaFin)}` : null,
                 ].filter(Boolean).join(" · ")}
-                monto={CLP(c.totalMensual ?? 0)}
+                monto={c.moneda === "UF" ? UF(c.totalMensualUF) : CLP(c.totalMensual ?? 0)}
                 pie="total/mes"
               />
             )}
@@ -463,7 +463,7 @@ function FichaCliente({ empresaId, client, resumen, payments, puedeEditar, onClo
                     mora > 0 ? `${mora} días de mora` : null,
                   ].filter(Boolean).join(" · ")}
                   monto={CLP(montoTotalEEPP(p))}
-                  pie={`${CLP(p.neto)} neto`}
+                  pie={p.moneda === "UF" ? `${UF(p.netoUF)} neto` : `${CLP(p.neto)} neto`}
                 />
               );
             }}
@@ -486,8 +486,8 @@ function FichaCliente({ empresaId, client, resumen, payments, puedeEditar, onClo
                       o.fechaEmision ? fmtFecha(o.fechaEmision) : null,
                       `${(o.archivos || []).length} respaldo(s)`,
                     ].filter(Boolean).join(" · ")}
-                    monto={CLP(s.saldo)}
-                    pie={`saldo de ${CLP(s.neto)} neto`}
+                    monto={fmtMoneda(s.saldo, s.moneda)}
+                    pie={`saldo de ${fmtMoneda(s.neto, s.moneda)} neto`}
                   />
                   <div className="mt-2">
                     <BarraConsumo pct={s.pct} />
@@ -512,7 +512,7 @@ function FichaCliente({ empresaId, client, resumen, payments, puedeEditar, onClo
                   q.fecha ? fmtFecha(q.fecha) : null,
                   q.ocNumero ? `OC ${q.ocNumero}` : null,
                 ].filter(Boolean).join(" · ")}
-                monto={CLP(q.total ?? 0)}
+                monto={q.moneda === "UF" ? UF(q.totalUF) : CLP(q.total ?? 0)}
                 pie="total/mes"
               />
             )}

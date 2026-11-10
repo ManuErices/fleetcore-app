@@ -380,7 +380,7 @@ function FichaCotizacion({ empresaId, quote, machines, clients, purchaseOrders, 
               <Dato
                 label="Orden de compra"
                 valor={`N° ${oc.numeroOC}`}
-                extra={`${fmtFecha(oc.fechaEmision)} · ${CLP(oc.montoNeto)} neto`}
+                extra={`${fmtFecha(oc.fechaEmision)} · ${oc.moneda === "UF" ? UF(oc.montoNetoUF) : CLP(oc.montoNeto)} neto`}
               />
             )}
             {quote.fechaAceptacion && <Dato label="Aceptada el" valor={fmtFecha(quote.fechaAceptacion)} />}
@@ -499,17 +499,28 @@ function LineaTotal({ label, valor, destacado }) {
 // Aceptar: llega la OC del mandante
 // ============================================================
 function ModalAceptar({ empresaId, quote, onClose, onListo }) {
-  const sugerido = quote.plazoMeses > 0
-    ? Math.round(Number(quote.neto || 0) * quote.plazoMeses)
-    : Number(quote.neto || 0);
+  // La OC va en la moneda de la cotización: el saldo se controla en ella.
+  const esUF = quote.moneda === "UF";
+  const fmt = (n) => fmtMoneda(n, quote.moneda);
+  const netoMes = Number((esUF ? quote.netoUF : quote.neto) || 0);
+  const sugerido = esUF
+    ? Math.round(netoMes * (quote.plazoMeses > 0 ? quote.plazoMeses : 1) * 100) / 100
+    : Math.round(netoMes * (quote.plazoMeses > 0 ? quote.plazoMeses : 1));
 
   const [f, setF] = useState({
     numeroOC: "",
     fechaEmision: new Date().toISOString().slice(0, 10),
     fechaVencimiento: "",
     montoNeto: sugerido,
+    valorUF: esUF ? quote.valorUF || "" : "",
     observaciones: "",
   });
+  useEffect(() => {
+    if (!esUF) return;
+    obtenerIndicadores(empresaId).then((ind) => {
+      if (ind?.uf) setF((p) => ({ ...p, valorUF: Math.round(ind.uf * 100) / 100 }));
+    });
+  }, [esUF, empresaId]);
   const [archivo, setArchivo] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -521,6 +532,7 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
     if (!f.numeroOC.trim()) return setError("Ingresa el número de la orden de compra");
     if (!f.fechaEmision) return setError("Ingresa la fecha de la orden de compra");
     if (!Number(f.montoNeto)) return setError("Ingresa el monto neto autorizado");
+    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF de la OC");
     setSaving(true);
     try {
       const r = await aceptarCotizacion(empresaId, quote, f, archivo);
@@ -554,22 +566,33 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
       <Aviso tono="info">
         El monto neto de la OC es el tope que podrás facturar en estados de pago. Si se agota, se amplía con una enmienda.
       </Aviso>
-      {quote.moneda === "UF" && (
-        <Aviso tono="alerta">
-          La cotización está en UF ({UF(quote.netoUF)} netos al mes). La OC se registra en pesos: el monto
-          sugerido usa la UF de referencia de la cotización ({CLP(quote.valorUF)}).
+      {esUF && (
+        <Aviso tono="info">
+          La cotización está en UF, así que la OC, el contrato y sus estados de pago también: el saldo se
+          controla en UF y cada estado de pago se cobra en pesos con la UF de ese día.
         </Aviso>
       )}
 
       <Seccion>
         <Campo label="N° de orden de compra" value={f.numeroOC} onChange={(v) => set("numeroOC", v)} placeholder="OC-45821" />
         <Campo
-          label="Monto neto autorizado"
+          label={esUF ? "Monto neto autorizado (UF)" : "Monto neto autorizado"}
           type="number"
+          step={esUF ? "0.01" : "1"}
           value={f.montoNeto}
           onChange={(v) => set("montoNeto", v)}
-          ayuda={`Sugerido: ${CLP(sugerido)}`}
+          ayuda={`Sugerido: ${fmt(sugerido)}`}
         />
+        {esUF && (
+          <Campo
+            label="Valor UF de la OC"
+            type="number"
+            step="0.01"
+            value={f.valorUF}
+            onChange={(v) => set("valorUF", v)}
+            ayuda="Solo para el equivalente en pesos"
+          />
+        )}
         <Campo label="Fecha de emisión" type="date" value={f.fechaEmision} onChange={(v) => set("fechaEmision", v)} />
         <Campo label="Vigencia hasta" type="date" value={f.fechaVencimiento} onChange={(v) => set("fechaVencimiento", v)} ayuda="Opcional" />
         <AreaTexto label="Observaciones" rows={2} value={f.observaciones} onChange={(v) => set("observaciones", v)} />
@@ -652,7 +675,7 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
   });
   const [ufHoy, setUfHoy] = useState(null);
 
-  // Se propone la UF del día; queda editable por si el contrato usa otra fecha.
+  // UF de referencia del contrato (equivalente en pesos); se propone la del día.
   useEffect(() => {
     if (!esUF) return;
     obtenerIndicadores(empresaId).then((ind) => {
@@ -670,7 +693,7 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
   const guardar = async () => {
     setError("");
     if (!f.fechaInicio) return setError("Indica la fecha de inicio del contrato");
-    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF para convertir las tarifas");
+    if (esUF && !(Number(f.valorUF) > 0)) return setError("Indica el valor de la UF de referencia");
     setSaving(true);
     try {
       await crearContratoDesdeCotizacion(empresaId, quote, { ...f, valorUF: Number(f.valorUF) || null });
@@ -707,16 +730,14 @@ function ModalContrato({ empresaId, quote, onClose, onListo }) {
         <Campo label="Obra o faena de destino" value={f.proyectoDestino} onChange={(v) => set("proyectoDestino", v)} full />
         {esUF && (
           <Campo
-            label="Valor UF para convertir a pesos"
+            label="Valor UF de referencia"
             type="number"
             step="0.01"
             value={f.valorUF}
             onChange={(v) => set("valorUF", v)}
             ayuda={
-              Number(f.valorUF) > 0
-                ? `Neto mensual: ${UF(quote.netoUF)} = ${CLP(Number(quote.netoUF || 0) * Number(f.valorUF))}` +
-                  (ufHoy ? ` · UF del ${fmtFecha(ufHoy.fecha)}` : "")
-                : "Los contratos y estados de pago se llevan en pesos"
+              `El contrato queda en UF (${UF(quote.netoUF)} netos al mes). Esta UF solo da el equivalente en pesos; ` +
+              `cada estado de pago se cobra con la UF de su día` + (ufHoy ? ` · UF del ${fmtFecha(ufHoy.fecha)}` : "")
             }
             full
           />

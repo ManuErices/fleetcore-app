@@ -35,6 +35,13 @@ import { db, storage } from "./firebase";
 // Reglas que este archivo garantiza:
 //  - Folios correlativos asignados dentro de una transacción.
 //  - Todo monto guardado como neto + IVA 19% + total.
+//  - Moneda: cotización, OC, contrato y estados de pago pueden ir en pesos
+//    o en UF (`moneda`). La moneda la fija la cotización (o el contrato si
+//    se crea a mano) y la heredan sus OC y estados de pago. En UF se guardan
+//    los montos en UF (`*UF`) y además su equivalente en pesos en los campos
+//    de siempre (`neto`, `montoNeto`, `netoMensual`…), para que cobranza,
+//    rentabilidad y KPI sigan sumando en pesos. Los saldos de OC/contrato se
+//    controlan en la moneda del documento.
 //  - El monto autorizado de un contrato es la suma de sus OC (original más
 //    enmiendas); los estados de pago no pueden superarlo.
 //  - Los borrados liberan las máquinas y se bloquean si dejan huérfanos.
@@ -109,6 +116,48 @@ const redondear = (n, decimales = 0) => {
   const f = 10 ** decimales;
   return Math.round((Number(n) || 0) * f) / f;
 };
+
+export const monedaDe = (docu) => (docu?.moneda === "UF" ? "UF" : "CLP");
+
+/** Monto en la moneda del documento → pesos, con la UF indicada (null si falta). */
+export function pesosDesde(monto, moneda, valorUF) {
+  if (moneda !== "UF") return Math.round(Number(monto) || 0);
+  return Number(valorUF) > 0 ? Math.round(Number(monto || 0) * Number(valorUF)) : null;
+}
+
+/**
+ * Desglose neto/IVA/total de un monto en la moneda indicada.
+ * En UF devuelve también los pesos a `valorUF`: el IVA en pesos se calcula
+ * sobre el neto en pesos, igual que en la factura.
+ */
+export function desgloseEnMoneda(netoEnMoneda, { moneda = "CLP", valorUF = null, afectoIVA = true } = {}) {
+  if (moneda !== "UF") {
+    const t = desglosarIVA(netoEnMoneda, { afectoIVA });
+    return { ...t, netoUF: null, ivaUF: null, totalUF: null };
+  }
+  const uf = desglosarIVA(netoEnMoneda, { afectoIVA, decimales: 2 });
+  const netoPesos = pesosDesde(uf.neto, "UF", valorUF);
+  const pesos = netoPesos == null ? { neto: null, iva: null, total: null } : desglosarIVA(netoPesos, { afectoIVA });
+  return { ...pesos, netoUF: uf.neto, ivaUF: uf.iva, totalUF: uf.total };
+}
+
+/** Neto de una OC en la moneda pedida. */
+export function netoOCEn(oc, moneda) {
+  if (moneda === "UF") {
+    if (oc?.montoNetoUF != null) return Number(oc.montoNetoUF);
+    return Number(oc?.valorUF) > 0 ? Number(oc.montoNeto || 0) / Number(oc.valorUF) : 0;
+  }
+  return Number(oc?.montoNeto || 0);
+}
+
+/** Neto de un estado de pago en la moneda pedida. */
+export function netoEEPPEn(p, moneda) {
+  if (moneda === "UF") {
+    if (p?.netoUF != null) return Number(p.netoUF);
+    return Number(p?.valorUF) > 0 ? Number(p.neto || 0) / Number(p.valorUF) : 0;
+  }
+  return Number(p?.neto || 0);
+}
 
 // Normaliza cualquier tarifa a un ingreso mensual neto estimado.
 // Supuestos: mes = 1, día ≈ 30/mes, hora ≈ horasMesReferencia (default 180).
@@ -449,7 +498,7 @@ export function resumenCliente(clienteId, { contracts = [], quotes = [], payment
     facturadoTotal: pagos.reduce((s, p) => s + montoTotalEEPP(p), 0),
     saldoOC: ocs
       .filter((o) => o.estado === "vigente")
-      .reduce((s, o) => s + saldoOC(o, pagos).saldo, 0),
+      .reduce((s, o) => s + saldoOC(o, pagos).saldoPesos, 0),
   };
 }
 
@@ -616,6 +665,8 @@ export async function aceptarCotizacion(empresaId, quote, ocData = {}, file = nu
     fechaEmision: ocData.fechaEmision,
     fechaVencimiento: ocData.fechaVencimiento || "",
     montoNeto: ocData.montoNeto,
+    moneda: monedaDe(quote),
+    valorUF: ocData.valorUF || quote.valorUF || null,
     afectoIVA: quote.afectoIVA !== false,
     tipo: "original",
     observaciones: ocData.observaciones || "",
@@ -673,7 +724,11 @@ export async function upsertRentalPurchaseOrder(empresaId, oc) {
   if (!numeroOC) throw new Error("El número de OC del cliente es obligatorio");
   if (!oc.clienteId) throw new Error("La OC debe estar asociada a un cliente");
 
-  const neto = Math.round(Number(oc.montoNeto || 0));
+  // `montoNeto` llega en la moneda de la OC (UF con 2 decimales o pesos).
+  const moneda = monedaDe(oc);
+  const valorUF = Number(oc.valorUF) > 0 ? Number(oc.valorUF) : null;
+  if (moneda === "UF" && !valorUF) throw new Error("Indica el valor de la UF de la orden de compra");
+  const neto = redondear(oc.montoNeto, moneda === "UF" ? 2 : 0);
   if (neto <= 0) throw new Error("El monto neto de la OC debe ser mayor a cero");
 
   // Una misma OC no se carga dos veces para el mismo cliente.
@@ -688,13 +743,13 @@ export async function upsertRentalPurchaseOrder(empresaId, oc) {
     const pagos = await listRentalPayments(empresaId, { ocId: oc.id });
     const consumido = pagos
       .filter((p) => p.estado !== "anulado")
-      .reduce((s, p) => s + Number(p.neto || 0), 0);
-    if (neto < consumido) {
-      throw new Error(`El neto no puede ser menor a lo ya consumido por sus estados de pago (${CLP(consumido)})`);
+      .reduce((s, p) => s + netoEEPPEn(p, moneda), 0);
+    if (neto < redondear(consumido, 2)) {
+      throw new Error(`El neto no puede ser menor a lo ya consumido por sus estados de pago (${fmtMoneda(consumido, moneda)})`);
     }
   }
 
-  const { iva, total } = desglosarIVA(neto, { afectoIVA: oc.afectoIVA !== false });
+  const d = desgloseEnMoneda(neto, { moneda, valorUF, afectoIVA: oc.afectoIVA !== false });
 
   const data = {
     numeroOC,
@@ -707,9 +762,15 @@ export async function upsertRentalPurchaseOrder(empresaId, oc) {
     contratoNumero: oc.contratoNumero || "",
     fechaEmision: oc.fechaEmision || new Date().toISOString().slice(0, 10),
     fechaVencimiento: oc.fechaVencimiento || "",
-    montoNeto: neto,
-    montoIva: iva,
-    montoTotal: total,
+    moneda,
+    valorUF: moneda === "UF" ? valorUF : null,
+    // En pesos siempre (en UF, a la UF de la OC).
+    montoNeto: d.neto,
+    montoIva: d.iva,
+    montoTotal: d.total,
+    montoNetoUF: d.netoUF,
+    montoIvaUF: d.ivaUF,
+    montoTotalUF: d.totalUF,
     afectoIVA: oc.afectoIVA !== false,
     estado: oc.estado || "vigente",
     observaciones: (oc.observaciones || "").trim(),
@@ -751,13 +812,17 @@ export async function deleteRentalPurchaseOrder(empresaId, ocId) {
 }
 
 // Saldo de una OC concreta (neto contra neto).
+// Montos en la moneda de la OC; `saldoPesos` sirve para sumar entre OC.
 export function saldoOC(oc, payments = []) {
-  const netoOC = Number(oc?.montoNeto || 0);
-  const consumido = payments
+  const moneda = monedaDe(oc);
+  const netoOC = netoOCEn(oc, moneda);
+  const consumido = redondear(payments
     .filter((p) => p.ocId === oc?.id && p.estado !== "anulado")
-    .reduce((s, p) => s + Number(p.neto || 0), 0);
-  const saldo = netoOC - consumido;
+    .reduce((s, p) => s + netoEEPPEn(p, moneda), 0), 2);
+  const saldo = redondear(netoOC - consumido, 2);
   return {
+    moneda,
+    saldoPesos: moneda === "UF" ? pesosDesde(saldo, "UF", oc?.valorUF) || 0 : saldo,
     neto: netoOC,
     consumido,
     saldo,
@@ -768,16 +833,20 @@ export function saldoOC(oc, payments = []) {
 
 // Monto autorizado de un contrato: la OC original más todas sus enmiendas.
 // Es el tope contra el que se descuentan los estados de pago.
+// Montos en la moneda del contrato; `saldoPesos` sirve para sumar entre contratos.
 export function saldoContrato(contrato, purchaseOrders = [], payments = []) {
+  const moneda = monedaDe(contrato);
   const ocs = purchaseOrders.filter((o) => o.contratoId === contrato?.id && o.estado !== "anulada");
-  const autorizado = ocs.reduce((s, o) => s + Number(o.montoNeto || 0), 0);
-  const consumido = payments
+  const autorizado = redondear(ocs.reduce((s, o) => s + netoOCEn(o, moneda), 0), 2);
+  const consumido = redondear(payments
     .filter((p) => p.contratoId === contrato?.id && p.estado !== "anulado")
-    .reduce((s, p) => s + Number(p.neto || 0), 0);
-  const saldo = autorizado - consumido;
+    .reduce((s, p) => s + netoEEPPEn(p, moneda), 0), 2);
+  const saldo = redondear(autorizado - consumido, 2);
   const pct = autorizado > 0 ? Math.round((consumido / autorizado) * 100) : 0;
 
   return {
+    moneda,
+    saldoPesos: moneda === "UF" ? pesosDesde(saldo, "UF", contrato?.valorUF) || 0 : saldo,
     ocs,
     original: ocs.find((o) => o.tipo !== "enmienda") || null,
     enmiendas: ocs.filter((o) => o.tipo === "enmienda"),
@@ -803,6 +872,9 @@ export async function agregarEnmiendaContrato(empresaId, contrato, ocData = {}, 
     fechaEmision: ocData.fechaEmision,
     fechaVencimiento: ocData.fechaVencimiento || "",
     montoNeto: ocData.montoNeto,
+    // La enmienda va en la moneda del contrato: el saldo se controla en ella.
+    moneda: monedaDe(contrato),
+    valorUF: ocData.valorUF || contrato.valorUF || null,
     afectoIVA: contrato.afectoIVA !== false,
     tipo: "enmienda",
     observaciones: ocData.observaciones || "",
@@ -839,19 +911,35 @@ export async function upsertRentalContract(empresaId, contract) {
     throw new Error("Un contrato activo necesita fecha de inicio para poder facturar");
   }
 
-  const { neto, iva, total } = totalesDocumento(lineas, { afectoIVA: contract.afectoIVA !== false });
+  const moneda = monedaDe(contract);
+  const valorUF = Number(contract.valorUF) > 0 ? Number(contract.valorUF) : null;
+  if (moneda === "UF" && !valorUF) throw new Error("Indica el valor de la UF de referencia del contrato");
+  const t = totalesCotizacion(lineas, { afectoIVA: contract.afectoIVA !== false, moneda, valorUF });
+  const { neto, iva, total } = t;
 
   // Estado anterior: necesario para liberar las máquinas que se quitaron.
   let lineasPrevias = [];
   if (contract.id) {
     const prev = await getDoc(EMPRESA_DOC(empresaId, "rentalContracts", contract.id));
-    if (prev.exists()) lineasPrevias = prev.data().lineas || [];
+    if (prev.exists()) {
+      lineasPrevias = prev.data().lineas || [];
+      // Las OC y los estados de pago ya emitidos están en la moneda anterior.
+      if (monedaDe(prev.data()) !== moneda) {
+        const [ocs, pagos] = await Promise.all([
+          listRentalPurchaseOrders(empresaId, { contratoId: contract.id }),
+          listRentalPayments(empresaId, { contratoId: contract.id }),
+        ]);
+        if (ocs.length || pagos.length) {
+          throw new Error("No se puede cambiar la moneda de un contrato que ya tiene OC o estados de pago");
+        }
+      }
+    }
   }
 
   const data = {
     clienteId: contract.clienteId,
     clienteNombre: contract.clienteNombre || "",
-    lineas: lineas.map((l) => normalizarLinea(l)),
+    lineas: lineas.map((l) => normalizarLinea(l, moneda)),
     fechaInicio: contract.fechaInicio || "",
     fechaFin: contract.fechaFin || "",
     estado: contract.estado || "borrador",
@@ -862,9 +950,13 @@ export async function upsertRentalContract(empresaId, contract) {
     cotizacionNumero: contract.cotizacionNumero || "",
     ocId: contract.ocId || null,
     ocNumero: contract.ocNumero || "",
-    monedaCotizacion: contract.monedaCotizacion || "CLP",
-    valorUFConversion: contract.valorUFConversion || null,
+    moneda,
+    valorUF: moneda === "UF" ? valorUF : null,
+    // En pesos siempre (en UF, a la UF de referencia del contrato).
     netoMensual: neto, ivaMensual: iva, totalMensual: total,
+    netoMensualUF: moneda === "UF" ? t.enMoneda.neto : null,
+    ivaMensualUF: moneda === "UF" ? t.enMoneda.iva : null,
+    totalMensualUF: moneda === "UF" ? t.enMoneda.total : null,
     updatedAt: serverTimestamp(),
   };
 
@@ -902,27 +994,13 @@ export async function crearContratoDesdeCotizacion(empresaId, quote, extra = {})
     throw new Error("La fecha de término no puede ser anterior a la de inicio");
   }
 
-  // Contratos, OC y estados de pago trabajan en pesos: una cotización en UF
-  // se convierte a la UF que se indique al generar el contrato. La tarifa
-  // original en UF queda en cada línea (`tarifaValorUF`) como referencia.
-  let lineas = quote.lineas || [];
-  let conversionUF = {};
-  if (quote.moneda === "UF") {
-    const valorUF = Number(extra.valorUF);
-    if (!(valorUF > 0)) throw new Error("Indica el valor de la UF para convertir las tarifas a pesos");
-    lineas = lineas.map((l) => ({
-      ...l,
-      tarifaValorUF: Number(l.tarifaValor || 0),
-      tarifaValor: Math.round(Number(l.tarifaValor || 0) * valorUF),
-    }));
-    conversionUF = { monedaCotizacion: "UF", valorUFConversion: valorUF };
-  }
-
+  // El contrato hereda la moneda de la cotización (y de su OC).
   const contratoId = await upsertRentalContract(empresaId, {
-    ...conversionUF,
+    moneda: monedaDe(quote),
+    valorUF: extra.valorUF || quote.valorUF || null,
     clienteId: quote.clienteId,
     clienteNombre: quote.clienteNombre,
-    lineas,
+    lineas: quote.lineas || [],
     fechaInicio: extra.fechaInicio,
     fechaFin: extra.fechaFin || "",
     estado: extra.estado || "activo",
@@ -1070,15 +1148,21 @@ function normalizarEEPP(p) {
 export async function upsertRentalPayment(empresaId, payment) {
   if (!payment.contratoId) throw new Error("El estado de pago debe estar asociado a un contrato");
 
-  const neto = Math.round(Number(payment.neto || 0));
-  if (neto <= 0) throw new Error("El monto neto debe ser mayor a cero");
-
   const contratoSnap = await getDoc(EMPRESA_DOC(empresaId, "rentalContracts", payment.contratoId));
   if (!contratoSnap.exists()) throw new Error("El contrato indicado no existe");
   const contrato = { id: contratoSnap.id, ...contratoSnap.data() };
 
+  // El estado de pago va en la moneda del contrato. En UF, `neto` llega en UF
+  // y `valorUF` es la UF con que se factura: de ahí salen los pesos a cobrar.
+  const moneda = monedaDe(contrato);
+  const valorUF = Number(payment.valorUF) > 0 ? Number(payment.valorUF) : null;
+  if (moneda === "UF" && !valorUF) throw new Error("Indica el valor de la UF con que se cobra este estado de pago");
+  const netoEnMoneda = redondear(payment.neto, moneda === "UF" ? 2 : 0);
+  if (netoEnMoneda <= 0) throw new Error("El monto neto debe ser mayor a cero");
+
   const afectoIVA = payment.afectoIVA !== false;
-  const { iva, total } = desglosarIVA(neto, { afectoIVA });
+  const d = desgloseEnMoneda(netoEnMoneda, { moneda, valorUF, afectoIVA });
+  const { neto, iva, total } = d;
 
   // Tope del contrato: OC original más enmiendas, menos lo ya emitido.
   const [ocs, todosLosPagos] = await Promise.all([
@@ -1088,13 +1172,13 @@ export async function upsertRentalPayment(empresaId, payment) {
   const hermanos = todosLosPagos.filter((p) => p.id !== payment.id && p.estado !== "anulado");
   const autorizado = ocs
     .filter((o) => o.estado !== "anulada")
-    .reduce((s, o) => s + Number(o.montoNeto || 0), 0);
-  const consumido = hermanos.reduce((s, p) => s + Number(p.neto || 0), 0);
-  const disponible = autorizado - consumido;
+    .reduce((s, o) => s + netoOCEn(o, moneda), 0);
+  const consumido = hermanos.reduce((s, p) => s + netoEEPPEn(p, moneda), 0);
+  const disponible = redondear(autorizado - consumido, 2);
 
-  if (payment.estado !== "anulado" && autorizado > 0 && neto > disponible) {
+  if (payment.estado !== "anulado" && autorizado > 0 && netoEnMoneda > disponible) {
     throw new Error(
-      `El neto supera el monto autorizado del contrato. Disponible: ${CLP(disponible)}. ` +
+      `El neto supera el monto autorizado del contrato. Disponible: ${fmtMoneda(disponible, moneda)}. ` +
       "Registra una enmienda con la nueva OC del cliente para ampliarlo."
     );
   }
@@ -1123,8 +1207,14 @@ export async function upsertRentalPayment(empresaId, payment) {
     ocId, ocNumero,
     periodo: payment.periodo || "",
     concepto: (payment.concepto || "").trim(),
+    // En pesos siempre: es lo que se factura y se cobra.
     neto, iva, total,
     monto: total, // alias de compatibilidad
+    moneda,
+    valorUF: moneda === "UF" ? valorUF : null,
+    netoUF: d.netoUF,
+    ivaUF: d.ivaUF,
+    totalUF: d.totalUF,
     afectoIVA,
     fechaEmision: payment.fechaEmision || new Date().toISOString().slice(0, 10),
     fechaVencimiento: payment.fechaVencimiento || "",
@@ -1321,9 +1411,13 @@ export function agingCobranza(payments = []) {
 
 // Genera los estados de pago mensuales sugeridos de un contrato (no los guarda).
 // Prorratea el primer y el último mes según los días realmente cubiertos.
-export function suggestPaymentsForContract(contract, { prorratear = true, diasPago = 30 } = {}) {
+// En un contrato en UF los montos van en UF y se pasan a pesos con `valorUF`
+// (por defecto, la UF de referencia del contrato).
+export function suggestPaymentsForContract(contract, { prorratear = true, diasPago = 30, valorUF = null } = {}) {
   if (!contract?.fechaInicio) return [];
 
+  const moneda = monedaDe(contract);
+  const uf = Number(valorUF) > 0 ? Number(valorUF) : Number(contract.valorUF) || null;
   const netoMensual = (contract.lineas || []).reduce((s, l) => s + ingresoMensualLinea(l), 0);
   if (!netoMensual) return [];
 
@@ -1347,8 +1441,11 @@ export function suggestPaymentsForContract(contract, { prorratear = true, diasPa
 
     if (diasCubiertos > 0) {
       const factor = prorratear ? diasCubiertos / diasMes : 1;
-      const neto = Math.round(netoMensual * factor);
-      const { iva, total } = desglosarIVA(neto, { afectoIVA });
+      const d = desgloseEnMoneda(netoMensual * factor, { moneda, valorUF: uf, afectoIVA });
+      const { iva, total } = d;
+      // `neto` va en la moneda del contrato (lo que recibe upsertRentalPayment);
+      // `netoPesos`/`total` son los pesos a la UF indicada.
+      const neto = moneda === "UF" ? d.netoUF : d.neto;
       const periodo = `${anio}-${String(mes + 1).padStart(2, "0")}`;
       const cierre = new Date(anio, mes, ultimoDia);
 
@@ -1360,6 +1457,10 @@ export function suggestPaymentsForContract(contract, { prorratear = true, diasPa
         periodo,
         concepto: `Arriendo ${periodo}${factor < 1 ? ` (${diasCubiertos} días)` : ""}`,
         neto, iva, total,
+        netoPesos: d.neto,
+        moneda,
+        valorUF: moneda === "UF" ? uf : null,
+        netoUF: d.netoUF, ivaUF: d.ivaUF, totalUF: d.totalUF,
         afectoIVA,
         diasCubiertos,
         prorrateado: factor < 1,
@@ -1382,16 +1483,18 @@ export function suggestPaymentsForContract(contract, { prorratear = true, diasPa
 // Ingreso neto emitido − leasing − mantenciones. Se usa el NETO: el IVA no
 // es ingreso de la empresa.
 
-export function buildIngresoPorMaquina(contracts) {
+// Contratos en UF se pasan a pesos con `valorUF` (o la UF de referencia de cada contrato).
+export function buildIngresoPorMaquina(contracts, { valorUF = null } = {}) {
   const map = {};
   for (const c of contracts) {
     if (c.estado !== "activo") continue;
+    const factor = monedaDe(c) === "UF" ? Number(valorUF) || Number(c.valorUF) || 0 : 1;
     for (const l of c.lineas || []) {
       if (!l.machineId) continue;
       if (!map[l.machineId]) {
         map[l.machineId] = { ingresoMensual: 0, contratoId: c.id, clienteNombre: c.clienteNombre };
       }
-      map[l.machineId].ingresoMensual += ingresoMensualLinea(l);
+      map[l.machineId].ingresoMensual += ingresoMensualLinea(l) * factor;
     }
   }
   return map;
@@ -1501,6 +1604,5 @@ function normalizarLinea(l, moneda = "CLP") {
     tarifaValor: redondear(l.tarifaValor, moneda === "UF" ? 2 : 0),
     cantidadEstimada: l.cantidadEstimada === "" || l.cantidadEstimada == null ? null : Number(l.cantidadEstimada),
   };
-  if (Number(l.tarifaValorUF) > 0) linea.tarifaValorUF = Number(l.tarifaValorUF);
   return linea;
 }
