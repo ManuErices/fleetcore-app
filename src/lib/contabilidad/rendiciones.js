@@ -25,6 +25,8 @@ function fechaMes(v) {
     const d = new Date(Math.round((v - 25569) * 86400000));
     return { anio: d.getUTCFullYear(), mes: d.getUTCMonth() };
   }
+  const iso = String(v ?? "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return { anio: +iso[1], mes: +iso[2] - 1 };
   const m = String(v ?? "").match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
   return m ? { anio: +m[3], mes: +m[2] - 1 } : null;
 }
@@ -111,4 +113,19 @@ export function resumirRendiciones(filas, opciones = {}) {
   r.periodo = top ? { anio: +top[0].split("-")[0], mes: +top[0].split("-")[1] } : null;
   r.total = Math.round(r.total);
   return r;
+}
+
+/**
+ * Lo mismo, pero desde la colección `rendiciones` de Oficina Técnica (que se
+ * llena importando el mismo reporte de Rindegastos). Se arma una tabla con
+ * los encabezados del reporte y se aplican exactamente las mismas reglas.
+ */
+export function resumirRendicionesDocs(docs, opciones = {}) {
+  const enc = ["Propietario del Gasto", "Estado del Gasto", "Tipo de Documento", "Fecha de Emisión",
+    "Monto Aprobado", "Monto Solicitado", "Estado DTE", "Categoría", "Nombre Proveedor"];
+  const filas = [enc, ...(docs || []).map(d => [
+    d.propietario, d.estadoGasto, d.tipoDocumento, d.fechaEmision,
+    d.montoAprobado, d.montoSolicitado, d.estadoDTE, d.categoria, d.proveedor,
+  ])];
+  return resumirRendiciones(filas, opciones);
 }
