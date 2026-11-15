@@ -166,6 +166,48 @@ export function diasParaCarencia(lic, todas) {
 }
 
 /**
+ * Primer día de reposo de la cadena continua a la que pertenece la licencia
+ * (se sigue `continuaDeId` hacia atrás hasta la licencia original).
+ */
+export function inicioCadena(lic, todas) {
+  const porId = new Map((todas || []).map(l => [l.id, l]));
+  const vistos = new Set();
+  let cur = lic, inicio = lic?.desde;
+  while (cur && !vistos.has(cur.id)) {
+    vistos.add(cur.id);
+    if (cur.desde && (!inicio || cur.desde < inicio)) inicio = cur.desde;
+    cur = cur.continuaDeId ? porId.get(cur.continuaDeId) : null;
+  }
+  return inicio;
+}
+
+/**
+ * Días de carencia de esta licencia que caen en el período.
+ *
+ * DFL 44 art. 14: en licencias de 10 días o menos el subsidio no cubre los
+ * tres PRIMEROS días del reposo. Una cadena continua es un solo reposo, así
+ * que la carencia son los tres primeros días de la cadena: caen en la primera
+ * licencia (o se derraman a la siguiente si la primera dura menos de tres), y
+ * una licencia que cruza de un mes a otro solo tiene carencia en el mes donde
+ * están esos tres días. Antes cada trozo aportaba min(3, días en el mes): una
+ * licencia partida entre dos meses perdía hasta 6 días.
+ *
+ * Se calcula siempre; si aplica o no (cadena ≤ 10 días, tipo de licencia) lo
+ * decide `calcularLiquidacion`.
+ */
+export function diasCarenciaEnPeriodo(lic, todas, mes, anio) {
+  const inicio = inicioCadena(lic, todas);
+  const finCarencia = aFecha(inicio);
+  if (!finCarencia) return 0;
+  finCarencia.setDate(finCarencia.getDate() + 2);
+  const fin3 = `${finCarencia.getFullYear()}-${String(finCarencia.getMonth() + 1).padStart(2, '0')}-${String(finCarencia.getDate()).padStart(2, '0')}`;
+  const desde = lic.desde > inicio ? lic.desde : inicio;
+  const hasta = lic.hasta < fin3 ? lic.hasta : fin3;
+  if (!desde || !hasta || hasta < desde) return 0;
+  return diasEnPeriodo({ desde, hasta }, mes, anio);
+}
+
+/**
  * Licencias vigentes de un trabajador que afectan un período, en el formato
  * que espera `calcularLiquidacion` vía `licenciasRegistradas`.
  *
@@ -188,6 +230,7 @@ export function licenciasDe(licencias, trabajadorId, mes, anio) {
       dias: diasCorridos(l.desde, l.hasta),
       diasParaCarencia: diasParaCarencia(l, propias),
       diasEnPeriodo: diasEnPeriodo(l, mes, anio),
+      diasCarenciaEnPeriodo: diasCarenciaEnPeriodo(l, propias, mes, anio),
     }))
     .filter(l => l.diasEnPeriodo > 0);
 }

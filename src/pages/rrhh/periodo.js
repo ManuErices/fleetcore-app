@@ -151,3 +151,64 @@ export function useIndicadoresPeriodo(empresaId, mes, anio) {
 
 /** Estados que no se pagan ni se declaran: el borrador todavía no está revisado. */
 export const esBorrador = (liq) => liq?.estado === 'borrador';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unicidad de documentos del período
+// ─────────────────────────────────────────────────────────────────────────────
+
+const pad2 = (v) => String(v ?? '').padStart(2, '0');
+
+/**
+ * Clave del período de una liquidación: trabajador + mes + año, y además la
+ * quincena / semana / turno cuando el período no es mensual (dos quincenas del
+ * mismo mes son dos liquidaciones legítimas).
+ */
+export function clavePeriodoLiquidacion(l) {
+  const tipo = l?.tipoPeriodo || 'mensual';
+  const sub = tipo === 'quincenal' ? (l.quincena || '1')
+    : tipo === 'semanal' ? (l.semana || '')
+    : tipo === 'turno' ? `${l.fechaInicioTurno || ''}/${l.fechaFinTurno || ''}` : '';
+  return `${l?.trabajadorId}|${pad2(l?.mes)}|${String(l?.anio ?? '')}|${tipo}|${sub}`;
+}
+
+/**
+ * Liquidación vigente que ya ocupa el período de `datos`, o null.
+ *
+ * Una reliquidación reemplaza a la original y tiene su propio flujo, así que no
+ * se bloquea. Al editar un documento sin cambiarle trabajador ni período no hay
+ * nada que revisar (la original de una reliquidación se puede seguir
+ * corrigiendo aunque ya no sea la vigente).
+ */
+export function liquidacionDuplicada(liquidaciones, datos, editando = null) {
+  if (!datos?.trabajadorId || !datos?.mes || !datos?.anio) return null;
+  if (datos.tipo === 'reliquidacion') return null;
+  const clave = clavePeriodoLiquidacion(datos);
+  if (editando?.id && clavePeriodoLiquidacion(editando) === clave) return null;
+  return liquidacionesVigentes(liquidaciones || []).find(l =>
+    l.id !== editando?.id && clavePeriodoLiquidacion(l) === clave) || null;
+}
+
+/**
+ * Centro de costo y obra del trabajador al momento de liquidar. Se copian a la
+ * liquidación para que el costo de un mes pasado quede en la obra donde se
+ * trabajó, aunque después el trabajador cambie de obra.
+ */
+export function snapshotCentroCosto(trabajador) {
+  if (!trabajador) return {};
+  return {
+    centroCosto: trabajador.centroCosto ?? '',
+    centroCostoNombre: trabajador.centroCostoNombre ?? '',
+    projectId: trabajador.projectId ?? null,
+  };
+}
+
+/**
+ * Finiquito vigente (no anulado) del mismo contrato, o null. Un documento sin
+ * `estado` es anterior a los estados y cuenta como vigente. Sin contrato se
+ * compara por trabajador.
+ */
+export function finiquitoDuplicado(finiquitos, datos, idPropio) {
+  const k = (f) => f?.contratoId || `t:${f?.trabajadorId}`;
+  return (finiquitos || []).find(f =>
+    f.id !== idPropio && f.estado !== 'anulado' && k(f) === k(datos)) || null;
+}

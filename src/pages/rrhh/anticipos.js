@@ -21,6 +21,7 @@ import { db } from '../../lib/firebase';
 import {
   collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp,
 } from 'firebase/firestore';
+import { hoyISO } from '../../lib/fechas';
 
 export const ESTADOS_ANTICIPO = {
   pendiente: { label: 'Por pagar', color: 'text-amber-700',   bg: 'bg-amber-100'   },
@@ -86,7 +87,7 @@ export async function crearAnticipo(empresaId, { trabajadorId, mes, anio, monto,
     trabajadorId, mes, anio,
     monto: valor,
     glosa: String(glosa || '').trim(),
-    fecha: fecha || new Date().toISOString().slice(0, 10),
+    fecha: fecha || hoyISO(),
     estado: 'pendiente',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

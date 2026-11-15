@@ -9,6 +9,7 @@ import * as PDFs from './pdfs';
 import * as Modals from './modals';
 import FirmaContratoModal from './FirmaContratoModal';
 import { ESTADOS_FIRMA, badgeFirma, esFirmadoCompleto } from './firma';
+import { fechaISO } from '../../lib/fechas';
 
 const { MESES, TIPOS_ANEXO } = Shared;
 const { calcularAntiguedad, calcularLiquidacion, alertaVencimiento, labelPeriodo, exportarAsistenciaCSV } = Calc;
@@ -188,7 +189,7 @@ export default function TrabajadorPerfil() {
   const contratoVigente = contratos.find(c => c.estado === 'vigente');
 
   const { anios, meses: mesesAntig } = contratoVigente
-    ? calcularAntiguedad(contratoVigente.fechaInicio, now.toISOString().split('T')[0])
+    ? calcularAntiguedad(contratoVigente.fechaInicio, fechaISO(now))
     : { anios: 0, meses: 0 };
 
   const antiguedadLabel =

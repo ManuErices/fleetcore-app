@@ -14,13 +14,14 @@ import ImportarNominaModal from './ImportarNominaModal';
 import CargaMasivaModal from './CargaMasivaModal';
 import ItemsPagoModal from './ItemsPagoModal';
 import { useAnticipos, anticiposDe, totalAnticipos } from './anticipos';
-import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
+import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador, clavePeriodoLiquidacion, snapshotCentroCosto } from './periodo';
 import ReliquidacionModal from './ReliquidacionModal';
 import { fueReliquidada, liquidacionesVigentes, ausenciasDePeriodo } from './calculo';
 import { paramsDe } from './parametros';
 import { lineaDePago } from './nominaBanco';
 // Se usaba sin importar: pulsar "acuse de recibo" lanzaba ReferenceError.
 import { registrarAcuseRecibo } from './acuse';
+import { hoyISO } from '../../lib/fechas';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
@@ -936,7 +937,7 @@ function ContratosSection() {
   const paginados = filtrados.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
   // Stats
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = hoyISO();
 
   const esPlazoFijo = (c) => String(c.tipoContrato || '').toLowerCase().includes('plazo');
 
@@ -1318,9 +1319,33 @@ function RemuneracionesSection() {
     // Trabajadores activos con un contrato que TOQUE el período. Antes bastaba
     // con `estado === 'vigente'`, así que un plazo fijo vencido que nadie
     // había cerrado seguía generando liquidación de mes completo.
-    const activos = trabajadores.filter(t => (t.estado || 'activo') === 'activo');
     const primeroMes = `${filtroAnio}-${filtroMes}-01`;
     const ultimoMes  = `${filtroAnio}-${filtroMes}-${String(new Date(parseInt(filtroAnio), parseInt(filtroMes), 0).getDate()).padStart(2, '0')}`;
+    // También los finiquitados cuyo término cae en este mes (o después): al
+    // guardar el finiquito la ficha pasa a 'finiquitado' y el último mes se
+    // quedaba sin liquidación, aunque los días trabajados se deben pagar y
+    // declarar (LRE, Previred). El término sale del finiquito vigente o, si no
+    // hay, del contrato; el motor prorratea los días hasta esa fecha.
+    let finiquitos = [];
+    try {
+      finiquitos = (await getDocs(collection(db, 'empresas', empresaId, 'finiquitos'))).docs
+        .map(d => ({ id: d.id, ...d.data() })).filter(f => f.estado !== 'anulado');
+    } catch { finiquitos = []; }
+    const terminoDe = (t) => {
+      const fechas = [
+        ...finiquitos.filter(f => f.trabajadorId === t.id).map(f => f.fechaTermino),
+        ...contratos.filter(c => c.trabajadorId === t.id).map(c => c.fechaFin),
+        t.fechaTermino,
+      ].filter(Boolean).map(f => String(f).slice(0, 10)).sort();
+      return fechas.length ? fechas[fechas.length - 1] : '';
+    };
+    const activos = trabajadores.filter(t => {
+      const estado = t.estado || 'activo';
+      if (estado === 'activo') return true;
+      if (estado !== 'finiquitado') return false;
+      const termino = terminoDe(t);
+      return !!termino && termino >= primeroMes;
+    });
     const tocaPeriodo = (c) =>
       (!c.fechaInicio || c.fechaInicio <= ultimoMes) &&
       (!c.fechaFin || c.fechaFin >= primeroMes);
@@ -1335,15 +1360,24 @@ function RemuneracionesSection() {
         const contrato = Calc.contratoAlPeriodo(contratoDoc, filtroMes, filtroAnio);
 
         // Verificar si ya existe liquidación para este período
-        const yaExiste = liquidaciones.some(l =>
-          l.trabajadorId === trab.id &&
-          l.mes === filtroMes &&
-          l.anio === filtroAnio
-        );
+        // Misma clave que el modal (mes con o sin cero a la izquierda, período
+        // mensual), contra las liquidaciones vigentes.
+        const clave = clavePeriodoLiquidacion({ trabajadorId: trab.id, mes: filtroMes, anio: filtroAnio, tipoPeriodo: 'mensual' });
+        const yaExiste = liquidacionesVigentes(liquidaciones).some(l => clavePeriodoLiquidacion(l) === clave);
         if (yaExiste) { omitidos++; continue; }
 
         // Crear borrador con datos base del contrato
         const borrador = {
+          // Centro de costo y obra del mes (copia): ver snapshotCentroCosto.
+          ...snapshotCentroCosto(trab),
+          // Término dentro del mes (finiquito) que el contrato no refleja: se
+          // fija en la liquidación para que el motor pague solo los días hasta
+          // el término (la liquidación manda sobre el contrato en remDe).
+          ...(() => {
+            const termino = (trab.estado === 'finiquitado') ? terminoDe(trab) : '';
+            return termino && termino <= ultimoMes && (!contrato.fechaFin || contrato.fechaFin > termino)
+              ? { fechaFin: termino } : {};
+          })(),
           trabajadorId: trab.id,
           contratoId: contrato.id,
           mes: filtroMes,
@@ -2076,13 +2110,18 @@ function FiniquitosSection() {
                       <td className="px-4 py-3 text-sm text-slate-600">{row.fechaTermino || '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{c ? `${c.anios}a ${c.meses}m` : '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{c ? `$${c.totalFeriado.toLocaleString('es-CL')}` : '—'}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-purple-700">{c && c.tieneIndemnizacion ? `$${c.indemMonto.toLocaleString('es-CL')}` : <span className="text-slate-400 font-normal">—</span>}</td>
+                      <td className="px-4 py-3 text-sm font-bold text-purple-700">{c && (c.tieneIndemnizacion || c.tieneIndemObra) ? `$${(c.indemMonto + (c.indemObraMonto || 0)).toLocaleString('es-CL')}` : <span className="text-slate-400 font-normal">—</span>}</td>
                       <td className="px-4 py-3"><span className="font-black text-emerald-600 text-sm">{c ? `$${c.totalFiniquito.toLocaleString('es-CL')}` : '—'}</span></td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1 items-start">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${estadoFirmaBadge[row.estadoFirma || 'pendiente']}`}>
                             {row.estadoFirma || 'pendiente'}
                           </span>
+                          {row.estado && (
+                            <span className={`text-[10px] font-bold uppercase ${row.estado === 'anulado' ? 'text-red-500 line-through' : 'text-slate-500'}`}>
+                              {row.estado}
+                            </span>
+                          )}
                           {row.evidenciaFirma?.url && (
                             <a href={row.evidenciaFirma.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline" title={`Evidencia ${row.evidenciaFirma.tipo === 'dt' ? 'DT' : 'notaría'}`}>
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
@@ -2123,7 +2162,7 @@ function FiniquitosSection() {
         )}
       </div>
 
-      <FiniquitoModal isOpen={modal} onClose={() => setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} remuneraciones={remuneraciones} onSaved={load} />
+      <FiniquitoModal isOpen={modal} onClose={() => setModal(false)} editData={editData} trabajadores={trabajadores} contratos={contratos} remuneraciones={remuneraciones} finiquitos={finiquitos} onSaved={load} />
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setConfirm(null)} />

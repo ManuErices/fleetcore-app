@@ -24,8 +24,9 @@ import {
   licenciasDe, diasCorridos, diasEnPeriodo, diasParaCarencia,
   TIPOS_LICENCIA, ENTIDADES_PAGADORAS, ESTADOS_LICENCIA,
 } from './licencias';
+import { hoyISO } from '../../lib/fechas';
 
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => hoyISO();   // hoy en Chile, no en UTC
 
 export default function LicenciasSection() {
   const { empresaId } = useEmpresa();
