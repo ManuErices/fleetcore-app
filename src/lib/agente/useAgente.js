@@ -40,6 +40,7 @@ const ETIQUETAS = {
   actualizar_maquina: 'Actualizando máquina',
   resumen_del_dia: 'Revisando el día',
   consultar_datos: 'Consultando datos',
+  resumen_tributario: 'Revisando el flujo tributario',
   recordar: 'Guardando en la memoria del equipo',
   olvidar: 'Borrando de la memoria',
   proyectar_caja: 'Proyectando la caja',
