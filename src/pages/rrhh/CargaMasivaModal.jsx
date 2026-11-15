@@ -16,7 +16,8 @@ import { db } from '../../lib/firebase';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { Modal, inp, MESES, UTM_DEFAULT } from './shared';
-import { liquidacionDe, calcularIUT, calcularRentaTributable } from './calculo';
+import { liquidacionDe, calcularIUT, calcularRentaTributable, liquidacionesVigentes } from './calculo';
+import { clavePeriodoLiquidacion, snapshotCentroCosto } from './periodo';
 import { useItemsPago, ITEM_DIAS, COLOR_GRUPO, grupoDe, patchItem } from './itemsPago';
 
 // El catálogo ya no vive acá: los ítems fijos y los que crea la empresa se
@@ -79,7 +80,10 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
       })
       .map(t => {
         const contrato = (contratos || []).find(c => c.trabajadorId === t.id && c.estado === 'vigente');
-        const liq = (liquidaciones || []).find(l => l.trabajadorId === t.id && l.mes === mes && l.anio === anio);
+        // La liquidación VIGENTE del mes (no una reemplazada por una
+        // reliquidación), con la misma clave de período que el resto de RRHH.
+        const clave = clavePeriodoLiquidacion({ trabajadorId: t.id, mes, anio, tipoPeriodo: 'mensual' });
+        const liq = liquidacionesVigentes(liquidaciones || []).find(l => clavePeriodoLiquidacion(l) === clave);
         return { ...t, _contrato: contrato, _liq: liq };
       })
       .sort((a, b) => (a.apellidoPaterno || '').localeCompare(b.apellidoPaterno || ''));
@@ -138,8 +142,15 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
     try {
       const batch = writeBatch(db);
       let creadas = 0, actualizadas = 0;
+      // Una liquidación pagada no se modifica: lo transferido ya no cambia, y
+      // una diferencia se corrige con una reliquidación. Se informan aparte.
+      const omitidas = [];
 
       conValor.forEach(fila => {
+        if (fila._liq?.estado === 'pagado') {
+          omitidas.push(`${fila.apellidoPaterno || ''} ${fila.nombre || ''}`.trim() || fila.rut || fila.id);
+          return;
+        }
         // El patch de un ítem personalizado reescribe el arreglo `items`
         // completo, así que tiene que partir del documento vigente para no
         // borrar los otros ítems ya cargados en el período.
@@ -155,6 +166,8 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
         } else {
           const ref = doc(collection(db, 'empresas', empresaId, 'remuneraciones'));
           batch.set(ref, {
+            // Centro de costo y obra del mes (copia para el costeo por obra).
+            ...snapshotCentroCosto(fila),
             ...construirRem(fila), ...extra,
             createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
           });
@@ -162,8 +175,8 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
         }
       });
 
-      await batch.commit();
-      setResultado({ creadas, actualizadas, item: item.label });
+      if (creadas + actualizadas > 0) await batch.commit();
+      setResultado({ creadas, actualizadas, omitidas, item: item.label });
       limpiar();
       onSaved?.();
     } catch (e) {
@@ -192,6 +205,7 @@ export default function CargaMasivaModal({ isOpen, onClose, trabajadores, contra
             <p className="text-sm font-black text-slate-800">{resultado.item} cargado</p>
             <p className="text-xs text-slate-500 mt-1">
               {resultado.creadas} liquidación(es) creada(s) · {resultado.actualizadas} actualizada(s)
+              {resultado.omitidas?.length > 0 && ` · ${resultado.omitidas.length} omitida(s) por estar pagada(s) (usa reliquidación): ${resultado.omitidas.join(', ')}`}
             </p>
           </div>
           <div className="flex justify-center gap-3">

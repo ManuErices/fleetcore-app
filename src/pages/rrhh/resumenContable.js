@@ -8,15 +8,22 @@
  * No usa hooks: carga todo una vez y recorre los 12 meses, así Contabilidad
  * lo puede pedir sin montar las pantallas de RRHH.
  *
- *   Remuneraciones del mes = Total haberes (LRE 5201) + Total aportes del
- *                            empleador (LRE 5410: AFC, mutual, SIS y aportes
- *                            de la reforma previsional)
+ *   Remuneraciones del mes = Total haberes (LRE 5201) − asignación familiar
+ *                            (LRE 2311) + Total aportes del empleador (LRE
+ *                            5410: AFC, mutual, SIS y aportes de la reforma
+ *                            previsional). La asignación familiar la paga el
+ *                            empleador pero la recupera descontándola de las
+ *                            cotizaciones que entera (DFL 150): no es costo de
+ *                            la empresa. Es el mismo `costoEmpresa` del motor.
  *   Finiquitos del mes     = total haberes del finiquito (indemnizaciones,
  *                            feriado, gratificación proporcional…), en el mes
  *                            de la fecha de término. Si ese mes además tiene
  *                            liquidación, no se suman la remuneración del mes
  *                            en curso ni las pendientes del finiquito, porque
  *                            ya están en la liquidación.
+ *
+ * Finiquitos: los anulados no se cuentan, y de cada contrato se toma uno solo
+ * (el vigente; si quedaron duplicados antiguos, el más reciente).
  *
  * Las liquidaciones reemplazadas por una reliquidación no se cuentan. Los
  * borradores tampoco, salvo que se pida (las cargas masivas desde Talana
@@ -36,6 +43,26 @@ const leer = async (empresaId, nombre) => {
   try { return lista(await getDocs(collection(db, 'empresas', empresaId, nombre))); }
   catch { return []; }   // sin permiso sobre una colección: se calcula sin ella
 };
+
+const _ms = (v) => (v?.toMillis ? v.toMillis() : (v?.seconds ? v.seconds * 1000 : (Date.parse(v) || 0)));
+
+/**
+ * Finiquitos que cuentan: sin los anulados y uno por contrato (o por
+ * trabajador si no tiene contrato). Un documento sin `estado` es anterior a
+ * los estados y cuenta como vigente. Si quedaron duplicados de antes de que se
+ * bloquearan, gana el más reciente.
+ */
+export function finiquitosVigentes(finiquitos) {
+  const porContrato = new Map();
+  (finiquitos || []).forEach(f => {
+    if (f?.estado === 'anulado') return;
+    const k = f.contratoId || `t:${f.trabajadorId}`;
+    const previo = porContrato.get(k);
+    const fecha = (x) => Math.max(_ms(x.updatedAt), _ms(x.createdAt), _ms(x.fechaCreacion));
+    if (!previo || fecha(f) >= fecha(previo)) porContrato.set(k, f);
+  });
+  return [...porContrato.values()];
+}
 
 /** Carga una vez todo lo que el motor de RRHH necesita. */
 async function cargarRRHH(empresaId) {
@@ -77,6 +104,7 @@ async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorrad
       salida.push({
         mes: m, trabajador, liquidacion: l, borrador: esBorrador(l),
         haberes: Number(fila[5201]) || 0, aportes: Number(fila[5410]) || 0,
+        asignacionFamiliar: Number(fila[2311]) || 0,
         descuentos: Number(fila[5301]) || 0, liquido: Number(fila[5501]) || 0,
       });
     });
@@ -99,22 +127,34 @@ export async function costosManoObraRRHH(empresaId, anio) {
   if (enCache && Date.now() - enCache.t < 5 * 60 * 1000) return enCache.v;
   const p = (async () => {
     const datos = await cargarRRHH(empresaId);
-    const { obraDe } = await import('../../lib/obras');
-    let centros = [];
-    try { centros = (await getDocs(collection(db, 'empresas', empresaId, 'centros_costo'))).docs.map(d => ({ id: d.id, ...d.data() })); } catch { centros = []; }
+    // Obras y centros de costo: con `obras: []` obraDe nunca encontraba una obra
+    // por su nombre (un centro de costo llamado igual que la obra).
+    const { obraDe, cargarObrasYCentros } = await import('../../lib/obras');
+    let obras = [], centros = [];
+    try { ({ obras, centros } = await cargarObrasYCentros(empresaId)); } catch { obras = []; centros = []; }
     const { filas } = await calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores: true });
     return filas.map(f => {
       const t = f.trabajador || {};
-      const projectId = obraDe({ obras: [], centros }, { codigo: t.centroCosto, nombre: t.centroCostoNombre }) || t.projectId || null;
+      const l = f.liquidacion || {};
+      // Centro de costo y obra del MES liquidado: la liquidación guarda una
+      // copia al crearse. Leer solo la ficha cargaba todo el historial de quien
+      // cambió de obra a su obra actual. Liquidaciones antiguas sin la copia
+      // caen a la ficha.
+      const cc = l.centroCosto != null || l.centroCostoNombre != null
+        ? { codigo: l.centroCosto, nombre: l.centroCostoNombre }
+        : { codigo: t.centroCosto, nombre: t.centroCostoNombre };
+      const projectId = obraDe({ obras, centros }, cc) || l.projectId || t.projectId || null;
+      const costo = f.haberes - f.asignacionFamiliar + f.aportes;
       return {
         id: `rrhh_${f.liquidacion.id}`,
         employeeId: t.id || f.liquidacion.trabajadorId,
         nombre: `${t.nombre || t.nombres || ''} ${t.apellidoPaterno || ''}`.trim(),
         projectId, year: Number(anio), month: f.mes,
-        centroCosto: t.centroCostoNombre || t.centroCosto || '',
+        centroCosto: cc.nombre || cc.codigo || '',
         tipoManoObra: t.tipoManoObra || (t.tipo === 'OPERADOR' ? 'DIRECTO' : null),
         totalHaberes: f.haberes, totalDescuentos: f.descuentos, sueldoLiquido: f.liquido,
-        aporteEmpresa: f.aportes, totalCosto: f.haberes + f.aportes,
+        // Costo empresa: sin la asignación familiar (2311), que no es costo.
+        aporteEmpresa: f.aportes, totalCosto: costo,
         porcentajeIncidencia: 100, fuente: 'rrhh',
       };
     });
@@ -142,12 +182,13 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
     const delMes = filas.filter(f => f.mes === m);
     const haberes = delMes.reduce((s, f) => s + f.haberes, 0);
     const aportes = delMes.reduce((s, f) => s + f.aportes, 0);
+    const asigFam = delMes.reduce((s, f) => s + f.asignacionFamiliar, 0);
     const conLiquidacion = new Set(delMes.map(f => f.liquidacion.trabajadorId));
     const borradores = liquidacionesVigentes(
       liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr)).filter(esBorrador).length;
 
     let montoFiniquitos = 0, nFiniquitos = 0;
-    finiquitos
+    finiquitosVigentes(finiquitos)
       .filter(f => String(f.fechaTermino || '').slice(0, 7) === `${anioStr}-${mes}`)
       .forEach(f => {
         const trabajador = trabajadores.find(t => t.id === f.trabajadorId);
@@ -165,7 +206,8 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
     meses.push({
       mes: m - 1, liquidaciones: delMes.length, borradores,
       haberes: Math.round(haberes), aportes: Math.round(aportes),
-      remuneraciones: Math.round(haberes + aportes),
+      asignacionFamiliar: Math.round(asigFam),
+      remuneraciones: Math.round(haberes - asigFam + aportes),
       finiquitos: Math.round(montoFiniquitos), nFiniquitos,
     });
   }

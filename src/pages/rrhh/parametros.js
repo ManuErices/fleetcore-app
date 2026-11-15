@@ -20,6 +20,8 @@
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { fechaISO, hoyISO } from '../../lib/fechas';
+
 // ── Ingreso Mínimo Mensual (Art. 44 CT) ──────────────────────────────────────
 // `noRemun` es el IMM para fines no remuneracionales (asignaciones, tramos de
 // beneficios); no se usa para calcular sueldos.
@@ -160,18 +162,18 @@ const UF_FALLBACK  = 40883;
  *   null / undefined     → hoy
  */
 export function normalizarPeriodo(p) {
-  if (!p) return new Date().toISOString().slice(0, 10);
-  if (p instanceof Date) return p.toISOString().slice(0, 10);
+  if (!p) return hoyISO();
+  if (p instanceof Date) return fechaISO(p);
   if (typeof p === 'object') {
     const anio = String(p.anio || p.year || '').padStart(4, '0');
     const mes  = String(p.mes  || p.month || '').padStart(2, '0');
     if (anio.length === 4 && mes !== '00') return `${anio}-${mes}-01`;
-    return new Date().toISOString().slice(0, 10);
+    return hoyISO();
   }
   const s = String(p).trim();
   if (/^\d{4}-\d{2}$/.test(s))       return `${s}-01`;
   if (/^\d{4}-\d{2}-\d{2}/.test(s))  return s.slice(0, 10);
-  return new Date().toISOString().slice(0, 10);
+  return hoyISO();
 }
 
 /** 'YYYY-MM' — la clave con que se indexan UTM y UF. */

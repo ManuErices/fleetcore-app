@@ -21,6 +21,7 @@ import {
   useAnticipos, crearAnticipo, actualizarAnticipo, eliminarAnticipo, ESTADOS_ANTICIPO,
   quincenasPendientes, generarQuincenasDelMes,
 } from './anticipos';
+import { hoyISO } from '../../lib/fechas';
 
 const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 const soloNum = v => String(v ?? '').replace(/[^\d]/g, '');
@@ -39,7 +40,7 @@ export default function AnticiposSection() {
   const [trabajadorId, setTrabajadorId] = useState('');
   const [monto, setMonto]   = useState('');
   const [glosa, setGlosa]   = useState('');
-  const [fecha, setFecha]   = useState(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha]   = useState(() => hoyISO());
   const [guardando, setGuardando] = useState(false);
   const [error, setError]   = useState(null);
   const [confirmar, setConfirmar] = useState(null);

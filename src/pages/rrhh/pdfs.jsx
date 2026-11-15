@@ -1,6 +1,7 @@
 import { IMM_2026, TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO, TRAMOS_IUT, CAUSALES_SIN_INDEMNIZACION, TIPOS_ANEXO, JORNADAS } from './shared';
 import { nombreTrabajador, calcularLiquidacion, liquidacionDe, remDe, calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT, labelPeriodo, calcularFiniquito, calcularAntiguedad, horasOrdinariasSemanales } from './calculo';
 import { paramsDe } from './parametros';
+import { hoyISO } from '../../lib/fechas';
 
 /**
  * Cláusula de jornada según el tipo pactado.
@@ -751,6 +752,7 @@ function generarPDFFiniquito(fin, trabajador, contrato, { preview = false } = {}
     ${fin.causal==='161' ? 'En conformidad al artículo 161 del Código del Trabajo, por necesidades de la empresa, establecimiento o servicio.' : ''}
     ${fin.causal==='159-2' ? 'El/la trabajador/a declara haber presentado su renuncia voluntaria con la debida anticipación legal.' : ''}
     ${fin.causal==='159-4' ? 'El contrato de plazo fijo ha llegado a su fecha de vencimiento pactada.' : ''}
+    ${fin.causal==='159-5' ? 'Ha concluido el trabajo o servicio que dio origen al contrato.' : ''}
   </div>
 
   <div class="clausula-titulo">III. Liquidación de Haberes</div>
@@ -766,7 +768,8 @@ function generarPDFFiniquito(fin, trabajador, contrato, { preview = false } = {}
       ${calc.gratPropMonto ? `<tr><td>Gratificación proporcional (Art. 50 CT)</td><td>${calc.mesesFeriado?.toFixed(1)} meses año en curso</td><td>${fmt(calc.gratPropMonto)}</td></tr>` : ''}
       ${calc.tieneIndemnizacion ? `<tr><td><strong>Indemnización por años de servicio (Art. 163 CT)</strong></td><td>${calc.aniosIndemnizacion} año${calc.aniosIndemnizacion!==1?'s':''} × ${fmt(calc.baseIndem)}${calc.baseTopeada ? ' (tope 90 UF, Art. 172)' : ''}</td><td><strong>${fmt(calc.indemBruta ?? calc.indemMonto)}</strong></td></tr>` : ''}
       ${calc.imputacionAFC > 0 ? `<tr><td>Imputación aporte del empleador al seguro de cesantía (Art. 13 Ley 19.728)</td><td>Según certificado AFC</td><td>-${fmt(calc.imputacionAFC)}</td></tr>` : ''}
-      ${calc.indемAvisoPrevio ? `<tr><td>Indemnización sustitutiva aviso previo (Art. 161 CT)</td><td>Equivalente a 1 mes de remuneración</td><td>${fmt(calc.indемAvisoPrevio)}</td></tr>` : ''}
+      ${calc.tieneIndemObra ? `<tr><td><strong>Indemnización por término de obra o faena (Art. 163 inc. 3° CT, Ley 21.122)</strong></td><td>${calc.indemObraMeses} mes${calc.indemObraMeses!==1?'es':''} × ${String(calc.indemObraDiasPorMes).replace('.', ',')} días = ${String(calc.indemObraDias).replace('.', ',')} días de remuneración${calc.baseTopeada ? ' (tope 90 UF, Art. 172)' : ''}. No imponible ni tributable</td><td><strong>${fmt(calc.indemObraMonto)}</strong></td></tr>` : ''}
+      ${calc.indemAvisoPrevio ? `<tr><td>Indemnización sustitutiva aviso previo (Art. 161 CT)</td><td>Equivalente a 1 mes de remuneración</td><td>${fmt(calc.indemAvisoPrevio)}</td></tr>` : ''}
       ${calc.otrosHaberes > 0 ? `<tr><td>${fin.glosaOtrosHaberes||'Otros haberes'}</td><td></td><td>${fmt(calc.otrosHaberes)}</td></tr>` : ''}
     </tbody>
     <tfoot>
@@ -1526,7 +1529,7 @@ function generarPreviredAvanzado(liqEnriquecidas, periodo) {
   const url    = URL.createObjectURL(blob);
   const a      = document.createElement('a');
   a.href = url;
-  a.download = `Previred_${periodo}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `Previred_${periodo}_${hoyISO()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   return errores;
@@ -1563,7 +1566,7 @@ function generarArchivoPago(liqEnriquecidas, periodo, banco) {
   const url    = URL.createObjectURL(blob);
   const a      = document.createElement('a');
   a.href = url;
-  a.download = `Pago_Remuneraciones_${periodo}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `Pago_Remuneraciones_${periodo}_${hoyISO()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
