@@ -2399,7 +2399,34 @@ function CentroCostoDetalleModal({ centro, todosActivos, contratos, liquidacione
 
 function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, onReload }) {
   const { empresaId } = useEmpresa();
-  const [form, setForm] = useState({ codigo: '', nombre: '', descripcion: '', presupuesto: '' });
+  const [form, setForm] = useState({ codigo: '', nombre: '', descripcion: '', presupuesto: '', projectId: '' });
+  // Obras de Oficina Técnica: cada centro de costo apunta a su obra, para que
+  // RRHH, rendiciones y maquinaria hablen de la misma obra.
+  const [obras, setObras] = useState([]);
+  useEffect(() => {
+    if (!empresaId) return;
+    getDocs(collection(db, 'empresas', empresaId, 'projects'))
+      .then(snap => setObras(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))))
+      .catch(() => setObras([]));
+  }, [empresaId]);
+  const nombreObra = (id) => obras.find(o => o.id === id)?.name || '';
+  const obrasSinCentro = obras.filter(o => o.active !== false && !centros.some(c => c.projectId === o.id));
+  const crearDesdeObras = async () => {
+    if (!obrasSinCentro.length) return;
+    if (!window.confirm(`Crear ${obrasSinCentro.length} centros de costo, uno por cada obra que aún no tiene: ${obrasSinCentro.map(o => o.name).join(', ')}?`)) return;
+    setSaving(true);
+    try {
+      for (const o of obrasSinCentro) {
+        await addDoc(collection(db, 'empresas', empresaId, 'centros_costo'), {
+          codigo: String(o.code || o.codigo || o.name || '').toUpperCase().slice(0, 20),
+          nombre: o.name || '', descripcion: 'Creado desde la obra', presupuesto: 0,
+          projectId: o.id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        });
+      }
+      onReload();
+    } catch (e) { alert('Error: ' + e.message); }
+    setSaving(false);
+  };
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [confirm, setConfirm] = useState(null);
@@ -2417,6 +2444,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
         nombre: form.nombre,
         descripcion: form.descripcion,
         presupuesto: parseInt(form.presupuesto) || 0,
+        projectId: form.projectId || null,
         updatedAt: serverTimestamp(),
       };
       if (editId) {
@@ -2424,7 +2452,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
       } else {
         await addDoc(collection(db, 'empresas', empresaId, 'centros_costo'), { ...payload, createdAt: serverTimestamp() });
       }
-      setForm({ codigo: '', nombre: '', descripcion: '', presupuesto: '' });
+      setForm({ codigo: '', nombre: '', descripcion: '', presupuesto: '', projectId: '' });
       setEditId(null);
       onReload();
     } catch (e) { alert('Error: ' + e.message); }
@@ -2432,7 +2460,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
   };
 
   const handleEdit = (c) => {
-    setForm({ codigo: c.codigo, nombre: c.nombre, descripcion: c.descripcion || '', presupuesto: String(c.presupuesto || '') });
+    setForm({ codigo: c.codigo, nombre: c.nombre, descripcion: c.descripcion || '', presupuesto: String(c.presupuesto || ''), projectId: c.projectId || '' });
     setEditId(c.id);
   };
 
@@ -2500,6 +2528,11 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
             onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
           <input className={inp} type="number" placeholder="Presupuesto mensual" value={form.presupuesto}
             onChange={e => setForm(f => ({ ...f, presupuesto: e.target.value }))} />
+          <select className={`${inp} sm:col-span-2`} value={form.projectId}
+            onChange={e => setForm(f => ({ ...f, projectId: e.target.value }))}>
+            <option value="">Sin obra (gasto general / oficina)</option>
+            {obras.map(o => <option key={o.id} value={o.id}>Obra: {o.name}</option>)}
+          </select>
         </div>
         <div className="flex gap-2 mt-3">
           <button onClick={handleSave} disabled={saving}
@@ -2507,8 +2540,14 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
             style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', boxShadow: '0 4px 12px rgba(124,58,237,0.25)' }}>
             {saving ? 'Guardando…' : editId ? 'Actualizar' : 'Agregar centro'}
           </button>
+          {!editId && obrasSinCentro.length > 0 && (
+            <button onClick={crearDesdeObras} disabled={saving}
+              className="px-4 py-2 bg-white border border-violet-200 hover:bg-violet-50 text-violet-700 font-bold text-sm rounded-xl transition-colors disabled:opacity-50">
+              Crear desde obras ({obrasSinCentro.length})
+            </button>
+          )}
           {editId && (
-            <button onClick={() => { setEditId(null); setForm({ codigo: '', nombre: '', descripcion: '', presupuesto: '' }); }}
+            <button onClick={() => { setEditId(null); setForm({ codigo: '', nombre: '', descripcion: '', presupuesto: '', projectId: '' }); }}
               className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm rounded-xl transition-colors">
               Cancelar
             </button>
@@ -2540,6 +2579,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
                     </div>
                     <p className="text-sm font-black text-slate-800 mt-1">{cc.nombre}</p>
                     {cc.descripcion && <p className="text-[11px] text-slate-400">{cc.descripcion}</p>}
+                    <p className="text-[11px] text-slate-500">{cc.projectId ? `Obra: ${nombreObra(cc.projectId) || 'obra eliminada'}` : 'Sin obra'}</p>
                   </div>
                   <div className="flex gap-1">
                     <button onClick={e => { e.stopPropagation(); handleEdit(cc); }} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors">

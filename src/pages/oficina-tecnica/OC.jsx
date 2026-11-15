@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listPurchaseOrders, savePurchaseOrders } from "../../lib/db";
+import { listActiveProjects, listPurchaseOrders } from "../../lib/db";
 import { useEmpresa } from "../../lib/useEmpresa";
 import OCImporter from "../../components/OCImporter";
 
@@ -98,7 +98,19 @@ export default function OC() {
   const handleImportComplete = async (importedOrders) => {
     try {
       setIsLoading(true);
-      await savePurchaseOrders(empresaId, importedOrders, selectedProject);
+      // Maestro de terceros: ficha por RUT y proveedorId en cada OC
+      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
+      const mapa = await asegurarTerceros(empresaId, importedOrders.map(o => ({ rut: o.rutProveedor, razonSocial: o.proveedor })));
+      const conTercero = importedOrders.map(o => {
+        const proveedorId = idTercero(mapa, o.rutProveedor);
+        return proveedorId ? { ...o, proveedorId } : o;
+      });
+      // Antes cada importación creaba OC nuevas y reimportar las duplicaba.
+      // Ahora la OC (N° OC + obra) se actualiza en vez de duplicarse.
+      const { guardarSinDuplicar } = await import("../../lib/importacion");
+      const r = await guardarSinDuplicar(empresaId, "purchaseOrders",
+        conTercero.map(o => ({ ...o, projectId: selectedProject })), ["numeroOC", "projectId"], "oc");
+      if (r.duplicadosEliminados) alert(`OC importadas: ${r.nuevas} nuevas, ${r.actualizadas} actualizadas, ${r.duplicadosEliminados} duplicadas de importaciones anteriores eliminadas.`);
       await loadData();
       setShowImporter(false);
     } catch (error) {

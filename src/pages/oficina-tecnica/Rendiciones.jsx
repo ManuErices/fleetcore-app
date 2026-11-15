@@ -364,7 +364,13 @@ export default function Rendiciones() {
       //    duplicados que hayan dejado importaciones anteriores.
       const norm = (v) => String(v || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const proyectoSel = projects.find(p => p.id === selectedProject);
-      const obraDeUnidad = (unidad) => {
+      // Centros de costo de RRHH vinculados a obras: la unidad de rendición
+      // (código "038", nombre "Nuevo Cobre") se lleva a la misma obra.
+      const { cargarObrasYCentros, obraDe } = await import("../../lib/obras");
+      const dimension = await cargarObrasYCentros(empresaId);
+      const obraDeUnidad = (unidad, codigo) => {
+        const porCentro = obraDe(dimension, { codigo, nombre: unidad });
+        if (porCentro) return porCentro;
         const u = norm(unidad);
         const p = projects.find(pr => norm(pr.name || pr.nombre) === u);
         if (p) return p.id;
@@ -375,9 +381,15 @@ export default function Rendiciones() {
         r.propietario, r.fechaEmision, Number(r.montoSolicitado) || 0].map(norm).join("|");
       const hash = (txt) => { let h = 5381; for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0; return h.toString(36); };
 
+      // Maestro de terceros: ficha por RUT y proveedorId en cada gasto
+      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
+      const mapaTerceros = await asegurarTerceros(empresaId, todasLasFilas.map(r => ({ rut: r.rutProveedor, razonSocial: r.proveedor })));
       const rendicionesImportadas = todasLasFilas
         .filter(r => r.nombreGasto || r.montoSolicitado || r.montoAprobado)
-        .map(r => ({ ...r, projectId: obraDeUnidad(r.unidadRendicion) }));
+        .map(r => {
+          const proveedorId = idTercero(mapaTerceros, r.rutProveedor);
+          return { ...r, projectId: obraDeUnidad(r.unidadRendicion, r.codigoUnidadRendicion), ...(proveedorId ? { proveedorId } : {}) };
+        });
 
       if (rendicionesImportadas.length === 0) {
         alert('No se encontraron gastos en el archivo.');

@@ -6,9 +6,10 @@ import {
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
+import { rutLlave, planificarUnificacion, aplicarUnificacion } from "../../lib/terceros";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, FechaHoja, ModalCuaderno, BarraProporcion,
-  IconoMas, IconoLapiz, IconoBorrar, casoTitulo,
+  IconoMas, IconoLapiz, IconoBorrar, casoTitulo, Nota, VistoBueno,
 } from "./cuaderno";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -182,6 +183,80 @@ function PanelDetalle({ proveedor, onClose, onEditManual, onDeleteManual, projec
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
+// ─── Maestro único por RUT ────────────────────────────────────────────────────
+// Crea una ficha por RUT (con el nombre más usado) y guarda en cada OC,
+// subcontrato, rendición y documento de deuda el id de su ficha. Desde ahí
+// todos los módulos se refieren al mismo proveedor.
+function MaestroTerceros({ empresaId, onListo }) {
+  const [plan, setPlan] = useState(null);
+  const [estado, setEstado] = useState("inicial"); // inicial | revisando | listo | aplicando | hecho | error
+  const [progreso, setProgreso] = useState(null);
+  const [resultado, setResultado] = useState(null);
+
+  const revisar = async () => {
+    setEstado("revisando");
+    try { setPlan(await planificarUnificacion(empresaId)); setEstado("listo"); }
+    catch (e) { console.error("Unificación de terceros:", e); setEstado("error"); }
+  };
+  const aplicar = async () => {
+    setEstado("aplicando");
+    try {
+      const r = await aplicarUnificacion(empresaId, plan, (h, t) => setProgreso({ h, t }));
+      setResultado(r); setEstado("hecho"); onListo?.();
+    } catch (e) { console.error("Unificación de terceros:", e); setEstado("error"); }
+  };
+  const sinRut = plan ? Object.values(plan.porFuente).reduce((s, f) => s + f.sinRut, 0) : 0;
+
+  return (
+    <Hoja titulo="Maestro único de proveedores"
+      extra={estado === "inicial" || estado === "error"
+        ? <Boton variante="secundario" onClick={revisar}>Revisar por RUT</Boton> : null}>
+      {estado === "inicial" && (
+        <p className="m-0 text-[16px] text-cuaderno-grafito">
+          Revisa OC, subcontratos, rendiciones, deuda y reglas de gasto, y deja una sola ficha por RUT para que todos los módulos apunten al mismo proveedor.
+        </p>
+      )}
+      {estado === "revisando" && <p className="m-0 text-[16px] text-cuaderno-grafito">Revisando los módulos…</p>}
+      {estado === "error" && <Nota etiqueta="Ojo:">No se pudo completar. Intenta nuevamente.</Nota>}
+      {(estado === "listo" || estado === "aplicando") && plan && (
+        <div className="space-y-3">
+          <LineaGuia etiqueta="Fichas que ya existen"><span>{plan.existentes}</span></LineaGuia>
+          <LineaGuia etiqueta="Fichas nuevas (un RUT sin ficha)"><span>{plan.crear.length}</span></LineaGuia>
+          <LineaGuia etiqueta="Documentos que se vinculan a su ficha"><span>{plan.vincular.length}</span></LineaGuia>
+          <div className="text-[15px] text-cuaderno-grafito">
+            {Object.values(plan.porFuente).map(f => (
+              <p key={f.nombre} className="m-0">
+                {f.nombre}: {f.documentos} documentos{f.aVincular ? ` · ${f.aVincular} por vincular` : ""}{f.sinRut ? ` · ${f.sinRut} sin RUT` : ""}
+              </p>
+            ))}
+          </div>
+          {plan.crear.some(c => c.variantes > 1) && (
+            <Nota etiqueta="Nota:" tono="grafito">
+              {plan.crear.filter(c => c.variantes > 1).length} proveedores aparecen escritos de varias formas; la ficha toma el nombre más usado (se puede corregir después).
+            </Nota>
+          )}
+          {sinRut > 0 && (
+            <Nota etiqueta="Nota:" tono="grafito">{sinRut} documentos no traen RUT y no se pueden vincular: quedan como están.</Nota>
+          )}
+          <div className="flex flex-wrap items-center gap-4">
+            <Boton variante="primario" onClick={aplicar} disabled={estado === "aplicando" || (!plan.crear.length && !plan.vincular.length)}>
+              {estado === "aplicando"
+                ? `Vinculando${progreso ? ` ${progreso.h} de ${progreso.t}` : "…"}`
+                : `Crear ${plan.crear.length} fichas y vincular ${plan.vincular.length} documentos`}
+            </Boton>
+            <Boton variante="texto" onClick={() => setEstado("inicial")} disabled={estado === "aplicando"}>Cancelar</Boton>
+          </div>
+        </div>
+      )}
+      {estado === "hecho" && resultado && (
+        <p className="m-0 flex items-center gap-2 text-[17px]">
+          <VistoBueno titulo="" /> {resultado.fichasCreadas} fichas creadas y {resultado.documentosVinculados} documentos vinculados. Las próximas importaciones se vinculan solas.
+        </p>
+      )}
+    </Hoja>
+  );
+}
+
 export default function FinanzasProveedores() {
   const { proyectoId } = useFinanzas();
   const [loading, setLoading]         = useState(true);
@@ -300,7 +375,9 @@ export default function FinanzasProveedores() {
     const txsFiltradas = proyectoId !== "todos" ? txs.filter(tx => tx.projectId === proyectoId) : txs;
 
     txsFiltradas.forEach(tx => {
-      const key = tx._key;
+      // Se agrupa por RUT cuando lo hay: el mismo proveedor escrito de dos
+      // formas ("SOC. COMERCIAL X LTDA" / "Comercial X") es uno solo.
+      const key = rutLlave(tx.rut || tx._rut) || tx._key;
       if (!mapaProveedores[key]) {
         mapaProveedores[key] = {
           razonSocial: tx.razonSocial || key,
@@ -422,6 +499,8 @@ export default function FinanzasProveedores() {
           </Boton>
         </div>
       </header>
+
+      <MaestroTerceros empresaId={empresaId} onListo={cargar} />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Hoja titulo="Resumen">
