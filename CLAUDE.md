@@ -48,6 +48,15 @@ Roles live in `users/{uid}.role`. Only two matter for access control gates:
 
 `isAdmin = role === 'superadmin' || role === 'admin_contrato'` is the main gate used across components.
 
+### Seguridad (reglas y funciones)
+- **Alta de usuarios** (`firestore.rules`, `users/{uid}`): a user can only give himself a role/empresa through a verifiable path — owner of an empresa whose `adminUid`/`adminEmail` is his (`esDuenoDeEmpresa`), a valid unused invitation (`invitacionId` on the user doc, `aceptaInvitacion`), a `trabajadores` ficha with his email (`trabajadorId`), or no empresa yet. Admins can't grant `superadmin` nor `empresasIds` they don't have (`adminNoEscala`).
+- **Permisos por área**: `areaDe(empresaId, modulos, patron)` mirrors App.jsx gating (admin_contrato all; administrativo/operador only modules in `modulos`, list or legacy "a,b" string). RRHH collections write `puedeRRHH`, read `leeSueldos` (RRHH, Contabilidad, Finanzas, fleetcore); Finanzas collections write `puedeFinanzas`, read `leeFinanzas`; Contabilidad (`journal_entries`, `chart_of_accounts`, `periods`, `flujo_mensual`…) write `puedeContabilidad`. Keep `areaDe` doing ONE read of the user doc: chaining helpers that each `get()` exceeded the rules evaluation limit and failed whole requests.
+- **Storage** (`storage.rules`): every `empresas/{id}/…` path checks membership via `firestore.get(users/{uid})`; labor files (contratos, finiquitos, anexos, documentos) only RRHH roles, plus the portal worker for his own folder. Fuel photos `reportes/{empresaId}/…`.
+- **Cloud Functions**: HTTP functions acting for a user verify the Firebase idToken (`uidVerificado(req)`) and overwrite `callerUid`/`userId` from it. The client adds `Authorization: Bearer` to every call to the functions automatically (fetch wrapper in `src/lib/firebase.js`).
+- **QR passwords** live only in `empresas/{id}/credenciales_qr/{trab_<id>|user_<uid>}` (`src/lib/credencialesQR.js`, office only); old plain-text `password` fields are moved there when an admin opens Admin → Operadores/Usuarios.
+- PINs (`pins`, `usuarios`) carry the owner's `uid`; only he can change them. Logout terminates Firestore and clears the offline cache.
+- Rule tests: `tests/reglas/test.mjs` (Firestore + Storage emulator).
+
 ### Firestore data model
 Every collection lives under `empresas/{empresaId}/`:
 - `projects` — obras/projects

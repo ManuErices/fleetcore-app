@@ -88,6 +88,8 @@ export default function InviteAccept({ token, onAccepted }) {
         nombre:    form.nombre || "",
         rut:       form.rut || "",
         estado:    "activo",
+        // Las reglas validan rol y empresa contra esta invitación
+        invitacionId: token,
         updatedAt: serverTimestamp(),
       };
       if (form.pin) {
@@ -134,6 +136,7 @@ export default function InviteAccept({ token, onAccepted }) {
         // 1. Guardar en 'pins' para firmas
         await setDoc(doc(db, "pins", u), {
           hash: pinHash,
+          uid,
           createdAt: new Date().toISOString(),
         });
 
@@ -142,6 +145,7 @@ export default function InviteAccept({ token, onAccepted }) {
         const empresaNombre = empresa?.nombre || "MPF Ingeniería Civil SpA";
         await setDoc(doc(db, "usuarios", u), {
           username: u,
+          uid,
           nombre: (form.nombre || "").trim(),
           rut: (form.rut || "").trim(),
           cargo: "",

@@ -61,6 +61,8 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
           await setDoc(doc(db, "users", user.uid), {
             empresaId: empresaId,
             role:      "operador",
+            // Las reglas verifican que esta ficha tenga el mismo email
+            trabajadorId: trabajadorDoc.id,
             email:     user.email,
             nombre:    trabajadorData.nombre || user.displayName || '',
             cargo:     trabajadorData.cargo || '',
@@ -129,7 +131,8 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
             await setDoc(subRef, {
               planId:    "",
               status:    "trial",
-              trialUntil: null,
+              // Prueba con vencimiento: con null usePlan la daba por infinita
+              trialUntil: new Date(Date.now() + 14 * 86400000).toISOString(),
               empresaId: empresaId,
               creadoEn:  serverTimestamp(),
             });
@@ -222,7 +225,8 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
       await setDoc(doc(db, "subscriptions", empresaRef.id), {
         planId:    "",
         status:    "trial",
-        trialUntil: null,
+        // Prueba con vencimiento: con null usePlan la daba por infinita
+              trialUntil: new Date(Date.now() + 14 * 86400000).toISOString(),
         empresaId: empresaRef.id,
         creadoEn:  serverTimestamp(),
       });

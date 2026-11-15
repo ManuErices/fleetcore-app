@@ -43,6 +43,35 @@ export const googleProvider = new GoogleAuthProvider();
 export const storage        = getStorage(app);   // ← AGREGADO para subida de documentos
 
 // ============================================
+// TOKEN EN LAS LLAMADAS A CLOUD FUNCTIONS
+// ============================================
+// Las funciones HTTP (crear o borrar usuarios, cerrar OT, correo, firmas…)
+// ya no confían en el uid que viaja en el cuerpo: verifican el idToken de
+// Firebase. En vez de tocar cada fetch, se agrega aquí la cabecera
+// Authorization a toda petición dirigida a las funciones del proyecto.
+if (typeof window !== "undefined" && typeof window.fetch === "function" && !window.__fleetcoreFetchConToken) {
+  const fetchOriginal = window.fetch.bind(window);
+  const esFuncion = (url) => {
+    const u = String(url || "");
+    const propia = import.meta.env?.VITE_FUNCTIONS_URL;
+    return u.includes(".cloudfunctions.net/") || (propia && u.startsWith(propia));
+  };
+  window.fetch = async (recurso, opciones = {}) => {
+    const url = typeof recurso === "string" ? recurso : recurso?.url;
+    if (!esFuncion(url) || !auth.currentUser) return fetchOriginal(recurso, opciones);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const headers = new Headers(opciones.headers || (typeof recurso !== "string" ? recurso.headers : undefined) || {});
+      if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+      return fetchOriginal(recurso, { ...opciones, headers });
+    } catch {
+      return fetchOriginal(recurso, opciones);
+    }
+  };
+  window.__fleetcoreFetchConToken = true;
+}
+
+// ============================================
 // PERSISTENCIA DE SESIÓN (AUTH)
 // ============================================
 setPersistence(auth, browserLocalPersistence)

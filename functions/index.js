@@ -32,6 +32,18 @@ const { FieldValue } = require('firebase-admin/firestore');
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
+/**
+ * uid del usuario que llama, verificado con su idToken de Firebase
+ * (cabecera "Authorization: Bearer <token>"). null si no hay token válido.
+ * El cliente lo agrega solo a toda llamada a las funciones (src/lib/firebase.js).
+ */
+async function uidVerificado(req) {
+  const h = req.headers?.authorization || req.headers?.Authorization || '';
+  const m = /^Bearer\s+(.+)$/i.exec(h);
+  if (!m) return null;
+  try { return (await admin.auth().verifyIdToken(m[1])).uid; } catch { return null; }
+}
+
 // ── Email Secrets (Resend) ────────────────────────────────────
 // Configurar con: firebase functions:secrets:set RESEND_API_KEY
 //                 firebase functions:secrets:set RESEND_FROM
@@ -79,6 +91,11 @@ function getMPClient() {
 // ============================================================
 exports.createSubscription = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -184,6 +201,11 @@ exports.webhookMercadoPago = onRequest((req, res) => {
 // ============================================================
 exports.createWebpaySubscription = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -393,6 +415,11 @@ exports.getInternationalOilPrice = onReq(async (req, res) => {
 // ============================================================
 exports.createUser = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.callerUid = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -429,9 +456,13 @@ exports.createUser = onRequest((req, res) => {
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       };
-      // Guardar contraseña para generación de QR de acceso rápido
-      if (savePassword && password) userData.password = password;
       await db.collection('users').doc(userRecord.uid).set(userData);
+      // Contraseña para el QR de acceso rápido: fuera del documento del usuario,
+      // en una colección que solo lee la oficina de la empresa (credenciales_qr).
+      if (savePassword && password) {
+        await db.doc(`empresas/${empresaId}/credenciales_qr/user_${userRecord.uid}`)
+          .set({ email, password, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       return res.status(200).json({ success: true, uid: userRecord.uid });
 
@@ -668,6 +699,11 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
 // ============================================================
 exports.testEmail = onRequest({ secrets: SES_SECRETS }, (req, res) => {
   cors(req, res, async () => {
+    // Solo un superadmin autenticado (antes cualquiera podía enviar correos/WhatsApp desde la cuenta de la empresa)
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida' });
+    const yo = await db.collection('users').doc(uidToken).get();
+    if (!yo.exists || yo.data().role !== 'superadmin') return res.status(403).json({ error: 'Solo superadmin' });
     try {
       const to = req.query.to || req.body?.to;
       if (!to) return res.status(400).json({ error: 'Falta query/body "to"' });
@@ -701,6 +737,11 @@ exports.testEmail = onRequest({ secrets: SES_SECRETS }, (req, res) => {
 // reemplazá la línea siguiente por: onRequest({ secrets: TWILIO_SECRETS }, …)
 exports.testWhatsapp = onRequest({}, (req, res) => {
   cors(req, res, async () => {
+    // Solo un superadmin autenticado (antes cualquiera podía enviar correos/WhatsApp desde la cuenta de la empresa)
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida' });
+    const yo = await db.collection('users').doc(uidToken).get();
+    if (!yo.exists || yo.data().role !== 'superadmin') return res.status(403).json({ error: 'Solo superadmin' });
     try {
       const to = req.query.to || req.body?.to;
       if (!to) return res.status(400).json({ error: 'Falta query/body "to" (formato +56912345678)' });
@@ -768,6 +809,11 @@ async function checkUserPermission(userId, empresaId) {
 // ── emailRegisterDomain ───────────────────────────────────────
 exports.emailRegisterDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KEY, MIGADU_VERIFICATION_TOKEN] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -867,6 +913,11 @@ exports.emailRegisterDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_
 // ── emailVerifyDomain ─────────────────────────────────────────
 exports.emailVerifyDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -972,6 +1023,11 @@ exports.emailVerifyDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KE
 // ── emailCreateMailbox ────────────────────────────────────────
 exports.emailCreateMailbox = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1057,6 +1113,11 @@ exports.emailCreateMailbox = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_K
 // ── emailDeleteMailbox ────────────────────────────────────────
 exports.emailDeleteMailbox = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1119,6 +1180,11 @@ exports.emailDeleteMailbox = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_K
 // ── emailCopilot ──────────────────────────────────────────────
 exports.emailCopilot = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1184,6 +1250,11 @@ exports.emailCopilot = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
 // ── emailDeleteDomain ─────────────────────────────────────────
 exports.emailDeleteDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.userId = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1253,6 +1324,11 @@ exports.emailDeleteDomain = onRequest({ secrets: [MIGADU_API_USER, MIGADU_API_KE
 
 exports.deleteAuthUser = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.callerUid = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1289,6 +1365,10 @@ exports.deleteAuthUser = onRequest((req, res) => {
 // ── generarDocumento ───────────────────────────────────────────
 exports.generarDocumento = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1347,6 +1427,10 @@ Responde SOLO con el documento redactado, sin comentarios adicionales.`
 // ── generarLayout ──────────────────────────────────────────────
 exports.generarLayout = onRequest({ secrets: [GEMINI_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1411,6 +1495,10 @@ Estructura de respuesta JSON requerida:
 // ── exportarWord ───────────────────────────────────────────────
 exports.exportarWord = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1557,6 +1645,11 @@ exports.exportarWord = onRequest((req, res) => {
 // única transacción para que nunca quede a medio camino.
 exports.closeWorkOrder = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.callerUid = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1740,6 +1833,11 @@ exports.closeWorkOrder = onRequest((req, res) => {
 // No expone nada sensible: nombre, rol y en qué empresas está.
 exports.buscarUsuarioPorEmail = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.callerUid = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1796,6 +1894,11 @@ exports.buscarUsuarioPorEmail = onRequest((req, res) => {
 // ── Vincular / desvincular a una empresa ──────────────────────
 exports.vincularUsuarioAEmpresa = onRequest((req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    if (req.body && typeof req.body === 'object') req.body.callerUid = uidToken;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     try {
@@ -1929,6 +2032,10 @@ const _vfBase = (key) => (key || '').startsWith('vf_test_')
 
 exports.validafirma = onRequest({ secrets: [VALIDAFIRMA_API_KEY] }, (req, res) => {
   cors(req, res, async () => {
+    // Identidad verificada: el uid sale del idToken de Firebase, no de lo que
+    // diga el cuerpo de la petición (antes bastaba con escribir el uid de un admin).
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
     try {
       const API_KEY = process.env.VALIDAFIRMA_API_KEY || '';
       if (!API_KEY) return res.status(500).json({ error: 'VALIDAFIRMA_API_KEY no configurada en Secret Manager' });

@@ -5,6 +5,7 @@ import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal
 import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion, cargarSurtidores, planSurtidores, migrarSurtidores, asegurarMaquina, listarMaquinas } from '../../lib/maquinas';
 import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
 import { rutTrabajador, duplicadosTrabajadores } from '../../lib/trabajadores';
+import { guardarCredencialQR, leerCredencialQR, migrarContrasenas, claveOperador, claveUsuario } from '../../lib/credencialesQR';
 import UnificarTrabajadores from '../../components/UnificarTrabajadores';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
@@ -601,7 +602,12 @@ function OperadoresSection() {
     setLoading(true);
     try {
       setLoadError(null);
-      setData(await fetchTrabajadores(empresaId));
+      const lista = await fetchTrabajadores(empresaId);
+      setData(lista);
+      // Contraseñas antiguas en texto plano en la ficha → credenciales_qr
+      migrarContrasenas(empresaId, lista.filter(t => t.password).map(t => ({
+        ruta: ['empresas', empresaId, 'trabajadores', t.id], clave: claveOperador(t.id), email: t.email, password: t.password,
+      })));
     } catch (e) {
       console.error('Error cargando operadores:', e);
       setLoadError(e?.message || 'No se pudo cargar la lista de operadores.');
@@ -622,7 +628,7 @@ function OperadoresSection() {
       rut: row.rut || '', cargo: isCustom ? 'otro' : cargo,
       empresa: row.empresa || '', esSurtidor: row.esSurtidor || false,
       accesoMaquinaria: row.accesoMaquinaria !== false,
-      email: row.email || '', password: row.password || '',
+      email: row.email || '', password: '',
       telefono: row.telefono || '', area: row.area || '',
       fechaIngreso: row.fechaIngreso || '', estado: row.estado || 'activo',
       afp: row.afp || '', prevision: row.prevision || '', nacionalidad: row.nacionalidad || '',
@@ -669,7 +675,8 @@ function OperadoresSection() {
         nacionalidad:form.nacionalidad|| '',
         updatedAt: serverTimestamp(),
       };
-      if (passTrim) p.password = passTrim;
+      // La contraseña ya no va en la ficha (la leen todos los operadores):
+      // se guarda aparte, solo para el QR (src/lib/credencialesQR.js).
 
       let trabajadoresDocId = editId;
       if (editId) {
@@ -677,6 +684,9 @@ function OperadoresSection() {
       } else {
         const newDoc = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), { ...p, createdAt: serverTimestamp() });
         trabajadoresDocId = newDoc.id;
+      }
+      if (passTrim && trabajadoresDocId) {
+        await guardarCredencialQR(empresaId, claveOperador(trabajadoresDocId), { email: emailTrim, password: passTrim });
       }
 
       // Si tiene email+password, intentar crear o sincronizar cuenta de acceso
@@ -697,7 +707,6 @@ function OperadoresSection() {
             cargo: cargoFinal,
             esSurtidor: form.esSurtidor || false,
             accesoMaquinaria: form.accesoMaquinaria !== false,
-            password: passTrim,
             createdAt: serverTimestamp(),
           });
           await setDoc(doc(db, 'empresas', empresaId, 'users', uid), {
@@ -709,7 +718,6 @@ function OperadoresSection() {
             cargo: cargoFinal,
             esSurtidor: form.esSurtidor || false,
             accesoMaquinaria: form.accesoMaquinaria !== false,
-            password: passTrim,
             createdAt: serverTimestamp(),
           });
           // Escribir portalUid en el doc de trabajadores para que del() pueda tombstonear correctamente
@@ -735,8 +743,7 @@ function OperadoresSection() {
                   rut: rutNorm,
                   cargo: cargoFinal,
                   esSurtidor: form.esSurtidor || false,
-                  accesoMaquinaria: form.accesoMaquinaria !== false,
-                  password: passTrim
+                  accesoMaquinaria: form.accesoMaquinaria !== false
                 });
                 await setDoc(doc(db, 'empresas', empresaId, 'users', userDoc.id), {
                   empresaId,
@@ -747,7 +754,6 @@ function OperadoresSection() {
                   cargo: cargoFinal,
                   esSurtidor: form.esSurtidor || false,
                   accesoMaquinaria: form.accesoMaquinaria !== false,
-                  password: passTrim,
                   createdAt: serverTimestamp()
                 }, { merge: true });
                 if (trabajadoresDocId) {
@@ -825,9 +831,10 @@ function OperadoresSection() {
     setConfirm(null);
   };
 
-  const openQROp = (row) => {
+  const openQROp = async (row) => {
     const email = row.email || '';
-    const password = row.password || '';
+    const cred = await leerCredencialQR(empresaId, claveOperador(row.id));
+    const password = cred?.password || row.password || '';
     if (!email || !password) {
       alert('Este operador no tiene credenciales de acceso guardadas.\n\nEdita el operador, ingresa email y contraseña, y guarda.');
       return;
@@ -2884,7 +2891,12 @@ function UsuariosSection() {
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, 'empresas', empresaId, 'users'));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setData(lista);
+      // Contraseñas en texto plano en el usuario → credenciales_qr (y se borran de ahí)
+      const conClave = lista.filter(u => u.password);
+      migrarContrasenas(empresaId, conClave.map(u => ({ ruta: ['empresas', empresaId, 'users', u.id], clave: claveUsuario(u.id), email: u.email, password: u.password })))
+        .then(() => migrarContrasenas(empresaId, conClave.map(u => ({ ruta: ['users', u.id], clave: claveUsuario(u.id), email: u.email, password: u.password }))));
     } catch (e) {
       console.error("Error loading users:", e);
       setData([]);
@@ -2932,7 +2944,7 @@ function UsuariosSection() {
       role:     row.role     || 'administrativo',
       nombre:   row.nombre   || '',
       rut:      row.rut      || '',
-      password: row.password || '',
+      password: '',
       modulos:  row.modulos  || [],
       cargo:    row.cargo    || '',
     });
@@ -2942,7 +2954,7 @@ function UsuariosSection() {
 
   const openQR = async (row) => {
     const email = row.email || row.id;
-    let password = row.password || '';
+    let password = (await leerCredencialQR(empresaId, claveUsuario(row.id)))?.password || row.password || '';
     if (!password) {
       try {
         const rootSnap = await getDoc(doc(db, 'users', row.id));
@@ -2967,7 +2979,8 @@ function UsuariosSection() {
         cargo:   form.role === 'operador' ? form.cargo : '',
         updatedAt: serverTimestamp(),
       };
-      if (form.password.trim()) updates.password = form.password.trim();
+      // Contraseña del QR: aparte, no en el documento del usuario
+      if (form.password.trim()) await guardarCredencialQR(empresaId, claveUsuario(editId), { email: data.find(u => u.id === editId)?.email || '', password: form.password.trim() });
       
       // Update both root users and company users in parallel
       await Promise.all([

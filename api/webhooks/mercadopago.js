@@ -30,7 +30,9 @@ function getFirebaseAdmin() {
 // MercadoPago envía x-signature y x-request-id en los headers
 function verifyMPSignature(req) {
   const secret    = process.env.MP_WEBHOOK_SECRET;
-  if (!secret) return true; // Skip en desarrollo sin secret configurado
+  // Sin secret no se puede verificar: se rechaza (antes se aceptaba cualquier
+  // petición, y cualquiera podía simular un pago).
+  if (!secret) { console.error('MP_WEBHOOK_SECRET no configurado: webhook rechazado'); return false; }
 
   const xSignature  = req.headers['x-signature'];
   const xRequestId  = req.headers['x-request-id'];
@@ -56,7 +58,9 @@ function verifyMPSignature(req) {
     .update(manifest)
     .digest('hex');
 
-  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(expected));
+  // timingSafeEqual lanza si los largos difieren: comparar largo antes
+  const a = Buffer.from(String(hash)), b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 // ── Mapeo de estado MP → estado interno ──────────────────────

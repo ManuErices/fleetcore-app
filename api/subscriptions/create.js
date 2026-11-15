@@ -18,6 +18,7 @@
 import { MercadoPagoConfig, PreApproval } from 'mercadopago';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { tokenDe, validarToken } from '../_comun/sesion.js';
 
 // ── Firebase Admin init (singleton) ──────────────────────────
 function getFirebaseAdmin() {
@@ -49,7 +50,11 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { planId, billingCycle = 'monthly', userId, userEmail, userName } = req.body;
+    // Solo con sesión: el userId sale del token, no del cuerpo de la petición
+    const sesion = await validarToken(tokenDe(req));
+    if (!sesion) return res.status(401).json({ error: 'Sesión no válida' });
+    const { planId, billingCycle = 'monthly', userEmail, userName } = req.body;
+    const userId = sesion.uid;
 
     // Validaciones
     if (!planId || !userId || !userEmail) {

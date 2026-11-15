@@ -1,5 +1,5 @@
 // src/lib/firmas.js
-import { db } from './firebase.js'
+import { db, auth } from './firebase.js'
 import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
 
 export const ROLES_FIRMA = {
@@ -28,7 +28,7 @@ export async function tienePin(usuario) {
 export async function crearPin(usuario, pin) {
   if (pin.length < 4) throw new Error('El PIN debe tener al menos 4 dígitos')
   const hash = await hashPin(pin)
-  await setDoc(doc(db, 'pins', usuario), { hash, createdAt: serverTimestamp() })
+  await setDoc(doc(db, 'pins', usuario), { hash, uid: auth.currentUser?.uid || null, createdAt: serverTimestamp() })
 }
 
 export async function verificarPin(usuario, pin) {

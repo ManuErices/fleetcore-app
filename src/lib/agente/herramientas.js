@@ -26,6 +26,10 @@ export const ACCIONES_QUE_MODIFICAN = new Set([
   'crear_obra', 'actualizar_maquina',
   'crear_cuentas_flujo', 'cargar_partidas_flujo', 'mover_pago_flujo', 'marcar_pagado',
   'aprobar_propuesta_flujo', 'rechazar_propuesta_flujo',
+  // También escriben: la memoria se carga en el contexto de todo el equipo y
+  // las propuestas quedan visibles para quien las revisa.
+  'crear_propuesta_flujo', 'editar_propuesta_flujo', 'enviar_propuesta_a_revision',
+  'recordar', 'olvidar',
   'proponer_mejora', 'aprobar_mejora', 'rechazar_mejora',
 ]);
 
