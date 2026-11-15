@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import * as XLSX from "xlsx";
@@ -12,14 +12,14 @@ import {
 import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
-  repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV,
+  repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV, fijarMesDesdeFuente,
 } from "../../lib/contabilidad/tributario";
 import {
   APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
 } from "../../lib/contabilidad/remuneraciones";
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
-import { detectarRendiciones, resumirRendiciones, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
+import { detectarRendiciones, resumirRendiciones, resumirRendicionesDocs, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -435,6 +435,163 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
   );
 }
 
+/**
+ * Datos que ya existen dentro de FleetCore, en vez de subir archivos:
+ *  · Remuneraciones y Finiquitos desde RRHH (mismo motor que la liquidación
+ *    y el Libro de Remuneraciones).
+ *  · Rendiciones desde Oficina Técnica (colección `rendiciones`).
+ * En los meses que la fuente trae datos, la celda queda tomada de la fuente:
+ * se reemplaza lo importado antes (Excel de Talana, reporte de Rindegastos) y
+ * lo escrito a mano.
+ */
+function ModalFleetCore({ empresaId, anio, data, onAplicar, onCerrar }) {
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
+  const [usarRRHH, setUsarRRHH] = useState(true);
+  const [usarRend, setUsarRend] = useState(true);
+  const [incluirBorradores, setIncluirBorradores] = useState(false);
+  const [opRend, setOpRend] = useState({ incluirEnRevision: true, incluirComprobantes: true, incluirFacturasNoRecibidas: false });
+  const [rrhh, setRrhh] = useState(null);
+  const [docsRend, setDocsRend] = useState([]);
+  const [aplicando, setAplicando] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    setCargando(true); setError("");
+    (async () => {
+      try {
+        const { resumenRRHHAnio } = await import("../rrhh/resumenContable");
+        const [r, snap] = await Promise.all([
+          resumenRRHHAnio(empresaId, anio, { incluirBorradores }),
+          getDocs(collection(db, "empresas", empresaId, "rendiciones")).catch(() => null),
+        ]);
+        if (!vivo) return;
+        setRrhh(r);
+        setDocsRend(snap ? snap.docs.map(d => d.data()) : []);
+      } catch (e) {
+        console.error("Error leyendo datos de FleetCore:", e);
+        if (vivo) setError("No se pudieron leer los datos de RRHH u Oficina Técnica.");
+      } finally {
+        if (vivo) setCargando(false);
+      }
+    })();
+    return () => { vivo = false; };
+  }, [empresaId, anio, incluirBorradores]);
+
+  const rend = useMemo(() => resumirRendicionesDocs(docsRend, opRend), [docsRend, opRend]);
+  const rendMes = m => rend?.reparto.find(x => x.anio === anio && x.mes === m);
+  const valor = (id, m) => num(data.filas.find(f => f.id === id)?.valores[m]);
+
+  // Qué meses toma cada fuente
+  const mesesRRHH = (rrhh?.meses || []).filter(m => m.liquidaciones > 0 || m.nFiniquitos > 0).map(m => m.mes);
+  const mesesRend = MESES.map((_, m) => m).filter(m => rendMes(m));
+  const cambios = (usarRRHH ? mesesRRHH.length : 0) + (usarRend ? mesesRend.length : 0);
+
+  const aplicar = async () => {
+    setAplicando(true);
+    try {
+      await onAplicar({
+        rrhh: usarRRHH ? (rrhh?.meses || []).filter(m => mesesRRHH.includes(m.mes)) : [],
+        rendiciones: usarRend ? mesesRend.map(m => ({ mes: m, ...rendMes(m) })) : [],
+        opRend,
+      });
+    } finally { setAplicando(false); }
+  };
+
+  const celda = (nuevo, actual) => (
+    <td className="px-2 py-1 text-right whitespace-nowrap">
+      {nuevo == null ? <span className="text-cuaderno-columna">·</span> : <Cifra valor={nuevo} escala="pesos" vacio="0" />}
+      {nuevo != null && actual !== nuevo && (
+        <span className="block text-[12px] text-cuaderno-grafito">hoy <Cifra valor={actual} escala="pesos" vacio="0" color="heredar" /></span>
+      )}
+    </td>
+  );
+
+  return (
+    <ModalCuaderno
+      titulo="Traer datos de FleetCore"
+      subtitulo={`Año ${anio} · RRHH y Oficina Técnica, sin subir archivos`}
+      onClose={onCerrar}
+      ancho="max-w-3xl"
+      bloqueado={aplicando}
+      pie={
+        <div className="flex flex-wrap items-center justify-end gap-4">
+          <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
+          <Boton variante="primario" disabled={aplicando || cargando || !cambios} onClick={aplicar}>
+            {aplicando ? "Cargando…" : `Usar estos datos (${cambios} ${cambios === 1 ? "mes" : "meses"})`}
+          </Boton>
+        </div>
+      }
+    >
+      {cargando ? (
+        <p className="m-0 py-8 text-center text-[17px] text-cuaderno-grafito">Calculando con los datos de RRHH y Oficina Técnica…</p>
+      ) : error ? (
+        <Nota etiqueta="Ojo:">{error}</Nota>
+      ) : (
+        <>
+          <section className="space-y-3">
+            <Casilla marcada={usarRRHH} onCambiar={setUsarRRHH}
+              descripcion="Remuneraciones = total haberes + aportes del empleador, de cada liquidación del mes; Finiquitos = indemnizaciones y feriado, en el mes de término. Mismo cálculo que el Libro de Remuneraciones.">
+              Remuneraciones y finiquitos desde RRHH
+            </Casilla>
+            {usarRRHH && rrhh?.totalBorradores > 0 && (
+              <Casilla marcada={incluirBorradores} onCambiar={setIncluirBorradores} className="ml-9"
+                descripcion="Las liquidaciones cargadas con el importador masivo quedan como borrador. El Libro de Remuneraciones no las declara hasta que se revisan.">
+                Incluir {rrhh.totalBorradores} liquidaciones en borrador
+              </Casilla>
+            )}
+            {usarRRHH && rrhh?.sinContrato > 0 && (
+              <Nota etiqueta="Ojo:" className="ml-9">{rrhh.sinContrato} liquidaciones no tienen contrato asociado y no se pueden calcular.</Nota>
+            )}
+            <Casilla marcada={usarRend} onCambiar={setUsarRend}
+              descripcion="Gastos de la colección de Oficina Técnica (importados desde Rindegastos), con las mismas reglas: entran boletas, peajes y vouchers; no entran las facturas (ya están en Compras) ni los rechazados.">
+              Rendiciones desde Oficina Técnica
+            </Casilla>
+            {usarRend && (
+              <div className="ml-9 space-y-2">
+                <Casilla marcada={opRend.incluirEnRevision} onCambiar={v => setOpRend(o => ({ ...o, incluirEnRevision: v }))}>Incluir gastos en revisión</Casilla>
+                <Casilla marcada={opRend.incluirComprobantes} onCambiar={v => setOpRend(o => ({ ...o, incluirComprobantes: v }))}>Incluir comprobantes de egreso</Casilla>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[16px]">
+                <thead>
+                  <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                    {["Mes", "Remuneraciones", "Finiquitos", "Rendiciones"].map((t, i) => (
+                      <th key={t} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 ? "text-left" : "text-right"}`}>{t}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MESES.map((nombre, m) => {
+                    const r = rrhh?.meses?.[m];
+                    const tomaRRHH = usarRRHH && mesesRRHH.includes(m);
+                    const rd = usarRend ? rendMes(m) : null;
+                    return (
+                      <tr key={m} className="border-b border-cuaderno-renglon">
+                        <td className="px-2 py-1">{nombre}{r?.liquidaciones ? <span className="text-[12px] text-cuaderno-grafito"> · {r.liquidaciones} liq.</span> : null}</td>
+                        {celda(tomaRRHH ? r.remuneraciones : null, valor("remuneraciones", m))}
+                        {celda(tomaRRHH ? r.finiquitos : null, valor("finiquitos", m))}
+                        {celda(rd ? rd.monto : null, valor("rendiciones", m))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="m-0 mt-2 text-[14px] text-cuaderno-grafito">
+              Los meses con punto no tienen datos en FleetCore y quedan como están (por ejemplo, lo importado desde Talana). En los meses con cifra, ese valor reemplaza lo de la planilla; debajo se ve lo que hay hoy.
+            </p>
+          </section>
+        </>
+      )}
+    </ModalCuaderno>
+  );
+}
+
 function ModalRendiciones({ filas, archivo, anioActivo, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
   const [op, setOp] = useState({ incluirEnRevision: true, incluirComprobantes: true, incluirFacturasNoRecibidas: false });
@@ -815,6 +972,7 @@ export default function ContabilidadFlujoMensual() {
   const [hon, setHon]             = useState(null);   // informe de boletas de honorarios que se está por cargar
   const [kdx, setKdx]             = useState(null);   // depreciación calculada desde el kardex
   const [rend, setRend]           = useState(null);   // reporte de rendiciones (filas crudas)
+  const [verFleetCore, setVerFleetCore] = useState(false);  // traer datos de RRHH y Oficina Técnica
   const [errorRcv, setErrorRcv]   = useState("");
   const [verAyuda, setVerAyuda]   = useState(false);
   const inputRcv = useRef(null);
@@ -1105,6 +1263,29 @@ export default function ContabilidadFlujoMensual() {
     setHon(null);
   }
 
+  // Datos internos (RRHH, Oficina Técnica) → cada mes con datos queda tomado
+  // íntegro de la fuente
+  function aplicarFleetCore({ rrhh, rendiciones, opRend }) {
+    const cuando = new Date().toISOString();
+    setData(d => {
+      let x = d;
+      rrhh.forEach(m => {
+        const k = `rrhh-${anio}-${String(m.mes + 1).padStart(2, "0")}`;
+        x = fijarMesDesdeFuente(x, "remuneraciones", m.mes, k, m.remuneraciones,
+          { fuente: "RRHH", liquidaciones: m.liquidaciones, haberes: m.haberes, aportes: m.aportes, cargadoEn: cuando, documentosPorMes: { [m.mes]: m.liquidaciones } });
+        x = fijarMesDesdeFuente(x, "finiquitos", m.mes, k, m.finiquitos,
+          { fuente: "RRHH", finiquitos: m.nFiniquitos, cargadoEn: cuando, documentosPorMes: { [m.mes]: m.nFiniquitos } });
+      });
+      rendiciones.forEach(m => {
+        const k = `ot-${anio}-${String(m.mes + 1).padStart(2, "0")}`;
+        x = fijarMesDesdeFuente(x, "rendiciones", m.mes, k, m.monto,
+          { fuente: "Oficina Técnica", opciones: opRend, cargadoEn: cuando, documentosPorMes: { [m.mes]: m.documentos } });
+      });
+      return x;
+    });
+    setVerFleetCore(false);
+  }
+
   // Rendiciones → fila Rendiciones, cada gasto en el mes de su emisión; los
   // meses de otro año se guardan de inmediato en ese año.
   async function aplicarRendiciones(r) {
@@ -1239,6 +1420,10 @@ export default function ContabilidadFlujoMensual() {
             aria-label="Importar RCV de compras o ventas, boletas de honorarios del SII, libro de remuneraciones de Talana, rendiciones de Rindegastos o kardex de activo fijo">
             <IconoSubir tamano={14} /> Importar archivo
           </Boton>
+          <Boton variante="secundario" onClick={() => setVerFleetCore(true)}
+            title="Remuneraciones y finiquitos de RRHH, rendiciones de Oficina Técnica">
+            Traer de FleetCore
+          </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
             {errorGuardado
               ? <Boton variante="texto" className="text-cuaderno-roja" onClick={() => { pendienteRef.current = { empresaId, anio, data }; guardar(); }}>No se guardó · reintentar</Boton>
@@ -1263,6 +1448,11 @@ export default function ContabilidadFlujoMensual() {
         <Nota etiqueta="Ojo:">
           Posible doble conteo en {calc.dobleConteo.map(d => `${d.fila.toLowerCase()} de ${MESES[d.mes].toLowerCase()}`).join(", ")}: las Compras de ese mes vienen del RCV, que ya incluye todo lo facturado a nombre de la empresa. Deja en esas filas solo lo que no tiene factura.
         </Nota>
+      )}
+
+      {verFleetCore && (
+        <ModalFleetCore empresaId={empresaId} anio={anio} data={data}
+          onAplicar={aplicarFleetCore} onCerrar={() => setVerFleetCore(false)} />
       )}
 
       {rend && (

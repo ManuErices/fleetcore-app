@@ -506,3 +506,33 @@ export function separarRCVPorFila(filas, reglas = {}) {
   const relevantes = Object.values(proveedores).filter(p => p.conRegla || p.sugerido);
   return { grupos, proveedores: relevantes };
 }
+
+/**
+ * Deja un mes de una fila tomado ÍNTEGRO de una fuente interna de FleetCore
+ * (RRHH, Oficina Técnica): borra lo que otros períodos importados (Excel de
+ * Talana, reporte de Rindegastos, RCV) aportaron a ese mes, registra el aporte
+ * de la fuente y fija la celda en ese monto (lo escrito a mano también se
+ * reemplaza). `fuente` es la llave del período, ej. "rrhh-2026-03".
+ */
+export function fijarMesDesdeFuente(doc, filaId, mes, fuente, monto, traza = {}) {
+  const rcv = { ...(doc.rcv || {}) };
+  const periodos = { ...(rcv.periodos || {}) };
+  const deFila = {};
+  Object.entries(periodos[filaId] || {}).forEach(([periodo, p]) => {
+    if (periodo === fuente) return;
+    const porMes = { ...(p.porMes || {}) };
+    delete porMes[mes];
+    if (Object.keys(porMes).length) deFila[periodo] = { ...p, porMes };
+  });
+  if (monto) deFila[fuente] = { ...traza, monto, porMes: { [mes]: monto } };
+  periodos[filaId] = deFila;
+  const legado = { ...(rcv[filaId] || {}) };
+  delete legado[mes];
+  return {
+    ...doc,
+    filas: doc.filas.map(f => f.id !== filaId ? f : {
+      ...f, valores: f.valores.map((v, i) => (i === mes ? Math.round(monto || 0) : v)),
+    }),
+    rcv: { ...rcv, [filaId]: legado, periodos },
+  };
+}
