@@ -188,6 +188,18 @@ export default function Machines() {
       await deleteMachine(empresaId, id);
       await refresh(projectId);
     } catch (error) {
+      // Con historial no se borra (quedarían huérfanos sus registros): se ofrece desactivarla
+      if (error.code === 'maquina-con-referencias') {
+        if (!confirm(`${error.message}\n\nNo se puede eliminar sin perder ese historial. ¿Marcarla como inactiva?`)) return;
+        try {
+          const original = machines.find(m => m.id === id);
+          await guardarMaquina(empresaId, { active: false }, { id, original, origen: "oficina-tecnica" });
+          await refresh(projectId);
+        } catch (e2) {
+          alert("Error al desactivar: " + e2.message);
+        }
+        return;
+      }
       alert("Error al eliminar: " + error.message);
     }
   };

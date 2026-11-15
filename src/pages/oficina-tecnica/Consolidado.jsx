@@ -6,27 +6,20 @@ import {
   listMachines
 } from "../../lib/db";
 import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
-import { manoObraMes } from "../../lib/manoObra";
+import { manoObraRango, costoObraFila } from "../../lib/manoObra";
+import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useFuelPrices } from "../../lib/fuelPriceService";
 
-// Utilidades de fecha (igual que MonthlyCalendar)
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
+// Utilidades de fecha en hora de Chile (toISOString daba el día en UTC)
+const isoToday = hoyISO;
+const addDays = sumarDias;
 
 function getDaysDiff(start, end) {
   const startDate = new Date(start + 'T00:00:00');
   const endDate = new Date(end + 'T00:00:00');
-  return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  return Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1; // round: cambio de hora
 }
 
 export default function Consolidado() {
@@ -39,7 +32,6 @@ export default function Consolidado() {
   const { prices: fuelPrices } = useFuelPrices(true);
 
   // Filtros de fecha - Rango flexible
-  const currentDate = new Date();
   const [dateFrom, setDateFrom] = useState(addDays(isoToday(), -29)); // Últimos 30 días por defecto
   const [dateTo, setDateTo] = useState(isoToday());
   const [error, setError] = useState(null);
@@ -96,17 +88,14 @@ export default function Consolidado() {
     setError(null);
     
     try {
-      // Obtener año y mes para employeeMonthlyData (que usa year/month)
-      const fromDate = new Date(dateFrom + 'T00:00:00');
-      const employeeYear = fromDate.getFullYear();
-      const employeeMonth = fromDate.getMonth() + 1;
-
       console.log(`📊 Cargando datos consolidados: ${dateFrom} a ${dateTo}`);
 
       // Cargar datos base en paralelo (sin logs de flota)
       const [fuel, employees, orders, machineList] = await Promise.all([
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
-        manoObraMes(empresaId, selectedProject, employeeYear, employeeMonth),
+        // Todas las liquidaciones de los meses del rango (antes solo el mes de
+        // dateFrom), cada una con la parte del mes que cae en el rango
+        manoObraRango(empresaId, selectedProject, dateFrom, dateTo),
         listPurchaseOrders(empresaId, selectedProject),
         listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
       ]);
@@ -205,12 +194,17 @@ export default function Consolidado() {
     let totalCostoEmpresa = 0;  // Costo real para la empresa
     let totalAportes = 0;
 
+    const personas = new Set();
     employeeData.forEach(emp => {
-      totalHaberes += Number(emp.totalHaberes) || 0;
-      totalDescuentos += Number(emp.totalDescuentos) || 0;
-      totalLiquido += Number(emp.sueldoLiquido) || 0;  // ← CORREGIDO
-      totalCostoEmpresa += Number(emp.totalCosto) || 0;
-      totalAportes += Number(emp.aporteEmpresa) || 0;
+      // Parte del mes dentro del rango × % de incidencia en esta obra
+      const f = emp.factorRango ?? 1;
+      const pct = emp.porcentajeIncidencia != null ? Number(emp.porcentajeIncidencia) / 100 : 1;
+      totalHaberes += (Number(emp.totalHaberes) || 0) * f * pct;
+      totalDescuentos += (Number(emp.totalDescuentos) || 0) * f * pct;
+      totalLiquido += (Number(emp.sueldoLiquido) || 0) * f * pct;
+      totalCostoEmpresa += costoObraFila(emp) * f;
+      totalAportes += (Number(emp.aporteEmpresa) || 0) * f * pct;
+      personas.add(emp.employeeId || emp.id);
     });
 
     return {
@@ -219,7 +213,7 @@ export default function Consolidado() {
       totalLiquido: Math.round(totalLiquido),
       totalCostoEmpresa: Math.round(totalCostoEmpresa),
       totalAportes: Math.round(totalAportes),
-      empleados: employeeData.length
+      empleados: personas.size
     };
   }, [employeeData]);
 
@@ -230,7 +224,9 @@ export default function Consolidado() {
     const contratistas = new Set();
 
     subcontratos.forEach(s => {
-      totalPagado += Number(s.totalPagoNeto) || 0;
+      // Costo = monto bruto del EP (como Dashboard y Estado de pago); el neto
+      // a pagar descuenta retenciones y anticipos, que no bajan el costo
+      totalPagado += Number(s.montoEP) || 0;
       totalSaldo += Number(s.saldoPorPagarSC) || 0;
       if (s.razonSocialSubcontratista) {
         contratistas.add(s.razonSocialSubcontratista);
@@ -359,25 +355,22 @@ export default function Consolidado() {
   };
 
   const setWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
+    const dayOfWeek = desdeISO(isoToday()).getDay();
     const monday = addDays(isoToday(), -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     setDateFrom(monday);
     setDateTo(addDays(monday, 6));
   };
 
   const setMonth = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const lastDay = new Date(year, today.getMonth() + 1, 0).getDate();
-    setDateFrom(`${year}-${month}-01`);
-    setDateTo(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
+    const { anio, mes } = partesISO(isoToday());
+    const { desde, hasta } = limitesMes(anio, mes);
+    setDateFrom(desde);
+    setDateTo(hasta);
   };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? desdeISO(dateStr) : new Date(dateStr);
     return date.toLocaleDateString('es-CL', { 
       year: 'numeric', 
       month: '2-digit', 
@@ -637,7 +630,7 @@ export default function Consolidado() {
                     icon="🤝"
                     total={costosSubcontratos.totalPagado}
                     items={[
-                      { label: 'Total Pagado', value: costosSubcontratos.totalPagado, highlight: true },
+                      { label: 'Total EP (bruto)', value: costosSubcontratos.totalPagado, highlight: true },
                       { label: 'Saldo por Pagar', value: costosSubcontratos.totalSaldo, warning: true },
                       { label: 'Estados de Pago', value: `${costosSubcontratos.cantidadEP}`, isText: true },
                       { label: 'Contratistas', value: `${costosSubcontratos.cantidadContratistas}`, isText: true }

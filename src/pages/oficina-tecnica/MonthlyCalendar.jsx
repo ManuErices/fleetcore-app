@@ -1,19 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
 import { listActiveProjects, listMachines, listLogsByRange } from "../../lib/db";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 
 // Utilidades de fecha (sin cambios)
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
+// Hoy en hora de Chile (toISOString daba el día en UTC: desde las 21:00 ya era "mañana")
+const isoToday = hoyISO;
+const addDays = sumarDias;
 
 function getDateRange(start, end) {
   const dates = [];
@@ -35,7 +29,7 @@ function getDateRange(start, end) {
 function getDaysDiff(start, end) {
   const startDate = new Date(start + 'T00:00:00');
   const endDate = new Date(end + 'T00:00:00');
-  return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  return Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1; // round: cambio de hora
 }
 
 export default function MonthlyCalendar() {
@@ -184,20 +178,17 @@ export default function MonthlyCalendar() {
   };
 
   const setWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
+    const dayOfWeek = desdeISO(isoToday()).getDay();
     const monday = addDays(isoToday(), -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     setDateFrom(monday);
     setDateTo(addDays(monday, 6));
   };
 
   const setMonth = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const lastDay = new Date(year, today.getMonth() + 1, 0).getDate();
-    setDateFrom(`${year}-${month}-01`);
-    setDateTo(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
+    const { anio, mes } = partesISO(isoToday());
+    const { desde, hasta } = limitesMes(anio, mes);
+    setDateFrom(desde);
+    setDateTo(hasta);
   };
 
   return (

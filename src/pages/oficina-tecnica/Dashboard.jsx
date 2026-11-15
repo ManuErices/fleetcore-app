@@ -6,25 +6,11 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFuelPrices } from "../../lib/fuelPriceService";
+import { hoyISO, inicioMesISO, partesISO } from "../../lib/fechas";
 
-// Utilidades de fecha
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
-
-function getMonthStart() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}-01`;
-}
+// Utilidades de fecha (en hora de Chile: toISOString daba el día en UTC)
+const isoToday = hoyISO;
+const getMonthStart = inicioMesISO;
 
 export default function DashboardExecutive() {
   const { empresaId } = useEmpresa();
@@ -65,9 +51,8 @@ export default function DashboardExecutive() {
     if (!empresaId || !selectedProject) return;
     setIsLoading(true);
     try {
-      const fromDate = new Date(dateFrom);
-      const year = fromDate.getFullYear();
-      const month = fromDate.getMonth() + 1;
+      // new Date("AAAA-MM-01") es medianoche UTC → en Chile, el mes anterior
+      const { anio: year, mes: month } = partesISO(dateFrom);
 
       const [logs, fuel, employees, machineList] = await Promise.all([
         listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
@@ -119,9 +104,12 @@ export default function DashboardExecutive() {
     let diasTrabajados = new Set();
     
     dailyLogs.forEach(log => {
-      totalHorasProductivas += Number(log.productiveHours) || 0;
-      totalKilometraje += Number(log.kilometraje) || 0;
-      diasTrabajados.add(log.date);
+      const horas = Number(log.productiveHours) || 0;
+      const km = Number(log.kilometraje) || 0;
+      totalHorasProductivas += horas;
+      totalKilometraje += km;
+      // Un día sin horas ni km (standby, panne o registro vacío) no es día trabajado
+      if (horas > 0 || km > 0) diasTrabajados.add(log.date);
     });
 
     const promedioHorasDia = diasTrabajados.size > 0 ? totalHorasProductivas / diasTrabajados.size : 0;
@@ -143,7 +131,11 @@ export default function DashboardExecutive() {
     // 3. PERSONAL
     const totalEmpleados = employeeData.length;
     const totalSueldoLiquido = employeeData.reduce((sum, emp) => sum + (Number(emp.sueldoLiquido) || 0), 0);
-    const totalCostoEmpresa = employeeData.reduce((sum, emp) => sum + (Number(emp.totalCosto) || 0), 0);
+    // Solo el % de incidencia en esta obra (igual que Estado de pago)
+    const totalCostoEmpresa = employeeData.reduce((sum, emp) => {
+      const pct = emp.porcentajeIncidencia != null ? Number(emp.porcentajeIncidencia) : 100;
+      return sum + (Number(emp.totalCosto) || 0) * (pct / 100);
+    }, 0);
 
     // 4. RENDICIONES
     const totalRendiciones = rendiciones.reduce((sum, r) => sum + (Number(r.montoAprobado) || 0), 0);

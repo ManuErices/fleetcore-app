@@ -1,26 +1,20 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { listActiveProjects, saveRendiciones, deleteAllRendiciones } from "../../lib/db";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes, fechaISO, serialExcelAISO } from "../../lib/fechas";
 import { collection, query, where, getDocs, writeBatch, doc, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import * as XLSX from 'xlsx';
 
 // Utilidades de fecha (igual que MonthlyCalendar)
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
+// Hoy en hora de Chile (toISOString daba el día en UTC: desde las 21:00 ya era "mañana")
+const isoToday = hoyISO;
+const addDays = sumarDias;
 
 function getDaysDiff(start, end) {
   const startDate = new Date(start + 'T00:00:00');
   const endDate = new Date(end + 'T00:00:00');
-  return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  return Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1; // round: cambio de hora
 }
 
 export default function Rendiciones() {
@@ -268,14 +262,12 @@ export default function Rendiciones() {
         
         // Si es un objeto Date
         if (value instanceof Date) {
-          return value.toISOString().split('T')[0];
+          return fechaISO(value);
         }
         
-        // Si es un número (serial de Excel)
+        // Si es un número (serial de Excel): día de calendario, se lee en UTC
         if (typeof value === 'number') {
-          const excelEpoch = new Date(1899, 11, 30);
-          const date = new Date(excelEpoch.getTime() + value * 86400000);
-          return date.toISOString().split('T')[0];
+          return serialExcelAISO(value);
         }
         
         // Si es string, intentar diferentes formatos
@@ -295,9 +287,10 @@ export default function Rendiciones() {
           }
           
           // Intentar parsear como fecha estándar
+          if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
           const parsed = new Date(value);
           if (!isNaN(parsed.getTime())) {
-            return parsed.toISOString().split('T')[0];
+            return fechaISO(parsed);
           }
         }
         
@@ -496,25 +489,23 @@ export default function Rendiciones() {
   };
 
   const setWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
+    const dayOfWeek = desdeISO(isoToday()).getDay();
     const monday = addDays(isoToday(), -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     setDateFrom(monday);
     setDateTo(addDays(monday, 6));
   };
 
   const setMonth = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const lastDay = new Date(year, today.getMonth() + 1, 0).getDate();
-    setDateFrom(`${year}-${month}-01`);
-    setDateTo(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
+    const { anio, mes } = partesISO(isoToday());
+    const { desde, hasta } = limitesMes(anio, mes);
+    setDateFrom(desde);
+    setDateTo(hasta);
   };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    // "AAAA-MM-DD" con new Date se lee en UTC: en Chile mostraba el día anterior
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? desdeISO(dateStr) : new Date(dateStr);
     return date.toLocaleDateString('es-CL', { 
       year: 'numeric', 
       month: '2-digit', 

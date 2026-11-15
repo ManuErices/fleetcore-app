@@ -81,7 +81,7 @@ export default function Proyectos() {
   };
 
   const onDelete = async (p) => {
-    if (!confirm(`¿Eliminar el proyecto "${p.name}" permanentemente?\n\nEsto NO elimina los datos ya asociados (equipos, rendiciones, OC, etc.) en otros módulos, pero dejarán de estar vinculados a un proyecto visible.`)) {
+    if (!confirm(`¿Eliminar el proyecto "${p.name}" permanentemente?\n\nSolo se puede eliminar una obra sin datos asociados (equipos, registros, rendiciones, OC, etc.).`)) {
       return;
     }
     setLoading(true);

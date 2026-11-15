@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
 import { saveCombustibleRegistros } from "../lib/db";
+import { fechaISO, serialExcelAISO } from "../lib/fechas";
 
 // Normaliza un encabezado: sin tildes, sin espacios extra, en minúsculas
 // (este Excel trae encabezados con espacios sueltos, ej. "Cod. / Patente ")
@@ -22,15 +23,9 @@ function getField(row, ...candidates) {
 
 function formatDate(value) {
   if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear(), m = String(value.getMonth() + 1).padStart(2, '0'), d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  if (typeof value === 'number') {
-    const date = new Date((value - 25569) * 86400 * 1000);
-    const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, '0'), d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
+  if (value instanceof Date) return fechaISO(value) || null;
+  // Serial de Excel: se lee en UTC (en hora local quedaba un día antes en Chile)
+  if (typeof value === 'number') return serialExcelAISO(value) || null;
   if (typeof value === 'string') {
     const parts = value.split('-');
     if (parts.length === 3) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
@@ -112,8 +107,9 @@ export default function CombustibleImporter({ empresaId, projectId, onImportComp
     setImporting(true);
     setError(null);
     try {
-      await saveCombustibleRegistros(empresaId, preview.registros, projectId);
-      setResults({ totalRegistros: preview.registros.length, totalLitros: preview.totalLitros, meses: preview.meses });
+      const r = await saveCombustibleRegistros(empresaId, preview.registros, projectId);
+      setResults({ totalRegistros: preview.registros.length, totalLitros: preview.totalLitros, meses: preview.meses,
+        nuevas: r?.nuevas, actualizadas: r?.actualizadas, duplicadosEliminados: r?.duplicadosEliminados });
       if (onImportComplete) onImportComplete();
     } catch (err) {
       console.error("Error importando:", err);
@@ -204,6 +200,11 @@ export default function CombustibleImporter({ empresaId, projectId, onImportComp
               <p className="text-emerald-700 mt-1 font-semibold">
                 {results.totalRegistros} registros ({results.totalLitros.toFixed(0)} L) importados para {results.meses.join(', ')}.
               </p>
+              {results.nuevas != null && (
+                <p className="text-emerald-700 text-sm mt-1">
+                  {results.nuevas} nuevos, {results.actualizadas} ya existían (actualizados){results.duplicadosEliminados ? `, ${results.duplicadosEliminados} duplicados eliminados` : ''}.
+                </p>
+              )}
             </div>
           </div>
           <button
