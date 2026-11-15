@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listLogsByRange, listMachines } from "../../lib/db";
+import { listActiveProjects, listMachines } from "../../lib/db";
+// Horas de máquina: dailyLogs (Excel) + partes diarios de WorkFleet, sin duplicar
+import { listarLogsObra } from "../../lib/partesDiarios";
 import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
 import { manoObraMes } from "../../lib/manoObra";
 import { collection, query, where, getDocs } from "firebase/firestore";
@@ -55,7 +57,7 @@ export default function DashboardExecutive() {
       const { anio: year, mes: month } = partesISO(dateFrom);
 
       const [logs, fuel, employees, machineList] = await Promise.all([
-        listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listarLogsObra(empresaId, selectedProject, dateFrom, dateTo),
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         manoObraMes(empresaId, selectedProject, year, month),
         listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
