@@ -356,18 +356,20 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
     try {
       setLoadingEquipo(true);
-      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'equipos_surtidores'), {
+      // El camión surtidor es una máquina del maestro (esSurtidor). Si la
+      // patente ya existe, se marca esa ficha como surtidor.
+      const { asegurarMaquina } = await import('../../../lib/maquinas');
+      const { id: surtidorId } = await asegurarMaquina(empresaId, {
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
         code: nuevoEquipoSurtidor.patente.toUpperCase(),
-        nombre: nuevoEquipoSurtidor.nombre,
         name: nuevoEquipoSurtidor.nombre,
-        tipo: nuevoEquipoSurtidor.tipo || 'Equipo Surtidor',
+        type: nuevoEquipoSurtidor.tipo || 'Camión surtidor',
         marca: nuevoEquipoSurtidor.marca || '',
         modelo: nuevoEquipoSurtidor.modelo || '',
-        categoria: 'surtidor_combustible',
-        fechaCreacion: new Date().toISOString()
-      });
-      setMachinesLocal(prev => [...prev, {
+        esSurtidor: true,
+      }, { origen: 'combustible' });
+      const docRef = { id: surtidorId };
+      setMachinesLocal(prev => prev.some(m => m.id === docRef.id) ? prev : [...prev, {
         id: docRef.id,
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
         code: nuevoEquipoSurtidor.patente.toUpperCase(),
@@ -376,7 +378,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         marca: nuevoEquipoSurtidor.marca || '',
         modelo: nuevoEquipoSurtidor.modelo || ''
       }]);
-      setEquiposSurtidores(prev => [...prev, {
+      setEquiposSurtidores(prev => prev.some(m => m.id === docRef.id) ? prev : [...prev, {
         id: docRef.id, ...nuevoEquipoSurtidor,
         patente: nuevoEquipoSurtidor.patente.toUpperCase()
       }]);

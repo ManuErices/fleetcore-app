@@ -6,6 +6,8 @@ import {
   listAllProjects,
   listMachineDocuments, uploadMachineDocument, deleteMachineDocument,
 } from "../../lib/db";
+import { hoyISO } from "../../lib/maquinas";
+import HistorialObras from "./HistorialObras";
 
 const CLP = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
 
@@ -77,6 +79,7 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
 
   // Campos editables de Información (proyecto, centro de costo, disponibilidad, ubicación)
   const [projectId, setProjectId] = useState(machine.projectId || "");
+  const [fechaObra, setFechaObra] = useState(hoyISO()); // desde cuándo está en la obra nueva
   const [centroCosto, setCentroCosto] = useState(machine.centroCosto || "");
   const [disponibilidad, setDisponibilidad] = useState(machine.disponibilidad || "disponible");
   const [ubicacion, setUbicacion] = useState(machine.ubicacion || "");
@@ -129,7 +132,7 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
         disponibilidad,
         ubicacion: ubicacion.trim(),
         leasingMensual: leasingMensual === "" ? null : Number(leasingMensual),
-      });
+      }, { fechaObra });
       onUpdated();
     } catch (err) {
       setError(err.message);
@@ -408,6 +411,18 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                       ))}
                     </select>
                   </div>
+                  {(projectId || "") !== (machine.projectId || "") && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-500">En la obra nueva desde</label>
+                      <input
+                        type="date"
+                        className="w-full border-2 border-amber-200 rounded-xl p-2.5 text-sm mt-1"
+                        value={fechaObra}
+                        max={hoyISO()}
+                        onChange={(e) => setFechaObra(e.target.value || hoyISO())}
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs font-bold text-slate-500">Centro de costo</label>
                     <input
@@ -458,6 +473,11 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                     {savingInfo ? "Guardando..." : "Guardar información"}
                   </button>
                 )}
+              </div>
+
+              <div className="border-t border-slate-100 pt-4 space-y-2">
+                <p className="text-xs font-black text-slate-500 uppercase">Historial de obras</p>
+                <HistorialObras empresaId={empresaId} machine={machine} projects={projects} puedeEditar={puedeEditar} onUpdated={onUpdated} />
               </div>
             </div>
           )}

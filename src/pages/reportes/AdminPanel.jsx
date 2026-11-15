@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
-import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion } from '../../lib/maquinas';
+import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion, cargarSurtidores, planSurtidores, migrarSurtidores, asegurarMaquina, listarMaquinas } from '../../lib/maquinas';
 import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
@@ -1812,8 +1812,9 @@ function SurtidoresSection() {
     if (!empresaId) return;
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'empresas', empresaId, 'equipos_surtidores'));
-      setData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // Los surtidores son máquinas del maestro (esSurtidor); se suman los de
+      // la colección antigua que aún no se migran.
+      setData(await cargarSurtidores(empresaId));
     } catch { setData([]); }
     setLoading(false);
   }, [empresaId]);
@@ -1821,21 +1822,41 @@ function SurtidoresSection() {
   useEffect(() => { load(); }, [load]);
 
   const openNew = () => { setForm({ nombre: '', patente: '', capacidad: '', tipo: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ nombre: row.nombre || '', patente: row.patente || '', capacidad: row.capacidad || '', tipo: row.tipo || '' }); setEditId(row.id); setModal(true); };
+  const [fila, setFila] = useState(null);
+  const openEdit = (row) => { setForm({ nombre: row.nombre || row.name || '', patente: row.patente || '', capacidad: row.capacidad || '', tipo: row.type || row.tipo || '' }); setFila(row); setEditId(row.id); setModal(true); };
 
   const save = async () => {
     setSaving(true);
     try {
-      const p = { nombre: form.nombre.trim(), patente: form.patente.trim().toUpperCase(), capacidad: form.capacidad, tipo: form.tipo.trim(), updatedAt: serverTimestamp() };
-      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'equipos_surtidores', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'equipos_surtidores'), { ...p, createdAt: serverTimestamp() });
+      const p = { name: form.nombre.trim(), patente: form.patente.trim().toUpperCase(), capacidad: form.capacidad, type: form.tipo.trim() || 'Camión surtidor', esSurtidor: true };
+      if (editId) {
+        let id = editId, original = fila;
+        if (fila?._antiguo) {
+          // Primero pasa al maestro (mismo id, o la máquina con su patente)
+          const plan = (await planSurtidores(empresaId)).filter(x => x.antiguo.id === editId);
+          await migrarSurtidores(empresaId, plan);
+          const destino = plan[0]?.destino;
+          id = destino?.id || editId;
+          original = (await listarMaquinas(empresaId)).find(m => m.id === id) || null;
+        }
+        await guardarMaquina(empresaId, p, { id, original, origen: 'admin' });
+      } else {
+        if (!p.patente) { alert('La patente es obligatoria: identifica al camión en el maestro de máquinas.'); setSaving(false); return; }
+        const { creada } = await asegurarMaquina(empresaId, { ...p, code: p.patente }, { origen: 'admin' });
+        if (!creada) alert('Esa patente ya estaba en el maestro de máquinas: se marcó como surtidor.');
+      }
       setModal(false); load();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { alert(e instanceof MaquinaDuplicada ? e.message : 'Error: ' + e.message); }
     setSaving(false);
   };
 
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas', empresaId, 'equipos_surtidores', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    try {
+      // Del maestro no se borra la máquina: solo deja de ser surtidor
+      if (confirm._antiguo) await deleteDoc(doc(db, 'empresas', empresaId, 'equipos_surtidores', confirm.id));
+      else await guardarMaquina(empresaId, { esSurtidor: false, categoria: '' }, { id: confirm.id, original: confirm, origen: 'admin' });
+      load();
+    } catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
@@ -1846,9 +1867,9 @@ function SurtidoresSection() {
       >
         <DataTable loading={loading} data={data} onEdit={openEdit} onDelete={setConfirm} emptyText="No hay surtidores registrados"
           columns={[
-            { key: 'nombre', label: 'Nombre' },
+            { key: 'nombre', label: 'Nombre', render: r => <span>{r.nombre || r.name}{r._antiguo && <span className="ml-2 text-[10px] text-amber-700">(sin migrar al maestro)</span>}</span> },
             { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-amber-700">{r.patente || '—'}</span> },
-            { key: 'tipo', label: 'Tipo' },
+            { key: 'tipo', label: 'Tipo', render: r => r.type || r.tipo || '—' },
             { key: 'capacidad', label: 'Capacidad', render: r => r.capacidad ? `${r.capacidad} L` : '—' },
           ]}
         />
@@ -1865,7 +1886,7 @@ function SurtidoresSection() {
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="amber" />
         </div>
       </Modal>
-      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Surtidor" message={`¿Eliminar "${confirm?.nombre}"?`} />
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Quitar surtidor" message={confirm?._antiguo ? `¿Eliminar "${confirm?.nombre}"?` : `"${confirm?.nombre}" deja de ser surtidor; la máquina sigue en el maestro.`} />
     </>
   );
 }

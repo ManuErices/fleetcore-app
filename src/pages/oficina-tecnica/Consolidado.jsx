@@ -108,7 +108,7 @@ export default function Consolidado() {
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         manoObraMes(empresaId, selectedProject, employeeYear, employeeMonth),
         listPurchaseOrders(empresaId, selectedProject),
-        listMachines(empresaId, selectedProject)
+        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
       ]);
 
       // Cargar rendiciones y filtrar por fechaEmision

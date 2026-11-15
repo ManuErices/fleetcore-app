@@ -18,6 +18,7 @@ import { db } from '../firebase';
 import { fetchTrabajadores, nombreCompletoTrabajador } from '../trabajadores';
 import { EJECUTORES_FINANZAS, describirAccionFinanzas } from './herramientasFinanzas';
 import { EJECUTORES_EQUIPO } from './herramientasEquipo';
+import { guardarMaquina } from '../maquinas';
 import { EJECUTORES_MEJORAS, describirAccionMejoras } from './herramientasMejoras';
 
 // Herramientas que escriben en la base: el usuario las confirma antes.
@@ -305,7 +306,8 @@ const EJECUTORES = {
     }
     if (!Object.keys(cambios).length) throw new Error('No se indicó ningún cambio.');
 
-    await updateDoc(ref, { ...cambios, updatedAt: serverTimestamp() });
+    // Por el maestro: mantiene el historial de obras y deja registro de quién cambió
+    await guardarMaquina(empresaId, cambios, { id: maquina_id, original: { id: maquina_id, ...actual.data() }, origen: 'agente' });
     return { ok: true, maquina: etiquetaMaquina(actual.data(), maquina_id), cambios };
   },
 

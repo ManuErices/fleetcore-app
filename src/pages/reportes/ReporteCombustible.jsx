@@ -375,9 +375,9 @@ export default function ReporteCombustible() {
         setEstaciones(estacionesData);
 
         // Cargar equipos surtidores (camiones)
-        const equiposRef = collection(db, 'empresas', empresaId, 'equipos_surtidores');
-        const equiposSnap = await getDocs(equiposRef);
-        setEquiposSurtidores(equiposSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        // Máquinas del maestro marcadas como surtidor + colección antigua sin migrar
+        const { cargarSurtidores } = await import('../../lib/maquinas');
+        setEquiposSurtidores(await cargarSurtidores(empresaId));
       } catch (error) {
         console.error("Error cargando datos base:", error);
       }
