@@ -24,6 +24,7 @@ import {
   listarPropuestas, cargarPropuesta, crearPropuesta, proponerPartida, proponerMovimiento as proponerMovimientoEnPropuesta,
   agregarCuentaNueva, proponerColchon, cambiarEstado, aplicarPropuesta,
 } from '../finanzas/propuestasDatos';
+import { conEstadoAlDia } from '../pagosDeuda';
 
 const MAX_PARTIDAS_LOTE = 60;
 const MAX_CUENTAS_LOTE = 30;
@@ -363,7 +364,7 @@ export const EJECUTORES_FINANZAS = {
     const snap = await getDocs(collection(db, 'empresas', empresaId, 'deuda_proveedores'));
     const porAcreedor = new Map();
     snap.docs.forEach(d => {
-      const x = d.data();
+      const x = conEstadoAlDia(d.data());   // mora y estado a hoy, no los de la importación
       if (!(x.saldoPendiente > 0)) return;
       if (solo_vencida && x.estado !== 'vencido') return;
       const nombre = x.proveedorNombre || 'Acreedor';
