@@ -6,6 +6,7 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { guardarMaquina, desdeFichaActivo, MaquinaDuplicada } from "../../lib/maquinas";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
@@ -456,7 +457,7 @@ export default function FinanzasActivos() {
         ownership:   (() => { const raw = d.data().ownership || "OWNED"; return raw === "OWN" ? "OWNED" : raw; })(),
         propietario: d.data().propietario || "",
         projectId:   d.data().projectId   || "",
-        activo:      d.data().active      !== false,
+        activo:      d.data().active !== false && d.data().activo !== false,
         moneda:      d.data().moneda      || "CLP",
         // Campos financieros (ahora en /machines directamente)
         valorCompra:            d.data().valorCompra            || "",
@@ -482,21 +483,16 @@ export default function FinanzasActivos() {
   },[empresaId, proyectoId]);
   useEffect(()=>{cargar();},[cargar]);
 
-  const handleSave=async(form)=>{
-    const {id,_source,machineId,nombre,...data}=form;
-    if(editando){
-      // Siempre actualizar el doc en /machines directamente
-      await updateDoc(doc(db,"empresas",empresaId,"machines",editando.id),{
-        ...data,
-        name: nombre || data.name || "",
-        updatedAt:serverTimestamp(),
+  // Se guarda por el maestro de máquinas: solo los campos que cambiaron
+  // (no se pisa lo que escribieron Oficina Técnica, Admin o Maquinaria), con
+  // `active` en vez de `activo` y sin duplicar patentes.
+  const handleSave = async (form) => {
+    try {
+      await guardarMaquina(empresaId, desdeFichaActivo(form), {
+        id: editando?.id, original: editando ? desdeFichaActivo(editando) : null, origen: "finanzas",
       });
-    } else {
-      await addDoc(collection(db,"empresas",empresaId,"machines"),{
-        ...data,
-        name: nombre || data.name || "",
-        createdAt:serverTimestamp(),
-      });
+    } catch (e) {
+      alert(e instanceof MaquinaDuplicada ? e.message : "No se pudo guardar: " + e.message);
     }
     setEditando(null); await cargar();
   };

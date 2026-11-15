@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
+import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion } from '../../lib/maquinas';
+import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
@@ -1304,10 +1306,23 @@ function MaquinasSection() {
   const [qr, setQr] = useState(null);
   const [form, setForm] = useState({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '', ownership: 'OWN', active: true, projectId: null, billingType: 'hourly', valorCompra: '', valorLibros: '', fechaCompra: '', vidaUtilAnios: '', moneda: 'CLP', vencPermisoCirculacion: '', vencSeguro: '', vencRevisionTecnica: '', vencSoapCivil: '' });
   const [editId, setEditId] = useState(null);
+  const [original, setOriginal] = useState(null); // ficha tal como se abrió
   const [saving, setSaving] = useState(false);
   const [busquedaMaq, setBusquedaMaq] = useState('');
   const [filtroEmpresaMaq, setFiltroEmpresaMaq] = useState('');
   const [detalle, setDetalle] = useState(null); // máquina cuyo detalle se despliega
+  const [obras, setObras] = useState([]);
+  const [revisar, setRevisar] = useState(false);
+  const pendientesMaestro = useMemo(() => ({
+    duplicadas: gruposDuplicados(data).length,
+    normalizar: planNormalizacion(data).length,
+  }), [data]);
+  useEffect(() => {
+    if (!empresaId) return;
+    getDocs(collection(db, 'empresas', empresaId, 'projects'))
+      .then(snap => setObras(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))))
+      .catch(() => setObras([]));
+  }, [empresaId]);
 
   // Catálogos dinámicos
   const { items: tiposDB,       add: addTipo,        remove: removeTipo,        load: reloadTipos }        = useCatalogo('tipo');
@@ -1338,8 +1353,19 @@ function MaquinasSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ name: row.name || '', code: row.code || '', patente: row.patente || '', type: row.type || '', marca: row.marca || '', modelo: row.modelo || '', empresa: row.empresa || '', propietario: row.propietario || '' }); setEditId(row.id); setModal(true); };
+  const FORM_VACIO = { name: '', code: '', patente: '', type: '', marca: '', modelo: '', empresa: '', propietario: '', ownership: 'OWN', active: true, projectId: null, billingType: 'hourly', valorCompra: '', valorLibros: '', fechaCompra: '', vidaUtilAnios: '', moneda: 'CLP', vencPermisoCirculacion: '', vencSeguro: '', vencRevisionTecnica: '', vencSoapCivil: '' };
+  const openNew = () => { setForm(FORM_VACIO); setOriginal(null); setEditId(null); setModal(true); };
+  // Se carga la ficha completa: antes solo se cargaban 8 campos y al guardar
+  // se pisaban con valores por defecto la propiedad, la obra, el valor de
+  // compra y los vencimientos que habían escrito otros módulos. Además se
+  // guardan solo los campos que cambiaron (guardarMaquina con `original`).
+  const openEdit = (row) => {
+    const f = { ...FORM_VACIO };
+    Object.keys(FORM_VACIO).forEach(k => { if (row[k] !== undefined && row[k] !== null) f[k] = row[k]; });
+    f.ownership = propiedadNormal(row.ownership) || 'OWN';
+    f.active = estaActiva(row);
+    setForm(f); setOriginal(row); setEditId(row.id); setModal(true);
+  };
   const openQR = (row) => setQr({ title: row.code || row.patente, subtitulo: [row.marca, row.modelo].filter(Boolean).join(' ') || row.name || row.code || '', headerLabel: [row.marca, row.modelo].filter(Boolean).join(' ') || row.name || row.code || '', qrText: row.code || row.patente || row.id, code: row.code || '', patente: row.patente || '' });
 
   const save = async () => {
@@ -1369,12 +1395,10 @@ function MaquinasSection() {
         vencSeguro:             form.vencSeguro             || "",
         vencRevisionTecnica:    form.vencRevisionTecnica    || "",
         vencSoapCivil:          form.vencSoapCivil          || "",
-        updatedAt: serverTimestamp(),
       };
-      if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'machines', editId), p);
-      else await addDoc(collection(db, 'empresas', empresaId, 'machines'), { ...p, createdAt: serverTimestamp() });
+      await guardarMaquina(empresaId, p, { id: editId || undefined, original: editId ? original : null, origen: 'admin', maquinas: data });
       setModal(false); load();
-    } catch (e) { alert('Error: ' + e.message); }
+    } catch (e) { alert(e instanceof MaquinaDuplicada ? e.message : 'Error: ' + e.message); }
     setSaving(false);
   };
 
@@ -1417,9 +1441,14 @@ function MaquinasSection() {
                 <option value="">Todas las empresas</option>
                 {empresasOpcionesMaq.map(e => <option key={e} value={e}>{e.toUpperCase()}</option>)}
               </select>
+              <button type="button" onClick={() => setRevisar(true)}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold border ${pendientesMaestro.duplicadas || pendientesMaestro.normalizar ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-600'}`}>
+                Revisar maestro{pendientesMaestro.duplicadas ? ` · ${pendientesMaestro.duplicadas} duplicada${pendientesMaestro.duplicadas > 1 ? 's' : ''}` : ''}{pendientesMaestro.normalizar ? ` · ${pendientesMaestro.normalizar} por normalizar` : ''}
+              </button>
             </div>
           );
         })()}
+        {revisar && <UnificarMaquinas empresaId={empresaId} obras={obras} onClose={() => setRevisar(false)} onCambio={load} />}
         <DataTable loading={loading} data={data.filter(r => {
           const q = busquedaMaq.toLowerCase();
           const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
@@ -1540,6 +1569,29 @@ function MaquinasSection() {
               </button>
             </div>
           </Field>
+
+          {/* ── Datos que comparten todos los módulos ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Propiedad">
+              <select className={selectCls} value={form.ownership || 'OWN'} onChange={e => setForm({ ...form, ownership: e.target.value })}>
+                {PROPIEDADES.map(o => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+              </select>
+            </Field>
+            <Field label="Obra actual">
+              <select className={selectCls} value={form.projectId || ''} onChange={e => setForm({ ...form, projectId: e.target.value || null })}>
+                <option value="">Sin obra</option>
+                {obras.map(o => <option key={o.id} value={o.id}>{o.name || o.id}</option>)}
+                {form.projectId && !obras.some(o => o.id === form.projectId) && <option value={form.projectId}>{form.projectId}</option>}
+              </select>
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={form.active !== false} onChange={e => setForm({ ...form, active: e.target.checked })} />
+            Activa (aparece en reportes, combustible y arriendos)
+          </label>
+          <p className="text-xs text-slate-500">
+            Esta es la ficha única de la máquina. Valores y depreciación se completan en Finanzas o Contabilidad; tarifas en Oficina Técnica; horómetro y mantención en Maquinaria. Al guardar aquí solo se escribe lo que cambiaste.
+          </p>
 
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="purple" />
         </div>

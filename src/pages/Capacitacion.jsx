@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { doc, updateDoc, getDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import { doc, updateDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { signOut } from "firebase/auth";
 import { useEmpresa } from "../lib/useEmpresa";
@@ -373,14 +373,18 @@ export default function Capacitacion({ user, onComplete }) {
     setStep(5);
   };
 
-  // write mock creations to the real Firestore collections (since it is a live training test environment!)
+  // Capacitación es un simulador: lo que se "crea" aquí vive solo en la
+  // pantalla. Antes se escribía en las colecciones reales y quedaban máquinas,
+  // trabajadores y obras de prueba mezclados con los datos de la empresa.
+  const simularAlta = () => ({ id: `sim_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` });
+
   const handleCrearEquipoSurtidor = async () => {
     if (!nuevoEquipoSurtidor.patente || !nuevoEquipoSurtidor.nombre) {
       alert("Patente y Nombre son obligatorios");
       return;
     }
     try {
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "equipos_surtidores"), {
+      const docRef = simularAlta({
         patente: nuevoEquipoSurtidor.patente.toUpperCase(),
         code: nuevoEquipoSurtidor.patente.toUpperCase(),
         nombre: nuevoEquipoSurtidor.nombre,
@@ -412,7 +416,7 @@ export default function Capacitacion({ user, onComplete }) {
       return;
     }
     try {
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "empresas_combustible"), {
+      const docRef = simularAlta({
         nombre: nuevaEmpresa.nombre,
         rut: nuevaEmpresa.rut || "",
         fechaCreacion: new Date().toISOString()
@@ -450,7 +454,7 @@ export default function Capacitacion({ user, onComplete }) {
         active: true,
         createdAt: serverTimestamp()
       };
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "machines"), mData);
+      const docRef = simularAlta(mData);
       const newMaq = { id: docRef.id, ...mData, nombre: mData.name };
       setMachinesLocal(prev => [...prev, newMaq]);
       if (simFlow === "entrega") {
@@ -470,7 +474,7 @@ export default function Capacitacion({ user, onComplete }) {
     }
     try {
       const empresaNombre = empresasLocal.find(e => e.id === nuevoEmpleadoData.empresaId)?.nombre || nuevoEmpleadoData.empresaId;
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "trabajadores"), {
+      const docRef = simularAlta({
         nombre: nuevoEmpleadoData.nombre.toUpperCase(),
         rut: nuevoEmpleadoData.rut || "",
         empresa: empresaNombre,
@@ -501,7 +505,7 @@ export default function Capacitacion({ user, onComplete }) {
       return;
     }
     try {
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "projects"), {
+      const docRef = simularAlta({
         name: nuevoProyecto.name.trim(),
         codigo: nuevoProyecto.codigo.trim(),
         createdAt: serverTimestamp()
@@ -523,7 +527,7 @@ export default function Capacitacion({ user, onComplete }) {
     }
     try {
       const obras = simDatosControl.projectId ? [simDatosControl.projectId] : [];
-      const docRef = await addDoc(collection(db, "empresas", empresaId, "estaciones_combustible"), {
+      const docRef = simularAlta({
         nombre: nuevaEstacion.nombre.trim(),
         marca: nuevaEstacion.marca.trim(),
         obras,

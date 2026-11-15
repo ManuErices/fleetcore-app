@@ -432,19 +432,19 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     const nombreEmpresa = targetEmpId ? (empresasLocal.find(e => e.id === targetEmpId)?.nombre || targetEmpId) : '';
     try {
       setLoading(true);
-      const mData = {
+      // Por el maestro de máquinas: si la patente ya existe en la empresa se
+      // usa esa ficha (no se crea otra).
+      const { asegurarMaquina } = await import('../../../lib/maquinas');
+      const { id: mId, creada, maquina: mData } = await asegurarMaquina(empresaId, {
         patente: nuevaMaquinaData.patente,
         code: nuevaMaquinaData.patente,
         name: `${nuevaMaquinaData.tipo} ${nuevaMaquinaData.modelo || ''}`.trim(),
-        tipo: nuevaMaquinaData.tipo,
-        marca: '',
-        modelo: nuevaMaquinaData.modelo,
+        type: nuevaMaquinaData.tipo,
+        modelo: nuevaMaquinaData.modelo || '',
         empresa: nombreEmpresa,
-        active: true,
-        createdAt: serverTimestamp()
-      };
-      const mRef = await addDoc(collection(db, 'empresas', empresaId, 'machines'), mData);
-      setMachinesLocal(prev => [...prev, { id: mRef.id, ...mData }]);
+      }, { origen: 'combustible' });
+      const mRef = { id: mId };
+      setMachinesLocal(prev => prev.some(m => m.id === mRef.id) ? prev : [...prev, { ...mData, id: mRef.id }]);
       const target = nuevaMaquinaData.targetField;
       if (target === 'maquinaProveedor') {
         setDatosEntrada(prev => ({ ...prev, maquinaProveedorId: mRef.id }));
@@ -455,7 +455,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       }
       setShowModalMaquina(false);
       setNuevaMaquinaData({ patente: '', tipo: '', modelo: '', empresaId: '' });
-      toast({ type: 'success', message: 'Maquinaria registrada y vinculada' });
+      toast({ type: 'success', message: creada ? 'Maquinaria registrada y vinculada' : 'Esa patente ya estaba registrada: se vinculó la ficha existente' });
     } catch (error) {
       console.error("Error creando máquina:", error);
       toast({ type: 'error', message: 'Error al crear máquina' });
@@ -866,7 +866,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           } catch {}
         }
         const finalMachineInfo = machineInfo
-          ? { patente: machineInfo.patente || '', nombre: machineInfo.name || machineInfo.nombre || '', tipo: machineInfo.tipo || '' }
+          ? { patente: machineInfo.patente || '', nombre: machineInfo.name || machineInfo.nombre || '', tipo: machineInfo.type || machineInfo.tipo || '' }
           : { patente: maquinaExterna.patente || 'N/A', nombre: maquinaExterna.modelo || 'EXTERNA', tipo: maquinaExterna.tipo || 'N/A' };
         let operadorInfo = trabajadoresLocales?.find(e => e.id === datosEntrega.operadorId);
         if (!operadorInfo && datosEntrega.operadorId) {

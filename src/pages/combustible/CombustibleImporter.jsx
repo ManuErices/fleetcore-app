@@ -136,19 +136,15 @@ export default function CombustibleImporter({ empresaId, onClose, onSuccess }) {
   async function handleCreateOne(patente, hint) {
     setCreatingSet(prev => new Set([...prev, patente]));
     try {
-      const mData = {
+      const { asegurarMaquina } = await import('../../lib/maquinas');
+      const { id, maquina } = await asegurarMaquina(empresaId, {
         patente: patente.toUpperCase(),
         code: patente.toUpperCase(),
         name: hint.equipoNombre.toUpperCase() || patente,
-        tipo: hint.equipoNombre.toUpperCase() || '',
-        marca: '',
-        modelo: '',
+        type: hint.equipoNombre.toUpperCase() || '',
         empresa: hint.empresaNombre || '',
-        active: true,
-        createdAt: serverTimestamp(),
-      };
-      const ref = await addDoc(collection(db, 'empresas', empresaId, 'machines'), mData);
-      setMachines(prev => [...prev, { id: ref.id, ...mData }]);
+      }, { origen: 'importador-combustible', maquinas: machines.filter(m => m.id) });
+      setMachines(prev => prev.some(m => m.id === id) ? prev : [...prev, { ...maquina, id }]);
       setCreatedSet(prev => new Set([...prev, patente]));
     } catch (e) {
       console.error('Error creando máquina:', e);
