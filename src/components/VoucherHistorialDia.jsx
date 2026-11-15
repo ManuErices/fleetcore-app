@@ -3,6 +3,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { printThermalVoucher } from '../utils/voucherThermalGenerator';
 import { useEmpresa } from '../lib/useEmpresa';
+import { hoyISO } from '../lib/fechas';
 
 /**
  * VoucherHistorialDia
@@ -15,7 +16,7 @@ export default function VoucherHistorialDia({ isOpen, onClose, repartidorId, rep
   const [loading, setLoading] = useState(false);
   const [imprimiendoId, setImprimiendoId] = useState(null);
 
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const today = hoyISO(); // YYYY-MM-DD en hora de Chile
 
   const cargar = useCallback(async () => {
     if (!empresaId) return;

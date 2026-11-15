@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { generarConIA } from '../lib/claude.js'
 import ResultPanel from '../components/ResultPanel.jsx'
 import SearchableDropdown from '../../../components/SearchableDropdown.jsx'
+import { hoyISO } from '../../../lib/fechas.js'
 
 const CONDICIONES_CLIMATICAS = [
   'Despejado',
@@ -26,7 +27,7 @@ const CONDICIONES_CLIMATICAS = [
   'Frío, despejado',
 ]
 
-const today = new Date().toISOString().split('T')[0]
+const today = hoyISO()
 
 const COLORS = {
   general:   '#3B82F6',

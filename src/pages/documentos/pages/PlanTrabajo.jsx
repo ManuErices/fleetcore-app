@@ -6,8 +6,9 @@ import LayoutEditor from '../components/LayoutEditor.jsx'
 import { useEmpresaData } from '../../../hooks/useEmpresaData.js'
 import { useEmpresa } from '../../../lib/useEmpresa.jsx'
 import SearchableDropdown from '../../../components/SearchableDropdown.jsx'
+import { hoyISO } from '../../../lib/fechas.js'
 
-const today = new Date().toISOString().split('T')[0]
+const today = hoyISO()
 
 // Section color identities
 const COLORS = {

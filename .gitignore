@@ -104,3 +104,5 @@ TODO.txt
 .env
 
 .backup/
+.claude/worktrees/
+
