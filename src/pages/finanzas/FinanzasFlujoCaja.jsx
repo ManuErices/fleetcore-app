@@ -14,6 +14,7 @@ import { useTransicion, ControlTransicion, lerp } from "./transicion";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
+import ReferenciaSubcontratos from "./ReferenciaSubcontratos";
 import { cargarReales, cargarSaldosBancos } from "../../lib/banco/importacion.js";
 import {
   Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
@@ -1861,6 +1862,10 @@ export default function FinanzasFlujoCaja() {
           })}
         </div>
       )}
+
+      {/* Referencia: estados de pago de subcontratistas (no escribe en el flujo) */}
+      <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
+        payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle} />
 
       {/* Panel lateral de detalle de cuenta (egresos) */}
       {cuentaDetalle && (

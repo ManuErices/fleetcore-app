@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { textoTransferencia, hrefTelefono } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
+import { cargarSubcontratos, epsDeTercero } from "../../lib/subcontratosEP";
 import ModalProveedor from "./ModalProveedor";
 import {
   Cifra, Titulo, Resaltado, LineaGuia, Boton, VistoBueno,
@@ -118,6 +119,17 @@ export default function PanelDetalleCuenta({
   const [copiado, setCopiado] = useState(null);
   const timerCopiado = useRef(null);
   const botonCerrar = useRef(null);
+
+  // Estados de pago del subcontratista en Oficina Técnica (solo referencia)
+  const [eps, setEps] = useState(null);
+  useEffect(() => {
+    if (!empresaId || !proveedor) { setEps(null); return; }
+    let vivo = true;
+    cargarSubcontratos(empresaId)
+      .then(filas => { if (vivo) setEps(epsDeTercero(filas, proveedor)); })
+      .catch(() => { if (vivo) setEps(null); });
+    return () => { vivo = false; };
+  }, [empresaId, proveedor?.id]);
 
   // Entrada: montar fuera de pantalla y deslizar en el siguiente frame
   useEffect(() => {
@@ -351,6 +363,31 @@ export default function PanelDetalleCuenta({
               <p className="m-0 text-[16px] text-cuaderno-grafito">Esta cuenta no tiene montos en las semanas visibles.</p>
             )}
           </Seccion>
+
+          {/* Estados de pago de Oficina Técnica: referencia, no escribe en el flujo */}
+          {eps?.eps.length > 0 && (
+            <Seccion titulo="Estados de pago en Oficina Técnica">
+              <p className="m-0 mb-2 text-[14px] text-cuaderno-grafito">Solo referencia para anotar el flujo; no lo modifica.</p>
+              <ul className="m-0 p-0 list-none">
+                {eps.eps.slice(0, 8).map(e => (
+                  <li key={`${e.numeroSC}-${e.numeroEP}`} className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 min-h-[46px] border-b border-cuaderno-azul">
+                    <div className="text-[15px] leading-tight">{e.fechaEP ? e.fechaEP.split("-").reverse().join("/") : "sin fecha"}</div>
+                    <div className="min-w-0 leading-tight">
+                      <div className="text-[15px] truncate">EP {e.numeroEP} · SC {e.numeroSC}</div>
+                      {e.estado && <div className="text-[13px] text-cuaderno-grafito">{casoOracion(e.estado)}</div>}
+                    </div>
+                    <Cifra valor={e.totalPagoNeto} escala="pesos" color="tinta" />
+                  </li>
+                ))}
+              </ul>
+              {eps.eps.length > 8 && <p className="m-0 mt-1 text-[13px] text-cuaderno-grafito">Y {eps.eps.length - 8} estados de pago anteriores.</p>}
+              {eps.saldoPorPagar > 0 && (
+                <LineaGuia etiqueta="Saldo por pagar de sus contratos" className="mt-2 text-[16px]">
+                  <Cifra valor={eps.saldoPorPagar} escala="pesos" color="tinta" />
+                </LineaGuia>
+              )}
+            </Seccion>
+          )}
 
           {/* Notas del proveedor */}
           {p?.notas && (
