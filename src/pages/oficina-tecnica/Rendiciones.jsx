@@ -375,9 +375,15 @@ export default function Rendiciones() {
         r.propietario, r.fechaEmision, Number(r.montoSolicitado) || 0].map(norm).join("|");
       const hash = (txt) => { let h = 5381; for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0; return h.toString(36); };
 
+      // Maestro de terceros: ficha por RUT y proveedorId en cada gasto
+      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
+      const mapaTerceros = await asegurarTerceros(empresaId, todasLasFilas.map(r => ({ rut: r.rutProveedor, razonSocial: r.proveedor })));
       const rendicionesImportadas = todasLasFilas
         .filter(r => r.nombreGasto || r.montoSolicitado || r.montoAprobado)
-        .map(r => ({ ...r, projectId: obraDeUnidad(r.unidadRendicion) }));
+        .map(r => {
+          const proveedorId = idTercero(mapaTerceros, r.rutProveedor);
+          return { ...r, projectId: obraDeUnidad(r.unidadRendicion), ...(proveedorId ? { proveedorId } : {}) };
+        });
 
       if (rendicionesImportadas.length === 0) {
         alert('No se encontraron gastos en el archivo.');

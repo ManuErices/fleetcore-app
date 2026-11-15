@@ -460,6 +460,11 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
     setProgreso({ hecho: 0, total: porEscribir.length });
 
     try {
+      // Maestro de terceros: ficha por RUT y proveedorId en cada documento
+      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
+      const mapaTerceros = await asegurarTerceros(empresaId, porEscribir.map(x => ({ rut: x.rut, razonSocial: x.proveedorNombre })));
+      porEscribir.forEach(x => { const id = idTercero(mapaTerceros, x.rut); if (id) x.proveedorId = id; });
+
       for (let i = 0; i < porEscribir.length; i += TAMANO_BATCH) {
         const lote = porEscribir.slice(i, i + TAMANO_BATCH);
         const batch = writeBatch(db);
