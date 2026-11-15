@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { collection, getDocs, addDoc, getDoc, doc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, addDoc, getDoc, doc, setDoc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { db, auth, storage } from "../../../lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { ref, uploadString, getDownloadURL, uploadBytes } from "firebase/storage";
@@ -8,35 +8,51 @@ import { useToast } from '../../../components/Toast';
 import { useEmpresaData } from '../../../hooks/useEmpresaData';
 import { useEmpresa } from '../../../lib/useEmpresa';
 import { useSurtidorStock } from './useSurtidorStock';
+import { hoyISO } from '../../../lib/fechas';
 
-const TODAY = () => new Date().toISOString().split('T')[0];
+// Fecha de hoy en Chile (toISOString daba la de UTC: desde las 21:00 ya era "mañana").
+const TODAY = hoyISO;
 
-const getNextCodigoNumber = async (empresaId) => {
+// Mayor código numérico ya usado (solo para sembrar el contador la primera vez).
+const maxCodigoExistente = async (empresaId) => {
+  const snapshot = await getDocs(collection(db, 'empresas', empresaId, 'reportes_combustible'));
+  let lastNum = 0;
+  snapshot.docs.forEach(d => {
+    const n = parseInt(d.data().codigo, 10);
+    if (!isNaN(n) && n > lastNum) lastNum = n;
+  });
+  return lastNum;
+};
+
+const conPlazo = (promesa, ms) => Promise.race([
+  promesa,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+]);
+
+// Código correlativo del reporte de combustible. Antes se leían 200 reportes
+// cualquiera (limit sin orderBy) y se tomaba el mayor: con más de 200
+// reportes el número se repetía. Ahora sale de un contador transaccional en
+// empresas/{id}/counters/combustible (como los folios de Rental). Sin señal
+// (o si el contador no responde) se usa un código provisorio marcado
+// `codigoPendiente`, para asignarle el definitivo después.
+const siguienteCodigoCombustible = async (empresaId) => {
+  const provisorio = () => ({ codigo: `PEND-${Date.now().toString(36).toUpperCase()}`, pendiente: true });
+  if (!empresaId || !navigator.onLine) return provisorio();
   try {
-    const { collection, query, limit, getDocs } = await import('firebase/firestore');
-    const { db } = await import('../../../lib/firebase');
-
-    if (!empresaId) return 1;
-
-    const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-    const q = query(reportesRef, limit(200));
-    const snapshot = await getDocs(q);
-
-    let lastNum = 0;
-    snapshot.docs.forEach(d => {
-      const val = d.data().codigo;
-      if (val) {
-        const n = parseInt(val, 10);
-        if (!isNaN(n) && n > lastNum) {
-          lastNum = n;
-        }
-      }
-    });
-
-    return lastNum + 1;
+    const ref = doc(db, 'empresas', empresaId, 'counters', 'combustible');
+    const inicial = await conPlazo(getDoc(ref), 8000);
+    const semilla = inicial.exists() ? 0 : await conPlazo(maxCodigoExistente(empresaId), 15000);
+    const numero = await conPlazo(runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const actual = snap.exists() ? Number(snap.data().codigo) || 0 : 0;
+      const siguiente = Math.max(actual, semilla) + 1;
+      tx.set(ref, { codigo: siguiente, updatedAt: serverTimestamp() }, { merge: true });
+      return siguiente;
+    }), 10000);
+    return { codigo: String(numero), pendiente: false };
   } catch (error) {
-    console.error('Error en getNextCodigoNumber:', error);
-    return 1;
+    console.warn('Contador de combustible no disponible, se usa código provisorio:', error?.code || error?.message);
+    return provisorio();
   }
 };
 
@@ -44,6 +60,11 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
   const { empresa: empresaPrincipal } = useEmpresa();
   const { toast, toasts, removeToast } = useToast();
   const isSubmittingRef = useRef(false);
+  // Id del reporte (y su código), fijos desde el primer intento de envío
+  // hasta resetear el formulario: un reintento sin señal escribe el mismo
+  // documento en vez de crear un duplicado.
+  const reporteIdRef = useRef(null);
+  const codigoAsignadoRef = useRef(null);
 
   const [paso, setPaso] = useState(1);
   const [tipoReporte, setTipoReporte] = useState('');
@@ -325,6 +346,8 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
 
   const resetForm = () => {
     isSubmittingRef.current = false;
+    reporteIdRef.current = null;
+    codigoAsignadoRef.current = null;
     setPaso(1);
     setTipoReporte('');
     setFirmaRepartidor(null);
@@ -671,20 +694,24 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     try {
       setLoading(true);
       // Validar o generar código
+      const reportesCol = collection(db, 'empresas', empresaId, 'reportes_combustible');
+      if (!reporteIdRef.current) reporteIdRef.current = doc(reportesCol).id;
       let finalCodigo = datosControl.codigo ? datosControl.codigo.trim() : null;
+      let codigoPendiente = false;
       if (finalCodigo) {
-        const { collection, query, where, getDocs } = await import('firebase/firestore');
-        const reportesRef = collection(db, 'empresas', empresaId, 'reportes_combustible');
-        const q = query(reportesRef, where('codigo', '==', finalCodigo));
+        const { query, where } = await import('firebase/firestore');
+        const q = query(reportesCol, where('codigo', '==', finalCodigo));
         const snap = await getDocs(q);
-        const exists = snap.docs.some(d => !d.data().deleted);
+        // El propio documento (reintento) no cuenta como duplicado
+        const exists = snap.docs.some(d => !d.data().deleted && d.id !== reporteIdRef.current);
         if (exists) {
           abort('warning', 'El código ingresado ya existe. Por favor ingresa uno diferente.');
           return;
         }
       } else {
-        const nextCodNum = await getNextCodigoNumber(empresaId);
-        finalCodigo = String(nextCodNum);
+        if (!codigoAsignadoRef.current) codigoAsignadoRef.current = await siguienteCodigoCombustible(empresaId);
+        finalCodigo = codigoAsignadoRef.current.codigo;
+        codigoPendiente = codigoAsignadoRef.current.pendiente;
       }
 
       const fecha = new Date();
@@ -697,6 +724,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         numeroGuia,
         ...datosControl,
         codigo: finalCodigo,
+        ...(codigoPendiente ? { codigoPendiente: true } : {}),
         // Se guarda además anidado: los reportes (stock de surtidores, vouchers,
         // PDF) leen `datosControl.equipoSurtidorId`. Sin esto las salidas no
         // descuentan del camión/mochila ni muestran el surtidor.
@@ -848,8 +876,15 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         // Firestore persistirá esto localmente de inmediato
       }
 
-      const docRef = await addDoc(collection(db, 'empresas', empresaId, 'reportes_combustible'), dataToSave);
-      const nuevoReporteId = docRef.id;
+      // Sin await: con la caché persistente la promesa recién se resuelve
+      // cuando el servidor confirma, y sin señal el spinner quedaba girando
+      // (el operador reenviaba y se duplicaba). La escritura local ya está
+      // hecha; si el servidor la rechaza se avisa después.
+      const nuevoReporteId = reporteIdRef.current;
+      setDoc(doc(reportesCol, nuevoReporteId), dataToSave).catch((err) => {
+        console.error('El servidor rechazó el reporte de combustible:', err);
+        toast({ type: 'error', message: `El servidor no aceptó el reporte ${numeroReporte}. Revisa con el administrador.`, duration: 8000 });
+      });
 
       // Refrescar el remanente del surtidor (la entrada suma, la entrega descuenta)
       recargarStockSurtidor();
@@ -888,7 +923,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           type: online ? 'success' : 'warning',
           message: online
             ? `Reporte de Entrega registrado: ${numeroReporte}`
-            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+            : `Guardado: ${numeroReporte}. Se sincroniza al volver la señal.`,
           duration: online ? 5000 : 7000,
         });
         if (isReportesView) {
@@ -901,7 +936,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
           type: online ? 'success' : 'warning',
           message: online
             ? `Reporte de Entrada registrado: ${numeroReporte}`
-            : `Guardado sin conexión: ${numeroReporte}. Se sincronizará automáticamente al reconectar.`,
+            : `Guardado: ${numeroReporte}. Se sincroniza al volver la señal.`,
           duration: online ? 5000 : 7000,
         });
         if (isReportesView) {

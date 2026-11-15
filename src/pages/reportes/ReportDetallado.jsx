@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { listMachines } from "../../lib/db";
-import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
+import { collection, setDoc, serverTimestamp, doc, getDoc, query, where, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
@@ -13,9 +13,28 @@ import {
   validarKilometraje,
   validarCombustible,
 } from "../../lib/reportesConfig";
+import { hoyISO } from "../../lib/fechas";
+import { guardarMaquina } from "../../lib/maquinas";
 
-function isoToday() {
-  return new Date().toISOString().split('T')[0];
+// Fecha de hoy en Chile (toISOString daba la de UTC: desde las 21:00 ya era "mañana").
+const isoToday = hoyISO;
+
+// Sube el medidor de la ficha de la máquina con el horómetro/kilometraje
+// final del parte (solo si es mayor), para que las alertas de mantención
+// funcionen con lo que reporta WorkFleet. No se espera: sin señal o sin
+// permisos el parte igual queda guardado.
+function subirMedidorMaquina(empresaId, machine, form) {
+  if (!machine?.id) return;
+  const esKm = machine.medidorTipo === 'kilometraje';
+  const valor = parseFloat(esKm ? form.kilometrajeFinal : form.horometroFinal);
+  if (!(valor > 0) || valor <= (Number(machine.medidorActual) || 0)) return;
+  const ahora = new Date().toISOString();
+  guardarMaquina(empresaId, {
+    medidorActual: valor,
+    medidorActualizadoEn: ahora,
+    medidorActualizadoDesde: 'workfleet',
+  }, { id: machine.id, original: machine, origen: 'workfleet' })
+    .catch((err) => console.warn('No se pudo actualizar el medidor de la máquina:', err?.message || err));
 }
 
 // ── Estados posibles de la máquina en el reporte ──────────────
@@ -42,6 +61,10 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  // Id del parte, fijo desde el primer intento de guardar hasta limpiar el
+  // formulario: si el operador reintenta (sin señal) se escribe el mismo
+  // documento y no se duplica.
+  const reporteIdRef = useRef(null);
   const [busquedaMaquina, setBusquedaMaquina] = useState(''); // buscador de máquina en el form
   const [confirmarOtro, setConfirmarOtro] = useState(false);  // modal "¿cargar otro reporte?"
 
@@ -563,6 +586,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       }
     }
 
+    reporteIdRef.current = null; // el próximo parte es otro documento
     setFormData({
       fecha: isoToday(),
       numeroReporte: '', // se genera al escanear la siguiente máquina
@@ -599,14 +623,25 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     if (!empresaId) return;
     setIsLoading(true);
     try {
-      await addDoc(collection(db, 'empresas', empresaId, 'reportes_detallados'), {
+      const col = collection(db, 'empresas', empresaId, 'reportes_detallados');
+      if (!reporteIdRef.current) reporteIdRef.current = doc(col).id;
+      // Sin await: con la caché persistente, la promesa recién se resuelve
+      // cuando el servidor confirma, y sin señal el botón quedaba girando
+      // para siempre (el operador reenviaba y se duplicaba). La escritura
+      // local ya quedó hecha; si el servidor la rechaza se avisa después.
+      setDoc(doc(col, reporteIdRef.current), {
         projectId: selectedProject,
         ...formData,
         deleted: false,           // soft-delete: nunca se borra físicamente
         firmado: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
+      }).catch((err) => {
+        console.error('El servidor rechazó el reporte:', err);
+        toast({ type: 'error', message: 'El servidor no aceptó el reporte guardado. Revisa con el administrador.', duration: 8000 });
       });
+
+      subirMedidorMaquina(empresaId, machines.find(m => m.id === formData.machineId), formData);
 
       // Se avisa al contenedor para que refresque el listado sin recargar
       // la página. El reload completo hacía perder la pestaña activa y
@@ -618,7 +653,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       if (navigator.onLine) {
         toast({ type: 'success', message: 'Reporte guardado correctamente.' });
       } else {
-        toast({ type: 'warning', message: 'Guardado sin conexión. Se sincronizará automáticamente al reconectar.', duration: 7000 });
+        toast({ type: 'warning', message: 'Guardado en el teléfono: se sincroniza al volver la señal.', duration: 7000 });
       }
       // ✅ Encadenar reportes: en terreno se cargan varias máquinas seguidas.
       // En vez de un confirm nativo, se abre un modal profesional.

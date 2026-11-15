@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useUserRole } from "../../lib/useUserRole";
 import { listMachines } from "../../lib/db";
+import { estaActiva } from "../../lib/maquinas";
+import { hoyISO } from "../../lib/fechas";
 import {
   listRentalContracts, upsertRentalContract, deleteRentalContract, finalizarRentalContract,
   listRentalClients, listRentalPurchaseOrders, listRentalPayments,
@@ -614,7 +616,7 @@ function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
   const fmt = (n) => fmtMoneda(n, monedaDe(contrato));
   const [f, setF] = useState({
     numeroOC: "",
-    fechaEmision: new Date().toISOString().slice(0, 10),
+    fechaEmision: hoyISO(),
     fechaVencimiento: "",
     montoNeto: "",
     valorUF: esUF ? contrato.valorUF || "" : "",
@@ -736,7 +738,7 @@ function ModalEnmienda({ empresaId, contrato, saldo, onClose, onListo }) {
 function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved }) {
   const [f, setF] = useState({
     clienteId: contrato?.clienteId || "",
-    fechaInicio: contrato?.fechaInicio || new Date().toISOString().slice(0, 10),
+    fechaInicio: contrato?.fechaInicio || hoyISO(),
     fechaFin: contrato?.fechaFin || "",
     estado: contrato?.estado || "activo",
     proyectoDestino: contrato?.proyectoDestino || "",
@@ -836,7 +838,8 @@ function FormContrato({ empresaId, contrato, clients, machines, onClose, onSaved
   };
 
   const disponibles = machines.filter(
-    (m) => m.activo !== false && (m.disponibilidad !== "arrendado" || lineas.some((l) => l.machineId === m.id))
+    // estaActiva: el maestro usa `active` (antes se filtraba solo `activo`)
+    (m) => estaActiva(m) && (m.disponibilidad !== "arrendado" || lineas.some((l) => l.machineId === m.id))
   );
 
   return (

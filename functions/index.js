@@ -1603,40 +1603,68 @@ exports.closeWorkOrder = onRequest((req, res) => {
           throw { status: 400, message: `El medidor no puede ser menor al registrado actualmente (${machine.medidorActual})` };
         }
 
-        // 1. Descontar stock de repuestos usados
+        // ── LECTURAS ──
+        // Firestore (Admin SDK) rechaza cualquier tx.get() después de un
+        // tx.update()/tx.set() en la misma transacción: antes se descontaba
+        // stock y DESPUÉS se leía el plan preventivo, así que toda OT
+        // preventiva con repuestos fallaba. Ahora se lee todo primero.
         let costoRepuestos = 0;
         const partRefs = [];
+        const repuestosValorizados = [];
         for (const item of repuestosUsados) {
+          const cantidad = Number(item.cantidad) || 0;
+          if (cantidad <= 0) throw { status: 400, message: `Cantidad inválida: ${item.codigo || item.spareId}` };
           const partRef = db.doc(`${empresaPath}/spareParts/${item.spareId}`);
           const partSnap = await tx.get(partRef);
           if (!partSnap.exists) throw { status: 404, message: `Repuesto ${item.codigo || item.spareId} no encontrado` };
-          const stockActual = partSnap.data().stock || 0;
-          if (stockActual < item.cantidad) throw { status: 409, message: `Stock insuficiente: ${item.codigo || item.spareId}` };
-          partRefs.push({ partRef, stockActual, item });
-          costoRepuestos += item.cantidad * (item.costoUnitario || 0);
+          const part = partSnap.data();
+          const stockActual = part.stock || 0;
+          if (stockActual < cantidad) throw { status: 409, message: `Stock insuficiente: ${item.codigo || item.spareId}` };
+          // El costo sale de la ficha del repuesto, no del body: el cliente
+          // podía mandar cualquier costoUnitario y alterar el costo de la OT.
+          const costoUnitario = Number(part.costoUnitario) || 0;
+          partRefs.push({ partRef, stockActual, item, cantidad });
+          repuestosValorizados.push({ ...item, cantidad, costoUnitario });
+          costoRepuestos += cantidad * costoUnitario;
         }
-        partRefs.forEach(({ partRef, stockActual, item }) => {
-          const stockResultante = stockActual - item.cantidad;
-          tx.update(partRef, { stock: stockResultante, updatedAt: FieldValue.serverTimestamp() });
-          const movRef = db.collection(`${empresaPath}/sparePartMovements`).doc();
-          tx.set(movRef, {
-            spareId: item.spareId, tipo: 'salida', cantidad: item.cantidad,
-            motivo: `OT-${workOrderId}`, workOrderId, usuarioId: callerUid,
-            fecha: new Date().toISOString(), stockResultante,
-            createdAt: FieldValue.serverTimestamp(),
-          });
-        });
 
-        // 2. Calcular próxima mantención si la OT viene de un plan preventivo
         let proximaMantencionEn = null;
         if (wo.origen === 'preventiva' && wo.origenRefId) {
           const planSnap = await tx.get(db.doc(`${empresaPath}/maintenancePlans/${wo.origenRefId}`));
           if (planSnap.exists) proximaMantencionEn = Number(medidorFinal) + (planSnap.data().intervalo || 0);
         }
 
+        // Falla que originó la OT (se marca resuelta al cerrar; antes quedaba 'en_ot' para siempre)
+        let failureRef = null;
+        if (wo.origen === 'falla' && wo.origenRefId) {
+          const ref = db.doc(`${empresaPath}/failures/${wo.origenRefId}`);
+          const failureSnap = await tx.get(ref);
+          if (failureSnap.exists && ['abierta', 'en_ot'].includes(failureSnap.data().estado)) failureRef = ref;
+        }
+
+        // ── ESCRITURAS ──
+        // 1. Descontar stock de repuestos usados
+        partRefs.forEach(({ partRef, stockActual, item, cantidad }) => {
+          const stockResultante = stockActual - cantidad;
+          tx.update(partRef, { stock: stockResultante, updatedAt: FieldValue.serverTimestamp() });
+          const movRef = db.collection(`${empresaPath}/sparePartMovements`).doc();
+          tx.set(movRef, {
+            spareId: item.spareId, tipo: 'salida', cantidad,
+            motivo: `OT-${workOrderId}`, workOrderId, usuarioId: callerUid,
+            fecha: new Date().toISOString(), stockResultante,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        });
+
+        // 2. Mano de obra: no existe todavía un valor hora de taller en la
+        // empresa ni en la máquina. Se respeta un costoManoObra que ya traiga
+        // la OT; si no, queda 0.
+        // TODO: valorizar horasTrabajo × valor hora del taller cuando exista ese campo.
+        const costoManoObra = Number(wo.costoManoObra) || 0;
+
         // 3. Crear el evento de mantención (historial)
         const eventRef = db.collection(`${empresaPath}/maintenanceEvents`).doc();
-        const costoTotal = (wo.costoManoObra || 0) + costoRepuestos;
+        const costoTotal = costoManoObra + costoRepuestos;
         tx.set(eventRef, {
           machineId: wo.machineId, planId: wo.origenRefId || null, workOrderId,
           tipo: wo.origen === 'preventiva' ? 'preventiva' : 'correctiva',
@@ -1648,16 +1676,28 @@ exports.closeWorkOrder = onRequest((req, res) => {
         // 4. Cerrar la OT
         tx.update(woRef, {
           estado: 'cerrada', trabajoRealizado, horasTrabajo: Number(horasTrabajo) || 0, observaciones: observaciones || '',
-          medidorFinal: Number(medidorFinal), repuestosUsados, costoRepuestos, costoTotal,
+          medidorFinal: Number(medidorFinal), repuestosUsados: repuestosValorizados, costoRepuestos, costoManoObra, costoTotal,
           fechaCierre: new Date().toISOString(), cerradoPor: callerUid,
           updatedAt: FieldValue.serverTimestamp(),
         });
 
-        // 5. Actualizar la máquina
-        tx.update(machineRef, {
+        // 5. Actualizar la máquina. Solo vuelve a 'operativa' si estaba
+        // detenida por mantención/falla: una máquina dada de baja (o
+        // disponible/arrendada) conserva su estado.
+        const ESTADOS_DETENIDA = ['en_mantencion', 'en_taller', 'fuera_de_servicio', 'fuera_servicio'];
+        const patchMaquina = {
           medidorActual: Number(medidorFinal), medidorActualizadoEn: FieldValue.serverTimestamp(),
-          medidorActualizadoPor: callerUid, status: 'operativa',
-        });
+          medidorActualizadoPor: callerUid,
+        };
+        if (!machine.status || ESTADOS_DETENIDA.includes(machine.status)) patchMaquina.status = 'operativa';
+        tx.update(machineRef, patchMaquina);
+
+        if (failureRef) {
+          tx.update(failureRef, {
+            estado: 'resuelta', resueltaEn: new Date().toISOString(), resueltaPor: callerUid,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
 
         // 6. Auditoría
         const histRef = db.collection(`${empresaPath}/machineHistory`).doc();
