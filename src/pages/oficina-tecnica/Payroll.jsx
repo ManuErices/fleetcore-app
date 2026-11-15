@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { listActiveProjects, listEmployees, listMachines, listEmployeeMonthlyData, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment, upsertEmployee } from "../../lib/db";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { mesActualISO } from "../../lib/fechas";
 import PayrollImporter from "../../components/PayrollImporter";
 import EmployeeDetailModal from "../../components/EmployeeDetailModal";
 
@@ -29,8 +30,8 @@ export default function Payroll() {
   const [machines, setMachines] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(() => Number(mesActualISO().slice(5, 7)));
+  const [selectedYear, setSelectedYear] = useState(() => Number(mesActualISO().slice(0, 4)));
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedEmployees, setExpandedEmployees] = useState(new Set());
   const [sortKey, setSortKey] = useState("nombre");

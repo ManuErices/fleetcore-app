@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
-import { listMachines, upsertFuelLog, listFuelLogsByRange } from "../lib/db";
+import { listMachines, upsertFuelLog, listFuelLogsByRange, deleteFuelLog } from "../lib/db";
+import { fechaISO, serialExcelAISO } from "../lib/fechas";
 import { useEmpresa } from "../lib/useEmpresa";
 
 export default function FuelImporter({ projectId, onImportComplete, setShowImporter }) {
@@ -113,19 +114,14 @@ export default function FuelImporter({ projectId, onImportComplete, setShowImpor
       }
     }
     
+    // Serial de Excel: es un día sin zona, se lee en UTC (leído en hora
+    // local quedaba un día antes en Chile)
     if (typeof excelDate === 'number') {
-      const date = new Date((excelDate - 25569) * 86400 * 1000);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+      return serialExcelAISO(excelDate) || null;
     }
     
     if (excelDate instanceof Date) {
-      const year = excelDate.getFullYear();
-      const month = String(excelDate.getMonth() + 1).padStart(2, '0');
-      const day = String(excelDate.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+      return fechaISO(excelDate) || null;
     }
     
     return null;
@@ -232,51 +228,65 @@ export default function FuelImporter({ projectId, onImportComplete, setShowImpor
         console.log(`✅ ${existingFuelLogs.length} recargas existentes`);
       }
 
+      // Reimportar REEMPLAZA, nunca suma (antes se sumaban los litros al
+      // registro existente y cada reimportación inflaba el consumo). Llave:
+      // máquina + día + n° de carga de esa máquina ese día en el archivo
+      // (`cargaN`), así dos cargas del mismo día siguen siendo dos registros.
+      // Para cada máquina-día del archivo, los registros existentes se
+      // reutilizan en orden y los que sobran se borran.
+      const ordenCarga = (l) => (l.cargaN != null ? Number(l.cargaN) : 1e9);
       const existingLogMap = {};
       existingFuelLogs.forEach(log => {
-        const key = `${log.machineId}-${log.date}`;
-        if (existingLogMap[key]) {
-          existingLogMap[key].liters += log.liters || 0;
-        } else {
-          existingLogMap[key] = log;
-        }
+        (existingLogMap[`${log.machineId}-${log.date}`] ||= []).push(log);
       });
+      Object.values(existingLogMap).forEach(lista => lista.sort((a, b) =>
+        ordenCarga(a) - ordenCarga(b) || String(a.id).localeCompare(String(b.id))));
+
+      const filasPorDia = {};
+      for (const log of preview.fuelLogs) {
+        const machineId = machineIdMap[log.machineKey];
+        if (!machineId || !log.date) continue;
+        (filasPorDia[`${machineId}-${log.date}`] ||= []).push({ ...log, machineId });
+      }
 
       console.log("🚀 Importando recargas...");
 
-      for (const log of preview.fuelLogs) {
-        try {
-          const machineId = machineIdMap[log.machineKey];
-          
-          if (!machineId) {
-            continue;
+      for (const [logKey, filas] of Object.entries(filasPorDia)) {
+        const existentes = existingLogMap[logKey] || [];
+        for (let i = 0; i < filas.length; i++) {
+          const log = filas[i];
+          try {
+            const fuelLogData = {
+              projectId: projectId,
+              machineId: log.machineId,
+              date: log.date,
+              liters: log.liters || 0,
+              origin: log.origin || '',
+              kilometraje: log.kilometraje,
+              horometro: log.horometro,
+              cargaN: i
+            };
+            if (existentes[i]) {
+              fuelLogData.id = existentes[i].id;
+              await upsertFuelLog(empresaId, fuelLogData);
+              importResults.logsUpdated++;
+            } else {
+              await upsertFuelLog(empresaId, fuelLogData);
+              importResults.logsCreated++;
+            }
+          } catch (err) {
+            console.error(`❌ Error:`, err);
+            importResults.errors.push(`Error: ${err.message}`);
           }
-
-          const logKey = `${machineId}-${log.date}`;
-          const existingLog = existingLogMap[logKey];
-
-          const fuelLogData = {
-            projectId: projectId,
-            machineId: machineId,
-            date: log.date,
-            liters: log.liters || 0,
-            origin: log.origin || '',
-            kilometraje: log.kilometraje,
-            horometro: log.horometro
-          };
-
-          if (existingLog) {
-            fuelLogData.id = existingLog.id;
-            fuelLogData.liters = (existingLog.liters || 0) + (log.liters || 0);
-            await upsertFuelLog(empresaId, fuelLogData);
-            importResults.logsUpdated++;
-          } else {
-            await upsertFuelLog(empresaId, fuelLogData);
-            importResults.logsCreated++;
+        }
+        // Registros de ese día que ya no están en el archivo (o duplicados de
+        // importaciones anteriores): se borran para que el día quede igual al archivo
+        for (const sobrante of existentes.slice(filas.length)) {
+          try {
+            await deleteFuelLog(empresaId, sobrante.id);
+          } catch (err) {
+            importResults.errors.push(`Error borrando duplicado: ${err.message}`);
           }
-        } catch (err) {
-          console.error(`❌ Error:`, err);
-          importResults.errors.push(`Error: ${err.message}`);
         }
       }
 

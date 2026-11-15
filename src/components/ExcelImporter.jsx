@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
-import { upsertDailyLog } from "../lib/db";
+import { upsertDailyLog, deleteDailyLog } from "../lib/db";
+import { fechaISO, serialExcelAISO } from "../lib/fechas";
 import { useEmpresa } from "../lib/useEmpresa";
 
 export default function ExcelImporter({ projectId, onImportComplete }) {
@@ -183,22 +184,24 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
   const formatDate = (excelDate) => {
     if (!excelDate) return null;
     
-    // Si ya es un objeto Date
+    // Si ya es un objeto Date (día en hora de Chile, no en UTC)
     if (excelDate instanceof Date) {
-      return excelDate.toISOString().split('T')[0];
+      return fechaISO(excelDate) || null;
     }
     
-    // Si es un número de Excel (días desde 1900-01-01)
+    // Si es un número de Excel (días desde 1900-01-01): se lee en UTC
     if (typeof excelDate === 'number') {
-      const date = new Date((excelDate - 25569) * 86400 * 1000);
-      return date.toISOString().split('T')[0];
+      return serialExcelAISO(excelDate) || null;
     }
     
-    // Si es un string, intentar parsearlo
+    // Si es un string, intentar parsearlo ("AAAA-MM-DD" tal cual: new Date lo
+    // tomaría como UTC y en Chile daría el día anterior)
     if (typeof excelDate === 'string') {
+      const iso = excelDate.trim().match(/^\d{4}-\d{2}-\d{2}/);
+      if (iso) return iso[0];
       const date = new Date(excelDate);
       if (!isNaN(date)) {
-        return date.toISOString().split('T')[0];
+        return fechaISO(date);
       }
     }
     
@@ -344,11 +347,15 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
         console.log(`✅ ${existingLogs.length} logs existentes encontrados en rango ${minDate} a ${maxDate}`);
       }
 
-      // Crear mapa de logs existentes: "machineId-date" -> log
+      // Crear mapa de logs existentes: "machineId-date" -> log. Si hay más de
+      // uno para el mismo día (duplicados antiguos) se deja el primero y los
+      // demás se borran al reimportar ese día.
       const existingLogMap = {};
+      const duplicadosLog = {};
       existingLogs.forEach(log => {
         const key = `${log.machineId}-${log.date}`;
-        existingLogMap[key] = log;
+        if (existingLogMap[key]) (duplicadosLog[key] ||= []).push(log.id);
+        else existingLogMap[key] = log;
       });
 
       // 🚀 PASO 4: Importar/actualizar logs
@@ -368,8 +375,11 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
             continue;
           }
 
-          // Procesar logs con horas > 0 O kilometraje > 0 (para vehículos que solo registran KM)
-          if (!log.fueraDeServicio && (log.productiveHours > 0 || log.kilometraje > 0)) {
+          // Se guarda TODO día clasificado (productivo, standby o fuera de
+          // servicio) con sus horas: antes solo los productivos, y las horas
+          // de standby/panne calculadas arriba se perdían. Si el día ya
+          // existía se reemplaza con la clasificación nueva.
+          if (log.date) {
             // Verificar si ya existe un log para esta máquina en esta fecha
             const logKey = `${machineId}-${log.date}`;
             const existingLog = existingLogMap[logKey];
@@ -392,6 +402,10 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
               notes: logData.notes?.substring(0, 30) + '...'
             });
 
+            const sobrantes = duplicadosLog[logKey] || [];
+            for (const idDup of sobrantes) await deleteDailyLog(empresaId, idDup);
+            delete duplicadosLog[logKey];
+
             if (existingLog) {
               // ✅ Log YA EXISTE - actualizarlo
               logData.id = existingLog.id;
@@ -404,14 +418,14 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
             } else {
               // 🆕 Log NUEVO - crearlo
               console.log(`   💾 Creando nuevo log: ${logData.productiveHours}h, ${logData.kilometraje}km`);
-              await upsertDailyLog(empresaId, logData);
+              const nuevoId = await upsertDailyLog(empresaId, logData);
+              // Si el mismo día viene otra vez en el archivo, se actualiza este
+              existingLogMap[logKey] = { ...logData, id: nuevoId };
               importResults.logsCreated++;
               console.log(`   ✅ Log creado exitosamente`);
             }
-          } else if (log.fueraDeServicio) {
-            console.log(`   ⏭️ Saltando log - Fuera de servicio`);
-          } else if (log.productiveHours <= 0) {
-            console.log(`   ⏭️ Saltando log - Sin horas productivas (${log.productiveHours}h)`);
+          } else {
+            console.log(`   ⏭️ Saltando log - Sin fecha válida`);
           }
         } catch (err) {
           console.error(`❌ Error procesando log:`, err);

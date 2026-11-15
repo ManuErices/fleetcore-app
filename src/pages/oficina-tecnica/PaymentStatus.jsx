@@ -14,7 +14,8 @@ import {
   listEstadoPagoIngresosByYear,
   upsertEstadoPagoIngresos
 } from "../../lib/db";
-import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
+import { listarConsumosCombustible, costoConsumo, listarCargasCombustible, precioVigente } from "../../lib/combustible";
+import { mesActualISO } from "../../lib/fechas";
 import { manoObraAnio } from "../../lib/manoObra";
 
 const MONTHS = [
@@ -101,7 +102,7 @@ function clasificar(codigo, texto) {
 // Calcula los 5 costos de Egresos (Mano de Obra, Maquinaria y Equipos, Materiales, Combustible, Gastos Generales)
 // para UN mes específico, junto con el desglose por cuenta de costo / origen de cada categoría.
 // Las Rendiciones y líneas de OC se distribuyen automáticamente en la categoría que les corresponda.
-function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios) {
+function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios, cargasCombustible) {
   const employeeTipoManoObraMap = {};
   const employeeNombreMap = {};
   employees.forEach(e => {
@@ -131,28 +132,40 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
 
   // ── Órdenes de Compra: cada línea se clasifica según su Cuenta de Costo (no todas son Materiales) ──
   const ocsMes = purchaseOrders.filter(oc => oc.fecha && oc.fecha.startsWith(monthPrefix));
-  let ocTuvoItemsDetallados = false;
   ocsMes.forEach(oc => {
-    (oc.items || []).forEach(item => {
-      ocTuvoItemsDetallados = true;
+    const lineas = oc.items || [];
+    if (!lineas.length) {
+      // Respaldo POR OC (antes era por mes: bastaba una OC con ítems para
+      // perder todas las que no traen detalle) — sin cuenta por línea, va a Materiales
+      items.materiales.push({ clave: oc.proveedor || "Sin proveedor", monto: Number(oc.totalMonto) || 0 });
+      return;
+    }
+    lineas.forEach(item => {
       const texto = item.cuentasCosto || "";
       const bucket = clasificar(item.codigoCC, texto);
       items[bucket].push({ clave: texto || item.codigoCC || "Sin cuenta de costo", monto: Number(item.subTotal) || 0 });
     });
   });
-  if (!ocTuvoItemsDetallados) {
-    // Fallback si la OC no trae items detallados — sin cuenta de costo por línea, se deja en Materiales
-    ocsMes.forEach(oc => items.materiales.push({ clave: oc.proveedor || "Sin proveedor", monto: Number(oc.totalMonto) || 0 }));
-  }
 
   // ── Combustible (4.1): litros del camión aljibe × precio fijado para ese mes ──
+  // Precedencia (a propósito): si ese mes hay registros del módulo nuevo
+  // (combustibleRegistros, importados del camión aljibe), ellos son el total
+  // del mes y NO se suman WorkFleet ni fuelLogs (serían el mismo diésel dos
+  // veces). Sin precio fijado para el mes se usa el precio vigente de las
+  // cargas de WorkFleet o el precio de respaldo, nunca $0.
   const registrosMes = combustibleRegistros.filter(r => r.fecha && r.fecha.startsWith(monthPrefix));
   if (registrosMes.length > 0) {
-    const precioMes = combustiblePrecios.find(p => p.month === month)?.precioLitro || 0;
+    const precioMes = Number(combustiblePrecios.find(p => p.month === month)?.precioLitro) || 0;
     registrosMes.forEach(r => {
+      const litros = Number(r.litros) || 0;
+      let precio = precioMes;
+      if (!precio) {
+        const vigente = precioVigente(cargasCombustible || [], String(r.fecha).slice(0, 10), r.projectId);
+        precio = vigente?.precio || Number(precioDiesel) || 0;
+      }
       items.combustible.push({
         clave: "4.1 DIÉSEL",
-        monto: (Number(r.litros) || 0) * precioMes
+        monto: litros * precio
       });
     });
   } else {
@@ -163,7 +176,11 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
     });
   }
 
-  // ── Subcontratos: Maquinaria y Equipos (Maquinaria Directa / Indirecta) ──
+  // ── Subcontratos: TODOS, clasificados por su cuenta de costo como OC y
+  // rendiciones (antes solo entraban los de "maquinaria": obras civiles,
+  // montaje, etc. nunca llegaban a los costos). Se costea el monto bruto del
+  // EP (montoEP), no el neto a pagar (totalPagoNeto descuenta retenciones y
+  // anticipos, que no son menor costo) — igual que el Dashboard.
   // Se ubica por "Mes Asociado" (mes real de ejecución), no por Fecha EP —
   // un EP puede emitirse el mes siguiente al trabajo que factura.
   // Si un ítem no tiene Mes Asociado asignado, se usa la Fecha EP como respaldo.
@@ -173,9 +190,9 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
       if (asociado) return asociado.year === year && asociado.month === month;
       return s.fechaEP && s.fechaEP.startsWith(monthPrefix); // respaldo si no tiene Mes Asociado
     })
-    .filter(s => /maquinaria/i.test(s.descripcionCuentaCosto || ""))
     .forEach(s => {
-      items.maquinariaYEquipos.push({ clave: `${s.codigoCuentaCosto || ""} ${s.descripcionCuentaCosto || ""}`.trim(), monto: Number(s.totalPagoNeto) || 0 });
+      const bucket = clasificar(s.codigoCuentaCosto, s.descripcionCuentaCosto || "");
+      items[bucket].push({ clave: `${s.codigoCuentaCosto || ""} ${s.descripcionCuentaCosto || ""}`.trim() || "Subcontrato sin cuenta", monto: Number(s.montoEP) || 0 });
     });
 
   // ── Rendiciones: se reparten en la categoría que corresponda según su Cuenta Contable ──
@@ -222,8 +239,8 @@ export default function PaymentStatus() {
   const { prices: fuelPrices } = useFuelPrices(true);
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [year, setYear] = useState(() => Number(mesActualISO().slice(0, 4)));
+  const [month, setMonth] = useState(() => Number(mesActualISO().slice(5, 7)));
   const [view, setView] = useState("resumen"); // 'resumen' | 'detalle'
   const [loading, setLoading] = useState(false);
 
@@ -236,6 +253,7 @@ export default function PaymentStatus() {
   const [rendiciones, setRendiciones] = useState([]);
   const [combustibleRegistros, setCombustibleRegistros] = useState([]);
   const [combustiblePrecios, setCombustiblePrecios] = useState([]); // precios mensuales fijados a mano
+  const [cargasCombustible, setCargasCombustible] = useState([]); // precios de cargas WorkFleet (respaldo)
 
   // Ingresos manuales
   const [ingresosMes, setIngresosMes] = useState(null); // doc actual del mes (con id) o null
@@ -267,7 +285,7 @@ export default function PaymentStatus() {
     try {
       const yearStart = `${year}-01-01`;
       const yearEnd = `${year}-12-31`;
-      const [emp, payroll, ocs, fuel, ingYear, subs, rends, combustibleRegs, combustiblePreciosYear] = await Promise.all([
+      const [emp, payroll, ocs, fuel, ingYear, subs, rends, combustibleRegs, combustiblePreciosYear, cargas] = await Promise.all([
         listEmployees(empresaId, projectId),
         manoObraAnio(empresaId, projectId, year),
         listPurchaseOrders(empresaId, projectId),
@@ -276,7 +294,8 @@ export default function PaymentStatus() {
         listSubcontratosByProject(empresaId, projectId),
         listRendicionesByProject(empresaId, projectId),
         listCombustibleRegistros(empresaId, projectId),
-        listCombustiblePrecioMensualByYear(empresaId, projectId, year)
+        listCombustiblePrecioMensualByYear(empresaId, projectId, year),
+        listarCargasCombustible(empresaId)
       ]);
       setEmployees(emp);
       setPayrollYearData(payroll);
@@ -287,6 +306,7 @@ export default function PaymentStatus() {
       setRendiciones(rends);
       setCombustibleRegistros(combustibleRegs);
       setCombustiblePrecios(combustiblePreciosYear);
+      setCargasCombustible(cargas);
     } catch (err) {
       console.error("Error cargando Estado de Pago:", err);
     } finally {
@@ -332,13 +352,13 @@ export default function PaymentStatus() {
   const precioDiesel = fuelPrices?.diesel || 950;
   const egresosMes = useMemo(() => {
     if (!payrollYearData) return null;
-    return calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios);
-  }, [year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios]);
+    return calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios, cargasCombustible);
+  }, [year, month, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios, cargasCombustible]);
 
   // Egresos de los 12 meses del año (para la vista Detalle)
   const egresosPorMes = useMemo(() => {
-    return Array.from({ length: 12 }, (_, i) => calcEgresosMes(year, i + 1, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios));
-  }, [year, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios]);
+    return Array.from({ length: 12 }, (_, i) => calcEgresosMes(year, i + 1, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios, cargasCombustible));
+  }, [year, employees, payrollYearData, purchaseOrders, fuelLogs, subcontratos, rendiciones, precioDiesel, combustibleRegistros, combustiblePrecios, cargasCombustible]);
 
   // Ingresos de los 12 meses del año, indexados por mes (1-12)
   const ingresosPorMes = useMemo(() => {
@@ -365,8 +385,11 @@ export default function PaymentStatus() {
   // Compara el total anual de Remuneraciones que aparece repartido por mes en el Estado de Pago
   // contra el total crudo. Si no coinciden, hay liquidaciones con un campo "mes" inválido
   // que no se están reflejando en ningún mes de la matriz.
+  // Solo las líneas de remuneraciones (1.1 / 1.2): manoDeObra y gastosGenerales
+  // también traen rendiciones y OC, y con ellas la alerta saltaba siempre.
   const consistencia = useMemo(() => {
-    const totalPayrollEnEP = egresosPorMes.reduce((s, e) => s + e.manoDeObra + e.gastosGenerales, 0);
+    const esLineaPayroll = (d) => /^1\.[12] MANO DE OBRA (DIRECTO|INDIRECTO) — /.test(d.clave);
+    const totalPayrollEnEP = egresosPorMes.reduce((s, e) => s + e.manoDeObraDetalle.filter(esLineaPayroll).reduce((t, d) => t + d.monto, 0), 0);
     const crudoPayroll = payrollYearData.reduce((s, l) => {
       const pct = l.porcentajeIncidencia != null ? l.porcentajeIncidencia : 100;
       return s + (Number(l.totalCosto) || 0) * (pct / 100);
@@ -538,9 +561,9 @@ function ResumenView({ projectName, year, month, egresosMes, ingresosForm, setIn
         </div>
         <div className="p-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <IngresoField label="Estados de Pago" value={ingresosForm.estadosPago} onChange={(v) => setIngresosForm({ ...ingresosForm, estadosPago: v })} />
-          <IngresoField label="Retenciones" value={ingresosForm.retenciones} onChange={(v) => setIngresosForm({ ...ingresosForm, retenciones: v })} />
+          <IngresoField label="Retenciones" ayuda="Se suma tal cual: retención descontada en negativo (−), devolución en positivo" value={ingresosForm.retenciones} onChange={(v) => setIngresosForm({ ...ingresosForm, retenciones: v })} />
           <IngresoField label="Reajuste" value={ingresosForm.reajuste} onChange={(v) => setIngresosForm({ ...ingresosForm, reajuste: v })} />
-          <IngresoField label="Multas" value={ingresosForm.multas} onChange={(v) => setIngresosForm({ ...ingresosForm, multas: v })} />
+          <IngresoField label="Multas" ayuda="Se suma tal cual: ingresar en negativo (−) para descontarla" value={ingresosForm.multas} onChange={(v) => setIngresosForm({ ...ingresosForm, multas: v })} />
           <IngresoField label="Reajuste Polinómico" value={ingresosForm.reajustePolinomico} onChange={(v) => setIngresosForm({ ...ingresosForm, reajustePolinomico: v })} />
         </div>
         <div className="px-6 pb-6 flex items-center gap-3">
@@ -650,10 +673,13 @@ function EgresoRow({ label, value, sub, pending, detalle = [], detalleLabel = "D
   );
 }
 
-function IngresoField({ label, value, onChange }) {
+// `ayuda`: el total de ingresos SUMA cada campo con su signo (retenciones y
+// multas no se restan solas), así que se indica cómo ingresarlas.
+function IngresoField({ label, value, onChange, ayuda }) {
   return (
     <div>
       <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">{label}</label>
+      {ayuda && <p className="text-[11px] text-slate-500 -mt-1 mb-1">{ayuda}</p>}
       <input
         type="number"
         value={value}
@@ -730,9 +756,9 @@ function DetalleView({ year, egresosPorMes, ingresosPorMes, balancePorMes }) {
             </tr>
             {[
               { label: "Estados de Pago", key: "estadosPago" },
-              { label: "Retenciones", key: "retenciones" },
+              { label: "Retenciones (con signo)", key: "retenciones" },
               { label: "Reajuste", key: "reajuste" },
-              { label: "Multas", key: "multas" },
+              { label: "Multas (con signo)", key: "multas" },
               { label: "Reajuste Polinómico", key: "reajustePolinomico" },
             ].map((row) => {
               const rowTotal = ingresosPorMes.reduce((s, i) => s + (Number(i?.[row.key]) || 0), 0);

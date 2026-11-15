@@ -14,7 +14,7 @@ import {
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
-import { guardarMaquina, estuvoEnObra } from "./maquinas";
+import { guardarMaquina, estuvoEnObra, REFERENCIAS_MAQUINA, reemplazarIds } from "./maquinas";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 
@@ -98,7 +98,41 @@ export async function toggleProjectActive(empresaId, projectId, active) {
   await updateDoc(ref, { active, updatedAt: serverTimestamp() });
 }
 
+// Colecciones con documentos de una obra (campo projectId), con su nombre para el aviso
+const REFERENCIAS_OBRA = [
+  ['dailyLogs', 'registros diarios'], ['fuelLogs', 'recargas de combustible'],
+  ['combustibleRegistros', 'registros del camión combustible'], ['purchaseOrders', 'órdenes de compra'],
+  ['subcontratos', 'subcontratos'], ['rendiciones', 'rendiciones'],
+  ['employeeMonthlyData', 'liquidaciones (Excel)'], ['estadoPagoIngresos', 'ingresos del estado de pago'],
+];
+
+/** Cuántos documentos usan la obra: { "órdenes de compra": 12, ... }. */
+export async function contarReferenciasObra(empresaId, projectId) {
+  const conteo = {};
+  await Promise.all(REFERENCIAS_OBRA.map(async ([col, nombre]) => {
+    try {
+      const snap = await getDocs(query(EMPRESA_COL(empresaId, col), where("projectId", "==", projectId)));
+      if (snap.size) conteo[nombre] = snap.size;
+    } catch { /* colección sin permiso o inexistente */ }
+  }));
+  // Máquinas: las que están hoy o estuvieron en la obra (historialObras)
+  const maquinas = (await getDocs(EMPRESA_COL(empresaId, 'machines'))).docs.map(d => d.data());
+  const enObra = maquinas.filter(m => m.projectId === projectId || (m.historialObras || []).some(t => t.projectId === projectId)).length;
+  if (enObra) conteo['máquinas'] = enObra;
+  return conteo;
+}
+
+// Borrar una obra con datos los dejaba huérfanos (costos sin obra visible).
+// Si tiene datos se rechaza con el detalle; se puede desactivar en su lugar.
 export async function deleteProject(empresaId, projectId) {
+  const conteo = await contarReferenciasObra(empresaId, projectId);
+  const lista = Object.entries(conteo).map(([n, c]) => `${c} ${n}`);
+  if (lista.length) {
+    const e = new Error(`La obra tiene datos asociados (${lista.join(', ')}). No se puede eliminar: desactívala en su lugar.`);
+    e.code = 'obra-con-datos';
+    e.referencias = conteo;
+    throw e;
+  }
   await deleteDoc(EMPRESA_DOC(empresaId, 'projects', projectId));
 }
 
@@ -137,9 +171,37 @@ export async function upsertMachine(empresaId, machine, opciones = {}) {
   return guardarMaquina(empresaId, datos, { id: id && String(id).trim() ? id : undefined, ...opciones });
 }
 
+/**
+ * Cuántos documentos apuntan a la máquina (machineId, maquinaId, etc., también
+ * anidados) en las colecciones de REFERENCIAS_MAQUINA: { coleccion: n }.
+ * Solo lee.
+ */
+export async function contarReferenciasMaquina(empresaId, machineId) {
+  const ids = new Set([machineId]);
+  const conteo = {};
+  for (const col of REFERENCIAS_MAQUINA) {
+    let snap;
+    try { snap = await getDocs(EMPRESA_COL(empresaId, col)); } catch { continue; }
+    const n = snap.docs.filter(d => reemplazarIds(d.data(), ids, '')[1]).length;
+    if (n) conteo[col] = n;
+  }
+  return conteo;
+}
+
+// Borrar una máquina con historial dejaba huérfanos sus registros diarios,
+// combustible, contratos de arriendo, etc. Si tiene referencias se rechaza
+// (err.code = 'maquina-con-referencias'); la pantalla ofrece desactivarla.
 export async function deleteMachine(empresaId, machineId) {
   if (!machineId || machineId.trim() === "") {
     throw new Error("Machine ID is required for deletion");
+  }
+  const conteo = await contarReferenciasMaquina(empresaId, machineId);
+  const lista = Object.entries(conteo).map(([c, n]) => `${n} en ${c}`);
+  if (lista.length) {
+    const e = new Error(`La máquina tiene registros asociados (${lista.join(', ')}).`);
+    e.code = 'maquina-con-referencias';
+    e.referencias = conteo;
+    throw e;
   }
   await deleteDoc(EMPRESA_DOC(empresaId, 'machines', machineId));
 }
@@ -193,6 +255,13 @@ export async function upsertDailyLog(empresaId, log) {
   });
   console.log("✅ Log actualizado con ID:", id);
   return id;
+}
+
+export async function deleteDailyLog(empresaId, logId) {
+  if (!logId || String(logId).trim() === "") {
+    throw new Error("Log ID is required for deletion");
+  }
+  await deleteDoc(EMPRESA_DOC(empresaId, 'dailyLogs', logId));
 }
 
 // ============================================
@@ -968,16 +1037,15 @@ export async function listCombustibleRegistros(empresaId, projectId) {
   }
 }
 
+// Llave estable por fila (fecha + patente + litros + horómetro + obra): antes
+// cada importación creaba documentos nuevos y reimportar duplicaba el diésel
+// del Estado de pago. Ahora se actualiza la fila existente y se borran los
+// duplicados de importaciones anteriores.
 export async function saveCombustibleRegistros(empresaId, registros, projectId) {
-  const batchSize = 400;
-  for (let i = 0; i < registros.length; i += batchSize) {
-    const batch = writeBatch(db);
-    registros.slice(i, i + batchSize).forEach(r => {
-      const docRef = doc(EMPRESA_COL(empresaId, 'combustibleRegistros'));
-      batch.set(docRef, { ...r, projectId, codigoCuentaContable: '4.1', createdAt: Timestamp.now() });
-    });
-    await batch.commit();
-  }
+  const { guardarSinDuplicar } = await import("./importacion");
+  const items = registros.map(r => ({ ...r, projectId, codigoCuentaContable: '4.1' }));
+  return guardarSinDuplicar(empresaId, 'combustibleRegistros', items,
+    ["fecha", "codigoPatente", "litros", "horometro", "projectId"], "cb");
 }
 
 export async function deleteAllCombustibleRegistros(empresaId, projectId) {
