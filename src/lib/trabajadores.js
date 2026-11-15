@@ -133,7 +133,7 @@ export const REFERENCIAS_TRABAJADOR = [
   'employeeMonthlyData', 'employeeAssignments', 'reportes_combustible', 'reportes_detallados',
   'workOrders', 'solicitudes_pasajes', 'trabajadores_portal',
 ];
-const CAMPOS_TRABAJADOR = new Set(['trabajadorId', 'employeeId', 'operadorId', 'receptorId', 'repartidorId', 'mecanicoId', 'solicitanteId', 'empleadoId']);
+const CAMPOS_TRABAJADOR = new Set(['trabajadorId', 'employeeId', 'operadorId', 'receptorId', 'repartidorId', 'mecanicoId', 'solicitanteId', 'empleadoId', 'operadorProveedorId']);
 
 /** Reemplaza ids viejos por el nuevo dentro de un valor; [valor, cambió]. */
 export function reemplazarIdsTrabajador(valor, viejos, nuevo) {

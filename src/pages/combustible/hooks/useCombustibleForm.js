@@ -506,7 +506,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       const nombres = partes.length >= 3 ? partes.slice(0, partes.length - 2).join(' ') : (partes[0] || '');
       const apellidoPaterno = partes.length >= 3 ? partes[partes.length - 2] : (partes[1] || '');
       const apellidoMaterno = partes.length >= 3 ? partes[partes.length - 1] : '';
-      const eRef = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), {
+      const ficha = {
         nombre: nombreCompleto,
         nombres,
         apellidoPaterno,
@@ -519,7 +519,18 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         tipo: 'OPERADOR',
         origen: 'combustible',
         fechaCreacion: new Date().toISOString()
-      });
+      };
+      // Con RUT válido se pasa por el maestro de trabajadores: si la persona
+      // ya existe (RRHH, importador, otra carga) se usa esa ficha y no se crea
+      // otra. Sin RUT se crea como antes (en terreno a veces no se sabe).
+      const { asegurarTrabajador, rutTrabajador } = await import('../../../lib/trabajadores');
+      let eRef, yaExistia = false;
+      if (rutTrabajador(ficha.rut)) {
+        const r = await asegurarTrabajador(empresaId, ficha, { origen: 'combustible' });
+        eRef = { id: r.id }; yaExistia = !r.creado;
+      } else {
+        eRef = await addDoc(collection(db, 'empresas', empresaId, 'trabajadores'), ficha);
+      }
       const newTrabajador = {
         id: eRef.id,
         nombre: nuevoEmpleadoData.nombre.toUpperCase(),
@@ -527,7 +538,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
         empresa: empresaNombre,
         empresaId: nuevoEmpleadoData.empresaId
       };
-      setTrabajadoresLocales(prev => [...prev, newTrabajador]);
+      setTrabajadoresLocales(prev => prev.some(t => t.id === eRef.id) ? prev : [...prev, newTrabajador]);
       const targetEmp = nuevoEmpleadoData.targetField;
       if (targetEmp === 'operadorProveedor') {
         setDatosEntrada(prev => ({ ...prev, operadorProveedorId: eRef.id }));
@@ -538,7 +549,7 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
       }
       setShowModalEmpleado(false);
       setNuevoEmpleadoData({ nombre: '', rut: '', empresaId: '' });
-      toast({ type: 'success', message: 'Trabajador registrado y vinculado' });
+      toast({ type: 'success', message: yaExistia ? 'Ese RUT ya estaba registrado: se vinculó la ficha existente' : 'Trabajador registrado y vinculado' });
     } catch (error) {
       console.error("Error creando empleado:", error);
       toast({ type: 'error', message: 'Error al crear trabajador' });
