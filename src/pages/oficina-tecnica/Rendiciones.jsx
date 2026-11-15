@@ -364,7 +364,13 @@ export default function Rendiciones() {
       //    duplicados que hayan dejado importaciones anteriores.
       const norm = (v) => String(v || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       const proyectoSel = projects.find(p => p.id === selectedProject);
-      const obraDeUnidad = (unidad) => {
+      // Centros de costo de RRHH vinculados a obras: la unidad de rendición
+      // (código "038", nombre "Nuevo Cobre") se lleva a la misma obra.
+      const { cargarObrasYCentros, obraDe } = await import("../../lib/obras");
+      const dimension = await cargarObrasYCentros(empresaId);
+      const obraDeUnidad = (unidad, codigo) => {
+        const porCentro = obraDe(dimension, { codigo, nombre: unidad });
+        if (porCentro) return porCentro;
         const u = norm(unidad);
         const p = projects.find(pr => norm(pr.name || pr.nombre) === u);
         if (p) return p.id;
@@ -382,7 +388,7 @@ export default function Rendiciones() {
         .filter(r => r.nombreGasto || r.montoSolicitado || r.montoAprobado)
         .map(r => {
           const proveedorId = idTercero(mapaTerceros, r.rutProveedor);
-          return { ...r, projectId: obraDeUnidad(r.unidadRendicion), ...(proveedorId ? { proveedorId } : {}) };
+          return { ...r, projectId: obraDeUnidad(r.unidadRendicion, r.codigoUnidadRendicion), ...(proveedorId ? { proveedorId } : {}) };
         });
 
       if (rendicionesImportadas.length === 0) {

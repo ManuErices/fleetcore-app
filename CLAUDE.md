@@ -135,6 +135,11 @@ Each platform improvement is a GitHub issue labeled `mejora`. Flow: `proponer_me
 - The agent defaults to proposals for cash-flow changes (`crear_propuesta_flujo`, `editar_propuesta_flujo`, `comparar_propuesta_flujo`), and opens them with `navegar_a` + `propuesta_id`.
 
 
+### Datos maestros compartidos
+- **Terceros por RUT** (`src/lib/terceros.js` over the `proveedores` master): `asegurarTerceros(empresaId, [{rut, razonSocial}])` creates missing fichas (stable id `rut_<rutNormalizado>`, never overwrites) and returns rut→id; the OC, subcontratos, rendiciones and deuda importers store `proveedorId` on each document. Finanzas → Proveedores has "Maestro único de proveedores" (`planificarUnificacion`/`aplicarUnificacion`) to create fichas and link existing documents, and groups suppliers by RUT.
+- **Obras = centros de costo** (`src/lib/obras.js`): RRHH `centros_costo` docs carry `projectId` (select in RRHH → Centros de costo, plus "Crear desde obras"). `obraDe({obras, centros}, {codigo, nombre})` maps a cost-center code/name or unit to a project; the Rendiciones import uses it.
+- **Imports without duplicates** (`src/lib/importacion.js`, `guardarSinDuplicar`): OC (N° OC + obra) and subcontratos (SC + línea + EP + cuenta + descripción + obra) re-imports update instead of creating new docs, and delete old duplicates.
+
 ### Rental de maquinaria: moneda (CLP / UF)
 Cotizaciones, OC, contratos y estados de pago (`src/lib/rental.js`, pages `src/pages/maquinaria/Rental*.jsx`) can be in pesos or UF (`moneda`). The quote (or a manual contract) sets it; its OC, contract, enmiendas and EEPP inherit it, and a contract's currency can't change once it has OC/EEPP. In UF, tariffs and amounts are stored with 2 decimals in `*UF` fields (`netoUF`, `montoNetoUF`, `netoMensualUF`…) and the usual fields (`neto`, `montoNeto`, `netoMensual`, `total`…) stay in **pesos** (at the document's `valorUF`), so cobranza, rentabilidad and KPIs keep summing pesos. OC/contract balances are controlled in the document currency (`saldoOC`/`saldoContrato` return `moneda` and `saldoPesos` for cross-document sums). Each EEPP in UF stores the UF it is billed with; the UF of the day comes from `obtenerIndicadores` (`src/lib/finanzas/monedas.js`).
 
