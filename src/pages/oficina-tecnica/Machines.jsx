@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { listActiveProjects, listMachines, upsertMachine, deleteMachine } from "../../lib/db";
+import { listActiveProjects, listMachines, deleteMachine } from "../../lib/db";
+import { guardarMaquina, listarMaquinas, MaquinaDuplicada, esPropia, esArrendada, propiedadNormal, nombreMaquina } from "../../lib/maquinas";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 import ExcelImporter from "../../components/ExcelImporter";
@@ -53,6 +54,8 @@ export default function Machines() {
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
+  // Ficha tal como se cargó al editar: solo se guardan los campos que cambian
+  const [original, setOriginal] = useState(null);
 
   // Hook para obtener operadores asignados
   const { operatorsByMachine } = useOperatorAssignments(projectId);
@@ -130,7 +133,23 @@ export default function Machines() {
         active: form.active !== false
       };
       
-      await upsertMachine(empresaId, payload);
+      const { id, ...datos } = payload;
+      try {
+        await guardarMaquina(empresaId, datos, {
+          id: id || undefined, original: id ? original : null, origen: "oficina-tecnica",
+          maquinas: id ? undefined : await listarMaquinas(empresaId),
+        });
+      } catch (e) {
+        if (!(e instanceof MaquinaDuplicada)) throw e;
+        // La máquina ya existe (en otra obra o sin obra): se asigna a esta en vez de duplicarla
+        const ex = e.existente;
+        const obra = projects.find(p => p.id === ex.projectId)?.name;
+        if (!confirm(`${nombreMaquina(ex)} ya está registrada${obra ? ` en la obra ${obra}` : ""}.\n\n¿Asignarla a esta obra? No se crea una ficha nueva: se conserva su historial.`)) {
+          setLoading(false);
+          return;
+        }
+        await guardarMaquina(empresaId, { projectId }, { id: ex.id, original: ex, origen: "oficina-tecnica" });
+      }
       setForm(empty(projectId));
       setShowForm(false);
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -144,7 +163,9 @@ export default function Machines() {
   };
 
   const onEdit = (m) => {
+    setOriginal(m);
     setForm({ 
+      ownership: propiedadNormal(m.ownership) || "OWN",
       ...m, 
       billingType: m.billingType || BILLING_TYPES.HOURLY,
       patente: m.patente || "",
@@ -176,8 +197,9 @@ export default function Machines() {
     refresh(projectId);
   };
 
-  const ownMachines = machines.filter(m => m.ownership === "OWN");
-  const rentedMachines = machines.filter(m => m.ownership === "RENTED");
+  // Propias = de la empresa, aunque estén en leasing o con crédito
+  const ownMachines = machines.filter(m => !esArrendada(m) && esPropia(m));
+  const rentedMachines = machines.filter(m => esArrendada(m));
 
   return (
     <div className="space-y-6">
@@ -330,9 +352,9 @@ export default function Machines() {
               </h3>
               <div className="flex gap-4">
                 <button
-                  onClick={() => setForm({ ...form, ownership: "OWN" })}
+                  onClick={() => setForm({ ...form, ownership: esArrendada(form) ? "OWN" : (form.ownership || "OWN") })}
                   className={`flex-1 px-6 py-4 rounded-xl border-2 transition-all ${
-                    form.ownership === "OWN"
+                    !esArrendada(form)
                       ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                       : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
                   }`}

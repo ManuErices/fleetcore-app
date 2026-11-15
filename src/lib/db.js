@@ -14,6 +14,7 @@ import {
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
+import { guardarMaquina } from "./maquinas";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 
@@ -120,25 +121,14 @@ export async function listMachines(empresaId, projectId) {
   );
 }
 
-export async function upsertMachine(empresaId, machine) {
-  if (!machine.id || machine.id.trim() === "") {
-    const { id, ...payload } = machine;
-    const dataToSave = { 
-      ...payload, 
-      createdAt: Timestamp.now() 
-    };
-    const ref = await addDoc(EMPRESA_COL(empresaId, 'machines'), dataToSave);
-    console.log("✅ Máquina creada con ID:", ref.id);
-    return ref.id;
-  }
-  const { id, ...rest } = machine;
-  await setDoc(
-    EMPRESA_DOC(empresaId, 'machines', id),
-    { ...rest, updatedAt: Timestamp.now() },
-    { merge: true }
-  );
-  console.log("✅ Máquina actualizada con ID:", id);
-  return id;
+/**
+ * Crea o actualiza una máquina a través del maestro único (src/lib/maquinas.js):
+ * merge, vocabulario normalizado y sin duplicar patentes/códigos en la empresa.
+ * Para editar desde un formulario completo, usa guardarMaquina con `original`.
+ */
+export async function upsertMachine(empresaId, machine, opciones = {}) {
+  const { id, ...datos } = machine;
+  return guardarMaquina(empresaId, datos, { id: id && String(id).trim() ? id : undefined, ...opciones });
 }
 
 export async function deleteMachine(empresaId, machineId) {

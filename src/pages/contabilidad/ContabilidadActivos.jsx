@@ -6,6 +6,7 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { guardarMaquina, desdeFichaActivo, MaquinaDuplicada } from "../../lib/maquinas";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Resaltado, Nota, VistoBueno, Boton, Campo,
   ModalCuaderno, Segmentado, FechaHoja,
@@ -443,7 +444,7 @@ export default function ContabilidadActivos() {
         patente:     d.data().patente     || "",
         ownership:   (() => { const raw = d.data().ownership || "OWNED"; return raw === "OWN" ? "OWNED" : raw; })(),
         propietario: d.data().propietario || "",
-        activo:      d.data().active      !== false,
+        activo:      d.data().active !== false && d.data().activo !== false,
         moneda:      d.data().moneda      || "CLP",
         valorCompra:            d.data().valorCompra            || "",
         valorLibros:            d.data().valorLibros            || "",
@@ -466,22 +467,16 @@ export default function ContabilidadActivos() {
   useEffect(() => { cargar(); }, [cargar]);
 
   // ── CRUD ──
+  // Se guarda por el maestro de máquinas: solo los campos que cambiaron
+  // (no se pisa lo que escribieron Oficina Técnica, Admin o Maquinaria), con
+  // `active` en vez de `activo` y sin duplicar patentes.
   const handleSave = async (form) => {
-    const { id, _source, machineId, nombre, ...data } = form;
-    if (editando) {
-      await updateDoc(doc(db, "empresas", empresaId, "machines", editando.id), {
-        ...data,
-        name: nombre || data.name || "",
-        updatedAt: serverTimestamp(),
+    try {
+      await guardarMaquina(empresaId, desdeFichaActivo(form), {
+        id: editando?.id, original: editando ? desdeFichaActivo(editando) : null, origen: "contabilidad",
       });
-    } else {
-      await addDoc(collection(db, "empresas", empresaId, "machines"), {
-        ...data,
-        name: nombre,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        active: true,
-      });
+    } catch (e) {
+      alert(e instanceof MaquinaDuplicada ? e.message : "No se pudo guardar: " + e.message);
     }
     await cargar();
   };

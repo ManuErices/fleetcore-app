@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
-import { upsertMachine, upsertDailyLog } from "../lib/db";
+import { upsertDailyLog } from "../lib/db";
 import { useEmpresa } from "../lib/useEmpresa";
 
 export default function ExcelImporter({ projectId, onImportComplete }) {
@@ -228,8 +228,11 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
 
       // 🔍 PASO 1: Cargar TODAS las máquinas existentes del proyecto
       console.log("🔍 Cargando máquinas existentes del proyecto...");
-      const { listMachines } = await import("../lib/db");
-      const existingMachines = await listMachines(empresaId, projectId);
+      // Se cargan las máquinas de TODA la empresa: una máquina que ya existe
+      // en otra obra (misma patente o código) no se vuelve a crear.
+      const { listarMaquinas, buscarMaquina, asegurarMaquina } = await import("../lib/maquinas");
+      const todasLasMaquinas = await listarMaquinas(empresaId);
+      const existingMachines = todasLasMaquinas.filter(m => m.projectId === projectId);
       console.log(`✅ ${existingMachines.length} máquinas existentes encontradas`);
 
       // Crear un mapa de máquinas existentes por código y nombre
@@ -259,8 +262,12 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
           let existingMachine = null;
           let matchedBy = null;
 
-          // Buscar por código (prioridad 1)
-          if (machine.code) {
+          // Buscar por patente (o código) en toda la empresa (prioridad 0)
+          existingMachine = buscarMaquina(todasLasMaquinas, { patente: machine.patente, code: machine.code });
+          if (existingMachine) matchedBy = existingMachine.patente ? `patente "${existingMachine.patente}"` : `código "${machine.code}"`;
+
+          // Buscar por código en la obra (prioridad 1)
+          if (!existingMachine && machine.code) {
             const codeKey = machine.code.trim().toUpperCase();
             existingMachine = existingByCode[codeKey];
             if (existingMachine) matchedBy = `código "${machine.code}"`;
@@ -303,7 +310,7 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
             };
             
             // Guardar en Firebase
-            const machineId = await upsertMachine(empresaId, machineData);
+            const { id: machineId } = await asegurarMaquina(empresaId, machineData, { origen: "importador-excel", maquinas: todasLasMaquinas });
             machineIdMap[machineKey] = machineId;
             importResults.machinesCreated++;
             console.log(`🆕 Máquina creada: ${machine.code || machine.name || 'SIN CÓDIGO'} (ID: ${machineId})`);
