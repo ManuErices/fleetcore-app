@@ -8,6 +8,8 @@ import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
+import { costoTerminado, diasEntre } from "../../lib/finanzas/costosFijos.js";
+import { hoyISO, desdeISO } from "../../lib/fechas";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
   ModalCuaderno, FechaHoja,
@@ -80,7 +82,8 @@ function fmtM(n) {
 }
 function diasRestantes(f) {
   if (!f) return null;
-  return Math.ceil((new Date(f) - new Date()) / 86400000);
+  // Días de calendario en Chile: new Date("AAAA-MM-DD") es medianoche UTC.
+  return diasEntre(hoyISO(), String(f).slice(0, 10));
 }
 function estadoDoc(f) {
   const d = diasRestantes(f); if (d === null) return null;
@@ -90,12 +93,17 @@ function estadoDoc(f) {
 function cuotasEsperadas(c) {
   const total = parseInt(c.cuotasTotales) || 0;
   if (!c.fechaInicio || !total) return null;
-  const inicio = new Date(c.fechaInicio + "T00:00:00");
-  const hoy = new Date();
-  if (hoy < inicio) return 0;
+  const inicio = desdeISO(c.fechaInicio);
+  const hoy = desdeISO(hoyISO());
+  if (!inicio || hoy < inicio) return 0;
   const divisor = c.frecuencia === "trimestral" ? 3 : c.frecuencia === "semestral" ? 6 : c.frecuencia === "anual" ? 12 : 1;
+  // `meses` cuenta las fechas de cuota mensual ya cumplidas, con la primera
+  // el mismo día de inicio (mensual: el día de inicio ya se espera 1 cuota).
+  // Con la misma convención, las cuotas cada `divisor` meses caen en los meses
+  // 0, divisor, 2·divisor… desde el inicio: floor((meses-1)/divisor)+1.
+  // Antes floor(meses/divisor) no contaba la primera hasta pasado un período.
   const meses = (hoy.getFullYear() - inicio.getFullYear()) * 12 + (hoy.getMonth() - inicio.getMonth()) + (hoy.getDate() >= inicio.getDate() ? 1 : 0);
-  const periodos = Math.floor(meses / divisor);
+  const periodos = meses <= 0 ? 0 : Math.floor((meses - 1) / divisor) + 1;
   return Math.min(Math.max(periodos, 0), total);
 }
 
@@ -556,7 +564,20 @@ export default function FinanzasCostos() {
 
   const handleSave = async (form) => {
     if (editando) {
-      await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", editando.id), form);
+      // Solo los campos que cambió el formulario. Guardar el formulario entero
+      // pisaba lo que se actualizó mientras estaba abierto (cuotas pagadas
+      // marcadas en la tabla, documentos subidos, otra persona).
+      const { id: _id, ...campos } = form;
+      const cambios = {};
+      for (const [k, v] of Object.entries(campos)) {
+        const antes = editando[k];
+        // 3 y "3" son el mismo valor (el modal convierte textos a número).
+        const igual = (v === null || typeof v !== "object") && (antes === null || typeof antes !== "object")
+          ? String(v ?? "") === String(antes ?? "")
+          : JSON.stringify(v ?? null) === JSON.stringify(antes ?? null);
+        if (!igual) cambios[k] = v;
+      }
+      if (Object.keys(cambios).length) await updateDoc(doc(db, "empresas", empresaId, "costos_fijos", editando.id), cambios);
     } else {
       await addDoc(collection(db, "empresas", empresaId, "costos_fijos"), { ...form, fechaCreacion: serverTimestamp() });
     }
@@ -641,7 +662,9 @@ export default function FinanzasCostos() {
     });
   }, [costos, filtroEstado, filtroCategoria, busqueda, sortCol, sortDir]);
 
-  const activos      = useMemo(() => costos.filter(c => c.activo), [costos]);
+  // Los terminados (todas las cuotas pagadas o fecha de término pasada) ya no
+  // se pagan: no entran a los totales aunque sigan marcados como activos.
+  const activos      = useMemo(() => { const hoy = hoyISO(); return costos.filter(c => c.activo && !costoTerminado(c, hoy)); }, [costos]);
   // Totales siempre en pesos: UF y dólares se convierten al valor del día.
   // Si no hay valor del día, ese costo queda fuera del total (y se avisa).
   const mensualEnPesos = (c) => aPesos(montoMensual(c), c.moneda, indicadores);
@@ -671,7 +694,9 @@ export default function FinanzasCostos() {
     { col: "dia",    label: "Día de pago", align: "text-center", cls: "hidden lg:table-cell" },
   ];
   const distribucion = Object.entries(porCategoria).sort((a, b) => b[1] - a[1]);
-  const totalFiltrado = costosFiltrados.filter(c => c.activo).reduce((s, c) => s + montoMensual(c), 0);
+  // En pesos (antes sumaba UF y dólares como si fueran pesos) y sin los terminados.
+  const hoyTotales = hoyISO();
+  const totalFiltrado = costosFiltrados.filter(c => c.activo && !costoTerminado(c, hoyTotales)).reduce((s, c) => s + (mensualEnPesos(c) || 0), 0);
 
   if (loading) return (
     <div className="cuaderno flex items-center justify-center h-64 text-[18px] text-cuaderno-grafito">
@@ -851,7 +876,7 @@ export default function FinanzasCostos() {
                               ? <Resaltado color="menta">terminado</Resaltado>
                               : dias <= 30
                               ? <Resaltado color="durazno">en {dias} días</Resaltado>
-                              : <span className="text-cuaderno-grafito">{new Date(c.fechaTermino).toLocaleDateString("es-CL")}</span>
+                              : <span className="text-cuaderno-grafito">{(desdeISO(c.fechaTermino) || new Date(c.fechaTermino)).toLocaleDateString("es-CL")}</span>
                             : <span className="text-cuaderno-grafito">—</span>}
                         </td>
                         <td className="px-2 py-2 text-center text-[15px] hidden lg:table-cell whitespace-nowrap">

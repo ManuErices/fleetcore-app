@@ -66,34 +66,136 @@ export function semanasDesde(hoy, n = SEMANAS_HORIZONTE) {
   });
 }
 
-// ─── Recurrentes (mismas reglas que FinanzasFlujoCaja) ───────────────────────
+// ─── Recurrentes (las MISMAS reglas para "La semana" y la planilla) ───────────
+// FinanzasFlujoCaja usa esta función: si cada pantalla tuviera su copia, la
+// planilla y "La semana" mostrarían montos distintos.
 const enPesos = (v) => { const n = String(v ?? "").replace(/\D/g, ""); return n ? parseInt(n, 10) : 0; };
 
 /**
- * Rellena en memoria las cuentas recurrentes: solo semanas futuras (desde hoy)
- * y vacías; nunca pisa lo escrito a mano. Mensual = primera semana futura de
- * cada mes; quincenal = una sí, una no; semanal = todas.
+ * Mes ("AAAA-MM") al que pertenece la semana que parte el lunes `lunesKey`.
+ * Regla del flujo: cada semana es del mes de su lunes, salvo la que contiene
+ * el día 1 del mes de hoy, que cuenta como del mes en curso (es la primera
+ * columna de la planilla y la semana 0 de "La semana").
  */
-export function rellenarRecurrentes(cuentas, pagos, semanas, hoy) {
-  const h = new Date(hoy); h.setHours(0, 0, 0, 0);
+export function mesDeSemana(lunesKey, hoy) {
+  const mesHoy = `${hoy.getFullYear()}-${dos(hoy.getMonth() + 1)}`;
+  if (claveDia(lunesDe(new Date(hoy.getFullYear(), hoy.getMonth(), 1))) === lunesKey) return mesHoy;
+  return lunesKey.slice(0, 7);
+}
+
+// Semanas enteras entre dos lunes "AAAA-MM-DD" (en UTC, para que el cambio de
+// hora no deje una semana de 6,96 días).
+const semanasEntre = (a, b) => {
+  const ua = Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10));
+  const ub = Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10));
+  return Math.round((ub - ua) / (7 * 86400000));
+};
+
+// Ancla fija de las quincenales cuando la cuenta no dice cuándo partió (un lunes).
+const ANCLA_QUINCENAL = "2024-01-01";
+
+/**
+ * Lunes desde el que se cuentan las quincenas de una cuenta: su fecha de
+ * inicio (inicioRecurrente) o de creación (creadoEn); si no tiene, una fecha
+ * fija. Antes la paridad se contaba desde hoy y la quincena cambiaba de semana
+ * cada semana.
+ */
+export function anclaQuincenal(cuenta) {
+  const f = cuenta.inicioRecurrente || cuenta.creadoEn;
+  let d = null;
+  if (typeof f === "string" && /^\d{4}-\d{2}-\d{2}$/.test(f)) d = new Date(+f.slice(0, 4), +f.slice(5, 7) - 1, +f.slice(8, 10));
+  else if (f) d = new Date(f?.toDate ? f.toDate() : f);
+  return d && !isNaN(d) ? claveDia(lunesDe(d)) : ANCLA_QUINCENAL;
+}
+
+/**
+ * Rellena en memoria las cuentas recurrentes, sin escribir nada (el flujo se
+ * llena a mano a propósito). Reglas:
+ *  · "Escrito" = existe el documento en flujo_pagos, aunque sea 0. Un 0 es una
+ *    decisión (se canceló la cuota, se arrastró a otra semana) y no se vuelve
+ *    a rellenar.
+ *  · Solo desde la semana en curso, incluida (antes, desde el martes la
+ *    semana en curso dejaba de contar y la mensual saltaba a la siguiente).
+ *  · Mensual: en la primera semana a la vista del mes, y solo si NINGUNA
+ *    semana de ese mes (pasada o futura, visible o no) tiene algo escrito o la
+ *    marca de pagado para esa cuenta. Si no, salía dos veces en el mes.
+ *  · Quincenal: semanas pares contadas desde anclaQuincenal(cuenta).
+ *  · Semanal: todas las semanas vacías.
+ *  · Una celda marcada como pagada sin monto escrito muestra el monto
+ *    recurrente (es lo que se pagó ahí), también en semanas pasadas.
+ * `semanas`: [{ key: lunes "AAAA-MM-DD" }]. `pagados`: { key: true }.
+ */
+export function rellenarRecurrentes(cuentas, pagos, semanas, hoy, pagados = {}) {
+  const lunesHoy = claveDia(lunesDe(hoy));
   const lleno = { ...pagos };
-  for (const c of cuentas) {
-    if (!c.recurrente || !c.montoRecurrente) continue;
+  const recurrentes = cuentas.filter(c => c.recurrente && c.montoRecurrente);
+  if (!recurrentes.length) return lleno;
+
+  // Meses con algo escrito o pagado, por cuenta.
+  const mesesOcupados = new Map();
+  const marcar = (key) => {
+    const semana = key.slice(-10), cuentaId = key.slice(0, -11);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(semana)) return;
+    if (!mesesOcupados.has(cuentaId)) mesesOcupados.set(cuentaId, new Set());
+    mesesOcupados.get(cuentaId).add(mesDeSemana(semana, hoy));
+  };
+  Object.keys(pagos).forEach(marcar);
+  Object.keys(pagados).forEach(k => { if (pagados[k]) marcar(k); });
+
+  for (const c of recurrentes) {
     const base = Math.abs(enPesos(c.montoRecurrente));
     const monto = c.categoria === "INGRESOS" ? base : -base;
-    const futuras = semanas.filter(w => w.inicio >= h);
-    futuras.forEach((w, idx) => {
+    const freq = c.frecuenciaRecurrente || "mensual";
+    const ocupados = new Set(mesesOcupados.get(c.id) || []);
+    const ancla = freq === "quincenal" ? anclaQuincenal(c) : null;
+    for (const w of semanas) {
       const key = `${c.id}-${w.key}`;
-      if (lleno[key]) return;
-      const freq = c.frecuenciaRecurrente || "mensual";
+      if (key in lleno) continue;                      // escrito a mano (también 0)
+      if (pagados[key]) { lleno[key] = monto; continue; }
+      if (w.key < lunesHoy) continue;                   // el pasado no se rellena
       let aplicar = false;
       if (freq === "semanal") aplicar = true;
-      else if (freq === "quincenal") aplicar = idx % 2 === 0;
-      else if (freq === "mensual") aplicar = !futuras.slice(0, idx).some(pw => pw.mes === w.mes);
+      else if (freq === "quincenal") aplicar = semanasEntre(ancla, w.key) % 2 === 0;
+      else if (freq === "mensual") {
+        const mes = mesDeSemana(w.key, hoy);
+        aplicar = !ocupados.has(mes);
+        if (aplicar) ocupados.add(mes);
+      }
       if (aplicar) lleno[key] = monto;
-    });
+    }
   }
   return lleno;
+}
+
+/**
+ * Lo que todavía mueve la caja de una partida (misma regla para "La semana" y
+ * el saldo acumulado de la planilla): lo pagado ✓ ya no; en la semana en curso,
+ * solo lo que el banco todavía no muestra; en las futuras, todo.
+ */
+export function pendientePartida(monto, { pagado = false, real, semanaEnCurso = false } = {}) {
+  if (!monto || pagado) return 0;
+  return semanaEnCurso ? pendienteDe(monto, real) : monto;
+}
+
+/**
+ * Saldo proyectado al cierre de cada semana, desde la semana en curso: parte
+ * del saldo de hoy y suma solo lo pendiente. Las semanas pasadas no tienen
+ * saldo proyectado (lo que pasó ya está en el saldo de partida; sumarlo de
+ * nuevo lo contaba dos veces). Devuelve { [lunes]: saldo }.
+ */
+export function saldosProyectados({ cuentas, plan, pagados = {}, reales = {}, saldoInicial = 0, semanas, hoy }) {
+  const lunesHoy = claveDia(lunesDe(hoy));
+  const salida = {};
+  let saldo = saldoInicial;
+  for (const w of semanas) {
+    if (w.key < lunesHoy) continue;
+    for (const c of cuentas) {
+      const key = `${c.id}-${w.key}`;
+      saldo += pendientePartida(plan[key] || 0, { pagado: !!pagados[key], real: reales[key], semanaEnCurso: w.key === lunesHoy });
+    }
+    salida[w.key] = saldo;
+  }
+  return salida;
 }
 
 // ─── Proyección ───────────────────────────────────────────────────────────────
@@ -123,7 +225,7 @@ export function pendienteDe(monto, real) {
  * colchón, o lo que falta si alguna semana baja de él.
  */
 export function proyectar({ cuentas, pagos, pagados = {}, reales = {}, saldoInicial = 0, semanas, hoy, colchon = COLCHON_POR_DEFECTO }) {
-  const plan = rellenarRecurrentes(cuentas, pagos, semanas, hoy);
+  const plan = rellenarRecurrentes(cuentas, pagos, semanas, hoy, pagados);
   let saldo = saldoInicial;
   const filas = semanas.map((w, i) => {
     const partidas = [];
@@ -133,11 +235,12 @@ export function proyectar({ cuentas, pagos, pagados = {}, reales = {}, saldoInic
       if (!monto) continue;
       const pagado = !!pagados[key];
       const real = reales[key];
-      const pendiente = pagado ? 0 : (i === 0 ? pendienteDe(monto, real) : monto);
+      const pendiente = pendientePartida(monto, { pagado, real, semanaEnCurso: i === 0 });
       partidas.push({
         key, cuenta: c, monto, pendiente, pagado, real,
         esIngreso: monto > 0, prioridad: prioridadDe(c),
-        recurrente: !pagos[key] && plan[key] !== undefined,
+        // Recurrente = puesto por la regla, no escrito (un 0 escrito también es escrito).
+        recurrente: !(key in pagos) && plan[key] !== undefined,
       });
     }
     const ingresos = partidas.reduce((s, p) => s + Math.max(0, p.pendiente), 0);

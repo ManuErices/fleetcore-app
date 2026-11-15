@@ -30,7 +30,9 @@ export async function cargarDatosCaja(empresaId, hoy = new Date()) {
     getDocs(col(empresaId, "flujo_config")),
   ]);
   const cuentas = snapC.docs.map(d => ({ id: d.id, ...d.data() }));
-  const pagos = {}; snapP.docs.forEach(d => { const v = d.data().valor; if (v) pagos[d.id] = v; });
+  // Un 0 escrito se conserva: es "no se paga esta semana" (cuota cancelada,
+  // recurrencia arrastrada), distinto de "no hay nada" y no debe rellenarse.
+  const pagos = {}; snapP.docs.forEach(d => { const v = d.data().valor; if (typeof v === "number" && !isNaN(v)) pagos[d.id] = v; });
   const pagados = {}; snapPaid.docs.forEach(d => { pagados[d.id] = true; });
   let saldoManual = 0, colchon = COLCHON_POR_DEFECTO;
   snapCfg.docs.forEach(d => {

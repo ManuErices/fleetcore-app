@@ -4,6 +4,9 @@ import { collection, getDocs, writeBatch, doc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
+import { fechaISO, desdeISO, serialExcelAISO, hoyISO } from "../../lib/fechas";
+import { diasMoraDesdeHoy, calcularEstado } from "../../lib/pagosDeuda";
+import { rutLlave, asegurarTerceros, idTercero } from "../../lib/terceros";
 import {
   ModalCuaderno, Hoja, Titulo, Campo, Boton, Segmentado, Casilla, Nota, LineaGuia, Cifra, VistoBueno,
   IconoMas, IconoSubir,
@@ -76,15 +79,13 @@ const KEYWORDS_FINANCIERA = ["BANCO", "LEASING", "RENTING"];
 function excelSerialToISO(value) {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number") {
-    const utcDays = value - 25569; // offset 1899-12-30 -> 1970-01-01
-    const utcMs = utcDays * 86400 * 1000;
-    const d = new Date(utcMs);
-    if (isNaN(d)) return null;
-    return d.toISOString().slice(0, 10);
+    // El serial es un día de calendario sin zona: se lee en UTC (fechas.js).
+    return serialExcelAISO(value) || null;
   }
   if (value instanceof Date) {
     if (isNaN(value)) return null;
-    return value.toISOString().slice(0, 10);
+    // Día de calendario en Chile (toISOString daba el día UTC: desde las 21:00, el siguiente).
+    return fechaISO(value);
   }
   // String tipo "DD-MM-YYYY" o "DD/MM/YYYY"
   if (typeof value === "string") {
@@ -92,8 +93,8 @@ function excelSerialToISO(value) {
     if (m) {
       let [, d, mo, y] = m;
       if (y.length === 2) y = "20" + y;
-      const dt = new Date(`${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}T12:00:00`);
-      if (!isNaN(dt)) return dt.toISOString().slice(0, 10);
+      const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      if (!isNaN(desdeISO(iso))) return iso;
     }
   }
   return null;
@@ -109,13 +110,25 @@ function toNumberSafe(value) {
   return isNaN(n) ? 0 : n;
 }
 
-function diasMoraDesdeHoy(fechaVencISO) {
-  if (!fechaVencISO) return 0;
-  const venc = new Date(fechaVencISO + "T12:00:00");
-  if (isNaN(venc)) return 0;
-  const hoy = new Date();
-  const dias = Math.floor((hoy - venc) / 86400000);
-  return dias > 0 ? dias : 0;
+// diasMoraDesdeHoy y calcularEstado vienen de lib/pagosDeuda: una sola regla
+// para el importador, los pagos y la pantalla (que además recalcula al leer).
+
+// ─── Llave de un documento de deuda ─────────────────────────────────────────
+// Antigua: nombre del proveedor + OC + DOC. El mismo proveedor escrito de otra
+// forma ("Comercial X Ltda" / "COMERCIAL X LTDA.") duplicaba el documento.
+// Nueva: RUT normalizado + tipo + folio (un folio es único por emisor y tipo),
+// cuando hay RUT válido; si no, la antigua.
+function claveLegacy(nombre, oc, numeroDoc) {
+  return `${slugify(nombre)}__${slugify(oc)}__${slugify(numeroDoc)}`;
+}
+function claveRut(rut, tipoDoc, numeroDoc) {
+  const r = rutLlave(rut);
+  const folio = slugify(numeroDoc);
+  return r && folio ? `RUT_${r}__${slugify(tipoDoc) || "DOC"}__${folio}` : null;
+}
+/** Todas las llaves con que se puede reconocer un documento ya guardado. */
+function clavesDe(data) {
+  return [data.claveUpsert, claveRut(data.rut, data.tipoDoc, data.numeroDoc), claveLegacy(data.proveedorNombre, data.oc, data.numeroDoc)].filter(Boolean);
 }
 
 // El Excel original mezcla headers con y sin espacios al inicio/fin
@@ -130,13 +143,6 @@ function normalizarClaves(row) {
   return limpio;
 }
 
-function calcularEstado(saldoPendiente, valorDoc, diasMora) {
-  if (saldoPendiente < 0) return "anticipo_excedente";
-  if (saldoPendiente === 0) return "pagado";
-  if (diasMora > 0) return "vencido";
-  if (saldoPendiente < valorDoc) return "parcial";
-  return "pendiente";
-}
 
 function detectarTipoYFactoring(proveedorNombre, factoringRaw) {
   const nombreUpper = (proveedorNombre || "").toUpperCase();
@@ -172,6 +178,7 @@ function parsearFila(row) {
   const numeroDoc = (row["DOC"] || "").toString().trim();
   const obra = (row["OBRA"] || "").toString().trim();
   const rut = (row["RUT"] || "").toString().trim();
+  const tipoDoc = (row["TIPO DOC"] || row["TIPO DOCUMENTO"] || row["TIPO"] || "").toString().trim();
 
   const valorDoc = toNumberSafe(row["VALOR DOC"]);
   const saldoPendiente = toNumberSafe(row["SALDO PEND"]);
@@ -185,13 +192,16 @@ function parsearFila(row) {
     proveedorNombre, row["FACTORING"]
   );
 
-  const claveUpsert = `${slugify(proveedorNombre)}__${slugify(oc)}__${slugify(numeroDoc)}`;
+  const legacy = claveLegacy(proveedorNombre, oc, numeroDoc);
+  const claveUpsert = claveRut(rut, tipoDoc, numeroDoc) || legacy;
 
   return {
     claveUpsert,
+    _claveLegacy: legacy,
     proveedorNombre,
     proveedorSlug: slugify(proveedorNombre),
     rut,
+    ...(tipoDoc ? { tipoDoc } : {}),
     tipoDeuda,
     obra,
     oc,
@@ -228,6 +238,15 @@ async function leerExcelDetalleProveedores(file) {
     else descartadas.push({ fila: i + 4, motivo: "Total / excluida / sin proveedor" });
   });
 
+  // Si el mismo folio del mismo RUT viene en varias filas (p. ej. una factura
+  // repartida en varias OC), la llave por RUT las juntaría y una pisaría a la
+  // otra: a esas se les agrega la OC.
+  const veces = {};
+  parseadas.forEach(p => { veces[p.claveUpsert] = (veces[p.claveUpsert] || 0) + 1; });
+  parseadas.forEach(p => {
+    if (veces[p.claveUpsert] > 1 && p.claveUpsert !== p._claveLegacy) p.claveUpsert = `${p.claveUpsert}__OC_${slugify(p.oc)}`;
+  });
+
   return { hoja: nombreHoja, totalFilasLeidas: rows.length, parseadas, descartadas };
 }
 
@@ -254,10 +273,12 @@ function ModalDocumentoManual({ isOpen, onClose, onSave, guardando }) {
     const saldoPendiente = valorDoc - montoPagado;
     const diasMora = saldoPendiente > 0 ? diasMoraDesdeHoy(form.fechaVencimiento || null) : 0;
     const estado = calcularEstado(saldoPendiente, valorDoc, diasMora);
-    const claveUpsert = `${slugify(form.proveedorNombre)}__${slugify(form.oc)}__${slugify(form.numeroDoc)}`;
+    const legacy = claveLegacy(form.proveedorNombre, form.oc, form.numeroDoc);
+    const claveUpsert = claveRut(form.rut, "", form.numeroDoc) || legacy;
 
     onSave({
       claveUpsert,
+      _claveLegacy: legacy,
       proveedorNombre: form.proveedorNombre.trim(),
       proveedorSlug: slugify(form.proveedorNombre),
       rut: form.rut.trim(),
@@ -355,7 +376,10 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
   const [resultadoLectura, setResultadoLectura] = useState(null); // { hoja, totalFilasLeidas, parseadas, descartadas }
 
   const [comparando, setComparando] = useState(false);
-  const [diff, setDiff] = useState(null); // { nuevos: [], actualizados: [], sinCambios: [] }
+  const [diff, setDiff] = useState(null); // { nuevos: [], actualizados: [], sinCambios: [], ausentes: [] }
+  // ¿El archivo es el corte completo? Solo entonces se marca lo que no viene
+  // (si se sube por partes, todo lo de las otras partes saldría "ausente").
+  const [marcarAusentes, setMarcarAusentes] = useState(true);
 
   const [importando, setImportando] = useState(false);
   const [progreso, setProgreso] = useState({ hecho: 0, total: 0 });
@@ -391,25 +415,29 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
     setComparando(true);
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "deuda_proveedores"));
+      // Cada documento guardado se reconoce por su llave guardada, por RUT y
+      // por la llave antigua (así los importados antes de la llave por RUT
+      // calzan y se migran a la nueva al actualizarse).
       const existentes = {};
       snap.docs.forEach(d => {
         const data = d.data();
-        const clave = data.claveUpsert ||
-          `${slugify(data.proveedorNombre)}__${slugify(data.oc)}__${slugify(data.numeroDoc)}`;
-        existentes[clave] = { id: d.id, data };
+        clavesDe(data).forEach(k => { if (!existentes[k]) existentes[k] = { id: d.id, data }; });
       });
 
       const nuevos = [];
       const actualizados = [];
       const sinCambios = [];
       const pagosConservados = [];
+      const usados = new Set();
 
       resultadoLectura.parseadas.forEach(itemExcel => {
-        const match = existentes[itemExcel.claveUpsert];
+        const candidatos = [existentes[itemExcel.claveUpsert], existentes[itemExcel._claveLegacy]];
+        const match = candidatos.find(m => m && !usados.has(m.id));
         if (!match) {
           nuevos.push(itemExcel);
           return;
         }
+        usados.add(match.id);
         // Si en FleetCore se registraron pagos que el Excel todavía no trae
         // (lo pagado en FleetCore es mayor), se conserva lo de FleetCore: antes
         // la reimportación devolvía el saldo y el estado a los del Excel.
@@ -422,17 +450,33 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
                    estado: calcularEstado(saldo, Number(itemExcel.valorDoc) || 0, mora) };
           pagosConservados.push({ proveedor: item.proveedorNombre, doc: item.numeroDoc, excel: Number(itemExcel.montoPagado) || 0, fleet: pagadoFleet });
         }
+        // Volvió a venir en el corte: se quita la marca de "no viene".
+        if (match.data.ausenteUltimoCorte) item = { ...item, ausenteUltimoCorte: false };
         const cambioSaldo = (match.data.saldoPendiente || 0) !== item.saldoPendiente;
         const cambioEstado = (match.data.estado || "") !== item.estado;
         const cambioMora = (match.data.diasMora || 0) !== item.diasMora;
-        if (cambioSaldo || cambioEstado || cambioMora) {
+        const cambioClave = (match.data.claveUpsert || "") !== item.claveUpsert;
+        if (cambioSaldo || cambioEstado || cambioMora || cambioClave || match.data.ausenteUltimoCorte) {
           actualizados.push({ ...item, _firestoreId: match.id, _anterior: match.data });
         } else {
           sinCambios.push({ ...item, _firestoreId: match.id });
         }
       });
 
-      setDiff({ nuevos, actualizados, sinCambios, pagosConservados });
+      // Documentos con saldo que NO vienen en este archivo: no se borran; si
+      // el archivo es el corte completo se marcan "no viene en el último
+      // corte" para revisarlos (pagados por fuera, anulados, o mal escritos).
+      const vistos = new Set();
+      const ausentes = [];
+      snap.docs.forEach(d => {
+        if (usados.has(d.id) || vistos.has(d.id)) return;
+        vistos.add(d.id);
+        const data = d.data();
+        if ((Number(data.saldoPendiente) || 0) === 0) return;
+        ausentes.push({ id: d.id, proveedorNombre: data.proveedorNombre, numeroDoc: data.numeroDoc, yaMarcado: !!data.ausenteUltimoCorte, ausenteDesde: data.ausenteDesde || null });
+      });
+
+      setDiff({ nuevos, actualizados, sinCambios, pagosConservados, ausentes });
     } catch (err) {
       console.error("Error comparando con Firestore:", err);
       setErrorLectura("No se pudo comparar con los datos existentes en Firestore.");
@@ -461,7 +505,6 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
 
     try {
       // Maestro de terceros: ficha por RUT y proveedorId en cada documento
-      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
       const mapaTerceros = await asegurarTerceros(empresaId, porEscribir.map(x => ({ rut: x.rut, razonSocial: x.proveedorNombre })));
       porEscribir.forEach(x => { const id = idTercero(mapaTerceros, x.rut); if (id) x.proveedorId = id; });
 
@@ -470,7 +513,7 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
         const batch = writeBatch(db);
 
         lote.forEach(item => {
-          const { _firestoreId, _anterior, ...payload } = item;
+          const { _firestoreId, _anterior, _claveLegacy, ...payload } = item;
           const ref = _firestoreId
             ? doc(db, "empresas", empresaId, "deuda_proveedores", _firestoreId)
             : doc(collection(db, "empresas", empresaId, "deuda_proveedores"));
@@ -508,11 +551,26 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
         setProgreso(p => ({ ...p, hecho: Math.min(p.hecho + lote.length, porEscribir.length) }));
       }
 
+      // Lo que no vino en el corte completo: solo una marca para revisar.
+      // Nunca se borra (puede ser un error del Excel o un pago por fuera).
+      const porMarcar = marcarAusentes ? (diff.ausentes || []) : [];
+      const hoy = hoyISO();
+      for (let i = 0; i < porMarcar.length; i += 400) {
+        const batch = writeBatch(db);
+        porMarcar.slice(i, i + 400).forEach(a => {
+          batch.update(doc(db, "empresas", empresaId, "deuda_proveedores", a.id), {
+            ausenteUltimoCorte: true, ausenteDesde: a.ausenteDesde || hoy, ultimoCorteRevisado: hoy,
+          });
+        });
+        await batch.commit();
+      }
+
       setResultadoImport({
         ok: true,
         creados: diff.nuevos.length,
         actualizados: diff.actualizados.length,
         sinCambios: diff.sinCambios.length,
+        ausentes: porMarcar.length,
       });
       onImportComplete?.();
     } catch (err) {
@@ -532,17 +590,16 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
   }
 
   // ── Guardar documento manual (upsert directo, sin pasar por comparación de lote) ──
-  async function guardarDocumentoManual(item) {
+  async function guardarDocumentoManual(itemForm) {
     if (!empresaId) return;
     setGuardandoManual(true);
     setMensajeManual(null);
     try {
+      const { _claveLegacy, ...base } = itemForm;
       const snap = await getDocs(collection(db, "empresas", empresaId, "deuda_proveedores"));
       const existente = snap.docs.find(d => {
-        const data = d.data();
-        const clave = data.claveUpsert ||
-          `${slugify(data.proveedorNombre)}__${slugify(data.oc)}__${slugify(data.numeroDoc)}`;
-        return clave === item.claveUpsert;
+        const claves = clavesDe(d.data());
+        return claves.includes(base.claveUpsert) || claves.includes(_claveLegacy);
       });
 
       const ref = existente
@@ -552,9 +609,32 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
       const usuarioEmail = auth.currentUser?.email || "desconocido";
       const ahora = new Date().toISOString();
 
-      // set sin merge: usamos writeBatch para reusar el mismo helper de escritura
+      // Si el documento ya existía, no se pierde lo registrado en FleetCore:
+      // antes se escribía sin merge con "Monto ya pagado" en 0 y se borraban
+      // los pagos, los comprobantes y el proveedorId. Ahora se conserva el
+      // mayor monto pagado (y se recalcula saldo y estado), y merge mantiene
+      // comprobantes y todo campo que el formulario no trae.
+      let item = { ...base };
+      if (existente) {
+        const previo = existente.data();
+        const pagadoPrevio = Number(previo.montoPagado) || 0;
+        if (pagadoPrevio > (Number(item.montoPagado) || 0)) {
+          const saldo = (Number(item.valorDoc) || 0) - pagadoPrevio;
+          const mora = saldo > 0 ? diasMoraDesdeHoy(item.fechaVencimiento) : 0;
+          item = { ...item, montoPagado: pagadoPrevio, saldoPendiente: saldo, diasMora: mora,
+                   estado: calcularEstado(saldo, Number(item.valorDoc) || 0, mora) };
+        }
+        if (!item.notasInternas && previo.notasInternas) delete item.notasInternas;
+      }
+      // Ficha del proveedor en el maestro de terceros (igual que el importador).
+      if (item.rut) {
+        const mapa = await asegurarTerceros(empresaId, [{ rut: item.rut, razonSocial: item.proveedorNombre }], "manual");
+        const pid = idTercero(mapa, item.rut);
+        if (pid) item.proveedorId = pid;
+      }
+
       const batch = writeBatch(db);
-      batch.set(ref, item, { merge: false });
+      batch.set(ref, item, { merge: true });
 
       if (!existente) {
         batch.set(doc(collection(db, "empresas", empresaId, "deuda_auditoria")), {
@@ -564,7 +644,8 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
         });
       } else {
         const anteriorData = existente.data();
-        const camposRevisar = new Set([...Object.keys(anteriorData), ...Object.keys(item)]);
+        // Con merge solo cambian los campos que trae el formulario.
+        const camposRevisar = new Set(Object.keys(item));
         camposRevisar.forEach((campo) => {
           if (campo === "id" || campo === "comprobantes" || campo === "claveUpsert") return;
           const anterior = anteriorData[campo] ?? null;
@@ -681,6 +762,15 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
             </div>
           )}
 
+          {diff.ausentes?.length > 0 && (
+            <div className="mt-4 max-w-xl">
+              <Casilla marcada={marcarAusentes} onCambiar={setMarcarAusentes}
+                descripcion={`${diff.ausentes.length} documento${diff.ausentes.length > 1 ? "s" : ""} con saldo no viene${diff.ausentes.length > 1 ? "n" : ""} en este archivo. Se marcan «no viene en el último corte» para revisarlos; no se borra nada. Desmárcalo si el archivo es solo una parte.`}>
+                Es el corte completo
+              </Casilla>
+            </div>
+          )}
+
           {importando && (
             <p className="m-0 mt-4 text-[17px]">Importando {progreso.hecho} de {progreso.total}…</p>
           )}
@@ -688,7 +778,7 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
           <div className="flex flex-wrap gap-2 mt-5">
             <Boton onClick={reiniciar} disabled={importando}>Cancelar</Boton>
             <Boton variante="primario" onClick={confirmarImportacion}
-              disabled={importando || (diff.nuevos.length === 0 && diff.actualizados.length === 0)}>
+              disabled={importando || (diff.nuevos.length === 0 && diff.actualizados.length === 0 && !(marcarAusentes && diff.ausentes?.length))}>
               {importando ? "Importando…" : `Confirmar e importar ${diff.nuevos.length + diff.actualizados.length} documento${diff.nuevos.length + diff.actualizados.length !== 1 ? "s" : ""}`}
             </Boton>
           </div>
@@ -704,6 +794,7 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
               <Titulo as="h2" tamano="md">Importación lista</Titulo>
               <p className="m-0 text-[17px] text-cuaderno-grafito">
                 {resultadoImport.creados} nuevos, {resultadoImport.actualizados} actualizados y {resultadoImport.sinCambios} sin cambios.
+                {resultadoImport.ausentes > 0 && ` ${resultadoImport.ausentes} marcados «no viene en el último corte».`}
               </p>
             </>
           ) : (

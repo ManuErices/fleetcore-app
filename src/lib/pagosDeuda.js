@@ -1,6 +1,7 @@
 import { db, auth } from "./firebase";
-import { doc, collection, getDoc, addDoc, updateDoc, getDocs } from "firebase/firestore";
+import { doc, collection, getDoc, updateDoc, getDocs, runTransaction } from "firebase/firestore";
 import { registrarCambio } from "./deudaAuditoria";
+import { hoyISO, partesISO } from "./fechas";
 
 /*
  * ════════════════════════════════════════════════════════════════════════
@@ -29,23 +30,35 @@ import { registrarCambio } from "./deudaAuditoria";
  * ════════════════════════════════════════════════════════════════════════
  */
 
-function diasMoraDesdeHoy(fechaVencISO) {
-  if (!fechaVencISO) return 0;
-  const venc = new Date(fechaVencISO + "T12:00:00");
-  if (isNaN(venc)) return 0;
-  const hoy = new Date();
-  const dias = Math.floor((hoy - venc) / 86400000);
+/**
+ * Días de mora a hoy (en Chile), contando días de calendario entre dos
+ * "AAAA-MM-DD" (sin horas: no depende de a qué hora se mire).
+ */
+export function diasMoraDesdeHoy(fechaVencISO, hoy = hoyISO()) {
+  const v = partesISO(fechaVencISO), h = partesISO(hoy);
+  if (!v || !h) return 0;
+  const dias = Math.round((Date.UTC(h.anio, h.mes - 1, h.dia) - Date.UTC(v.anio, v.mes - 1, v.dia)) / 86400000);
   return dias > 0 ? dias : 0;
 }
 
-// Misma lógica de estado que FinanzasDeudaImportador.jsx — mantenerlas
-// sincronizadas si alguna cambia, son la misma regla de negocio.
-function calcularEstado(saldoPendiente, valorDoc, diasMora) {
+// La misma regla de estado para el importador, los pagos y la pantalla Deuda.
+export function calcularEstado(saldoPendiente, valorDoc, diasMora) {
   if (saldoPendiente < 0) return "anticipo_excedente";
   if (saldoPendiente === 0) return "pagado";
   if (diasMora > 0) return "vencido";
   if (saldoPendiente < valorDoc) return "parcial";
   return "pendiente";
+}
+
+/**
+ * Documento de deuda con diasMora y estado calculados HOY. Los guardados se
+ * congelaban en la fecha de importación o del último pago: un documento
+ * importado "pendiente" nunca pasaba a "vencido". Se recalcula al leer.
+ */
+export function conEstadoAlDia(d, hoy = hoyISO()) {
+  const saldo = Number(d.saldoPendiente) || 0;
+  const diasMora = saldo > 0 ? diasMoraDesdeHoy(d.fechaVencimiento, hoy) : 0;
+  return { ...d, diasMora, estado: calcularEstado(saldo, Number(d.valorDoc) || 0, diasMora) };
 }
 
 /**
@@ -112,41 +125,47 @@ export async function registrarPago({ empresaId, documento, monto, fecha, cuenta
   if (!montoNum || montoNum <= 0) {
     return { ok: false, error: "El monto debe ser mayor a 0." };
   }
-  if (montoNum > documento.saldoPendiente) {
-    return {
-      ok: false,
-      error: `El pago ($${montoNum.toLocaleString("es-CL")}) supera el saldo pendiente ($${documento.saldoPendiente.toLocaleString("es-CL")}).`,
-    };
+  const fmtPesos = (n) => `$${Number(n || 0).toLocaleString("es-CL")}`;
+  if (montoNum > (Number(documento.saldoPendiente) || 0)) {
+    return { ok: false, error: `El pago (${fmtPesos(montoNum)}) supera el saldo pendiente (${fmtPesos(documento.saldoPendiente)}).` };
   }
 
   const usuarioEmail = auth.currentUser?.email || "desconocido";
   const ahora = new Date().toISOString();
+  const SUPERA = "supera_saldo";
 
   try {
-    // 1. Crear el registro de pago en la subcolección
-    const pagoData = {
-      monto: montoNum,
-      fecha: fecha || ahora.slice(0, 10),
-      cuentaOrigen: cuentaOrigen || "",
-      nota: nota || "",
-      comprobanteUrl: comprobante?.url || null,
-      comprobantePath: comprobante?.path || null,
-      registradoPor: usuarioEmail,
-      registradoEn: ahora,
-    };
-    await addDoc(collection(db, "empresas", empresaId, "deuda_proveedores", documento.id, "pagos"), pagoData);
+    // 1 y 2. Pago y saldo en UNA transacción que relee el documento. Antes se
+    // sumaba al montoPagado de la copia en pantalla y se escribía en dos
+    // pasos: dos pagos casi simultáneos (dos personas, o un doble clic)
+    // dejaban solo uno reflejado en el saldo.
+    const docRef = doc(db, "empresas", empresaId, "deuda_proveedores", documento.id);
+    const pagoRef = doc(collection(db, "empresas", empresaId, "deuda_proveedores", documento.id, "pagos"));
+    const r = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists()) throw new Error("El documento ya no existe.");
+      const actual = snap.data();
+      const valorDoc = Number(actual.valorDoc) || 0;
+      const saldoAnterior = Number(actual.saldoPendiente) || 0;
+      if (montoNum > saldoAnterior) { const e = new Error(SUPERA); e.saldo = saldoAnterior; throw e; }
 
-    // 2. Recalcular saldo/estado del documento padre
-    const nuevoMontoPagado = (documento.montoPagado || 0) + montoNum;
-    const nuevoSaldoPendiente = documento.valorDoc - nuevoMontoPagado;
-    const nuevosDiasMora = nuevoSaldoPendiente > 0 ? diasMoraDesdeHoy(documento.fechaVencimiento) : 0;
-    const nuevoEstado = calcularEstado(nuevoSaldoPendiente, documento.valorDoc, nuevosDiasMora);
+      const montoPagado = (Number(actual.montoPagado) || 0) + montoNum;
+      const saldoPendiente = valorDoc - montoPagado;
+      const diasMora = saldoPendiente > 0 ? diasMoraDesdeHoy(actual.fechaVencimiento) : 0;
+      const cambios = { montoPagado, saldoPendiente, diasMora, estado: calcularEstado(saldoPendiente, valorDoc, diasMora) };
 
-    await updateDoc(doc(db, "empresas", empresaId, "deuda_proveedores", documento.id), {
-      montoPagado: nuevoMontoPagado,
-      saldoPendiente: nuevoSaldoPendiente,
-      diasMora: nuevosDiasMora,
-      estado: nuevoEstado,
+      tx.set(pagoRef, {
+        monto: montoNum,
+        fecha: fecha || hoyISO(),     // hoy en Chile (ahora.slice daba el día UTC)
+        cuentaOrigen: cuentaOrigen || "",
+        nota: nota || "",
+        comprobanteUrl: comprobante?.url || null,
+        comprobantePath: comprobante?.path || null,
+        registradoPor: usuarioEmail,
+        registradoEn: ahora,
+      });
+      tx.update(docRef, cambios);
+      return { actual, cambios, saldoAnterior };
     });
 
     // 3. Auditoría del cambio (mismo patrón que el resto del módulo)
@@ -156,22 +175,19 @@ export async function registrarPago({ empresaId, documento, monto, fecha, cuenta
       coleccion: "deuda_proveedores",
       accion: "registrar_pago",
       campo: "saldoPendiente",
-      valorAnterior: documento.saldoPendiente,
-      valorNuevo: nuevoSaldoPendiente,
+      valorAnterior: r.saldoAnterior,
+      valorNuevo: r.cambios.saldoPendiente,
       origen: "manual",
     });
 
     return {
       ok: true,
-      documentoActualizado: {
-        ...documento,
-        montoPagado: nuevoMontoPagado,
-        saldoPendiente: nuevoSaldoPendiente,
-        diasMora: nuevosDiasMora,
-        estado: nuevoEstado,
-      },
+      documentoActualizado: { ...documento, ...r.actual, ...r.cambios },
     };
   } catch (err) {
+    if (err?.message === SUPERA) {
+      return { ok: false, error: `El pago (${fmtPesos(montoNum)}) supera el saldo pendiente (${fmtPesos(err.saldo)}); alguien registró otro pago entretanto.` };
+    }
     console.error("Error registrando pago:", err);
     return { ok: false, error: "No se pudo registrar el pago. Intenta de nuevo." };
   }

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc, query, orderBy, serverTimestamp, writeBatch } from "firebase/firestore";
+import { onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc, query, orderBy, serverTimestamp, writeBatch, where, documentId } from "firebase/firestore";
+import { rellenarRecurrentes, saldosProyectados } from "../../lib/finanzas/caja.js";
+import { cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
@@ -145,6 +147,7 @@ function getWeekColumns() {
 // ─── Modal: Nueva / Editar Cuenta ──────────────────────────────────────────
 function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
   const { empresaId } = useEmpresa();
+  const { proyectos = [] } = useFinanzas();
   const { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat } = useSubcategorias(empresaId);
   const [form, setForm] = useState(editando || {
     categoria: "EGRESOS", nombre: "", subcategoria: "OPERACIONAL",
@@ -334,8 +337,16 @@ function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
 
       {isIngreso && (
         <div className="grid grid-cols-2 gap-4">
-          <Campo etiqueta="Proyecto" value={form.proyectoId}
-            onChange={e => setForm(f => ({...f, proyectoId: e.target.value.toUpperCase()}))} />
+          {/* Se guarda el id del proyecto (antes texto libre, que el filtro
+              por obra no lograba calzar). Un texto antiguo se sigue mostrando. */}
+          <Campo as="select" etiqueta="Proyecto" value={form.proyectoId || ""}
+            onChange={e => setForm(f => ({...f, proyectoId: e.target.value}))}>
+            <option value="">Sin proyecto</option>
+            {proyectos.map(p => <option key={p.id} value={p.id}>{p.name || p.nombre}</option>)}
+            {form.proyectoId && !proyectos.some(p => p.id === form.proyectoId) && (
+              <option value={form.proyectoId}>{form.proyectoId}</option>
+            )}
+          </Campo>
           <Campo etiqueta="Cliente" value={form.cliente}
             onChange={e => setForm(f => ({...f, cliente: e.target.value}))} />
         </div>
@@ -566,7 +577,8 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
     onClick: () => onOpenDetalle(account),
     onKeyDown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetalle(account); } },
   } : {};
-  if (proyectoId !== "todos" && account.proyectoId && account.proyectoId !== proyectoId) return null;
+  // El filtro por obra ya lo hace cuentasFiltradas (con cuentaEsDeObra); aquí
+  // comparaba el texto libre con el id del proyecto y escondía filas de más.
 
   const rowTotal = weekColumns.reduce((s, w) => s + (payments[`${account.id}-${w.key}`] || 0), 0);
 
@@ -664,17 +676,18 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function FinanzasFlujoCaja() {
-  const { proyectoId } = useFinanzas();
+  const { proyectoId, proyecto } = useFinanzas();
   const { empresaId, empresa } = useEmpresa();
   const { subcatsEgreso, subcatsIngreso, eliminarSubcat } = useSubcategorias(empresaId);
   const weekColumns = useMemo(() => getWeekColumns(), []);
+  // El mismo "hoy" con que se armaron las columnas (recurrencias y saldo).
+  const hoyRef = useMemo(() => new Date(), []);
   const tableRef = useRef(null);
 
   const [cuentas,      setCuentas]      = useState([]);
   // Lo que muestra el flujo hoy (con recurrencias) y lo escrito en flujo_pagos.
   // `payments` (más abajo) es lo que se dibuja: el actual, la propuesta o un
   // punto intermedio de la transición.
-  const [pagosActual,    setPagosActual]    = useState({});
   const [pagosGuardados, setPagosGuardados] = useState({});
   const [paymentsPaid, setPaymentsPaid] = useState({});
   const [paymentNotas, setPaymentNotas] = useState({});
@@ -683,6 +696,12 @@ export default function FinanzasFlujoCaja() {
   const [reales,       setReales]       = useState({});
   const [bancos,       setBancos]       = useState(null);
   const [loading,      setLoading]      = useState(true);
+  // Se deriva siempre de lo escrito + marcas de pagado, con la misma función
+  // que "La semana" (caja.js). Así, escribir un monto en otra semana del mes o
+  // marcar ✓ quita al tiro la recurrencia mensual repetida.
+  const pagosActual = useMemo(
+    () => rellenarRecurrentes(cuentas, pagosGuardados, weekColumns, hoyRef, paymentsPaid),
+    [cuentas, pagosGuardados, weekColumns, hoyRef, paymentsPaid]);
 
   const [showModalCuenta, setShowModalCuenta] = useState(false);
   const [editandoCuenta,  setEditandoCuenta]  = useState(null);
@@ -822,38 +841,20 @@ export default function FinanzasFlujoCaja() {
   useEffect(() => escucharProveedores(empresaId, setProveedores), [empresaId]);
 
   // ── Autorrelleno de recurrentes ────────────────────────────────────────────
-  // Se ejecuta cuando hay cuentas o payments listos
-  // Rellena solo semanas FUTURAS y VACÍAS — nunca sobreescribe ediciones manuales
-  const applyRecurrentes = useCallback((cuentasList, paymentsMap, weeks) => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const filled = { ...paymentsMap };
-    let changed = false;
-    cuentasList.forEach(c => {
-      if (!c.recurrente || !c.montoRecurrente) return;
-      const monto = -Math.abs(parseInput(c.montoRecurrente)); // egresos siempre negativos
-      const isIngreso = c.categoria === "INGRESOS";
-      const montoFinal = isIngreso ? Math.abs(parseInput(c.montoRecurrente)) : monto;
-      const futuras = weeks.filter(w => w.startDate >= today);
-      futuras.forEach((w, idx) => {
-        const key = `${c.id}-${w.key}`;
-        if (filled[key]) return; // ya tiene valor — no sobreescribir
-        const freq = c.frecuenciaRecurrente || "mensual";
-        let aplicar = false;
-        if (freq === "semanal") aplicar = true;
-        else if (freq === "quincenal") aplicar = idx % 2 === 0;
-        else if (freq === "mensual") {
-          // Solo la primera semana de cada mes
-          const prevSameMes = futuras.slice(0, idx).find(pw => pw.monthIndex === w.monthIndex);
-          aplicar = !prevSameMes;
-        }
-        if (aplicar) { filled[key] = montoFinal; changed = true; }
-      });
-    });
-    return changed ? filled : null;
-  }, []);
+  // En memoria, nunca se guarda: rellenarRecurrentes (caja.js), la misma
+  // regla de "La semana".
 
   const cuentasProp = useMemo(() => (propuesta ? cuentasNuevas(propuesta) : []), [propuesta]);
   const cuentasVista = useMemo(() => (propuesta ? [...cuentas, ...cuentasProp] : cuentas), [propuesta, cuentas, cuentasProp]);
+
+  // En la propuesta, una partida cambiada deja de estar pagada (igual que
+  // datosConPropuesta y aplicarPropuesta).
+  const pagadosPropuesta = useMemo(() => {
+    if (!propuesta) return null;
+    const m = { ...paymentsPaid };
+    for (const k of Object.keys(propuesta.cambios?.pagos || {})) delete m[k];
+    return m;
+  }, [propuesta, paymentsPaid]);
 
   // La propuesta completa: lo escrito en el flujo + los cambios, con las
   // mismas reglas de recurrencia que el flujo actual.
@@ -861,10 +862,8 @@ export default function FinanzasFlujoCaja() {
     if (!propuesta) return null;
     const raw = { ...pagosGuardados };
     for (const [k, c] of Object.entries(propuesta.cambios?.pagos || {})) raw[k] = c.valor || 0;
-    return applyRecurrentes(cuentasVista, raw, weekColumns) || raw;
-    // applyRecurrentes es estable (useCallback sin dependencias)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propuesta, pagosGuardados, cuentasVista, weekColumns]);
+    return rellenarRecurrentes(cuentasVista, raw, weekColumns, hoyRef, pagadosPropuesta);
+  }, [propuesta, pagosGuardados, cuentasVista, weekColumns, hoyRef, pagadosPropuesta]);
 
   const cambiadas = useMemo(() => {
     const set = new Set();
@@ -899,10 +898,8 @@ export default function FinanzasFlujoCaja() {
       setCuentas(cuentasList);
       const pMap = {}; snapP.docs.forEach(d => { pMap[d.id] = d.data().valor || 0; });
       setPagosGuardados(pMap);
-      // Autorrelleno recurrentes — en memoria, no persiste a Firebase
+      // Las recurrencias se rellenan en memoria (pagosActual), no se guardan.
       const weeksSnap = getWeekColumns();
-      const filledMap = applyRecurrentes(cuentasList, pMap, weeksSnap);
-      setPagosActual(filledMap || pMap);
       const paidMap = {}; snapPaid.docs.forEach(d => { paidMap[d.id] = true; }); setPaymentsPaid(paidMap);
       const notaMap = {}; snapNotas.docs.forEach(d => { notaMap[d.id] = d.data().texto || ""; }); setPaymentNotas(notaMap);
       snapCfg.docs.forEach(d => { if (d.id === "saldo_banco") setSaldoBanco(d.data().valor || 0); });
@@ -917,13 +914,12 @@ export default function FinanzasFlujoCaja() {
       } catch (e) { console.warn("Flujo sin datos del banco:", e); }
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
-  }, [empresaId, applyRecurrentes]);
+  }, [empresaId]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
   const handlePayment = useCallback(async (key, valor) => {
     if (propuestaRef.current) return guardarEnPropuesta({ [key]: valor });
-    setPagosActual(prev => ({ ...prev, [key]: valor }));
     setPagosGuardados(prev => ({ ...prev, [key]: valor }));
     try { await setDoc(doc(db, "empresas", empresaId, "flujo_pagos", key), { valor, updatedAt: new Date().toISOString() }); } catch(e) {}
   }, [empresaId]);
@@ -970,7 +966,6 @@ export default function FinanzasFlujoCaja() {
       setDraggedPayment(null); setDragOverKey(null);
       return guardarEnPropuesta({ [targetKey]: valor, [sourceKey]: 0 });
     }
-    setPagosActual(prev => ({ ...prev, [targetKey]: valor, [sourceKey]: 0 }));
     setPagosGuardados(prev => ({ ...prev, [targetKey]: valor, [sourceKey]: 0 }));
     if (paymentNotas[sourceKey]) {
       setPaymentNotas(prev => { const next = { ...prev, [targetKey]: prev[sourceKey] }; delete next[sourceKey]; return next; });
@@ -1012,19 +1007,14 @@ export default function FinanzasFlujoCaja() {
       await updateDoc(doc(db, "empresas", empresaId, "flujo_cuentas", editandoCuenta.id), form);
       setCuentas(prev => prev.map(c => c.id === editandoCuenta.id ? { ...c, ...form } : c));
     } else {
-      const ref = await addDoc(collection(db, "empresas", empresaId, "flujo_cuentas"), { ...form, creadoEn: new Date().toISOString() });
-      setCuentas(prev => [...prev, { id: ref.id, ...form }]);
+      // creadoEn también en memoria: ancla las quincenales igual que al recargar.
+      const nueva = { ...form, creadoEn: new Date().toISOString() };
+      const ref = await addDoc(collection(db, "empresas", empresaId, "flujo_cuentas"), nueva);
+      setCuentas(prev => [...prev, { id: ref.id, ...nueva }]);
     }
-    // Re-aplicar recurrentes después de guardar/editar
-    setCuentas(prev => {
-      setPagosActual(pm => {
-        const filled = applyRecurrentes(prev, pm, weekColumns);
-        return filled || pm;
-      });
-      return prev;
-    });
+    // Las recurrentes se recalculan solas (pagosActual depende de `cuentas`).
     setShowModalCuenta(false); setEditandoCuenta(null);
-  }, [editandoCuenta, applyRecurrentes, weekColumns, empresaId]);
+  }, [editandoCuenta, empresaId]);
 
   const handleDeleteCuenta = useCallback(async (id) => {
     if (propuestaRef.current) {
@@ -1037,7 +1027,28 @@ export default function FinanzasFlujoCaja() {
       return;
     }
     if (!window.confirm("¿Eliminar esta cuenta? Se perderán todos sus montos.")) return;
-    try { await deleteDoc(doc(db, "empresas", empresaId, "flujo_cuentas", id)); setCuentas(prev => prev.filter(c => c.id !== id)); } catch(e) {}
+    try {
+      // Montos, marcas ✓ y notas de la cuenta se borran con ella. Antes
+      // quedaban huérfanos en flujo_pagos/flujo_pagados/flujo_notas y los
+      // seguían leyendo otras pantallas. Las llaves son "<cuentaId>-<lunes>".
+      const huerfanos = [];
+      for (const nombre of ["flujo_pagos", "flujo_pagados", "flujo_notas"]) {
+        const snap = await getDocs(query(collection(db, "empresas", empresaId, nombre),
+          where(documentId(), ">=", `${id}-`), where(documentId(), "<", `${id}-\uf8ff`)));
+        snap.docs.forEach(d => { if (d.id.slice(0, -11) === id) huerfanos.push(d.ref); });
+      }
+      // La cuenta va al final: si un lote falla, la cuenta sigue y se puede reintentar.
+      const refs = [...huerfanos, doc(db, "empresas", empresaId, "flujo_cuentas", id)];
+      // Lotes de 400 (el límite de Firestore es 500 escrituras por lote).
+      for (let i = 0; i < refs.length; i += 400) {
+        const batch = writeBatch(db);
+        refs.slice(i, i + 400).forEach(r => batch.delete(r));
+        await batch.commit();
+      }
+      setCuentas(prev => prev.filter(c => c.id !== id));
+      const sinCuenta = (m) => Object.fromEntries(Object.entries(m).filter(([k]) => k.slice(0, -11) !== id));
+      setPagosGuardados(sinCuenta); setPaymentsPaid(sinCuenta); setPaymentNotas(sinCuenta);
+    } catch(e) { console.error(e); window.alert("No se pudo eliminar la cuenta. Revisa tu conexión e intenta de nuevo."); }
   }, [empresaId]);
 
   // Vincula (o desvincula con "") un proveedor del maestro a una cuenta.
@@ -1062,9 +1073,12 @@ export default function FinanzasFlujoCaja() {
   const cuentasFiltradas = useMemo(() => {
     let lista = cuentasVista;
     if (busqueda) lista = lista.filter(c => c.nombre?.toLowerCase().includes(busqueda.toLowerCase()));
-    if (proyectoId !== "todos") lista = lista.filter(c => !c.proyectoId || c.proyectoId === proyectoId);
+    // Las cuentas guardan la obra como id (selector) o como texto libre
+    // antiguo (código/nombre en mayúsculas); cuentaEsDeObra reconoce ambos.
+    // Las cuentas sin obra son generales y se ven siempre.
+    if (proyectoId !== "todos" && proyecto) lista = lista.filter(c => !c.proyectoId || cuentaEsDeObra(c, proyecto));
     return lista;
-  }, [cuentasVista, busqueda, proyectoId]);
+  }, [cuentasVista, busqueda, proyectoId, proyecto]);
 
   const mesActualWeeks = useMemo(() => weekColumns.filter(w => w.monthIndex === 0), [weekColumns]);
 
@@ -1241,16 +1255,16 @@ export default function FinanzasFlujoCaja() {
     setTimeout(() => setExportando(null), 2000);
   }, [ingresos, egresos, weekColumns, payments, empresa]);
 
-  const acumulados = useMemo(() => {
-    const acc = {};
-    let running = saldoBanco;
-    weekColumns.forEach(w => {
-      running += weekTotal(w.key, ingresos) + weekTotal(w.key, egresos);
-      acc[w.key] = running;
-    });
-    return acc;
-    // eslint-disable-next-line
-  }, [weekColumns, ingresos, egresos, payments, saldoBanco]);
+  // Saldo acumulado = la misma proyección de "La semana" (caja.js): parte del
+  // saldo de hoy en la semana en curso y suma solo lo pendiente (sin ✓ y, en
+  // la semana en curso, lo que el banco aún no muestra). Antes partía del
+  // saldo de hoy y le volvía a sumar las semanas pasadas ya pagadas. Las
+  // semanas pasadas quedan sin saldo proyectado.
+  const pagadosVista = pagadosPropuesta && t > 0.5 ? pagadosPropuesta : paymentsPaid;
+  const acumulados = useMemo(() => saldosProyectados({
+    cuentas: [...ingresos, ...egresos], plan: payments, pagados: pagadosVista, reales,
+    saldoInicial: saldoBanco, semanas: weekColumns, hoy: hoyRef,
+  }), [weekColumns, ingresos, egresos, payments, pagadosVista, reales, saldoBanco, hoyRef]);
 
   const kpiIngresos = useMemo(() => ingresos.reduce((s, c) => s + weekColumns.reduce((ws, w) => ws + (payments[`${c.id}-${w.key}`] || 0), 0), 0), [ingresos, payments, weekColumns]);
   const kpiEgresos  = useMemo(() => egresos.reduce((s, c)  => s + weekColumns.reduce((ws, w) => ws + (payments[`${c.id}-${w.key}`] || 0), 0), 0), [egresos,  payments, weekColumns]);
@@ -1298,10 +1312,13 @@ export default function FinanzasFlujoCaja() {
   const totalIngresos  = weekColumns.reduce((s, w) => s + weekTotal(w.key, ingresos), 0);
   const totalEgresos   = weekColumns.reduce((s, w) => s + weekTotal(w.key, egresos), 0);
   // Caja al final de las semanas visibles, en cada versión (para la franja de la propuesta)
-  const acumuladoFinalDe = (mapa) => weekColumns.reduce((tot, w) =>
-    tot + [...ingresos, ...egresos].reduce((x, c) => x + (mapa[`${c.id}-${w.key}`] || 0), 0), saldoBanco);
-  const acumuladoFinalActual = propuesta ? acumuladoFinalDe(pagosActual) : 0;
-  const acumuladoFinalPropuesta = propuesta ? acumuladoFinalDe(pagosPropuesta) : 0;
+  // (misma regla que el saldo acumulado: desde hoy y solo lo pendiente)
+  const acumuladoFinalDe = (mapa, pagados) => {
+    const s = saldosProyectados({ cuentas: [...ingresos, ...egresos], plan: mapa, pagados, reales, saldoInicial: saldoBanco, semanas: weekColumns, hoy: hoyRef });
+    return s[weekColumns[weekColumns.length - 1]?.key] ?? saldoBanco;
+  };
+  const acumuladoFinalActual = propuesta ? acumuladoFinalDe(pagosActual, paymentsPaid) : 0;
+  const acumuladoFinalPropuesta = propuesta ? acumuladoFinalDe(pagosPropuesta, pagadosPropuesta) : 0;
 
   // Botón para empezar o retomar una propuesta
   const botonPropuestas = (
@@ -1713,7 +1730,8 @@ export default function FinanzasFlujoCaja() {
                 </td>
                 {weekColumns.map((w, i) => (
                   <td key={w.key} className={`px-2 pt-1.5 pb-3 text-right text-[16px] ${bordeSemana(i, weekColumns)} ${w.isCurrentWeek ? "bg-cuaderno-durazno" : "bg-cuaderno-hoja"}`}>
-                    <Cifra valor={acumulados[w.key] || 0} vacio="0" />
+                    {/* Semanas pasadas: sin saldo proyectado (ver acumulados) */}
+                    {acumulados[w.key] !== undefined && <Cifra valor={acumulados[w.key]} vacio="0" />}
                   </td>
                 ))}
                 <td className={`${celdaTotal} z-30 pt-1.5 pb-3 text-[16.5px]`}><Cifra valor={acumuladoFinal} vacio="0" raya="doble" /></td>
