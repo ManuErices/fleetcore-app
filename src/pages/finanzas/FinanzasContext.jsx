@@ -3,16 +3,20 @@ import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
+import { proximoPagoCosto, diasEntre } from "../../lib/finanzas/costosFijos.js";
+import { conEstadoAlDia } from "../../lib/pagosDeuda";
+import { hoyISO, fechaISO } from "../../lib/fechas";
 
 const FinanzasContext = createContext(null);
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 function diasHasta(fechaStr) {
   if (!fechaStr) return null;
+  // Días de calendario en Chile (antes: mediodía contra "ahora" con ceil, que
+  // en la tarde daba un día menos de lo que se ve en el calendario).
   try {
-    const d = new Date(fechaStr.includes("T") ? fechaStr : fechaStr + "T12:00:00");
-    if (isNaN(d)) return null;
-    return Math.ceil((d - new Date()) / 86400000);
+    const iso = fechaStr.includes("T") ? fechaISO(new Date(fechaStr)) : fechaStr.slice(0, 10);
+    return diasEntre(hoyISO(), iso);
   } catch { return null; }
 }
 function mesKey(fecha) {
@@ -75,14 +79,16 @@ export function FinanzasProvider({ children }) {
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "costos_fijos"));
       costos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const hoy = new Date();
+      // Con fechas de calendario de Chile: antes se comparaba la medianoche
+      // del día de pago con "ahora" y el pago de hoy saltaba al mes siguiente;
+      // además ignoraba la frecuencia y avisaba costos ya terminados.
+      const hoy = hoyISO();
       costos.forEach(c => {
-        if (c.activo === false || !c.diaPago) return;
-        const diaPago = parseInt(c.diaPago);
-        // Calcular próxima fecha de pago (este mes o el siguiente)
-        let fechaPago = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago);
-        if (fechaPago < hoy) fechaPago = new Date(hoy.getFullYear(), hoy.getMonth() + 1, diaPago);
-        const dias = Math.ceil((fechaPago - hoy) / 86400000);
+        if (c.activo === false || (!c.diaPago && c.frecuencia !== "unico")) return;
+        const fechaPago = proximoPagoCosto(c, hoy);
+        if (!fechaPago) return;
+        const diaPago = Number(fechaPago.slice(8, 10));
+        const dias = diasEntre(hoy, fechaPago);
         if (dias <= 7) {
           const monto = parseFloat(c.monto) || 0;
           resultado.push({
@@ -90,7 +96,7 @@ export function FinanzasProvider({ children }) {
             tipo: dias <= 3 ? "danger" : "warning",
             categoria: "costo_fijo",
             titulo: `Pago próximo: ${c.nombre}`,
-            descripcion: `Vence el día ${diaPago}, ${montoTexto(monto, c.moneda)}`,
+            descripcion: `${dias === 0 ? "Vence hoy" : `Vence el día ${diaPago}`}, ${montoTexto(monto, c.moneda)}`,
             dias,
             accion: "Costos",
             // En pesos, para que ningún total sume UF como si fueran pesos.
@@ -259,7 +265,8 @@ export function FinanzasProvider({ children }) {
       const snapDeuda = await getDocs(collection(db, "empresas", empresaId, "deuda_proveedores"));
       const porAcreedor = {};
       snapDeuda.docs.forEach(d => {
-        const doc = d.data();
+        // Estado y mora recalculados a hoy (los guardados se congelaban al importar).
+        const doc = conEstadoAlDia(d.data());
         if (doc.estado !== "vencido") return;
         const key = doc.proveedorNombre || "Acreedor";
         if (!porAcreedor[key]) porAcreedor[key] = { saldo: 0, maxMora: 0, docs: 0 };

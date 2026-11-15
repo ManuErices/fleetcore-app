@@ -7,6 +7,8 @@ import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { rutLlave, planificarUnificacion, aplicarUnificacion } from "../../lib/terceros";
+import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
+import { fechaISO } from "../../lib/fechas";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, FechaHoja, ModalCuaderno, BarraProporcion,
   IconoMas, IconoLapiz, IconoBorrar, casoTitulo, Nota, VistoBueno,
@@ -159,7 +161,12 @@ function PanelDetalle({ proveedor, onClose, onEditManual, onDeleteManual, projec
                   {tx._fuente === "manual" && tx.estado && (
                     <Resaltado color={ESTADO_RESALTE[tx.estado] || "durazno"} className="text-[14px]">{tx.estado.toLowerCase()}</Resaltado>
                   )}
-                  <Cifra valor={tx._monto} escala="pesos" color="tinta" vacio="$0" className="text-[16px]" />
+                  {tx.moneda && tx.moneda !== "CLP" && (
+                    <span className="text-[13px] text-cuaderno-grafito whitespace-nowrap">
+                      {tx.moneda} {(parseFloat(tx.monto) || 0).toLocaleString("es-CL", { maximumFractionDigits: 2 })}{tx._sinConvertir ? ", sin valor del día" : ", unos"}
+                    </span>
+                  )}
+                  {!tx._sinConvertir && <Cifra valor={tx._monto} escala="pesos" color="tinta" vacio="$0" className="text-[16px]" />}
                   {tx._fuente === "manual" && (
                     <>
                       <button onClick={() => onEditManual(tx)} aria-label="Editar registro" title="Editar"
@@ -271,11 +278,13 @@ export default function FinanzasProveedores() {
   const [sortCol, setSortCol]         = useState("total");
   const [sortDir, setSortDir]         = useState("desc");
   const [activeTab, setActiveTab]     = useState("proveedores"); // proveedores | transacciones
+  const [sinConvertir, setSinConvertir] = useState(0);
 
   const cargar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     const txs = []; // todas las transacciones normalizadas
+    let sinConvertir = 0;   // registros en UF/USD sin valor del día (fuera de los totales)
 
     try {
       // 1. Rendiciones
@@ -311,7 +320,7 @@ export default function FinanzasProveedores() {
           _key: proveedor,
           _rut: normalizar(s.rutSubcontratista || ""),
           _monto: parseFloat(s.saldoPorPagarSC) || parseFloat(s.totalPagoNeto) || 0,
-          _fecha: s.fechaEP || s.createdAt?.toDate?.()?.toISOString?.()?.slice(0, 10) || "",
+          _fecha: s.fechaEP || (s.createdAt ? fechaISO(s.createdAt) : "") || "",   // día en Chile, no UTC
           _descripcion: s.descripcionLinea || s.descricpionCuentaCosto || "",
           projectId: s.projectId || "",
           razonSocial: s.razonSocialSubcontratista || "",
@@ -347,15 +356,25 @@ export default function FinanzasProveedores() {
     try {
       // 4. Manuales
       const snapM = await getDocs(query(collection(db, "empresas", empresaId, "finanzas_proveedores"), orderBy("createdAt", "desc")));
+      // Los registros manuales pueden estar en UF o dólares: se pasan a pesos
+      // con el valor del día (como Costos). Antes se sumaban como pesos. Si no
+      // hay valor del día, quedan fuera de los totales y se avisa.
+      const hayExtranjera = snapM.docs.some(d => (d.data().moneda || "CLP") !== "CLP");
+      const indicadores = hayExtranjera ? await obtenerIndicadores(empresaId).catch(() => null) : null;
       snapM.docs.forEach(d => {
         const m = d.data();
         const proveedor = normalizar(m.razonSocial);
         if (!proveedor) return;
+        const original = parseFloat(m.monto) || 0;
+        const pesos = aPesos(original, m.moneda || "CLP", indicadores);
+        if (pesos === null) sinConvertir++;
         txs.push({
           _fuente: "manual",
           _key: proveedor,
           _rut: normalizar(m.rut || ""),
-          _monto: parseFloat(m.monto) || 0,
+          _monto: pesos ?? 0,
+          _sinConvertir: pesos === null,
+          monto: m.monto,          // el original, para que "Editar" no lo deje en 0
           _fecha: m.fecha || "",
           _descripcion: m.descripcion || "",
           projectId: m.projectId || "",
@@ -393,6 +412,7 @@ export default function FinanzasProveedores() {
     });
 
     setProveedores(Object.values(mapaProveedores));
+    setSinConvertir(sinConvertir);
     setLoading(false);
   }, [empresaId, proyectoId]);
 
@@ -499,6 +519,12 @@ export default function FinanzasProveedores() {
           </Boton>
         </div>
       </header>
+
+      {sinConvertir > 0 && (
+        <Nota etiqueta="Ojo:">
+          {sinConvertir} registro{sinConvertir > 1 ? "s" : ""} manual{sinConvertir > 1 ? "es" : ""} en UF o dólares quedan fuera de los totales: no se pudo obtener el valor del día para pasarlos a pesos.
+        </Nota>
+      )}
 
       <MaestroTerceros empresaId={empresaId} onListo={cargar} />
 

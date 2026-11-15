@@ -51,9 +51,9 @@ export function cuentasNuevas(propuesta) {
 export function datosConPropuesta(datos, propuesta) {
   const cambios = propuesta?.cambios || {};
   const pagos = { ...datos.pagos };
-  for (const [key, c] of Object.entries(cambios.pagos || {})) {
-    if (c.valor) pagos[key] = c.valor; else delete pagos[key];
-  }
+  // Un 0 propuesto queda escrito como 0 (igual que al aprobar): si se borrara
+  // la llave, la recurrencia volvería a llenar la celda.
+  for (const [key, c] of Object.entries(cambios.pagos || {})) pagos[key] = c.valor || 0;
   // Una partida reemplazada deja de estar "pagada": es otra decisión.
   const pagados = { ...datos.pagados };
   for (const key of Object.keys(cambios.pagos || {})) delete pagados[key];

@@ -9,7 +9,7 @@
  * un solo lote atómico: o entra la propuesta completa, o no entra nada.
  */
 import {
-  collection, doc, getDoc, getDocs, addDoc, updateDoc, writeBatch, deleteField, FieldPath,
+  collection, doc, getDoc, getDocs, addDoc, updateDoc, runTransaction, deleteField, FieldPath,
 } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { PREFIJO_CUENTA_NUEVA, conSigno, cuentasNuevas, esEditable, partesClave } from "./propuestas.js";
@@ -188,40 +188,63 @@ export async function cambiarEstado(empresaId, propuesta, estado, comentario = "
  * Aprueba la propuesta y escribe sus cambios en el flujo, todo en un lote.
  * Las cuentas nuevas reciben su id definitivo y sus partidas se reapuntan.
  * Las partidas cambiadas pierden la marca de pagado (es otra decisión).
- * Devuelve cuántas cosas cambió.
+ * Devuelve cuántas cosas cambió (y cuántas partidas se omitieron).
+ *
+ * Se aplica la propuesta tal como está en Firestore, no la copia del
+ * navegador: dentro de una transacción se relee (si alguien la editó o la
+ * cerró mientras se revisaba, se aplica lo último o se rechaza) y se omiten
+ * las partidas de cuentas del flujo que ya no existen (si no, se creaban
+ * montos huérfanos).
  */
-export async function aplicarPropuesta(empresaId, propuesta, comentario = "") {
-  exigirEditable(propuesta);
-  const batch = writeBatch(db);
-  const idReal = new Map();
+export async function aplicarPropuesta(empresaId, propuestaLocal, comentario = "") {
+  exigirEditable(propuestaLocal);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref(empresaId, propuestaLocal.id));
+    if (!snap.exists()) throw new Error("Esa propuesta no existe.");
+    const propuesta = { id: snap.id, ...snap.data() };
+    exigirEditable(propuesta);
 
-  for (const c of cuentasNuevas(propuesta)) {
-    const nueva = doc(collection(db, "empresas", empresaId, "flujo_cuentas"));
-    idReal.set(c.id, nueva.id);
-    const { id: _provisorio, esNueva: _nueva, ...datosCuenta } = c;
-    batch.set(nueva, { ...datosCuenta, creadoEn: ahora(), creadoPorPropuesta: propuesta.id });
-  }
+    // Cuentas del flujo que toca la propuesta: ¿siguen existiendo?
+    const pagos = Object.entries(propuesta.cambios?.pagos || {});
+    const idsExistentes = [...new Set(pagos.map(([key]) => partesClave(key).cuentaId)
+      .filter(id => !id.startsWith(PREFIJO_CUENTA_NUEVA)))];
+    const existe = new Map();
+    for (const id of idsExistentes) {
+      existe.set(id, (await tx.get(doc(db, "empresas", empresaId, "flujo_cuentas", id))).exists());
+    }
 
-  let partidas = 0;
-  for (const [key, c] of Object.entries(propuesta.cambios?.pagos || {})) {
-    const { cuentaId, semana } = partesClave(key);
-    const destino = `${idReal.get(cuentaId) || cuentaId}-${semana}`;
-    batch.set(doc(db, "empresas", empresaId, "flujo_pagos", destino), { valor: c.valor || 0, updatedAt: ahora(), propuestaId: propuesta.id });
-    batch.delete(doc(db, "empresas", empresaId, "flujo_pagados", destino));
-    partidas++;
-  }
+    // Desde aquí solo escrituras (una transacción lee todo antes de escribir).
+    const idReal = new Map();
+    for (const c of cuentasNuevas(propuesta)) {
+      const nueva = doc(collection(db, "empresas", empresaId, "flujo_cuentas"));
+      idReal.set(c.id, nueva.id);
+      const { id: _provisorio, esNueva: _nueva, ...datosCuenta } = c;
+      tx.set(nueva, { ...datosCuenta, creadoEn: ahora(), creadoPorPropuesta: propuesta.id });
+    }
 
-  if (typeof propuesta.cambios?.colchon === "number") {
-    batch.set(doc(db, "empresas", empresaId, "flujo_config", "colchon"), { valor: propuesta.cambios.colchon, actualizadoEn: ahora() });
-  }
+    let partidas = 0, omitidas = 0;
+    for (const [key, c] of pagos) {
+      const { cuentaId, semana } = partesClave(key);
+      const real = idReal.get(cuentaId) || (existe.get(cuentaId) ? cuentaId : null);
+      if (!real) { omitidas++; continue; }
+      const destino = `${real}-${semana}`;
+      tx.set(doc(db, "empresas", empresaId, "flujo_pagos", destino), { valor: c.valor || 0, updatedAt: ahora(), propuestaId: propuesta.id });
+      tx.delete(doc(db, "empresas", empresaId, "flujo_pagados", destino));
+      partidas++;
+    }
 
-  batch.update(ref(empresaId, propuesta.id), {
-    estado: "aplicada",
-    aprobadaPor: quien(),
-    aprobadaEn: ahora(),
-    comentarioCierre: String(comentario).slice(0, 1000),
-    actualizadaEn: ahora(),
+    if (typeof propuesta.cambios?.colchon === "number") {
+      tx.set(doc(db, "empresas", empresaId, "flujo_config", "colchon"), { valor: propuesta.cambios.colchon, actualizadoEn: ahora() });
+    }
+
+    tx.update(ref(empresaId, propuesta.id), {
+      estado: "aplicada",
+      aprobadaPor: quien(),
+      aprobadaEn: ahora(),
+      comentarioCierre: String(comentario).slice(0, 1000),
+      actualizadaEn: ahora(),
+      ...(omitidas ? { partidasOmitidas: omitidas } : {}),
+    });
+    return { partidas, omitidas, cuentas: idReal.size, colchon: typeof propuesta.cambios?.colchon === "number" };
   });
-  await batch.commit();
-  return { partidas, cuentas: idReal.size, colchon: typeof propuesta.cambios?.colchon === "number" };
 }

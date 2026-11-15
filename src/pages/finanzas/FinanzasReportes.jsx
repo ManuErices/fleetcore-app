@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { fechaISO } from "../../lib/fechas";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
@@ -82,7 +83,7 @@ export default function FinanzasReportes() {
         const s = d.data();
         if (proyectoId !== "todos" && s.projectId !== proyectoId) return;
         const monto = parseFloat(s.saldoPorPagarSC) || parseFloat(s.totalPagoNeto) || 0;
-        const fecha = s.fechaEP || s.createdAt?.toDate?.()?.toISOString?.()?.slice(0, 10) || "";
+        const fecha = s.fechaEP || (s.createdAt ? fechaISO(s.createdAt) : "") || "" /* día en Chile */;
         resultado.egresos.push({ fuente: "subcontrato", monto, fecha, proveedor: s.razonSocialSubcontratista || "", projectId: s.projectId || "" });
         if (s.razonSocialSubcontratista) resultado.proveedores.push({ nombre: s.razonSocialSubcontratista, monto });
       });

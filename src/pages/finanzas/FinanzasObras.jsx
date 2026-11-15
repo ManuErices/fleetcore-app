@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { fechaISO } from "../../lib/fechas";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
 import {
@@ -205,7 +206,7 @@ export default function FinanzasObras() {
       snapS.docs.forEach(d => {
         const s=d.data(); if(!s.projectId) return;
         const a=get(s.projectId);
-        const fecha=s.fechaEP||s.createdAt?.toDate?.()?.toISOString?.()?.slice(0,10)||"";
+        const fecha=s.fechaEP||(s.createdAt ? fechaISO(s.createdAt) : "")||"" /* día en Chile */;
         const k=mesKey(fecha); const m=parseFloat(s.saldoPorPagarSC)||parseFloat(s.totalPagoNeto)||0;
         if(k===keyActual){ a.egresos+=m; a.egrPorFuente.subcontrato+=m; }
         if(ultimos6.includes(k)) a.flujo[k].egresos+=m;

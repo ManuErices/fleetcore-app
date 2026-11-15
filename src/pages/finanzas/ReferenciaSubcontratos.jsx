@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { cargarSubcontratos, subcontratistasConEPs } from "../../lib/subcontratosEP";
 import { rutLlave } from "../../lib/terceros";
+import { hoyISO, sumarDias } from "../../lib/fechas";
 import { Hoja, Cifra, Boton, Resaltado, casoTitulo } from "./cuaderno";
 
 /*
@@ -27,7 +28,7 @@ export default function ReferenciaSubcontratos({ empresaId, egresos, proveedores
 
   const grupos = useMemo(() => {
     if (!filas) return [];
-    const desde = new Date(Date.now() - DIAS * 86400000).toISOString().slice(0, 10);
+    const desde = sumarDias(hoyISO(), -DIAS) /* calendario de Chile */;
     return subcontratistasConEPs(filas, desde).map(g => {
       // Ficha del maestro: por proveedorId o, si la fila es antigua, por RUT
       const ficha = proveedores.find(p => p.id === g.proveedorId)

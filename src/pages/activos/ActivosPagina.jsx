@@ -6,7 +6,27 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
-import { guardarMaquina, desdeFichaActivo, MaquinaDuplicada } from "../../lib/maquinas";
+import { guardarMaquina, desdeFichaActivo, MaquinaDuplicada, REFERENCIAS_MAQUINA, reemplazarIds } from "../../lib/maquinas";
+import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
+import { hoyISO, partesISO } from "../../lib/fechas";
+
+/**
+ * ¿Qué registros apuntan a esta máquina? Recorre las colecciones de
+ * REFERENCIAS_MAQUINA buscando su id en machineId, maquinaId,
+ * activoVinculadoId… (también anidados, como hace la fusión del maestro).
+ * Devuelve { coleccion: cantidad }.
+ */
+async function referenciasDeMaquina(empresaId, id) {
+  const ids = new Set([id]);
+  const encontradas = {};
+  for (const nombre of REFERENCIAS_MAQUINA) {
+    let snap;
+    try { snap = await getDocs(collection(db, "empresas", empresaId, nombre)); } catch { continue; }
+    const n = snap.docs.filter(d => d.id !== id && reemplazarIds(d.data(), ids, "")[1]).length;
+    if (n) encontradas[nombre] = n;
+  }
+  return encontradas;
+}
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
   ModalCuaderno, FechaHoja,
@@ -49,7 +69,13 @@ function fmtM(n) {
   if (Math.abs(n)>=1000000) return "$"+(n/1000000).toFixed(1).replace(".",","  )+"M";
   return "$"+Math.round(n).toLocaleString("es-CL");
 }
-function diasR(f) { if(!f) return null; return Math.ceil((new Date(f)-new Date())/86400000); }
+// Días de calendario en Chile hasta la fecha (new Date("AAAA-MM-DD") es medianoche UTC).
+function diasR(f) {
+  if(!f) return null;
+  const a=partesISO(hoyISO()), b=partesISO(String(f).slice(0,10));
+  if(!a||!b) return null;
+  return Math.round((Date.UTC(b.anio,b.mes-1,b.dia)-Date.UTC(a.anio,a.mes-1,a.dia))/86400000);
+}
 function estadoDoc(f) {
   const d=diasR(f); if(d===null) return null;
   if(d<0) return "vencido"; if(d<=30) return "urgente"; if(d<=90) return "pronto"; return "ok";
@@ -421,6 +447,9 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
   const [detalle,setDetalle]=useState(null);
   const [deletingId,setDeletingId]=useState(null);
   const [confirmEliminar,setConfirmEliminar]=useState(null); // activo a eliminar
+  const [refsEliminar,setRefsEliminar]=useState(null);       // { coleccion: n } si tiene registros
+  const [revisandoRefs,setRevisandoRefs]=useState(false);
+  const [indicadores,setIndicadores]=useState(null);         // UF y dólar del día
   const [filtroTipo,setFiltroTipo]=useState("todos");
   const [filtroEstado,setFiltroEstado]=useState("activos");
   const [filtroDoc,setFiltroDoc]=useState("todos");
@@ -488,6 +517,7 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
     setLoading(false);
   },[empresaId, proyectoId]);
   useEffect(()=>{cargar();},[cargar]);
+  useEffect(()=>{ if(empresaId) obtenerIndicadores(empresaId).then(setIndicadores).catch(()=>{}); },[empresaId]);
 
   // Se guarda por el maestro de máquinas: solo los campos que cambiaron
   // (no se pisa lo que escribieron Oficina Técnica, Admin o Maquinaria), con
@@ -525,6 +555,17 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
   const confirmarEliminar=async()=>{
     const a=confirmEliminar;
     if(!a) return;
+    // Una máquina con historial (partes diarios, combustible, costos fijos,
+    // arriendos…) no se borra: quedarían registros apuntando a una ficha que
+    // no existe. Se ofrece dejarla inactiva.
+    if(a._source==="machines"){
+      setRevisandoRefs(true);
+      let refs={};
+      try { refs=await referenciasDeMaquina(empresaId,a.id); }
+      catch(e){ console.error(e); setRevisandoRefs(false); alert("No se pudo revisar si la máquina tiene registros. Intenta de nuevo."); return; }
+      setRevisandoRefs(false);
+      if(Object.keys(refs).length){ setRefsEliminar(refs); return; }
+    }
     setConfirmEliminar(null);
     setDeletingId(a.id);
     // Eliminar de machines (FleetCore) o de finanzas_activos según origen
@@ -537,6 +578,19 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
     if(detalle?.id===a.id) setDetalle(null);
     await cargar();
   };
+
+  // En vez de borrar: marcarla inactiva por el maestro (solo cambia `active`).
+  const marcarInactivo=async()=>{
+    const a=confirmEliminar;
+    if(!a) return;
+    try {
+      await guardarMaquina(empresaId, desdeFichaActivo({ ...a, activo:false }), { id:a.id, original:desdeFichaActivo(a), origen });
+    } catch(e){ alert("No se pudo marcar inactivo: "+e.message); return; }
+    cerrarEliminar();
+    if(detalle?.id===a.id) setDetalle(null);
+    await cargar();
+  };
+  const cerrarEliminar=()=>{ setConfirmEliminar(null); setRefsEliminar(null); };
 
   const handleSort=(col)=>{ if(sortCol===col) setSortDir(d=>d==="asc"?"desc":"asc"); else{setSortCol(col);setSortDir("asc");} };
 
@@ -557,8 +611,12 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
   },[activos,filtroEstado,filtroTipo,filtroDoc,busqueda,sortCol,sortDir]);
 
   const activosActivos=useMemo(()=>activos.filter(a=>a.activo),[activos]);
-  const valorTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+valorLibros(a),0),[activosActivos]);
-  const depTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+depAnual(a),0),[activosActivos]);
+  // Totales en pesos: lo que está en UF o dólares se convierte al valor del
+  // día (antes se sumaba como pesos). Sin valor del día queda fuera y se avisa.
+  const enPesos=(a,v)=>aPesos(v,a.moneda||"CLP",indicadores);
+  const sinConvertir=useMemo(()=>activosActivos.filter(a=>enPesos(a,1)===null).length,[activosActivos,indicadores]);
+  const valorTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+(enPesos(a,valorLibros(a))||0),0),[activosActivos,indicadores]);
+  const depTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+(enPesos(a,depAnual(a))||0),0),[activosActivos,indicadores]);
   const conAlertas=useMemo(()=>activosActivos.filter(tieneAlerta).length,[activosActivos]);
 
   // ── Solo presentación ─────────────────────────────────────────────────────
@@ -609,6 +667,9 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
             <LineaGuia etiqueta="Valor libro total"><Cifra valor={valorTotal} escala="pesos" color="tinta" vacio="$0" raya="doble" /></LineaGuia>
             <LineaGuia etiqueta="Depreciación al año"><Cifra valor={depTotal} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
             <p className="m-0 -mt-1 text-right text-[13px] text-cuaderno-grafito"><Cifra valor={depTotal / 12} escala="pesos" color="heredar" vacio="$0" /> al mes</p>
+            {sinConvertir > 0 && (
+              <Nota etiqueta="Ojo:">{sinConvertir} activo{sinConvertir > 1 ? "s" : ""} en UF o dólares quedan fuera de los totales: no hay valor del día para pasarlos a pesos.</Nota>
+            )}
           </div>
         </div>
       </Hoja>
@@ -729,17 +790,29 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
           subtitulo="No se puede deshacer"
           ancho="max-w-sm"
           capa="z-[80]"
-          onClose={() => setConfirmEliminar(null)}
-          pie={
+          onClose={cerrarEliminar}
+          pie={refsEliminar ? (
             <div className="flex gap-2">
-              <Boton className="flex-1" onClick={() => setConfirmEliminar(null)}>Cancelar</Boton>
-              <Boton variante="primario" className="flex-1 !bg-cuaderno-roja !border-cuaderno-roja hover:!bg-cuaderno-roja/90" onClick={confirmarEliminar}>Sí, eliminar</Boton>
+              <Boton className="flex-1" onClick={cerrarEliminar}>Cancelar</Boton>
+              <Boton variante="primario" className="flex-1" onClick={marcarInactivo}>Marcar inactivo</Boton>
             </div>
-          }>
+          ) : (
+            <div className="flex gap-2">
+              <Boton className="flex-1" onClick={cerrarEliminar} disabled={revisandoRefs}>Cancelar</Boton>
+              <Boton variante="primario" className="flex-1 !bg-cuaderno-roja !border-cuaderno-roja hover:!bg-cuaderno-roja/90" onClick={confirmarEliminar} disabled={revisandoRefs}>
+                {revisandoRefs ? "Revisando registros…" : "Sí, eliminar"}
+              </Boton>
+            </div>
+          )}>
           <p className="m-0 text-[17px]">
             ¿Eliminar «{confirmEliminar.nombre || confirmEliminar.code || "este activo"}»?
           </p>
-          {confirmEliminar._source === "machines" && (
+          {refsEliminar && (
+            <Nota etiqueta="No se puede eliminar:">
+              tiene registros que la usan ({Object.entries(refsEliminar).map(([c, n]) => `${c}: ${n}`).join(", ")}). Si se borra, quedan apuntando a una ficha que no existe. Puedes marcarla inactiva: deja de aparecer en uso y conserva su historial.
+            </Nota>
+          )}
+          {!refsEliminar && confirmEliminar._source === "machines" && (
             <Nota etiqueta="Ojo:">este activo viene de la flota de FleetCore. Se va a eliminar también de la flota principal.</Nota>
           )}
           <p className="m-0 text-[15px] text-cuaderno-grafito">Se borran también sus documentos y datos de valor.</p>

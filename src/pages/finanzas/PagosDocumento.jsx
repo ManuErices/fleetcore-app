@@ -1,4 +1,5 @@
 import React, { useState, useId } from "react";
+import { hoyISO } from "../../lib/fechas";
 import {
   obtenerCuentasBancarias,
   agregarCuentaBancaria,
@@ -22,7 +23,7 @@ function fmt(n) {
 
 function ModalRegistrarPago({ documento, empresaId, cuentas, onClose, onGuardado }) {
   const [monto, setMonto] = useState("");
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState(hoyISO()) /* hoy en Chile, no en UTC */;
   const [cuentaOrigen, setCuentaOrigen] = useState(cuentas[0] || "");
   const [cuentaNueva, setCuentaNueva] = useState("");
   const [usarCuentaNueva, setUsarCuentaNueva] = useState(cuentas.length === 0);
