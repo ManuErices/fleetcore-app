@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listActiveProjects, listMachines, listFuelLogsByRange } from "../../lib/db";
+import { listActiveProjects, listMachines } from "../../lib/db";
+import { listarConsumosCombustible } from "../../lib/combustible";
 import { useEmpresa } from "../../lib/useEmpresa";
 import FuelImporter from "../../components/FuelImporter";
 import FuelPriceWidget from "../../components/FuelPriceWidget";
@@ -90,7 +91,7 @@ export default function Fuel() {
         const m = await listMachines(empresaId, selectedProject);
         if (active) setMachines(m.filter(x => x.active !== false));
 
-        const logs = await listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo);
+        const logs = await listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo);
         if (active) setFuelLogs(logs);
       } catch (err) {
         console.error("Error cargando datos:", err);
@@ -169,7 +170,7 @@ export default function Fuel() {
     if (selectedProject && dateFrom && dateTo) {
       setIsLoading(true);
       try {
-        const logs = await listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo);
+        const logs = await listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo);
         setFuelLogs(logs);
       } catch (err) {
         console.error("Error recargando datos:", err);

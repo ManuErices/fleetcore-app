@@ -2,11 +2,11 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { 
   listActiveProjects, 
-  listFuelLogsByRange,
   listEmployeeMonthlyData,
   listPurchaseOrders,
   listMachines
 } from "../../lib/db";
+import { listarConsumosCombustible } from "../../lib/combustible";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useFuelPrices } from "../../lib/fuelPriceService";
@@ -105,7 +105,7 @@ export default function Consolidado() {
 
       // Cargar datos base en paralelo (sin logs de flota)
       const [fuel, employees, orders, machineList] = await Promise.all([
-        listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         listEmployeeMonthlyData(empresaId, selectedProject, employeeYear, employeeMonth),
         listPurchaseOrders(empresaId, selectedProject),
         listMachines(empresaId, selectedProject)
