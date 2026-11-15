@@ -5,8 +5,6 @@ import { claveEgresoPorCodigo } from "../../lib/planCuentas";
 import {
   listActiveProjects,
   listEmployees,
-  listEmployeeMonthlyData,
-  listEmployeeMonthlyDataByYear,
   listPurchaseOrders,
   listSubcontratosByProject,
   listRendicionesByProject,
@@ -17,6 +15,7 @@ import {
   upsertEstadoPagoIngresos
 } from "../../lib/db";
 import { listarConsumosCombustible } from "../../lib/combustible";
+import { manoObraAnio } from "../../lib/manoObra";
 
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -121,9 +120,12 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
     const totalCosto = Number(l.totalCosto) || 0;
     const pct = l.porcentajeIncidencia != null ? l.porcentajeIncidencia : 100;
     const costoObra = totalCosto * (pct / 100);
-    const esDirecto = employeeTipoManoObraMap[l.employeeId] === "DIRECTO";
+    // Las filas de RRHH traen su propio tipo de mano de obra y nombre: el
+    // trabajador puede no estar en la lista de la obra si llega por su centro
+    // de costo.
+    const esDirecto = (l.tipoManoObra || employeeTipoManoObraMap[l.employeeId]) === "DIRECTO";
     const prefijo = esDirecto ? "1.1 MANO DE OBRA DIRECTO" : "1.2 MANO DE OBRA INDIRECTO";
-    const clave = `${prefijo} — ${l.centroCosto || employeeNombreMap[l.employeeId] || "Sin centro de costo"}`;
+    const clave = `${prefijo} — ${l.centroCosto || l.nombre || employeeNombreMap[l.employeeId] || "Sin centro de costo"}`;
     items.manoDeObra.push({ clave, monto: costoObra });
   });
 
@@ -267,7 +269,7 @@ export default function PaymentStatus() {
       const yearEnd = `${year}-12-31`;
       const [emp, payroll, ocs, fuel, ingYear, subs, rends, combustibleRegs, combustiblePreciosYear] = await Promise.all([
         listEmployees(empresaId, projectId),
-        listEmployeeMonthlyDataByYear(empresaId, projectId, year),
+        manoObraAnio(empresaId, projectId, year),
         listPurchaseOrders(empresaId, projectId),
         listarConsumosCombustible(empresaId, projectId, yearStart, yearEnd),
         listEstadoPagoIngresosByYear(empresaId, projectId, year),
