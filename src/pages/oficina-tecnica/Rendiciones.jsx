@@ -352,45 +352,80 @@ export default function Rendiciones() {
         };
       });
 
-      // Filtrar solo filas cuya "Nombre Unidad de Rendición" sea "Nuevo Cobre"
-      const rendicionesImportadas = todasLasFilas.filter(r =>
-        r.unidadRendicion.trim().toLowerCase() === 'nuevo cobre'
-      );
+      // Antes se guardaban solo las filas de la unidad "Nuevo Cobre" (lo de
+      // Oficina Central y otras unidades se perdía) y cada importación creaba
+      // documentos nuevos, así que reimportar un mes duplicaba los gastos.
+      // Ahora:
+      //  · se guardan TODAS las unidades; cada gasto queda en la obra cuyo
+      //    nombre coincide con la unidad de rendición (o en la obra elegida si
+      //    es la unidad "Nuevo Cobre", como antes), y sin obra si no hay una;
+      //  · cada gasto tiene una llave estable: reimportar actualiza su estado
+      //    (en revisión → aprobada) en vez de duplicarlo, y se eliminan los
+      //    duplicados que hayan dejado importaciones anteriores.
+      const norm = (v) => String(v || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const proyectoSel = projects.find(p => p.id === selectedProject);
+      const obraDeUnidad = (unidad) => {
+        const u = norm(unidad);
+        const p = projects.find(pr => norm(pr.name || pr.nombre) === u);
+        if (p) return p.id;
+        if (u === "nuevo cobre" || u === norm(proyectoSel?.name || proyectoSel?.nombre)) return selectedProject;
+        return null;
+      };
+      const clave = (r) => [r.numeroRendicionAsociada, r.numeroDocumento, r.rutProveedor, r.nombreGasto,
+        r.propietario, r.fechaEmision, Number(r.montoSolicitado) || 0].map(norm).join("|");
+      const hash = (txt) => { let h = 5381; for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0; return h.toString(36); };
 
-      console.log(`📊 Filas totales en Excel: ${todasLasFilas.length} | Filtradas "Nuevo Cobre": ${rendicionesImportadas.length}`);
-      
+      const rendicionesImportadas = todasLasFilas
+        .filter(r => r.nombreGasto || r.montoSolicitado || r.montoAprobado)
+        .map(r => ({ ...r, projectId: obraDeUnidad(r.unidadRendicion) }));
+
       if (rendicionesImportadas.length === 0) {
-        alert('⚠️ No se encontraron filas con "Nombre Unidad de Rendición" = "Nuevo Cobre" en el archivo.');
+        alert('No se encontraron gastos en el archivo.');
         setIsLoading(false);
         return;
       }
 
-      // Log para debug
-      console.log('📅 Primera rendición importada:', {
-        nombreGasto: rendicionesImportadas[0]?.nombreGasto,
-        propietario: rendicionesImportadas[0]?.propietario,
-        fechaEmision: rendicionesImportadas[0]?.fechaEmision,
-        unidadRendicion: rendicionesImportadas[0]?.unidadRendicion,
-        montoAprobado: rendicionesImportadas[0]?.montoAprobado,
+      // Lo que ya está guardado, por llave (para actualizar y limpiar duplicados)
+      const existentesSnap = await getDocs(collection(db, `empresas/${empresaId}/rendiciones`));
+      const porClave = {};
+      existentesSnap.docs.forEach(d => { (porClave[clave(d.data())] ||= []).push(d.id); });
+
+      const operaciones = [];
+      let nuevas = 0, actualizadas = 0, duplicadosEliminados = 0;
+      const vistas = new Set();
+      rendicionesImportadas.forEach(rendicion => {
+        const k = clave(rendicion);
+        if (vistas.has(k)) return;              // misma fila repetida dentro del archivo
+        vistas.add(k);
+        const ids = porClave[k] || [];
+        const id = ids[0] || `rg_${hash(k)}_${hash(k.split("").reverse().join(""))}`;
+        const ref = doc(db, `empresas/${empresaId}/rendiciones`, id);
+        if (ids.length) {
+          actualizadas++;
+          operaciones.push(b => b.set(ref, { ...rendicion, empresaId, updatedAt: serverTimestamp() }, { merge: true }));
+          ids.slice(1).forEach(extra => {
+            duplicadosEliminados++;
+            operaciones.push(b => b.delete(doc(db, `empresas/${empresaId}/rendiciones`, extra)));
+          });
+        } else {
+          nuevas++;
+          operaciones.push(b => b.set(ref, { ...rendicion, empresaId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+        }
       });
 
-      // Guardar en Firebase bajo la ruta empresa-scoped (sin eliminar datos previos)
-      const batch = writeBatch(db);
-      rendicionesImportadas.forEach(rendicion => {
-        const docRef = doc(collection(db, `empresas/${empresaId}/rendiciones`));
-        batch.set(docRef, {
-          ...rendicion,
-          empresaId,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-      });
-      await batch.commit();
-      
+      for (let i = 0; i < operaciones.length; i += 400) {
+        const batch = writeBatch(db);
+        operaciones.slice(i, i + 400).forEach(op => op(batch));
+        await batch.commit();
+      }
+      const sinObra = rendicionesImportadas.filter(r => !r.projectId).length;
+
       // Recargar
       await loadData();
       setShowImporter(false);
-      alert(`✅ ${rendicionesImportadas.length} rendiciones importadas correctamente`);
+      alert(`Rendiciones importadas: ${nuevas} nuevas, ${actualizadas} actualizadas` +
+        (duplicadosEliminados ? `, ${duplicadosEliminados} duplicados de importaciones anteriores eliminados` : "") +
+        (sinObra ? `. ${sinObra} gastos no calzan con ninguna obra por su unidad de rendición (quedan sin obra).` : "."));
     } catch (error) {
       console.error("Error importando Excel:", error);
       alert("❌ Error al importar el archivo: " + error.message);
