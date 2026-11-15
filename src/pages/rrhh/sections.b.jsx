@@ -12,6 +12,7 @@ import { paramsDe, asegurarIndicadores } from './parametros';
 import { useContextoPeriodo, extrasDelPeriodo, useIndicadoresPeriodo, esBorrador } from './periodo';
 import { aplicarAnexo, revertirAnexo, anexoAplicado } from './anexos';
 import OrganigramaVertical, { generarPDFOrganigrama } from './OrganigramaVertical';
+import { hoyISO as hoyChile } from '../../lib/fechas';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA, PLAN_CUENTAS_DEFAULT,
@@ -3132,7 +3133,7 @@ function ReportesSection() {
   // Hacia adelante N meses, pero también deja mirar lo ya vencido: un plazo
   // fijo que pasó su fecha y sigue "vigente" en el sistema es un indefinido
   // de hecho (Art. 159 N°4), y eso hay que verlo.
-  const hoyISO = new Date().toISOString().slice(0, 10);
+  const hoyISO = hoyChile();  // fecha de hoy en Chile, no en UTC
   const filasVenc = contratos
     .filter(c => c.fechaFin && idsTrab.has(c.trabajadorId) && c.estado === 'vigente')
     .map(c => {
@@ -3169,7 +3170,8 @@ function ReportesSection() {
 
   // ── Finiquitos del período ──
   const filasFiniq = finiquitos
-    .filter(f => String(f.fechaTermino || '').startsWith(prefijoMes) && idsTrab.has(f.trabajadorId))
+    // Los anulados no son salidas: no cuentan en el reporte.
+    .filter(f => f.estado !== 'anulado' && String(f.fechaTermino || '').startsWith(prefijoMes) && idsTrab.has(f.trabajadorId))
     .map(f => {
       const t = trabajadores.find(x => x.id === f.trabajadorId);
       const c = contratos.find(x => x.id === f.contratoId);
@@ -3784,7 +3786,7 @@ function ReportesSection() {
                   ...filasFiniq.map(({ f, t, calc }) => [
                     t?.rut || '', nombreTrabajador(t), f.causal || '', f.fechaTermino || '',
                     `${calc?.anios || 0}a ${calc?.meses || 0}m`,
-                    calc?.indemMonto || 0, calc?.indemAvisoPrevio || 0,
+                    (calc?.indemMonto || 0) + (calc?.indemObraMonto || 0), calc?.indemAvisoPrevio || 0,
                     calc?.totalFeriado || 0, calc?.totalFiniquito || 0,
                   ]),
                 ], `Finiquitos ${repAnio}-${repMes}`)}
@@ -3795,7 +3797,7 @@ function ReportesSection() {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {[
                     ['Salidas',             filasFiniq.length, '#7c3aed'],
-                    ['Indemnización años',  fmtK(filasFiniq.reduce((s, x) => s + (x.calc?.indemMonto || 0), 0)), '#e11d48'],
+                    ['Indemnización años',  fmtK(filasFiniq.reduce((s, x) => s + (x.calc?.indemMonto || 0) + (x.calc?.indemObraMonto || 0), 0)), '#e11d48'],
                     ['Feriado',             fmtK(filasFiniq.reduce((s, x) => s + (x.calc?.totalFeriado || 0), 0)), '#0284c7'],
                     ['Total del período',   fmtK(totalFiniq), '#059669'],
                   ].map(([l, v, c]) => (
@@ -3818,7 +3820,7 @@ function ReportesSection() {
                 filas={filasFiniq.map(({ f, t, calc }) => [
                   nombreTrabajador(t), f.causal || '—', f.fechaTermino || '—',
                   `${calc?.anios || 0}a ${calc?.meses || 0}m`,
-                  calc?.indemMonto ? fmt(calc.indemMonto) : '—',
+                  (calc?.indemMonto || calc?.indemObraMonto) ? fmt((calc.indemMonto || 0) + (calc.indemObraMonto || 0)) : '—',
                   calc?.indemAvisoPrevio ? fmt(calc.indemAvisoPrevio) : '—',
                   fmt(calc?.totalFeriado), fmt(calc?.totalFiniquito),
                 ])}

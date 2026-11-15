@@ -9,11 +9,12 @@ import {
   uploadPaymentFile, deletePaymentFile,
   listRentalContracts, listRentalClients, listRentalPurchaseOrders,
   suggestPaymentsForContract, saldoContrato,
-  estadoEfectivoEEPP, montoTotalEEPP, diasParaVencer, diasVencidoEEPP, agingCobranza,
+  estadoEfectivoEEPP, montoTotalEEPP, saldoEEPP, diasParaVencer, diasVencidoEEPP, agingCobranza,
   desgloseEnMoneda, monedaDe,
   CLP, UF, fmtMoneda, ESTADOS_EEPP, MEDIOS_PAGO,
 } from "../../lib/rental";
 import { obtenerIndicadores } from "../../lib/finanzas/monedas";
+import { hoyISO, mesActualISO } from "../../lib/fechas";
 
 // UF del día (mindicador.cl o la última guardada), para proponerla al cobrar.
 function useUFDelDia(empresaId, activo = true) {
@@ -98,18 +99,26 @@ export default function RentalPagos() {
 
   const totales = useMemo(() => {
     const abiertos = vivos.filter((p) => estadoEfectivoEEPP(p) !== "pagado");
-    const mesActual = new Date().toISOString().slice(0, 7);
+    const mesActual = mesActualISO();
+    // Los abonados cuentan por su saldo, no por el total.
     return {
-      porCobrar: abiertos.reduce((s, p) => s + montoTotalEEPP(p), 0),
+      porCobrar: abiertos.reduce((s, p) => s + saldoEEPP(p), 0),
       vencido: abiertos
         .filter((p) => estadoEfectivoEEPP(p) === "vencido")
-        .reduce((s, p) => s + montoTotalEEPP(p), 0),
+        .reduce((s, p) => s + saldoEEPP(p), 0),
       porFacturar: vivos
         .filter((p) => ["pendiente", "aprobado"].includes(p.estado))
         .reduce((s, p) => s + montoTotalEEPP(p), 0),
-      cobradoMes: vivos
-        .filter((p) => p.estado === "pagado" && String(p.fechaPago || "").slice(0, 7) === mesActual)
-        .reduce((s, p) => s + montoTotalEEPP(p), 0),
+      // Con abonos se suma lo recibido en el mes; los pagos antiguos (sin
+      // `abonos`) cuentan su total en el mes de fechaPago.
+      cobradoMes: vivos.reduce((s, p) => {
+        if (Array.isArray(p.abonos) && p.abonos.length) {
+          return s + p.abonos
+            .filter((a) => String(a.fecha || "").slice(0, 7) === mesActual)
+            .reduce((t, a) => t + (Number(a.monto) || 0), 0);
+        }
+        return p.estado === "pagado" && String(p.fechaPago || "").slice(0, 7) === mesActual ? s + montoTotalEEPP(p) : s;
+      }, 0),
     };
   }, [vivos]);
 
@@ -120,7 +129,7 @@ export default function RentalPagos() {
     let base = payments;
 
     if (vista === "cobranza") {
-      base = base.filter((p) => ["facturado", "vencido"].includes(estadoEfectivoEEPP(p)));
+      base = base.filter((p) => ["facturado", "abonado", "vencido"].includes(estadoEfectivoEEPP(p)));
     } else {
       if (filtro === "abiertos") base = base.filter((p) => !["pagado", "anulado"].includes(estadoEfectivoEEPP(p)));
       if (filtro === "porFacturar") base = base.filter((p) => ["pendiente", "aprobado"].includes(p.estado));
@@ -336,6 +345,8 @@ function FilaEEPP({ eepp, vista, onAbrir }) {
           )}
           {ef === "pagado" ? (
             <p className="text-[11px] text-emerald-600 font-bold">Pagado {fmtFecha(eepp.fechaPago)}</p>
+          ) : eepp.estado === "abonado" && mora === 0 ? (
+            <p className="text-[11px] text-teal-600 font-bold">Saldo {CLP(saldoEEPP(eepp))}</p>
           ) : mora > 0 ? (
             <p className="text-[11px] text-red-600 font-bold">{mora} día(s) de mora</p>
           ) : dias != null ? (
@@ -417,7 +428,7 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
                   Facturar
                 </button>
               )}
-              {eepp.estado === "facturado" && (
+              {["facturado", "abonado"].includes(eepp.estado) && (
                 <>
                   <button onClick={() => setAccion("pago")} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold">
                     Registrar pago
@@ -435,7 +446,7 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
                   Editar
                 </button>
               )}
-              {eepp.estado !== "pagado" && (
+              {!["pagado", "abonado"].includes(eepp.estado) && (
                 <button onClick={() => setAccion("anular")} className="px-3 py-1.5 rounded-lg border-2 border-red-200 text-red-600 text-xs font-bold">
                   Anular
                 </button>
@@ -455,6 +466,11 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
           {eepp.estado === "anulado" && (
             <Aviso tono="info">
               Anulado{eepp.motivoAnulacion ? `: ${eepp.motivoAnulacion}` : ""}. No consume monto autorizado.
+            </Aviso>
+          )}
+          {eepp.estado === "abonado" && (
+            <Aviso tono="info">
+              Pago parcial: recibido {CLP(Number(eepp.montoPagado) || 0)} de {CLP(montoTotalEEPP(eepp))}. Saldo {CLP(saldoEEPP(eepp))}.
             </Aviso>
           )}
           {mora > 0 && eepp.estado !== "pagado" && (
@@ -536,11 +552,11 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
           )}
 
           {/* Bitácora de cobranza */}
-          {(gestiones.length > 0 || eepp.estado === "facturado") && (
+          {(gestiones.length > 0 || ["facturado", "abonado"].includes(eepp.estado)) && (
             <div className="bg-white border-2 border-slate-100 rounded-2xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs font-black text-slate-400 uppercase">Gestiones de cobranza</p>
-                {puedeEditar && eepp.estado === "facturado" && (
+                {puedeEditar && ["facturado", "abonado"].includes(eepp.estado) && (
                   <button onClick={() => setAccion("gestion")} className="text-xs font-bold text-red-600 hover:text-red-700">
                     + Registrar
                   </button>
@@ -643,7 +659,7 @@ function FichaEEPP({ empresaId, eepp, contrato, cliente, puedeEditar, onClose, o
 function ModalFacturar({ empresaId, eepp, cliente, onClose, onListo }) {
   const [f, setF] = useState({
     numero: "",
-    fechaEmision: new Date().toISOString().slice(0, 10),
+    fechaEmision: hoyISO(),
     diasPago: cliente?.diasPago ?? 30,
     fechaVencimiento: "",
     total: eepp.total,
@@ -739,9 +755,10 @@ function ModalFacturar({ empresaId, eepp, cliente, onClose, onListo }) {
 
 function ModalPago({ empresaId, eepp, onClose, onListo }) {
   const [f, setF] = useState({
-    fechaPago: new Date().toISOString().slice(0, 10),
+    fechaPago: hoyISO(),
     medioPago: "Transferencia",
-    montoPagado: montoTotalEEPP(eepp),
+    // Por defecto lo que falta (en un abonado, el saldo). Si se recibe menos, queda abonado.
+    montoPagado: saldoEEPP(eepp),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -762,7 +779,7 @@ function ModalPago({ empresaId, eepp, onClose, onListo }) {
   return (
     <Modal
       titulo="Registrar pago"
-      subtitulo={`${eepp.numero} · ${CLP(montoTotalEEPP(eepp))}`}
+      subtitulo={`${eepp.numero} · ${CLP(montoTotalEEPP(eepp))}${eepp.estado === "abonado" ? ` · saldo ${CLP(saldoEEPP(eepp))}` : ""}`}
       onClose={onClose}
       ancho="max-w-lg"
       acciones={
@@ -795,7 +812,7 @@ function ModalFactoring({ empresaId, eepp, onClose, onListo }) {
   const [f, setF] = useState({
     factorizada: eepp.factorizada !== false && !!eepp.factoringNombre,
     factoringNombre: eepp.factoringNombre || "",
-    fechaCesion: eepp.fechaCesion || new Date().toISOString().slice(0, 10),
+    fechaCesion: eepp.fechaCesion || hoyISO(),
     montoCedido: eepp.montoCedido ?? montoTotalEEPP(eepp),
   });
   const [saving, setSaving] = useState(false);
@@ -855,7 +872,7 @@ function ModalFactoring({ empresaId, eepp, onClose, onListo }) {
 
 function ModalGestion({ empresaId, eepp, onClose, onListo }) {
   const [f, setF] = useState({
-    fecha: new Date().toISOString().slice(0, 10),
+    fecha: hoyISO(),
     tipo: "llamada",
     detalle: "",
     compromisoPago: "",
@@ -1028,7 +1045,20 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
       // Secuencial: cada folio se toma en su propia transacción y el control
       // de saldo necesita ver los anteriores ya guardados.
       for (const s of marcados) {
-        await upsertRentalPayment(empresaId, s);
+        let eepp = s;
+        if (esUF) {
+          // Cada período se cobra con la UF de SU fecha de emisión (antes todos
+          // usaban la UF de hoy). Si esa UF aún no está publicada, se usa el
+          // valor indicado arriba.
+          const ind = await obtenerIndicadores(empresaId, s.fechaEmision);
+          const ufEmision = ind?.fecha === s.fechaEmision && ind?.uf > 0 ? uf2(ind.uf) : Number(valorUF);
+          eepp = suggestPaymentsForContract(contrato, {
+            prorratear,
+            diasPago: cliente?.diasPago ?? 30,
+            valorUF: ufEmision,
+          }).find((x) => x.periodo === s.periodo) || s;
+        }
+        await upsertRentalPayment(empresaId, eepp);
         creados++;
       }
       onListo(creados);
@@ -1092,8 +1122,8 @@ function ModalGenerar({ empresaId, contracts, clients, purchaseOrders, payments,
           onChange={setValorUF}
           ayuda={
             ufDia
-              ? `Contrato en UF. UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}. Los pesos de cada estado de pago se calculan con este valor`
-              : "Contrato en UF. Los pesos de cada estado de pago se calculan con este valor"
+              ? `Contrato en UF. Cada estado de pago se cobra con la UF de su fecha de emisión; este valor (UF del ${fmtFecha(ufDia.fecha)}: ${CLP(ufDia.uf)}) se usa solo si esa UF aún no está publicada`
+              : "Contrato en UF. Cada estado de pago se cobra con la UF de su fecha de emisión; este valor se usa solo si esa UF aún no está publicada"
           }
           full
         />
@@ -1192,13 +1222,13 @@ function FormEEPP({ empresaId, eepp, contracts, purchaseOrders, payments, onClos
   const [f, setF] = useState({
     contratoId: eepp?.contratoId || "",
     ocId: eepp?.ocId || "",
-    periodo: eepp?.periodo || new Date().toISOString().slice(0, 7),
+    periodo: eepp?.periodo || mesActualISO(),
     concepto: eepp?.concepto || "",
     // En un contrato en UF el neto se escribe en UF.
     neto: (eepp?.moneda === "UF" ? eepp?.netoUF : eepp?.neto) || "",
     valorUF: eepp?.valorUF || "",
     afectoIVA: eepp?.afectoIVA !== false,
-    fechaEmision: eepp?.fechaEmision || new Date().toISOString().slice(0, 10),
+    fechaEmision: eepp?.fechaEmision || hoyISO(),
     fechaVencimiento: eepp?.fechaVencimiento || "",
     observaciones: eepp?.observaciones || "",
   });

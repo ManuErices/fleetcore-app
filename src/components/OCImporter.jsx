@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
+import { fechaISO, serialExcelAISO } from '../lib/fechas';
 
 export default function OCImporter({ projectId, projects, onImportComplete }) {
   const [file, setFile] = useState(null);
@@ -127,13 +128,15 @@ export default function OCImporter({ projectId, projects, onImportComplete }) {
           const formatDate = (value) => {
             if (!value) return '';
             
+            // Fechas de Excel sin zona: el serial se lee en UTC y un Date de
+            // medianoche UTC también; uno en hora local se lee en hora de Chile.
             if (value instanceof Date) {
-              return value.toISOString().split('T')[0];
+              return (value.getUTCHours() === 0 && value.getUTCMinutes() === 0)
+                ? value.toISOString().split('T')[0] : fechaISO(value);
             }
             
             if (typeof value === 'number') {
-              const date = new Date((value - 25569) * 86400 * 1000);
-              return date.toISOString().split('T')[0];
+              return serialExcelAISO(value);
             }
             
             if (typeof value === 'string') {

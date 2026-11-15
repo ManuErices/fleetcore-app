@@ -7,7 +7,10 @@ import {
   listMachineDocuments, uploadMachineDocument, deleteMachineDocument,
 } from "../../lib/db";
 import { hoyISO } from "../../lib/maquinas";
+import { doc, getDoc, arrayUnion } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 import HistorialObras from "./HistorialObras";
+import { desdeISO } from "../../lib/fechas";
 
 const CLP = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
 
@@ -38,7 +41,8 @@ const DISPONIBILIDAD = [
 function estadoVencimiento(fechaVenc) {
   if (!fechaVenc) return { label: "Sin vencimiento", color: "text-slate-400" };
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const venc = new Date(fechaVenc);
+  // "AAAA-MM-DD" a medianoche local (new Date(texto) lo toma en UTC: un día antes en Chile)
+  const venc = (typeof fechaVenc === "string" && desdeISO(fechaVenc)) || new Date(fechaVenc);
   const dias = Math.ceil((venc - hoy) / (1000 * 60 * 60 * 24));
   if (dias < 0) return { label: `Vencido hace ${Math.abs(dias)} d`, color: "text-red-600 font-bold" };
   if (dias <= 30) return { label: `Vence en ${dias} d`, color: "text-amber-600 font-bold" };
@@ -118,6 +122,19 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
     })();
   }, [empresaId, machine.id]);
 
+  // La máquina como está HOY en Firestore (no la que trae el prop, que pudo
+  // quedar vieja: un contrato de arriendo, una OT o el parte diario de
+  // WorkFleet la cambian mientras esta ficha está abierta). Sin conexión, la del prop.
+  const leerMaquinaActual = async () => {
+    try {
+      const snap = await getDoc(doc(db, "empresas", empresaId, "machines", machine.id));
+      if (snap.exists()) return { id: snap.id, ...snap.data() };
+    } catch { /* sin conexión */ }
+    return machine;
+  };
+  // La disponibilidad la maneja el contrato de arriendo mientras está activo.
+  const bloqueadaPorContrato = !!machine.contratoActivoId;
+
   const refreshPlans = async () => setPlans(await listMaintenancePlans(empresaId, machine.id));
   const refreshDocs = async () => setDocuments(await listMachineDocuments(empresaId, machine.id));
 
@@ -125,14 +142,17 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
     setError("");
     setSavingInfo(true);
     try {
+      // `original: machine`: solo se escriben los campos que el usuario cambió
+      // en esta pantalla. Antes se reescribían todos con el estado local y,
+      // por ejemplo, se pisaba la disponibilidad "arrendado" puesta por un contrato.
       await upsertMachine(empresaId, {
         id: machine.id,
         projectId: projectId || null,
         centroCosto: centroCosto.trim(),
-        disponibilidad,
+        ...(bloqueadaPorContrato ? {} : { disponibilidad }),
         ubicacion: ubicacion.trim(),
         leasingMensual: leasingMensual === "" ? null : Number(leasingMensual),
-      }, { fechaObra });
+      }, { fechaObra, original: machine, origen: "maquinaria" });
       onUpdated();
     } catch (err) {
       setError(err.message);
@@ -154,11 +174,15 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
     if (medidorActual === "" || isNaN(Number(medidorActual))) {
       return setError("Ingresa un valor de medidor válido");
     }
-    if (machine.medidorActual != null && Number(medidorActual) < Number(machine.medidorActual)) {
-      return setError(`El ${medidorLabel.toLowerCase()} no puede ser menor al actual (${Number(machine.medidorActual).toLocaleString("es-CL")}). Si el valor guardado está mal, usa "Corregir".`);
-    }
     setSavingMedidor(true);
     try {
+      // Se relee la ficha: el medidor y la bitácora pudieron cambiar (cierre
+      // de OT, parte diario) desde que se abrió esta pantalla.
+      const actual = await leerMaquinaActual();
+      if (actual.medidorActual != null && Number(medidorActual) < Number(actual.medidorActual)) {
+        setSavingMedidor(false);
+        return setError(`El ${medidorLabel.toLowerCase()} no puede ser menor al actual (${Number(actual.medidorActual).toLocaleString("es-CL")}). Si el valor guardado está mal, usa "Corregir".`);
+      }
       const ahora = new Date().toISOString();
       await upsertMachine(empresaId, {
         id: machine.id,
@@ -169,10 +193,10 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
         // ritmo de uso del equipo y para detectar un salto raro antes de que
         // arrastre las mantenciones.
         medidorLecturas: [
-          ...(machine.medidorLecturas || []),
+          ...(actual.medidorLecturas || []),
           { valor: Number(medidorActual), fecha: ahora },
         ].slice(-20),
-      });
+      }, { original: actual, origen: "maquinaria" });
       setMedidorOk({ valor: Number(medidorActual), fecha: ahora });
       onUpdated();
     } catch (err) {
@@ -194,23 +218,22 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
     setSavingMedidor(true);
     setError("");
     try {
+      const actual = await leerMaquinaActual();
       await upsertMachine(empresaId, {
         id: machine.id,
         medidorTipo,
         medidorActual: Number(valor),
         medidorActualizadoEn: new Date().toISOString(),
         // Se conserva el historial de correcciones en la propia máquina: es
-        // poco volumen y evita crear una colección para esto.
-        medidorCorrecciones: [
-          ...(machine.medidorCorrecciones || []),
-          {
-            anterior: machine.medidorActual ?? null,
-            nuevo: Number(valor),
-            motivo,
-            fecha: new Date().toISOString(),
-          },
-        ],
-      });
+        // poco volumen y evita crear una colección para esto. arrayUnion: no
+        // reescribe la lista con la copia (posiblemente vieja) de la pantalla.
+        medidorCorrecciones: arrayUnion({
+          anterior: actual.medidorActual ?? null,
+          nuevo: Number(valor),
+          motivo,
+          fecha: new Date().toISOString(),
+        }),
+      }, { original: actual, origen: "maquinaria" });
       setMedidorActual(String(valor));
       setMedidorOk({ valor: Number(valor), fecha: new Date().toISOString() });
       setShowCorreccion(false);
@@ -438,10 +461,15 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                       className="w-full border-2 border-slate-200 rounded-xl p-2.5 text-sm mt-1 disabled:opacity-60"
                       value={disponibilidad}
                       onChange={(e) => setDisponibilidad(e.target.value)}
-                      disabled={!puedeEditar}
+                      disabled={!puedeEditar || bloqueadaPorContrato}
                     >
                       {DISPONIBILIDAD.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
                     </select>
+                    {bloqueadaPorContrato && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Fijada por el contrato de arriendo{machine.clienteArriendoNombre ? ` con ${machine.clienteArriendoNombre}` : ""}. Cambia al finalizar el contrato.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500">Ubicación</label>

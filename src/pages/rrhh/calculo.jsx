@@ -4,6 +4,7 @@ import { TASAS, TASAS_AFP, MESES, CAUSALES_TERMINO,
 // IMM, UTM, UF y jornada máxima legal ya no son constantes: dependen del
 // período que se está liquidando. Ver parametros.js.
 import { paramsDe, montoAsignacionFamiliar, tramoSugerido, valorPlanSalud } from './parametros';
+import { partesISO, desdeISO, isoLocal, hoyISO, sumarDias } from '../../lib/fechas';
 
 /**
  * Redondeo "bancario" (mitad al par): 190.312,5 → 190.312 y 83.317,5 → 83.318.
@@ -20,11 +21,18 @@ function redondearPar(x) {
 
 function diasEntre(desde, hasta) {
   if (!desde || !hasta) return 0;
-  return Math.max(0, Math.round((new Date(hasta) - new Date(desde)) / 86400000));
+  // Fechas de calendario "AAAA-MM-DD" leídas en hora local (fechas.js): con
+  // new Date("AAAA-MM-DD") se leían como medianoche UTC.
+  const d = desdeISO(desde), h = desdeISO(hasta);
+  if (!d || !h) return 0;
+  return Math.max(0, Math.round((h - d) / 86400000));
 }
 function alertaVencimiento(fechaFin) {
   if (!fechaFin) return null;
-  const dias = diasEntre(new Date().toISOString().split('T')[0], fechaFin);
+  // Hoy en Chile, no en UTC (desde las 21:00 la fecha UTC ya es mañana).
+  const hoy = hoyISO();
+  if (String(fechaFin).slice(0, 10) < hoy) return { tipo: 'vencido', texto: 'Contrato vencido', color: 'bg-red-100 text-red-700 border-red-200' };
+  const dias = diasEntre(hoy, fechaFin);
   if (dias < 0)  return { tipo: 'vencido',   texto: 'Contrato vencido',       color: 'bg-red-100 text-red-700 border-red-200' };
   if (dias <= 7)  return { tipo: 'urgente',   texto: `Vence en ${dias} días`,  color: 'bg-red-100 text-red-700 border-red-200' };
   if (dias <= 30) return { tipo: 'proximo',   texto: `Vence en ${dias} días`,  color: 'bg-amber-100 text-amber-700 border-amber-200' };
@@ -173,6 +181,21 @@ function parametrosEfectivos(rem) {
   return P;
 }
 
+/**
+ * ¿La relación laboral ya cumplió 11 años al inicio del período? (Ley 19.728
+ * art. 5: las cotizaciones del seguro de cesantía se pagan hasta por once años
+ * en cada relación laboral.) Se cuenta desde el ingreso del trabajador o, si
+ * la ficha no lo tiene, desde el inicio del contrato. Se exige el aniversario
+ * cumplido al día 1 del mes: el mes en que se cumple todavía cotiza completo.
+ */
+function afcMasDeOnceAnios(rem) {
+  const inicio = partesISO(rem.fechaIngresoRelacion || rem.fechaInicio);
+  const m = parseInt(rem.mes), a = parseInt(rem.anio);
+  if (!inicio || !m || !a) return false;
+  const aniv = `${inicio.anio + 11}-${String(inicio.mes).padStart(2, '0')}-${String(inicio.dia).padStart(2, '0')}`;
+  return aniv <= `${a}-${String(m).padStart(2, '0')}-01`;
+}
+
 function calcularLiquidacion(rem) {
   // ── Parámetros legales del período que se está liquidando ──
   // IMM (tope de gratificación), UTM (IUT), UF (topes de APV) y jornada
@@ -230,8 +253,16 @@ function calcularLiquidacion(rem) {
     // Sin carencia en accidente del trabajo ni licencia maternal.
     const aplicaCarencia = paraCar > 0 && paraCar <= 10
       && !['maternal', 'accidente', 'profesional'].includes(String(l.tipo || 'comun'));
+    // Los 3 días de carencia son los tres primeros de la CADENA (DFL 44 art.
+    // 14), no de cada trozo: `diasCarenciaEnPeriodo` (licencias.js) dice cuántos
+    // de esos tres caen en este mes y en esta licencia. Una prórroga o la parte
+    // del mes siguiente aportan 0. Sin ese dato (ingreso manual o snapshot
+    // antiguo) se mantiene el criterio anterior.
+    const carEnPeriodo = l.diasCarenciaEnPeriodo != null
+      ? Math.max(0, parseInt(l.diasCarenciaEnPeriodo) || 0)
+      : Math.min(3, enPeriodo);
     return { ...l, dias: total, diasParaCarencia: paraCar, diasEnPeriodo: enPeriodo,
-             diasCarencia: aplicaCarencia ? Math.min(3, enPeriodo) : 0 };
+             diasCarencia: aplicaCarencia ? Math.min(3, enPeriodo, carEnPeriodo) : 0 };
   });
 
   const diasLicencia = detalleLic.reduce((s, l) => s + l.diasEnPeriodo, 0);
@@ -445,8 +476,14 @@ function calcularLiquidacion(rem) {
   // No afectos al seguro de cesantía: pensionados y quien la ficha marque con
   // `afectoAFC: false` (p. ej. contratos anteriores a oct-2002 sin opción).
   const sinAFC = esPensionado || rem.afectoAFC === false;
+  // ── Regla de los 11 años (Ley 19.728 art. 5) ──
+  // En el contrato indefinido las cotizaciones del seguro se pagan hasta por
+  // once años en una misma relación laboral. Cumplidos, el trabajador deja de
+  // cotizar (0%) y el empleador solo entera el 0,8% al Fondo de Cesantía
+  // Solidario. Antes se seguía cobrando 0,6% + 2,4% de por vida.
+  const afc11 = !esCt && afcMasDeOnceAnios(rem);
   const cesM  = sinAFC ? 0
-    : pct(baseCesantia, esCt ? TASAS.ces_trab_pf : TASAS.ces_trab);
+    : pct(baseCesantia, esCt ? TASAS.ces_trab_pf : (afc11 ? TASAS.ces_trab_11 : TASAS.ces_trab));
   // SIS: cargo empleador (referencial, no descuenta al trabajador). Va sobre
   // el tope previsional, igual que AFP y salud. La tasa es la del período.
   // ── Licencias: lo que el empleador sigue pagando por los días de reposo ──
@@ -511,7 +548,8 @@ function calcularLiquidacion(rem) {
   const liquido = imponible - totalDescuentos + noImponible - descAdicional - anticipo - itemsDesc - pagoAnterior - cuenta2M;
 
   const tasaMutualEf = Number(rem.tasaMutual) > 0 ? Number(rem.tasaMutual) : TASAS.mutual;
-  const cesEmpM  = sinAFC ? 0 : pct(Math.min(baseCesantia + rimaProp, P.topeCesantia), esCt ? TASAS.ces_pf_emp : TASAS.ces_emp);
+  const cesEmpM  = sinAFC ? 0 : pct(Math.min(baseCesantia + rimaProp, P.topeCesantia),
+    esCt ? TASAS.ces_pf_emp : (afc11 ? TASAS.ces_emp_11 : TASAS.ces_emp));
   // Mutual: tasa completa sobre lo trabajado + Ley SANNA (0,03%) sobre la RIMA.
   const mutualM  = pct(baseCotiza, tasaMutualEf) + pct(rimaProp, 0.0003);
   // Todo lo que paga la empresa por sobre la remuneración. La asignación
@@ -560,7 +598,7 @@ function calcularLiquidacion(rem) {
     },
     uf: P.uf,   // lo consume calcularRentaTributable para el tope de APV
     tasaAfp, afpResuelta,
-    esPensionado, pensionadoCotiza, sinAFC, sinGrat, rimaMensual, rimaProp,
+    esPensionado, pensionadoCotiza, sinAFC, afc11, sinGrat, rimaMensual, rimaProp,
     cesEmpM,
     sisEmpM: sisM,
     // Reforma previsional (Ley 21.735) — cargo empleador
@@ -590,12 +628,18 @@ function calcularLiquidacion(rem) {
 }
 function calcularAntiguedad(fechaIngreso, fechaTermino) {
   if (!fechaIngreso || !fechaTermino) return { anios:0, meses:0, dias:0, totalMeses:0 };
-  const ini = new Date(fechaIngreso);
-  const fin = new Date(fechaTermino);
+  // Fechas de calendario en hora local: new Date("AAAA-MM-DD") es medianoche
+  // UTC, que en Chile cae el día anterior y descuadra getDate().
+  const ini = desdeISO(fechaIngreso);
+  const fin = desdeISO(fechaTermino);
+  if (!ini || !fin) return { anios:0, meses:0, dias:0, totalMeses:0 };
   let anios  = fin.getFullYear() - ini.getFullYear();
   let meses  = fin.getMonth()    - ini.getMonth();
   let dias   = fin.getDate()     - ini.getDate();
-  if (dias < 0)  { meses--; }
+  // Días sueltos desde el último "mesiversario": si el día del término es
+  // menor que el del ingreso se pide prestado el mes anterior. Antes quedaban
+  // en 0, y "6 meses y algunos días" (fracción del Art. 163) no se detectaba.
+  if (dias < 0)  { meses--; dias += new Date(fin.getFullYear(), fin.getMonth(), 0).getDate(); }
   if (meses < 0) { anios--; meses += 12; }
   const totalMeses = anios * 12 + Math.max(0, meses);
   return { anios, meses: Math.max(0,meses), dias: Math.max(0,dias), totalMeses };
@@ -738,12 +782,66 @@ function diasFeriadoAPagar(diasHabiles, fechaTermino) {
 
 /** Meses comerciales entre dos fechas: meses completos + días restantes / 30. */
 function mesesComerciales(desde, hasta) {
-  const a = new Date(desde), b = new Date(hasta);
-  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  const aDe = (x) => x instanceof Date ? x : desdeISO(x);
+  const a = aDe(desde), b = aDe(hasta);
+  if (!a || !b || isNaN(a) || isNaN(b) || b < a) return 0;
   let meses = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
   let dias = b.getDate() - a.getDate();
   if (dias < 0) { meses -= 1; dias += 30; }
   return Math.max(0, meses + Math.min(30, dias) / 30);
+}
+
+/**
+ * Meses trabajados para la indemnización de obra o faena: meses completos
+ * entre el inicio y el día siguiente al término (el último día se trabajó), más
+ * uno si los días sueltos superan 15 ("fracción superior a quince días").
+ * Devuelve también los meses completos para el requisito de "un mes o más".
+ */
+function mesesObraFaena(fechaInicio, fechaTermino) {
+  const ini = desdeISO(fechaInicio), finD = desdeISO(fechaTermino);
+  if (!ini || !finD || finD < ini) return { completos: 0, dias: 0, meses: 0 };
+  const hasta = desdeISO(sumarDias(fechaTermino, 1));
+  const sumarMeses = (n) => {
+    // Sin desbordar: 31-ene + 1 mes = 28/29-feb, no 3-mar.
+    const d = new Date(ini.getFullYear(), ini.getMonth() + n, 1);
+    d.setDate(Math.min(ini.getDate(), new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    return d;
+  };
+  let completos = 0;
+  while (completos < 1200 && sumarMeses(completos + 1) <= hasta) completos++;
+  const dias = Math.round((hasta - sumarMeses(completos)) / 86400000);
+  return { completos, dias, meses: completos + (dias > 15 ? 1 : 0) };
+}
+
+/**
+ * Días por mes según la fecha en que se CELEBRÓ el contrato (Ley 21.122,
+ * art. transitorio): la indemnización rige para contratos celebrados desde el
+ * 1-1-2019 y entró gradualmente: 1 día (ene-2019 a jun-2020), 1,5 (jul-2020 a
+ * jun-2021), 2 (jul-2021 a dic-2021) y 2,5 desde el 1-1-2022.
+ */
+function diasPorMesObraFaena(fechaInicio) {
+  const f = String(fechaInicio || '').slice(0, 10);
+  if (!f) return 2.5;   // sin fecha no se puede aplicar la gradualidad: régimen pleno
+  if (f < '2019-01-01') return 0;
+  if (f < '2020-07-01') return 1;
+  if (f < '2021-07-01') return 1.5;
+  if (f < '2022-01-01') return 2;
+  return 2.5;
+}
+
+/** Indemnización del Art. 163 inc. 3° (término de obra o faena). Lógica pura. */
+function indemnizacionObraFaena({ causal, tipoContrato, fechaInicio, fechaTermino, base }) {
+  const nada = (motivo) => ({ aplica: false, monto: 0, meses: 0, diasPorMes: 0, dias: 0, motivo });
+  if (causal !== '159-5') return nada('');
+  if (!String(tipoContrato || '').toLowerCase().includes('obra')) return nada('el contrato no es por obra o faena');
+  const t = mesesObraFaena(fechaInicio, fechaTermino);
+  // "Vigente por un mes o más" (Art. 163 inc. 3°).
+  if (t.completos < 1) return nada('el contrato duró menos de un mes');
+  const diasPorMes = diasPorMesObraFaena(fechaInicio);
+  if (!diasPorMes) return nada('contrato celebrado antes del 1-1-2019 (Ley 21.122 no aplica)');
+  const dias = Math.round(t.meses * diasPorMes * 100) / 100;
+  const monto = Math.round((Number(base) || 0) / 30 * dias);
+  return { aplica: monto > 0, monto, meses: t.meses, diasPorMes, dias, motivo: '' };
 }
 
 function calcularFiniquito(fin, contrato, trabajador) {
@@ -759,8 +857,9 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // enero. Antes se usaba `dtTerm.getMonth() + 1`, o sea los meses del año
   // calendario: a alguien con 3 años 2 meses que sale en agosto se le pagaban
   // 7,9 meses de feriado en vez de los 2 que le corresponden.
-  const dtTerm  = new Date(fechaTerm);
-  const dtIng   = fechaIng ? new Date(fechaIng) : null;
+  // Fechas de calendario en hora local (fechas.js), no medianoche UTC.
+  const dtTerm  = desdeISO(fechaTerm) || new Date(NaN);
+  const dtIng   = fechaIng ? desdeISO(fechaIng) : null;
 
   // El aniversario se busca avanzando año a año desde el ingreso, en vez de
   // saltar con `anios`. Antes dependía de que `calcularAntiguedad` acertara: si
@@ -781,7 +880,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
       if (siguiente > dtTerm) break;
       aniv.setFullYear(aniv.getFullYear() + 1);
     }
-    ultimoAniversario = aniv.toISOString().slice(0, 10);
+    ultimoAniversario = isoLocal(aniv);
     // Meses COMERCIALES: meses completos desde el aniversario más los días
     // restantes / 30. Del 17-feb al 17-sep son 7 meses = 8,75 días, no
     // 212 días / 30 = 8,83. Así lo calcula Talana (verificado con el
@@ -838,8 +937,18 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // festivos que caen en medio, contados en el calendario real desde el día
   // siguiente al término (Art. 69). Van acá y no más arriba porque dependen de
   // `feriadoPropDias` y `feriadoPendiente`, declarados en estas líneas.
-  const propCorridos = diasFeriadoAPagar(feriadoPropDias, fechaTerm);
-  const pendCorridos = diasFeriadoAPagar(feriadoPendiente, fechaTerm);
+  //
+  // El pendiente y el proporcional son UN solo tramo de calendario: los días
+  // hábiles de ambos se corren seguidos desde el día siguiente al término, y
+  // los sábados, domingos y festivos de ese tramo se agregan una vez. Antes se
+  // convertía cada uno por separado partiendo del mismo día, así que el mismo
+  // fin de semana se contaba dos veces. Se convierte el total y los días
+  // corridos se reparten en proporción a los hábiles de cada concepto.
+  const habilesTotal = feriadoPropDias + feriadoPendiente;
+  const corridosTotal = diasFeriadoAPagar(habilesTotal, fechaTerm);
+  const propCorridos = habilesTotal > 0
+    ? Math.round(corridosTotal * feriadoPropDias / habilesTotal * 100) / 100 : 0;
+  const pendCorridos = Math.round((corridosTotal - propCorridos) * 100) / 100;
 
   const feriadoPropMonto   = Math.round(sueldoFeriado / 30 * propCorridos);
   // Sugerencia: 15 días hábiles por cada año completo cumplido. Es el techo,
@@ -883,7 +992,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
   // servicio: meses desde el 1 de enero —o desde el ingreso, si fue este año—
   // hasta el término. Antes se usaban los meses desde el aniversario.
   const inicioEjercicio = (() => {
-    const ene = new Date(dtTerm.getFullYear(), 0, 1, 12);
+    const ene = new Date(dtTerm.getFullYear(), 0, 1);
     return dtIng && dtIng > ene ? dtIng : ene;
   })();
   const mesesEjercicio  = !isNaN(dtTerm) && dtTerm >= inicioEjercicio
@@ -925,6 +1034,18 @@ function calcularFiniquito(fin, contrato, trabajador) {
     ? Math.min(indemBruta, Math.max(0, parseInt(fin.imputacionAFC) || 0)) : 0;
   const indemMonto         = indemBruta - imputacionAFC;
 
+  // ── Indemnización por término de obra o faena (Art. 163 inc. 3° CT) ──
+  // Ley 21.122: si el contrato por obra o faena termina por conclusión del
+  // trabajo o servicio (Art. 159 N°5) y estuvo vigente un mes o más, se pagan
+  // 2,5 días de remuneración por cada mes trabajado y fracción superior a 15
+  // días, calculados conforme al Art. 172 (misma base y tope de 90 UF que la
+  // de años de servicio). Como toda indemnización legal, no es imponible ni
+  // tributable (Art. 178 CT). Antes no se calculaba.
+  const obra = indemnizacionObraFaena({
+    causal, tipoContrato: contrato?.tipoContrato, fechaInicio: fechaIng, fechaTermino: fechaTerm, base: baseIndem,
+  });
+  const indemObraMonto     = obra.monto;
+
   // ── Indemnización sustitutiva aviso previo (Art. 161 CT) ──
   // La indemnización sustitutiva del aviso previo usa la misma base topeada.
   // (La variable se llamaba `indemAvisoPrevio`, con "ем" en cirílico.)
@@ -950,7 +1071,11 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const baseDesc = remMesEnCurso;
   const descAfp  = fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * tasaAfp) : parseInt(fin.descAfp || 0);
   const descSalud= fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * TASAS.salud) : parseInt(fin.descSalud || 0);
-  const descCes  = fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * (esCt ? TASAS.ces_trab_pf : TASAS.ces_trab)) : parseInt(fin.descCes || 0);
+  // Ley 19.728 art. 5: con más de 11 años en la relación, el trabajador indefinido ya no cotiza.
+  const afc11Fin = !esCt && !!fechaTerm && afcMasDeOnceAnios({
+    fechaIngresoRelacion: trabajador?.fechaIngreso || fechaIng,
+    mes: fechaTerm.slice(5, 7), anio: fechaTerm.slice(0, 4) });
+  const descCes  = fin.aplicarDescuentos === 'si' ? Math.round(baseDesc * (esCt ? TASAS.ces_trab_pf : (afc11Fin ? TASAS.ces_trab_11 : TASAS.ces_trab))) : parseInt(fin.descCes || 0);
   const totalDescPrev = descAfp + descSalud + descCes;
 
   // ── Otros descuentos ──
@@ -958,7 +1083,7 @@ function calcularFiniquito(fin, contrato, trabajador) {
   const otrosDescuentos    = parseInt(fin.otrosDescuentos || 0);
 
   // ── Totales ──
-  const totalHaberes    = totalFeriado + gratPropMonto + remMesEnCurso + remPendiente + indemMonto + indemAvisoPrevio + otrosHaberes;
+  const totalHaberes    = totalFeriado + gratPropMonto + remMesEnCurso + remPendiente + indemMonto + indemObraMonto + indemAvisoPrevio + otrosHaberes;
   const totalDescuentos = totalDescPrev + anticipoPend + otrosDescuentos;
   const totalFiniquito  = totalHaberes - totalDescuentos;
 
@@ -974,6 +1099,9 @@ function calcularFiniquito(fin, contrato, trabajador) {
     mesesEjercicio,
     baseIndem, baseTopeada, topeIndem, gratMensualPagable, desgloseBase,
     indemAvisoPrevio,
+    // Indemnización por término de obra o faena (Art. 163 inc. 3°)
+    tieneIndemObra: obra.aplica, indemObraMonto, indemObraMeses: obra.meses,
+    indemObraDiasPorMes: obra.diasPorMes, indemObraDias: obra.dias, indemObraMotivo: obra.motivo,
     descAfp, descSalud, descCes, totalDescPrev,
     anticipoPend, otrosDescuentos, totalDescuentos,
     totalHaberes, totalFiniquito,
@@ -1588,6 +1716,8 @@ function remDe(trabajador, contratoActual, liq, extras) {
     esPensionado: trabajador?.esPensionado === true,
     pensionadoCotiza: trabajador?.pensionadoCotiza === true,
     afectoAFC:    trabajador?.afectoAFC,
+    // Inicio de la relación laboral, para la regla de los 11 años del AFC.
+    fechaIngresoRelacion: trabajador?.fechaIngreso || contrato?.fechaInicio || '',
     apvMonto:      liq?.apvMonto      ?? trabajador?.apvMonto,
     apvRegimen:    liq?.apvRegimen    ?? trabajador?.apvRegimen,
     apvInstitucion:liq?.apvInstitucion?? trabajador?.apvInstitucion,
@@ -1640,7 +1770,8 @@ function fueReliquidada(liq, liquidaciones) {
   return (liquidaciones || []).some(l => l?.liquidacionOriginalId === liq?.id);
 }
 
-export { diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
+export { indemnizacionObraFaena, mesesObraFaena, afcMasDeOnceAnios, diasFeriadoAPagar,
+  diasEntre, alertaVencimiento, labelPeriodo, factorPeriodo,
   nombreTrabajador, diasVigentesEnPeriodo, parametrosEfectivos, baseArt172, baseIndemnizacion, festivosChile, mesesComerciales,
   calcularLiquidacion, remDe, liquidacionDe, redondearPar, contratoAlPeriodo, liquidacionesVigentes, fueReliquidada, calcularAntiguedad, calcularFiniquito, calcularHaberesDesdeRemuneraciones,
   calcularIUT, calcularRentaTributable, calcularLiquidacionConIUT,

@@ -118,6 +118,14 @@ export function valorizarConsumos(consumos, cargas) {
 export const costoConsumo = (c, precioRespaldo) =>
   c.costo != null ? c.costo : (Number(c.liters) || 0) * (Number(precioRespaldo) || 0);
 
+/** Cargas de WorkFleet con precio (para valorizar litros que no vienen de WorkFleet). */
+export async function listarCargasCombustible(empresaId) {
+  const reportes = await getDocs(query(collection(db, "empresas", empresaId, "reportes_combustible"), where("tipo", "==", "entrada")))
+    .then(s => s.docs.map(d => ({ id: d.id, ...d.data() })))
+    .catch(() => []);
+  return preciosDeCargas(reportes);
+}
+
 /** Consumos de una obra en un rango, de las dos fuentes y sin duplicar. */
 export async function listarConsumosCombustible(empresaId, projectId, desde, hasta) {
   const [excel, reportes] = await Promise.all([

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
-import { fmt, normalizaRut, leerTextoDetectando, repararMojibake } from "./ContabilidadContext";
+import { fmt, normalizaRut, leerTextoDetectando, repararMojibake, claveDocImport, claveDocLegado } from "./ContabilidadContext";
 import {
   ModalCuaderno, Boton, Campo, Cifra, Titulo, Nota, Resaltado, VistoBueno, LineaGuia, Pestanas,
   casoTitulo, IconoBajar, IconoLapiz, IconoSubir, IconoAnterior, IconoSiguiente,
@@ -78,16 +78,21 @@ function clasificarProveedor(razonSocial) {
  */
 function aplicarReglaImport(asiento, reglasGasto) {
   if (!reglasGasto || !asiento._rut) return asiento;
-  if (String(asiento.glosa || "").startsWith("NC")) return asiento; // las NC siguen la cuenta original
+  if (asiento._esVenta) return asiento;
   const regla = reglasGasto[normalizaRut(asiento._rut)];
   if (!regla || !regla.cuentaId) return asiento;
 
-  const esGasto = (l) => parseFloat(l.debe) > 0 && !/(iva|impuesto)/i.test(l.cuentaNombre || "");
+  // Las NC de compra anulan el gasto en la MISMA cuenta que usó la factura:
+  // si el proveedor tiene regla, la factura se fue a la cuenta de la regla, así
+  // que la NC también (en su lado haber). Antes las NC se saltaban la regla y
+  // reversaban otra cuenta.
+  const lado = asiento._esNC ? "haber" : "debe";
+  const esGasto = (l) => parseFloat(l[lado]) > 0 && !/(iva|impuesto|pagar)/i.test(l.cuentaNombre || "");
   const candidatas = (asiento.lineas || []).filter(esGasto);
   if (!candidatas.length) return asiento;
 
   // La línea principal es la de mayor monto: es la que representa el gasto.
-  const principal = candidatas.reduce((a, b) => (parseFloat(b.debe) > parseFloat(a.debe) ? b : a));
+  const principal = candidatas.reduce((a, b) => (parseFloat(b[lado]) > parseFloat(a[lado]) ? b : a));
   const etiqueta = regla.categoriaLabel || regla.cuentaNombre || "Clasificado";
 
   const lineas = (asiento.lineas || []).map(l => l === principal
@@ -105,6 +110,16 @@ function aplicarReglaImport(asiento, reglasGasto) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// Notas de crédito: 61 electrónica y 60 en papel (aún aparecen en el RCV).
+// Antes solo se reconocía la 61 y una 60 se contabilizaba como factura.
+const TIPOS_NC = new Set([60, 61]);
+
+// Origen con que se guardan los asientos de cada formato (dedupe por origen)
+const origenDeFormato = (formato) => (formato === "rcv_venta" ? "rcv_venta" : "iconstruye");
+
+/** Llave por documento de una fila normalizada (ver claveDocImport). */
+const claveFila = (f, origen) => claveDocImport(origen, f["_tipoDoc"], f["_folio"], f["_rut"]);
+
 function parseFecha(str) {
   if (!str) return null;
   const m = String(str).match(/(\d{2})-(\d{2})-(\d{4})/);
@@ -148,7 +163,7 @@ function normalizarRCV_Venta(fila) {
     "_impTabaco":     0,
     "_total":         total || (neto + iva + exento),
     "_esExento":      tipoDoc === 34,
-    "_esNotaCredito": tipoDoc === 61,  // NC emitida (reduce débito fiscal)
+    "_esNotaCredito": TIPOS_NC.has(tipoDoc),  // NC emitida (reduce débito fiscal)
     "_esCombustibleSII": false,
     "_activoFijo":    false,
     "_esVenta":       true,
@@ -230,7 +245,7 @@ function normalizarRCV(fila) {
     "_impTabaco":        impNoRecuperable, // nombre histórico: todo impuesto no recuperable
     "_total":            total || (neto + ivaRec + ivaRetenido + impEspec + impNoRecuperable + exento),
     "_esExento":         tipoDoc === 34,
-    "_esNotaCredito":    tipoDoc === 61,
+    "_esNotaCredito":    TIPOS_NC.has(tipoDoc),
     "_esCombustibleSII": esComb,
     "_activoFijo":       n(fila["Monto Neto Activo Fijo"]) > 0,
     "_netoActivoFijo":   n(fila["Monto Neto Activo Fijo"]),
@@ -270,11 +285,17 @@ function normalizarIConstruct(fila) {
     "_impEspec":    (esCombNombre || esCombRUT || esCombMat) ? impEspecCalc : 0,
     "_total":       total,
     "_esExento":    tipoSII === 34,
-    "_esNotaCredito": tipoSII === 61,
+    "_esNotaCredito": TIPOS_NC.has(tipoSII),
     "_impTabaco":   0,
     "_esCombustibleSII": esCombNombre || esCombRUT || esCombMat,
     "_activoFijo":  false,
   };
+}
+
+// Reparte el impuesto específico al diésel en recuperable / no recuperable.
+function repartirDiesel(monto, fraccion) {
+  const recuperable = Math.round((monto || 0) * (fraccion || 0));
+  return { recuperable, noRecuperable: Math.round(monto || 0) - recuperable };
 }
 
 // ─── Motor de asientos ────────────────────────────────────────────────────────
@@ -533,22 +554,43 @@ function generarAsientosVenta(filasNorm, cuentas, periodo) {
 }
 
 // Punto de entrada principal — detecta formato, normaliza y deriva el período
-function generarAsientos(filas, cuentas, periodoFallback) {
+function normalizarFilas(filas) {
   const formato = detectarFormato(filas);
   const normalizador = formato === "rcv_sii"    ? normalizarRCV
                      : formato === "rcv_venta"  ? normalizarRCV_Venta
                      : normalizarIConstruct;
-  const filasNorm = filas.map(f => normalizador(f));
-  const periodoDetectado = detectarPeriodoDesdeArchivo(filasNorm) || periodoFallback;
+  return { formato, filasNorm: filas.map(f => normalizador(f)) };
+}
+
+// opciones.pctDiesel: % del impuesto específico al diésel (código 28) que es
+// recuperable — el mismo configTributaria.dieselRecuperablePct del Flujo
+// Mensual. opciones.excluir: llaves de documentos ya importados (se omiten).
+// opciones.periodo: fija el período (si no, se detecta de las fechas).
+function generarAsientos(filas, cuentas, periodoFallback, opciones = {}) {
+  const { formato, filasNorm: todas } = normalizarFilas(filas);
+  const periodoDetectado = opciones.periodo || detectarPeriodoDesdeArchivo(todas) || periodoFallback;
+  const origen = origenDeFormato(formato);
+  const excluir = opciones.excluir || new Set();
+  const filasNorm = todas.filter(f => !excluir.has(claveFila(f, origen))
+    && !excluir.has(claveDocLegado(origen, f["_esNotaCredito"], f["_folio"], f["_rut"])));
   const result = formato === "rcv_venta"
     ? generarAsientosVenta(filasNorm, cuentas, periodoDetectado)
-    : generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodoDetectado);
+    : generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodoDetectado, opciones);
+  // Llaves por documento de cada asiento: la próxima importación omite esos
+  // documentos aunque vengan junto a folios nuevos del mismo proveedor.
+  result.asientos = result.asientos.map(a => ({
+    ...a, importDocs: [...new Set((a._facturas || []).map(f => claveFila(f, origen)))],
+  }));
   result.periodoDetectado = periodoDetectado;
   result.esVenta = formato === "rcv_venta";
+  result.docsOmitidos = todas.length - filasNorm.length;
   return result;
 }
 
-function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) {
+function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo, { pctDiesel = 0 } = {}) {
+  // Parte recuperable del impuesto específico (Ley 18.502); el resto es mayor
+  // costo del combustible. Antes el 100% iba al activo recuperable.
+  const fraccionDiesel = Math.min(100, Math.max(0, Number(pctDiesel) || 0)) / 100;
   const findCuenta = (pred) => cuentas.find(c => c.activa !== false && pred(c));
 
   const cIVA         = findCuenta(c => c.tipo === "iva_credito" && !/específico|especifico/i.test(c.nombre));
@@ -659,12 +701,20 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
         debe: totalNeto, haber: 0,
         descripcion:  "Neto combustible (base imponible)",
       });
-      // 2. Imp. específico Ley 18.502 → recuperable como CF adicional
-      if (totalImpEspec > 0) lineas.push({
+      // 2. Imp. específico Ley 18.502: la parte recuperable (según % de la
+      //    configuración tributaria) al activo; el resto es costo del combustible.
+      const { recuperable, noRecuperable } = repartirDiesel(totalImpEspec, fraccionDiesel);
+      if (recuperable > 0) lineas.push({
         cuentaId:     cImpEspec.id,
         cuentaNombre: cImpEspec.nombre,
-        debe: totalImpEspec, haber: 0,
-        descripcion:  "Imp. específico combustible — Ley 18.502 (recuperable F29 línea 24)",
+        debe: recuperable, haber: 0,
+        descripcion:  `Imp. específico combustible — Ley 18.502 (recuperable ${Math.round(fraccionDiesel * 100)}%, F29 línea 24)`,
+      });
+      if (noRecuperable > 0) lineas.push({
+        cuentaId:     prov.cuentaGastoId,
+        cuentaNombre: prov.cuentaGastoNombre,
+        debe: noRecuperable, haber: 0,
+        descripcion:  "Imp. específico combustible no recuperable (mayor costo)",
       });
       // 3. IVA 19% sobre el neto
       if (totalIVA > 0) lineas.push({
@@ -672,6 +722,14 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
         cuentaNombre: cIVA.nombre,
         debe: totalIVA, haber: 0,
         descripcion:  "IVA Crédito Fiscal 19%",
+      });
+      // 4. Exento de la misma factura: antes no se registraba y el asiento
+      //    quedaba descuadrado.
+      if (totalExento > 0) lineas.push({
+        cuentaId:     prov.cuentaGastoId,
+        cuentaNombre: prov.cuentaGastoNombre,
+        debe: totalExento, haber: 0,
+        descripcion:  "Neto exento — combustible",
       });
     } else {
       // ── Resto de proveedores: lógica estándar ───────────────────────────
@@ -737,6 +795,8 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       _totalNeto:     totalNeto,
       _totalIVA:      totalIVA,
       _totalImpEspec: totalImpEspec,
+      _pctDiesel:     fraccionDiesel,
+      _totalActivoFijo: totalActivoFijo,
       _totalExento:   totalExento,
       _facturas:      prov.facturas,
     };
@@ -754,24 +814,42 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
     mapaNC[rut].ncs.push(f);
   });
 
+  // La NC reversa EXACTAMENTE los mismos componentes que carga una factura:
+  // neto (y no recuperables) al gasto, activo fijo, exento, impuesto
+  // específico (recuperable / no recuperable con el mismo %) e IVA. Antes solo
+  // reversaba neto e IVA contra la cuenta del regex: una NC de combustible o
+  // con exento quedaba descuadrada o anulaba otra cuenta.
   const asientosNC = Object.values(mapaNC).map(prov => {
-    let totalNeto=0, totalIVA=0, totalTotal=0;
+    let totalNeto=0, totalIVA=0, totalTotal=0, totalExento=0, totalImpEspec=0, totalActivoFijo=0;
     const folios=[]; let fechaRef=null;
 
     prov.ncs.forEach(f => {
-      totalNeto  += f["_neto"]  || 0;
-      totalIVA   += f["_iva"]   || 0;
-      totalTotal += f["_total"] || 0;
+      totalNeto     += (f["_neto"] || 0) + (f["_impTabaco"] || 0);
+      if (cActivoFijo) totalActivoFijo += Math.min(f["_netoActivoFijo"] || 0, f["_neto"] || 0);
+      totalIVA      += f["_iva"]      || 0;
+      totalExento   += f["_exento"]   || 0;
+      totalImpEspec += f["_impEspec"] || 0;
+      totalTotal    += f["_total"]    || 0;
       if (f["_folio"]) folios.push(`NC°${f["_folio"]}`);
       if (!fechaRef && f["_fecha"]) fechaRef = f["_fecha"];
     });
 
     const clasif   = clasificarProveedor(prov.razonSocial);
-    // Misma resolución por etiqueta que las facturas: la NC tiene que anular la
-    // MISMA cuenta que cargó la compra, no la primera del tipo.
-    const cGasto   = resolverCuenta(clasif).cuenta;
+    // Misma cuenta que la factura: combustible si el proveedor (o la NC) es de
+    // combustible; si la factura viene en el mismo archivo, su cuenta; si no,
+    // la resolución por etiqueta. La regla aprendida se aplica después
+    // (aplicarReglaImport), igual que en la factura.
+    const facturaProv = mapa[prov.rut];
+    const esComb   = totalImpEspec > 0 || prov.ncs.some(f => f["_esCombustibleSII"]) || !!facturaProv?.esCombustible;
+    const cGasto   = esComb
+      ? (cCombustible || getCuentaGasto("costo"))
+      : facturaProv?.cuentaGastoId
+        ? cuentas.find(c => c.id === facturaProv.cuentaGastoId)
+        : resolverCuenta(clasif).cuenta;
     const foliosTxt = folios.length <= 3 ? folios.join(", ") : `${folios.slice(0,3).join(", ")} +${folios.length-3}`;
     const nDocs = prov.ncs.length;
+    const { recuperable, noRecuperable } = repartirDiesel(totalImpEspec, fraccionDiesel);
+    const etiqueta = esComb ? "combustible" : clasif.label;
 
     const lineas = [];
     // DEBE: Cuentas por Pagar (reduce la deuda)
@@ -780,11 +858,31 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       debe: totalTotal, haber: 0,
       descripcion:  `${prov.razonSocial} · NC recibida`,
     });
-    // HABER: Gasto (anula el gasto original)
-    if (totalNeto > 0) lineas.push({
+    // HABER: Gasto (anula el gasto original, incluidos impuestos no recuperables)
+    if (totalNeto - totalActivoFijo > 0) lineas.push({
       cuentaId:     cGasto?.id || "", cuentaNombre: cGasto?.nombre || "",
-      debe: 0, haber: totalNeto,
-      descripcion:  `Anulación gasto — ${clasif.label}`,
+      debe: 0, haber: totalNeto - totalActivoFijo,
+      descripcion:  `Anulación gasto — ${etiqueta}`,
+    });
+    if (totalActivoFijo > 0) lineas.push({
+      cuentaId:     cActivoFijo.id, cuentaNombre: cActivoFijo.nombre,
+      debe: 0, haber: totalActivoFijo,
+      descripcion:  "Anulación compra de activo fijo",
+    });
+    if (totalExento > 0) lineas.push({
+      cuentaId:     cGasto?.id || "", cuentaNombre: cGasto?.nombre || "",
+      debe: 0, haber: totalExento,
+      descripcion:  `Anulación exento — ${etiqueta}`,
+    });
+    if (recuperable > 0) lineas.push({
+      cuentaId:     cImpEspec.id, cuentaNombre: cImpEspec.nombre,
+      debe: 0, haber: recuperable,
+      descripcion:  "Reverso imp. específico combustible recuperable",
+    });
+    if (noRecuperable > 0) lineas.push({
+      cuentaId:     cGasto?.id || "", cuentaNombre: cGasto?.nombre || "",
+      debe: 0, haber: noRecuperable,
+      descripcion:  "Reverso imp. específico combustible no recuperable",
     });
     // HABER: IVA Crédito Fiscal (reduce el CF)
     if (totalIVA > 0) lineas.push({
@@ -813,13 +911,15 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       _rut:          prov.rut,
       _razonSocial:  repararMojibake(prov.razonSocial),
       _clasificacion:"Nota de Crédito",
-      _esCombustible:false,
+      _esCombustible:esComb,
       _nDocs:        nDocs,
       _totalTotal:   totalTotal,
       _totalNeto:    totalNeto,
       _totalIVA:     totalIVA,
-      _totalImpEspec:0,
-      _totalExento:  0,
+      _totalImpEspec:totalImpEspec,
+      _pctDiesel:    fraccionDiesel,
+      _totalActivoFijo: totalActivoFijo,
+      _totalExento:  totalExento,
       _facturas:     prov.ncs,
       _esNC:         true,
     };
@@ -896,7 +996,10 @@ function reconstruirLineas(asiento, nuevaCateg, cuentas) {
 
   if (nuevaCateg.esCombustible) {
     if (_totalNeto > 0)     lineas.push({ cuentaId: cGasto?.id||"", cuentaNombre: cGasto?.nombre||"", debe: _totalNeto,     haber: 0, descripcion: "Neto combustible (base imponible)" });
-    if (_totalImpEspec > 0) lineas.push({ cuentaId: cImpEspec?.id||"", cuentaNombre: cImpEspec?.nombre||"", debe: _totalImpEspec, haber: 0, descripcion: "Imp. específico combustible — Ley 18.502 (recuperable F29 línea 24)" });
+    // Mismo % recuperable que se usó al generar el asiento
+    const { recuperable, noRecuperable } = repartirDiesel(_totalImpEspec, asiento._pctDiesel || 0);
+    if (recuperable > 0)    lineas.push({ cuentaId: cImpEspec?.id||"", cuentaNombre: cImpEspec?.nombre||"", debe: recuperable, haber: 0, descripcion: "Imp. específico combustible — Ley 18.502 (recuperable F29 línea 24)" });
+    if (noRecuperable > 0)  lineas.push({ cuentaId: cGasto?.id||"", cuentaNombre: cGasto?.nombre||"", debe: noRecuperable, haber: 0, descripcion: "Imp. específico combustible no recuperable (mayor costo)" });
     if (_totalIVA > 0)      lineas.push({ cuentaId: cIVA?.id||"", cuentaNombre: cIVA?.nombre||"", debe: _totalIVA,      haber: 0, descripcion: "IVA Crédito Fiscal 19%" });
   } else {
     if (_totalNeto > 0)    lineas.push({ cuentaId: cGasto?.id||"", cuentaNombre: cGasto?.nombre||"", debe: _totalNeto,   haber: 0, descripcion: `Neto afecto — ${nuevaCateg.label}` });
@@ -913,7 +1016,8 @@ function reconstruirLineas(asiento, nuevaCateg, cuentas) {
     // que no se tapa. Antes se empujaban hasta $9 a la primera línea sin dejar rastro.
     if (Math.abs(sd-sh) > 0 && Math.abs(sd-sh) <= 2) lineas[0].debe += sh - sd;
 
-  return lineas;
+  // Una NC es el asiento de la factura al revés
+  return asiento._esNC ? lineas.map(l => ({ ...l, debe: l.haber, haber: l.debe })) : lineas;
 }
 
 // ─── Tarjeta de proveedor editable ───────────────────────────────────────────
@@ -1166,7 +1270,7 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
 }
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
-export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglasGasto = {}, guardarReglaGasto, guardarAsiento, periodoActivo, onImportDone, buscarHashesExistentes }) {
+export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglasGasto = {}, guardarReglaGasto, guardarAsiento, periodoActivo, onImportDone, buscarHashesExistentes, dieselRecuperablePct = 0 }) {
   const inputRef   = useRef(null);
   const [step, setStep]              = useState(0);
   const [filas, setFilas]            = useState([]);
@@ -1174,6 +1278,7 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
   const [asientos, setAsientos]      = useState([]);
   const [duplicados, setDuplicados]  = useState(new Set()); // hashes ya importados
   const [saltados, setSaltados]      = useState(0);
+  const [docsOmitidos, setDocsOmitidos] = useState(0); // documentos ya importados antes
   const [errores, setErrores]     = useState([]);
   const [progreso, setProgreso]   = useState(0);
   const [importados, setImportados] = useState(0);
@@ -1183,7 +1288,7 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
   const reset = () => {
     setStep(0); setFilas([]); setAsientos([]); setErrores([]);
     setProgreso(0); setImportados(0); setImporting(false);
-    setFormato("desconocido"); setDuplicados(new Set()); setSaltados(0);
+    setFormato("desconocido"); setDuplicados(new Set()); setSaltados(0); setDocsOmitidos(0);
     setPeriodo(periodoActivo);
   };
 
@@ -1198,25 +1303,30 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       const fmt_ = detectarFormato(raw);
       let validas;
       if (fmt_ === "rcv_sii") {
-        validas = raw.filter(r => [33,34,55,56,61].includes(parseInt(r["Tipo Doc"])||0));
+        validas = raw.filter(r => [33,34,55,56,60,61].includes(parseInt(r["Tipo Doc"])||0));
       } else if (fmt_ === "rcv_venta") {
-        validas = raw.filter(r => [33,34,56,61].includes(parseInt(r["Tipo Doc"])||0));
+        validas = raw.filter(r => [33,34,56,60,61].includes(parseInt(r["Tipo Doc"])||0));
       } else {
         validas = raw.filter(r => String(r["Tipo"]||"").toLowerCase().includes("factura"));
       }
       if (!validas.length) { setErrores([`No se encontraron facturas (formato: ${fmt_}).`]); return; }
       setFilas(validas);
       setFormato(fmt_);
-      const res = generarAsientos(validas, cuentas, periodo);
-      if (res.errores.length) { setErrores(res.errores); return; }
+      const opciones = { pctDiesel: dieselRecuperablePct };
+      const res0 = generarAsientos(validas, cuentas, periodo, opciones);
+      if (res0.errores.length) { setErrores(res0.errores); return; }
       // Usar el período detectado automáticamente desde las fechas del archivo
-      const periodoReal = res.periodoDetectado || periodo;
+      const periodoReal = res0.periodoDetectado || periodo;
       if (periodoReal !== periodo) setPeriodo(periodoReal);
-      // Consultar hashes ya importados en Firestore para ese período
+      // Llaves ya importadas (por documento y hashes antiguos). Se vuelven a
+      // generar los asientos SIN los documentos ya importados: un folio nuevo
+      // de un proveedor ya cargado entra solo, no todo el grupo de nuevo.
       const hashsExistentes = buscarHashesExistentes
         ? await buscarHashesExistentes(periodoReal)
         : new Set();
+      const res = generarAsientos(validas, cuentas, periodo, { ...opciones, periodo: periodoReal, excluir: hashsExistentes });
       setDuplicados(hashsExistentes);
+      setDocsOmitidos(res.docsOmitidos || 0);
       setAsientos(res.asientos.map(a => aplicarReglaImport(a, reglasGasto)));
       setErrores([]);
       setStep(1);
@@ -1255,7 +1365,7 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       };
       reader.readAsArrayBuffer(file);
     }
-  }, [cuentas, periodo, reglasGasto]);
+  }, [cuentas, periodo, reglasGasto, dieselRecuperablePct, buscarHashesExistentes]);
 
   const handleUpdateAsiento = (idx, updated) => {
     setAsientos(prev => prev.map((a, i) => i === idx ? updated : a));
@@ -1455,6 +1565,13 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
             </div>
           </div>
 
+          {/* Documentos ya importados en una carga anterior */}
+          {docsOmitidos > 0 && (
+            <Nota etiqueta="Nota:" tono="grafito">
+              {docsOmitidos} documento{docsOmitidos !== 1 ? "s" : ""} del archivo ya {docsOmitidos !== 1 ? "estaban importados" : "estaba importado"} y no se vuelve{docsOmitidos !== 1 ? "n" : ""} a cargar.
+            </Nota>
+          )}
+
           {/* Alerta duplicados */}
           {stats.nDuplicados > 0 && (
             <Nota etiqueta="Ojo:" tono="grafito">
@@ -1462,7 +1579,7 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
               {" "}Se importarán {stats.nNuevos} asiento{stats.nNuevos!==1?"s":""} nuevo{stats.nNuevos!==1?"s":""}.
             </Nota>
           )}
-          {stats.nDuplicados === 0 && stats.proveedores > 0 && (
+          {stats.nDuplicados === 0 && docsOmitidos === 0 && stats.proveedores > 0 && (
             <p className="m-0 flex items-center gap-2 text-[17px] text-cuaderno-grafito">
               <VistoBueno titulo="" /> Sin duplicados — todos los {stats.proveedores} asientos son nuevos
             </p>

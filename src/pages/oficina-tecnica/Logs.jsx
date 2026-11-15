@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { listActiveProjects, listMachines, listLogsByRange, upsertDailyLog } from "../../lib/db";
+import { listActiveProjects, listMachines, upsertDailyLog } from "../../lib/db";
+import { listarLogsObra } from "../../lib/partesDiarios";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
+import { hoyISO } from "../../lib/fechas";
 
-function isoToday() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+// Hoy en Chile (no en la zona del equipo)
+const isoToday = hoyISO;
 
 function formatDateDisplay(isoDate) {
   // Para evitar problemas de zona horaria, parseamos manualmente
@@ -32,6 +29,9 @@ export default function Logs() {
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Partes de WorkFleet del día, por máquina: solo referencia (no se guardan
+  // en dailyLogs), para no tipear de nuevo lo que el operador ya registró
+  const [wfPorMaquina, setWfPorMaquina] = useState({});
 
   // Obtener operadores asignados
   const selectedDate = new Date(date + 'T00:00:00');
@@ -53,12 +53,28 @@ export default function Logs() {
   useEffect(() => {
     if (!projectId) return;
     (async () => {
-      const m = await listMachines(empresaId, projectId);
+      // Solo las máquinas que estaban en la obra ESE día (historialObras):
+      // una que ya se fue no debe aparecer ni recibir registros
+      const m = await listMachines(empresaId, projectId, { desde: date, hasta: date });
       setMachines(m);
 
-      const logs = await listLogsByRange(empresaId, projectId, date, date);
+      // Excel y WorkFleet unidos: se editan solo los dailyLogs (fuente excel
+      // o ambas, que traen el id del dailyLog); lo de WorkFleet se muestra aparte
+      const logs = await listarLogsObra(empresaId, projectId, date, date);
       const byMachine = {};
-      for (const l of logs) byMachine[l.machineId] = l;
+      const wf = {};
+      for (const l of logs) {
+        if (l.fuente !== "workfleet") byMachine[l.machineId] = l;
+        if (l.fuente === "workfleet" || l.fuente === "ambas") {
+          wf[l.machineId] = {
+            horas: l.fuente === "workfleet" ? l.productiveHours : l.horasWorkFleet,
+            estado: l.estadoMaquina,
+            numeroReporte: l.numeroReporte,
+            discrepancia: !!l.discrepancia,
+          };
+        }
+      }
+      setWfPorMaquina(wf);
 
       setRows(
         m.filter(x => x.active !== false).map(mm => {
@@ -67,8 +83,9 @@ export default function Logs() {
             id: existing?.id || "",
             machineId: mm.id,
             productiveHours: existing?.productiveHours ?? 0,
-            standbyHours: 0, // Mantenemos en 0 para compatibilidad con DB
-            downtimeHours: 0, // Mantenemos en 0 para compatibilidad con DB
+            // No se editan aquí, pero se conservan (los carga el importador Excel)
+            standbyHours: existing?.standbyHours ?? 0,
+            downtimeHours: existing?.downtimeHours ?? 0,
             kilometraje: existing?.kilometraje ?? 0,
             notes: existing?.notes ?? "",
           };
@@ -88,16 +105,22 @@ export default function Logs() {
     setSaved(false);
     try {
       for (const r of rows) {
+        // Sin registro previo y sin nada cargado: no se crea un log vacío
+        // (inflaba los "días trabajados" con 0 horas)
+        const vacio = !(Number(r.productiveHours) || 0) && !(Number(r.kilometraje) || 0) && !String(r.notes || "").trim();
+        if (!r.id && vacio) continue;
         const payload = {
           ...r,
           projectId,
           date,
           productiveHours: Number(r.productiveHours) || 0,
-          standbyHours: 0, // Siempre 0
-          downtimeHours: 0, // Siempre 0
+          standbyHours: Number(r.standbyHours) || 0,
+          downtimeHours: Number(r.downtimeHours) || 0,
           kilometraje: Number(r.kilometraje) || 0,
         };
-        await upsertDailyLog(empresaId, payload);
+        const id = await upsertDailyLog(empresaId, payload);
+        // Guardar el id del log recién creado: sin él, un segundo "Guardar" lo duplicaba
+        if (!r.id && id) setRows(prev => prev.map(x => x.machineId === r.machineId ? { ...x, id } : x));
       }
       
       setSaved(true);
@@ -278,6 +301,20 @@ export default function Logs() {
                         className="w-28 text-center px-3 py-2 rounded-xl border-2 border-slate-200 bg-white text-slate-900 font-semibold focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 focus:outline-none transition-all hover:border-slate-300"
                         placeholder="0"
                       />
+                      {wfPorMaquina[r.machineId] && (
+                        <div
+                          className={`mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                            wfPorMaquina[r.machineId].discrepancia
+                              ? 'bg-amber-50 text-amber-700 border-amber-300'
+                              : 'bg-violet-50 text-violet-700 border-violet-200'
+                          }`}
+                          title="Parte diario registrado en terreno (solo lectura, se corrige en WorkFleet)"
+                        >
+                          WorkFleet: {Number(wfPorMaquina[r.machineId].horas || 0).toFixed(1)} h
+                          {wfPorMaquina[r.machineId].estado && wfPorMaquina[r.machineId].estado !== 'operativa' ? ` · ${wfPorMaquina[r.machineId].estado.replace('_', ' ')}` : ''}
+                          {wfPorMaquina[r.machineId].numeroReporte ? ` · ${wfPorMaquina[r.machineId].numeroReporte}` : ''}
+                        </div>
+                      )}
                     </td>
                     
                     <td className="px-4 py-4">

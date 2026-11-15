@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useUserRole } from "../../lib/useUserRole";
 import { listMachines } from "../../lib/db";
+import { estaActiva } from "../../lib/maquinas";
+import { hoyISO } from "../../lib/fechas";
 import {
   listRentalQuotes, upsertRentalQuote, deleteRentalQuote,
   listRentalClients, listRentalPurchaseOrders,
@@ -509,7 +511,7 @@ function ModalAceptar({ empresaId, quote, onClose, onListo }) {
 
   const [f, setF] = useState({
     numeroOC: "",
-    fechaEmision: new Date().toISOString().slice(0, 10),
+    fechaEmision: hoyISO(),
     fechaVencimiento: "",
     montoNeto: sugerido,
     valorUF: esUF ? quote.valorUF || "" : "",
@@ -668,7 +670,7 @@ function ModalRechazar({ empresaId, quote, onClose, onListo }) {
 function ModalContrato({ empresaId, quote, onClose, onListo }) {
   const esUF = quote.moneda === "UF";
   const [f, setF] = useState({
-    fechaInicio: new Date().toISOString().slice(0, 10),
+    fechaInicio: hoyISO(),
     fechaFin: "",
     proyectoDestino: "",
     valorUF: esUF ? quote.valorUF || "" : "",
@@ -896,7 +898,7 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
     clienteManual: quote?.clienteManual || {
       nombre: "", rut: "", ejecutivo: "", email: "", telefono: "", direccion: "", giro: "",
     },
-    fecha: (quote?.fecha || new Date().toISOString()).slice(0, 10),
+    fecha: quote?.fecha ? String(quote.fecha).slice(0, 10) : hoyISO(),
     validezDias: quote?.validezDias || 15,
     plazoMeses: quote?.plazoMeses || "",
     afectoIVA: quote?.afectoIVA !== false,
@@ -1014,7 +1016,8 @@ function FormCotizacion({ empresaId, quote, clients, machines, onClose, onSaved 
 
   // Se ocultan las máquinas ya arrendadas, salvo las que esta cotización ya usa.
   const disponibles = machines.filter(
-    (m) => m.activo !== false && (m.disponibilidad !== "arrendado" || lineas.some((l) => l.machineId === m.id))
+    // estaActiva: el maestro usa `active` (antes se filtraba solo `activo`)
+    (m) => estaActiva(m) && (m.disponibilidad !== "arrendado" || lineas.some((l) => l.machineId === m.id))
   );
 
   return (

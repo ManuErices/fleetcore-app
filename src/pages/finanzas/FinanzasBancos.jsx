@@ -10,6 +10,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { auth } from "../../lib/firebase";
+import { sumarDias } from "../../lib/fechas";
 import { leerCartola, verificarSaldos, reconstruirSaldos, numero, TIPOS } from "../../lib/banco/cartolas.js";
 import { leerCertificadoPago, buscarRepeticiones } from "../../lib/banco/certificados.js";
 import {
@@ -31,7 +32,8 @@ const fechaCorta = (iso) => {
 };
 // Son cuentas de la propia empresa: se muestran completas, tal como las escribe el banco.
 const cuentaCorta = (numero) => String(numero || "").trim();
-const sumarDias = (iso, n) => { const f = new Date(iso); f.setDate(f.getDate() + n); return f.toISOString().slice(0, 10); };
+// sumarDias viene de fechas.js: new Date("AAAA-MM-DD") es medianoche UTC y
+// en Chile corría el día.
 
 // ─── Tarjeta de un archivo subido ─────────────────────────────────────────────
 function TarjetaArchivo({ a, onQuitar, onSaldo }) {

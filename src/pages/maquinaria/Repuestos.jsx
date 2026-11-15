@@ -188,8 +188,9 @@ function SparePartForm({ empresaId, part, onClose, onSaved }) {
         codigo: f.codigo.trim(),
         descripcion: f.descripcion.trim(),
         marca: f.marca.trim(),
-        // stock inicial solo al crear; después se ajusta con movimientos
-        stock: part?.id ? undefined : (f.stock === "" ? 0 : Number(f.stock)),
+        // stock inicial solo al crear; después se ajusta con movimientos.
+        // Al editar se omite la clave: `stock: undefined` hace fallar a Firestore.
+        ...(part?.id ? {} : { stock: f.stock === "" ? 0 : Number(f.stock) }),
         stockMinimo: f.stockMinimo === "" ? 0 : Number(f.stockMinimo),
         costoUnitario: f.costoUnitario === "" ? 0 : Number(f.costoUnitario),
         ubicacionBodega: f.ubicacionBodega.trim(),

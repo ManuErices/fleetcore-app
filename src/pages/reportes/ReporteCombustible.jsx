@@ -13,6 +13,7 @@ import CombustibleImporter from "../combustible/CombustibleImporter";
 import { printThermalVoucher, getNextGuiaNumber } from "../../utils/voucherThermalGenerator";
 import { useToast, ToastContainer } from "../../components/Toast";
 import { machineTitulo } from "../../utils/searchHelpers";
+import { hoyISO } from '../../lib/fechas';
 
 /**
  * Equipo surtidor (camión / mochila / estanque) de un reporte.
@@ -883,7 +884,7 @@ export default function ReporteCombustible() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Reportes Combustible');
 
-    XLSX.writeFile(wb, `Reportes_Combustible_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `Reportes_Combustible_${hoyISO()}.xlsx`);
   };
 
 
@@ -1112,7 +1113,7 @@ export default function ReporteCombustible() {
       }
     });
 
-    doc.save(`Reportes_Combustible_Detallado_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reportes_Combustible_Detallado_${hoyISO()}.pdf`);
     setReportesSeleccionados([]);
   };
 
@@ -1193,7 +1194,7 @@ export default function ReporteCombustible() {
       }
     });
 
-    doc.save(`Reportes_Combustible_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reportes_Combustible_${hoyISO()}.pdf`);
   };
 
   return (

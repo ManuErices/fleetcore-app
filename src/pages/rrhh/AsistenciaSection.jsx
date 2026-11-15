@@ -23,6 +23,7 @@ import * as Calc from './calculo';
 import { diasHabilesEntre, resumenVacaciones } from './vacaciones';
 import { TrabajadoresSection } from './sections.a';
 import * as Modals from './modals';
+import { fechaISO, hoyISO, sumarDias } from '../../lib/fechas';
 
 const { AusenciaModal } = Modals;
 
@@ -393,7 +394,7 @@ export default function AsistenciaSection() {
   }
 
   function getActiveShift(trabajadorId, dateString) {
-    const today = dateString || now.toISOString().split('T')[0];
+    const today = dateString || fechaISO(now);
     const assign = asignaciones.find(
       a =>
         a.trabajadorId === trabajadorId &&
@@ -454,7 +455,7 @@ export default function AsistenciaSection() {
       // Mark old assignments for this worker as inactive
       const prevAssigns = asignaciones.filter(a => a.trabajadorId === assigningWorker.id && a.activo);
       for (const oldAssign of prevAssigns) {
-        const yesterday = new Date(new Date(fechaInicio).getTime() - 86400000).toISOString().split('T')[0];
+        const yesterday = sumarDias(fechaInicio, -1);
         await updateDoc(doc(db, 'empresas', empresaId, 'asignaciones_turnos', oldAssign.id), {
           activo: false,
           fechaFin: oldAssign.fechaFin && oldAssign.fechaFin < yesterday ? oldAssign.fechaFin : yesterday,
@@ -495,7 +496,7 @@ export default function AsistenciaSection() {
       const snap = await getDoc(ref);
       const data = snap.exists() ? snap.data() : { trabajadorId: uid, trabajadorNombre: tName, anio, mes: mesStr, registros: {} };
 
-      const activeShift = getActiveShift(selectedMarcadorWorker.id, currentTime.toISOString().split('T')[0]);
+      const activeShift = getActiveShift(selectedMarcadorWorker.id, fechaISO(currentTime));
 
       const daysOfWeek = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
       const todayDay = daysOfWeek[currentTime.getDay()];
@@ -1911,7 +1912,7 @@ function AssignShiftModal({ isOpen, onClose, worker, turnos, currentAssignment, 
   // Orden: la asignación que ya existía, la fecha de inicio del contrato
   // vigente, la fecha de ingreso de la ficha, y recién ahí hoy.
   const [fechaInicio, setFechaInicio] = useState(() => {
-    const hoy = new Date().toISOString().split('T')[0];
+    const hoy = hoyISO();
     return currentAssignment?.fechaInicio
       || contrato?.fechaInicio
       || worker?.fechaIngreso

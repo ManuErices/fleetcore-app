@@ -43,6 +43,11 @@ export const TASAS = {
   ces_emp:     0.024,
   ces_pf_trab: 0.0,
   ces_pf_emp:  0.03,
+  // Indefinido con más de 11 años en la relación laboral (Ley 19.728 art. 5):
+  // el trabajador deja de cotizar y el empleador entera solo el 0,8% al Fondo
+  // de Cesantía Solidario.
+  ces_trab_11: 0.0,
+  ces_emp_11:  0.008,
   mutual:      0.0348, // Mutual AT — tasa específica MPF Ingeniería Civil (3.48%)
 };
 

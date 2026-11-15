@@ -2,20 +2,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { listActiveProjects, listMachines } from "../../lib/db";
 import { listarConsumosCombustible } from "../../lib/combustible";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
 import FuelImporter from "../../components/FuelImporter";
 import FuelPriceWidget from "../../components/FuelPriceWidget";
 
 // Utilidades de fecha (sin cambios)
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
+// Hoy en hora de Chile (toISOString daba el día en UTC: desde las 21:00 ya era "mañana")
+const isoToday = hoyISO;
+const addDays = sumarDias;
 
 function getDateRange(start, end) {
   const dates = [];
@@ -37,7 +31,7 @@ function getDateRange(start, end) {
 function getDaysDiff(start, end) {
   const startDate = new Date(start + 'T00:00:00');
   const endDate = new Date(end + 'T00:00:00');
-  return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  return Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1; // round: cambio de hora
 }
 
 export default function Fuel() {
@@ -148,8 +142,7 @@ export default function Fuel() {
   };
 
   const setThisWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
+    const dayOfWeek = desdeISO(isoToday()).getDay();
     const monday = addDays(isoToday(), -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     const sunday = addDays(monday, 6);
     setDateFrom(monday);
@@ -157,13 +150,10 @@ export default function Fuel() {
   };
 
   const setThisMonth = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth() + 1;
-    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
-    const lastDay = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
-    setDateFrom(firstDay);
-    setDateTo(lastDay);
+    const { anio, mes } = partesISO(isoToday());
+    const { desde, hasta } = limitesMes(anio, mes);
+    setDateFrom(desde);
+    setDateTo(hasta);
   };
 
   const handleImportComplete = async () => {

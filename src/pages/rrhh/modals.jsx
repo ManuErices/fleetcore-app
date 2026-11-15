@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { db, storage } from '../../lib/firebase';
 import { useEmpresa } from "../../lib/useEmpresa";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import * as Shared from './shared';
 import { useItemsPago, colorDe, grupoDe, snapshotItem } from './itemsPago';
 import * as Calc from './calculo';
 import * as PDFs from './pdfs';
-import { useContextoPeriodo, extrasDelPeriodo } from './periodo';
+import { useContextoPeriodo, extrasDelPeriodo, liquidacionDuplicada, snapshotCentroCosto, finiquitoDuplicado } from './periodo';
+import { hoyISO, sumarDias } from '../../lib/fechas';
 import { aplicarAnexo, prorrogasDe } from './anexos';
 import { useVacaciones, resumenVacaciones } from './vacaciones';
 
@@ -1067,7 +1068,7 @@ function FichaTrabajador({ trabajador, onEdit, onClose, onVerPerfil = null }) {
 
   const contratoVigente = contratos.find(c => c.estado === 'vigente');
   const { anios, meses } = contratoVigente
-    ? calcularAntiguedad(contratoVigente.fechaInicio, new Date().toISOString().split('T')[0])
+    ? calcularAntiguedad(contratoVigente.fechaInicio, hoyISO())
     : { anios: 0, meses: 0 };
 
   const ini = `${trabajador.nombre?.[0] || ''}${trabajador.apellidoPaterno?.[0] || ''}`.toUpperCase();
@@ -1676,6 +1677,22 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
     if (!form.trabajadorId || !form.contratoId || !form.mes || !form.anio) {
       alert('Selecciona trabajador, contrato, mes y año.'); return;
     }
+    // Una sola liquidación vigente por trabajador y período. Antes el modal
+    // creaba una segunda sin mirar (solo "Generar nómina" lo revisaba) y el
+    // mes se pagaba, declaraba y costeaba dos veces. Corregir un mes ya
+    // emitido es una reliquidación, que tiene su propio flujo.
+    // Se consulta al guardar (no solo la lista en vivo, que puede no haber
+    // cargado todavía al abrir el modal).
+    let delTrabajador = (ctxPeriodo.liquidaciones || []).filter(l => l.trabajadorId === form.trabajadorId);
+    try {
+      const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'remuneraciones'), where('trabajadorId', '==', form.trabajadorId)));
+      delTrabajador = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch { /* sin conexión: se usa la lista en vivo */ }
+    const choque = liquidacionDuplicada(delTrabajador, form, editData);
+    if (choque) {
+      alert(`Este trabajador ya tiene una liquidación vigente para ${Shared.MESES[parseInt(form.mes) - 1] || form.mes} ${form.anio} (estado: ${choque.estado || 'pendiente'}).\n\nEdita esa liquidación o, si ya se pagó, haz una reliquidación.`);
+      return;
+    }
     setSaving(true);
     try {
       // Se congelan los parámetros legales usados (IMM, UTM, UF, jornada). Una
@@ -1701,7 +1718,10 @@ function LiquidacionModal({ isOpen, onClose, editData, trabajadores, contratos, 
       if (editData?.id) {
         await updateDoc(doc(db, 'empresas', empresaId, 'remuneraciones', editData.id), payload);
       } else {
-        await addDoc(collection(db, 'empresas', empresaId, 'remuneraciones'), { ...payload, createdAt: serverTimestamp() });
+        // Copia del centro de costo y la obra del mes: el costo de mano de obra
+        // de este período no debe moverse si el trabajador cambia de obra.
+        await addDoc(collection(db, 'empresas', empresaId, 'remuneraciones'),
+          { ...snapshotCentroCosto(trabajadorSel), ...payload, createdAt: serverTimestamp() });
       }
       onSaved?.(); onClose();
     } catch (e) { alert('Error: ' + e.message); }
@@ -2041,11 +2061,14 @@ function Auto({ valor, sugerido, fuente, onRestaurar, formato = (v) => v }) {
   );
 }
 
-function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, remuneraciones = [], onSaved }) {
+function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, remuneraciones = [], finiquitos = [], onSaved }) {
   const { empresaId } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '',
-    fechaTermino: new Date().toISOString().split('T')[0],
+    // Hoy en Chile: la fecha UTC ya es "mañana" desde las 21:00.
+    fechaTermino: hoyISO(),
+    // borrador → firmado → pagado; anulado deja de contar en todas partes.
+    estado: 'borrador',
     causal: '', ultimaRemuneracion: '',
     diasFeriadoPendiente: '0', remuneracionesPendientes: '0',
     pagoAvisoPrevio: 'no', anticipoPendiente: '0', otrosDescuentos: '0',
@@ -2158,6 +2181,16 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
     if (!form.trabajadorId || !form.causal || !form.fechaTermino) {
       alert('Trabajador, causal y fecha de término son obligatorios.'); return;
     }
+    // Un contrato se termina una sola vez: un segundo finiquito vigente del
+    // mismo contrato duplicaba el gasto en Contabilidad. Para corregirlo se
+    // edita el existente; para rehacerlo, se anula el anterior.
+    if (form.estado !== 'anulado') {
+      const choque = finiquitoDuplicado(finiquitos, form, editData?.id);
+      if (choque) {
+        alert(`Ya existe un finiquito vigente para este contrato (término ${choque.fechaTermino || '—'}, estado ${choque.estado || 'vigente'}).\n\nEdítalo, o márcalo como anulado antes de emitir otro.`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       // Doble resguardo: aunque el formulario ya entra limpio, cualquier campo
@@ -2180,6 +2213,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
       } else {
         await addDoc(collection(db, 'empresas', empresaId, 'finiquitos'), { ...payload, createdAt: serverTimestamp() });
       }
+
+      // Un finiquito anulado no termina la relación: la ficha no se toca.
+      if (form.estado === 'anulado') { onSaved?.(); onClose(); setSaving(false); return; }
 
       // Automatically update worker state to finiquitado
       await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', form.trabajadorId), {
@@ -2288,6 +2324,14 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
               <span className="ml-3 text-purple-700 font-bold">
                 ✓ Con indemnización ({calc.aniosIndemnizacion} mes{calc.aniosIndemnizacion !== 1 ? 'es' : ''})
               </span>
+            )}
+            {calc.tieneIndemObra && (
+              <span className="ml-3 text-purple-700 font-bold">
+                ✓ Indemnización obra o faena ({calc.indemObraMeses} meses × {String(calc.indemObraDiasPorMes).replace('.', ',')} días)
+              </span>
+            )}
+            {form.causal === '159-5' && !calc.tieneIndemObra && calc.indemObraMotivo && (
+              <span className="ml-3 text-slate-500">Sin indemnización de obra o faena: {calc.indemObraMotivo}</span>
             )}
           </div>
         )}
@@ -2434,6 +2478,9 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
                         ? `${calc.aniosIndemnizacion} año(s) × ${fmt(calc.baseIndem)}${calc.baseTopeada ? ' (base topeada a 90 UF)' : ''}`
                         : (form.causal ? 'No corresponde por la causal seleccionada' : 'Requiere causal'),
                       calc.indemMonto],
+                    ['Indemnización por término de obra o faena',
+                      `Art. 163 inc. 3° (Ley 21.122) — ${calc.indemObraMeses} mes(es) × ${String(calc.indemObraDiasPorMes).replace('.', ',')} días = ${String(calc.indemObraDias).replace('.', ',')} días × ${fmt(Math.round(calc.baseIndem / 30))}${calc.baseTopeada ? ' (base topeada a 90 UF)' : ''} · no imponible ni tributable`,
+                      calc.indemObraMonto],
                     ['Indemnización sustitutiva del aviso previo',
                       form.pagoAvisoPrevio === 'si' ? 'Art. 161 — un mes de remuneración' : '',
                       calc.indemAvisoPrevio],
@@ -2484,6 +2531,14 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Estado del finiquito">
+            <select className={inp} value={form.estado || 'borrador'} onChange={e => set('estado', e.target.value)}>
+              <option value="borrador">Borrador</option>
+              <option value="firmado">Firmado</option>
+              <option value="pagado">Pagado</option>
+              <option value="anulado">Anulado (no cuenta)</option>
+            </select>
+          </Field>
           <Field label="Estado de firma">
             <select className={inp} value={form.estadoFirma} onChange={e => set('estadoFirma', e.target.value)}>
               <option value="pendiente">Pendiente</option>
@@ -2640,7 +2695,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
   const { empresaId, subEmpresasNames: EMPRESAS = [] } = useEmpresa();
   const empty = {
     trabajadorId: '', contratoId: '', tipo: '',
-    fechaAnexo: new Date().toISOString().split('T')[0],
+    fechaAnexo: hoyISO(),
     descripcion: '',
     // Aumento sueldo base
     sueldoBase: '',
@@ -2688,9 +2743,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
     const contrato = contratos?.find(c => c.id === cid);
     let fechaAnexo = form.fechaAnexo;
     if (contrato?.fechaFin) {
-      const siguiente = new Date(contrato.fechaFin);
-      siguiente.setDate(siguiente.getDate() + 1);
-      fechaAnexo = siguiente.toISOString().split('T')[0];
+      fechaAnexo = sumarDias(contrato.fechaFin, 1);
     }
     set('contratoId', cid);
     setForm(f => ({ ...f, contratoId: cid, fechaAnexo }));
@@ -2700,9 +2753,7 @@ function AnexoModal({ isOpen, onClose, editData, contratos, trabajadores, nroAne
     const contrato = contratos?.find(c => c.trabajadorId === tid && c.estado === 'vigente');
     setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato?.id || '' }));
     if (contrato?.fechaFin) {
-      const siguiente = new Date(contrato.fechaFin);
-      siguiente.setDate(siguiente.getDate() + 1);
-      setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato.id, fechaAnexo: siguiente.toISOString().split('T')[0] }));
+      setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato.id, fechaAnexo: sumarDias(contrato.fechaFin, 1) }));
     } else {
       setForm(f => ({ ...f, trabajadorId: tid, contratoId: contrato?.id || '' }));
     }
@@ -3074,7 +3125,7 @@ function HistorialModal({ isOpen, onClose, trabajador, contratos, anexos, liquid
 
   const contratoVigente = misContratos.find(c => c.estado === 'vigente');
   const { anios, meses } = contratoVigente
-    ? calcularAntiguedad(contratoVigente.fechaInicio, new Date().toISOString().split('T')[0])
+    ? calcularAntiguedad(contratoVigente.fechaInicio, hoyISO())
     : { anios: 0, meses: 0 };
 
   const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
@@ -3641,7 +3692,7 @@ function AusenciaModal({ isOpen, onClose, editData, trabajadores, preselectedTra
   const empty = {
     trabajadorId: preselectedTrabajadorId || '',
     tipo: '',
-    fechaDesde: new Date().toISOString().split('T')[0],
+    fechaDesde: hoyISO(),
     dias: '1',
     medioDia: false,
     esContinuacion: false,

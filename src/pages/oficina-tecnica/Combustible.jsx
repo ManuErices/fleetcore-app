@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { mesActualISO } from "../../lib/fechas";
 import {
   listActiveProjects,
   listCombustibleRegistros,
@@ -20,8 +21,8 @@ export default function Combustible() {
   const { empresaId } = useEmpresa();
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [year, setYear] = useState(() => Number(mesActualISO().slice(0, 4)));
+  const [month, setMonth] = useState(() => Number(mesActualISO().slice(5, 7)));
   const [registros, setRegistros] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showImporter, setShowImporter] = useState(false);

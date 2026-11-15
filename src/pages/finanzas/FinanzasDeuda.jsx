@@ -8,6 +8,7 @@ import FinanzasDeudaImportador from "./FinanzasDeudaImportador";
 import ComprobantesUploader from "./ComprobantesUploader";
 import HistorialAuditoria from "./HistorialAuditoria";
 import PagosDocumento from "./PagosDocumento";
+import { conEstadoAlDia } from "../../lib/pagosDeuda";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, Paginador, FechaHoja,
   IconoActualizar, IconoCerrar, casoTitulo,
@@ -199,6 +200,12 @@ function PanelDetalleAcreedor({ acreedor, documentos, onClose, empresaId, onDocu
                 </p>
               )}
               {d.notasInternas && <p className="m-0 mt-1 text-[14px] text-cuaderno-grafito">Nota: {d.notasInternas}</p>}
+              {d.ausenteUltimoCorte && (
+                <p className="m-0 mt-1 text-[14px]">
+                  <Resaltado color="durazno">no viene en el último corte</Resaltado>
+                  {d.ausenteDesde && <span className="text-cuaderno-grafito"> desde el {fmtFecha(d.ausenteDesde)}</span>}. Revisa si se pagó por fuera o se anuló.
+                </p>
+              )}
 
               {d.id && (
                 <ComprobantesUploader
@@ -246,7 +253,9 @@ export default function FinanzasDeuda() {
     setLoading(true);
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "deuda_proveedores"));
-      setDocumentos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // diasMora y estado se recalculan a hoy: los guardados quedaban
+      // congelados en la fecha de importación.
+      setDocumentos(snap.docs.map(d => conEstadoAlDia({ id: d.id, ...d.data() })));
     } catch (e) {
       console.error("Error cargando deuda_proveedores:", e);
     }
@@ -260,7 +269,7 @@ export default function FinanzasDeuda() {
   // (ej. { comprobantes: [...] } o { saldoPendiente, estado, ... }).
   function handleDocumentoActualizado(documentoId, cambiosParciales) {
     setDocumentos(prev => prev.map(d =>
-      d.id === documentoId ? { ...d, ...cambiosParciales } : d
+      d.id === documentoId ? conEstadoAlDia({ ...d, ...cambiosParciales }) : d
     ));
   }
 

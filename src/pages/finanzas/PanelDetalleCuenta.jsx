@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { textoTransferencia, hrefTelefono } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import { cargarSubcontratos, epsDeTercero } from "../../lib/subcontratosEP";
+import { cargarCobrosRental, cargarPagosRRHH } from "../../lib/finanzas/referenciasDatos";
+import { cobrosDeCuenta, tipoCuentaRRHH, resumirSueldos, sumarMeses } from "../../lib/finanzas/referencias";
+import { mesActualISO } from "../../lib/fechas";
 import ModalProveedor from "./ModalProveedor";
 import {
   Cifra, Titulo, Resaltado, LineaGuia, Boton, VistoBueno,
@@ -29,7 +32,16 @@ import {
  *  - bloqueado: true si hay un modal del flujo abierto encima
  *  - onClose(), onEditarCuenta(cuenta)
  *  - onVincularProveedor(cuentaId, proveedorId): async, lanza si falla
+ *  - obraId: obra elegida en el selector ("todos" o null = todas)
+ *
+ * También abre cuentas de INGRESOS: ahí no hay proveedor que mostrar, solo los
+ * montos y, como referencia, los estados de pago de Rental de ese cliente.
+ * En cuentas de sueldos/Previred/impuesto único se muestra lo que dice RRHH.
+ * Ninguna referencia escribe en el flujo: se sigue anotando a mano.
  */
+const MESES_RRHH = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const nombreMesRRHH = (mes) => `${MESES_RRHH[Number(mes.slice(5, 7)) - 1]} ${mes.slice(0, 4)}`;
+const fechaCortaRef = (iso) => iso ? iso.split("-").reverse().join("/") : "sin fecha";
 
 const MEDIO_ETIQUETA = {
   transferencia: "por transferencia",
@@ -109,8 +121,9 @@ function Pendiente({ children, accion, onAccion }) {
 export default function PanelDetalleCuenta({
   empresaId, cuenta, proveedor, proveedores,
   weekColumns, payments, paymentsPaid, paymentNotas,
-  bloqueado = false, onClose, onEditarCuenta, onVincularProveedor,
+  bloqueado = false, onClose, onEditarCuenta, onVincularProveedor, obraId = null,
 }) {
+  const esIngreso = cuenta.categoria === "INGRESOS";
   const [visible, setVisible] = useState(false);
   const [editandoFicha, setEditandoFicha] = useState(false);
   const [cambiando, setCambiando] = useState(false);
@@ -130,6 +143,36 @@ export default function PanelDetalleCuenta({
       .catch(() => { if (vivo) setEps(null); });
     return () => { vivo = false; };
   }, [empresaId, proveedor?.id]);
+
+  // Cobros de Rental del cliente de esta cuenta de ingreso (solo referencia)
+  const [cobros, setCobros] = useState(null);
+  useEffect(() => {
+    setCobros(null);
+    if (!empresaId || !esIngreso) return;
+    let vivo = true;
+    cargarCobrosRental(empresaId)
+      .then(lista => { if (vivo) setCobros(cobrosDeCuenta(lista, cuenta)); })
+      .catch(() => { if (vivo) setCobros(null); });
+    return () => { vivo = false; };
+  }, [empresaId, esIngreso, cuenta.id, cuenta.nombre, cuenta.cliente, cuenta.detalle]);
+
+  // Sueldos / Previred / impuesto único según RRHH, mes en curso y siguiente (solo referencia)
+  const tipoRRHH = tipoCuentaRRHH(cuenta);
+  const [rrhh, setRrhh] = useState(null);
+  useEffect(() => {
+    setRrhh(null);
+    if (!empresaId || !tipoRRHH) return;
+    let vivo = true;
+    const actual = mesActualISO();
+    // Se carga también el mes anterior: su Previred e impuesto se pagan en el
+    // mes en curso, y sirve para estimar si el mes aún no tiene liquidaciones.
+    const meses = [sumarMeses(actual, -1), actual, sumarMeses(actual, 1)];
+    const obra = obraId && obraId !== "todos" ? obraId : null;
+    cargarPagosRRHH(empresaId, meses)
+      .then(d => { if (vivo) setRrhh(resumirSueldos(d.filas, d.nominas, meses, { projectId: obra })); })
+      .catch(() => { if (vivo) setRrhh(null); });
+    return () => { vivo = false; };
+  }, [empresaId, tipoRRHH, obraId]);
 
   // Entrada: montar fuera de pantalla y deslizar en el siguiente frame
   useEffect(() => {
@@ -214,7 +257,7 @@ export default function PanelDetalleCuenta({
 
         {/* Resumen */}
         <div className="px-6 py-3 border-b border-cuaderno-azul flex-shrink-0">
-          <LineaGuia etiqueta="Próximo pago" className="text-[18px]">
+          <LineaGuia etiqueta={esIngreso ? "Próximo cobro" : "Próximo pago"} className="text-[18px]">
             {proximo ? <Cifra valor={proximo.monto} escala="pesos" /> : <span className="text-cuaderno-grafito">sin pendientes</span>}
           </LineaGuia>
           {proximo && <p className="m-0 -mt-1.5 text-right text-[14px] text-cuaderno-grafito">{proximo.label}, del {proximo.dateRange}</p>}
@@ -226,8 +269,8 @@ export default function PanelDetalleCuenta({
         {/* Cuerpo */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* Proveedor */}
-          <Seccion titulo="Proveedor"
+          {/* Proveedor (las cuentas de ingreso no tienen) */}
+          {!esIngreso && <Seccion titulo="Proveedor"
             extra={p && !cambiando && (
               <div className="flex items-center gap-4">
                 <Boton variante="texto" className="text-[16px] text-cuaderno-grafito" onClick={() => setCambiando(true)}>Cambiar</Boton>
@@ -259,10 +302,10 @@ export default function PanelDetalleCuenta({
               </div>
             )}
             {errorVincular && <p className="m-0 mt-2 text-[15px] text-cuaderno-roja">{errorVincular}</p>}
-          </Seccion>
+          </Seccion>}
 
           {/* Cómo pagar */}
-          {p && (
+          {p && !esIngreso && (
             <Seccion titulo="Cómo pagar"
               extra={p.medioPago && <Resaltado color="lavanda" className="text-[16px]">{MEDIO_ETIQUETA[p.medioPago]}</Resaltado>}>
               {p.medioPago === "transferencia" && (
@@ -311,7 +354,7 @@ export default function PanelDetalleCuenta({
           )}
 
           {/* Contacto */}
-          {p && (
+          {p && !esIngreso && (
             <Seccion titulo="Contacto">
               {tieneContacto ? (
                 <div className="space-y-3">
@@ -339,7 +382,7 @@ export default function PanelDetalleCuenta({
           )}
 
           {/* Pagos en el flujo */}
-          <Seccion titulo="Pagos en el flujo">
+          <Seccion titulo={esIngreso ? "Montos en el flujo" : "Pagos en el flujo"}>
             {semanas.length ? (
               <ul className="m-0 p-0 list-none">
                 {semanas.map(w => (
@@ -386,6 +429,55 @@ export default function PanelDetalleCuenta({
                   <Cifra valor={eps.saldoPorPagar} escala="pesos" color="tinta" />
                 </LineaGuia>
               )}
+            </Seccion>
+          )}
+
+          {/* Cobros de Rental del cliente: referencia, no escribe en el flujo */}
+          {esIngreso && cobros?.length > 0 && (
+            <Seccion titulo="Estados de pago de Rental por cobrar">
+              <p className="m-0 mb-2 text-[14px] text-cuaderno-grafito">Del cliente cuyo nombre calza con esta cuenta. Solo referencia; no modifica el flujo.</p>
+              <ul className="m-0 p-0 list-none">
+                {cobros.slice(0, 8).map(c => (
+                  <li key={c.id} className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 min-h-[46px] border-b border-cuaderno-azul">
+                    <div className="text-[15px] leading-tight">{fechaCortaRef(c.fecha)}</div>
+                    <div className="min-w-0 leading-tight">
+                      <div className="text-[15px] truncate">EEPP {c.numero || "s/n"}{c.factura ? ` · factura ${c.factura}` : ""}</div>
+                      <div className="text-[13px] text-cuaderno-grafito truncate">{casoTitulo(c.cliente)}{c.estimada ? " · fecha estimada" : ""}{c.estado === "abonado" ? " · abonado" : ""}</div>
+                    </div>
+                    <Cifra valor={c.saldo} escala="pesos" color="tinta" />
+                  </li>
+                ))}
+              </ul>
+              {cobros.length > 8 && <p className="m-0 mt-1 text-[13px] text-cuaderno-grafito">Y {cobros.length - 8} más.</p>}
+              <LineaGuia etiqueta="Total por cobrar" className="mt-2 text-[16px]">
+                <Cifra valor={cobros.reduce((s, c) => s + c.saldo, 0)} escala="pesos" color="tinta" />
+              </LineaGuia>
+            </Seccion>
+          )}
+
+          {/* RRHH: referencia, no escribe en el flujo */}
+          {tipoRRHH && rrhh && (
+            <Seccion titulo="Según RRHH">
+              <p className="m-0 mb-2 text-[14px] text-cuaderno-grafito">
+                {tipoRRHH === "previred" ? "Previred (cotizaciones + aportes del empleador − asignación familiar), se paga el 13 del mes siguiente."
+                  : tipoRRHH === "impuesto" ? "Impuesto único retenido, se paga con el F29 el 20 del mes siguiente."
+                  : "Líquido a pagar de las liquidaciones del mes."} Solo referencia; no modifica el flujo.
+              </p>
+              {rrhh.map(m => {
+                const concepto = tipoRRHH === "previred" ? "previred" : tipoRRHH === "impuesto" ? "impuestoUnico" : "liquido";
+                const pago = m.pagos.find(x => x.concepto === concepto);
+                return (
+                  <div key={m.mes}>
+                    <LineaGuia etiqueta={`De ${nombreMesRRHH(m.mes)}`} className="text-[16px]">
+                      {pago?.monto ? <Cifra valor={-pago.monto} escala="pesos" /> : <span className="text-cuaderno-grafito">—</span>}
+                    </LineaGuia>
+                    <p className="m-0 -mt-1.5 text-right text-[13px] text-cuaderno-grafito">
+                      {m.estimadoCon ? `estimado con ${nombreMesRRHH(m.estimadoCon)} · ` : !m.liquidaciones ? "sin liquidaciones · " : ""}
+                      {concepto === "liquido" && m.liquidoPagado > 0 && !m.liquidoPendiente ? "pagado por nómina" : `paga ${fechaCortaRef(pago?.fecha)}`}
+                    </p>
+                  </div>
+                );
+              })}
             </Seccion>
           )}
 

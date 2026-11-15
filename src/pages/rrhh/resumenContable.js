@@ -8,15 +8,22 @@
  * No usa hooks: carga todo una vez y recorre los 12 meses, así Contabilidad
  * lo puede pedir sin montar las pantallas de RRHH.
  *
- *   Remuneraciones del mes = Total haberes (LRE 5201) + Total aportes del
- *                            empleador (LRE 5410: AFC, mutual, SIS y aportes
- *                            de la reforma previsional)
+ *   Remuneraciones del mes = Total haberes (LRE 5201) − asignación familiar
+ *                            (LRE 2311) + Total aportes del empleador (LRE
+ *                            5410: AFC, mutual, SIS y aportes de la reforma
+ *                            previsional). La asignación familiar la paga el
+ *                            empleador pero la recupera descontándola de las
+ *                            cotizaciones que entera (DFL 150): no es costo de
+ *                            la empresa. Es el mismo `costoEmpresa` del motor.
  *   Finiquitos del mes     = total haberes del finiquito (indemnizaciones,
  *                            feriado, gratificación proporcional…), en el mes
  *                            de la fecha de término. Si ese mes además tiene
  *                            liquidación, no se suman la remuneración del mes
  *                            en curso ni las pendientes del finiquito, porque
  *                            ya están en la liquidación.
+ *
+ * Finiquitos: los anulados no se cuentan, y de cada contrato se toma uno solo
+ * (el vigente; si quedaron duplicados antiguos, el más reciente).
  *
  * Las liquidaciones reemplazadas por una reliquidación no se cuentan. Los
  * borradores tampoco, salvo que se pida (las cargas masivas desde Talana
@@ -37,6 +44,26 @@ const leer = async (empresaId, nombre) => {
   catch { return []; }   // sin permiso sobre una colección: se calcula sin ella
 };
 
+const _ms = (v) => (v?.toMillis ? v.toMillis() : (v?.seconds ? v.seconds * 1000 : (Date.parse(v) || 0)));
+
+/**
+ * Finiquitos que cuentan: sin los anulados y uno por contrato (o por
+ * trabajador si no tiene contrato). Un documento sin `estado` es anterior a
+ * los estados y cuenta como vigente. Si quedaron duplicados de antes de que se
+ * bloquearan, gana el más reciente.
+ */
+export function finiquitosVigentes(finiquitos) {
+  const porContrato = new Map();
+  (finiquitos || []).forEach(f => {
+    if (f?.estado === 'anulado') return;
+    const k = f.contratoId || `t:${f.trabajadorId}`;
+    const previo = porContrato.get(k);
+    const fecha = (x) => Math.max(_ms(x.updatedAt), _ms(x.createdAt), _ms(x.fechaCreacion));
+    if (!previo || fecha(f) >= fecha(previo)) porContrato.set(k, f);
+  });
+  return [...porContrato.values()];
+}
+
 /** Carga una vez todo lo que el motor de RRHH necesita. */
 async function cargarRRHH(empresaId) {
   const [liquidaciones, trabajadores, contratos, finiquitos, anticipos, licencias, ausencias] = await Promise.all([
@@ -52,19 +79,26 @@ async function cargarRRHH(empresaId) {
  * Cada liquidación vigente del año, calculada con el motor de RRHH:
  * { mes (1-12), trabajador, liquidacion, haberes, aportes, descuentos, liquido, borrador }.
  */
-async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores = false } = {}) {
+async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores = false, soloMes = null, meses = null, soloLectura = false } = {}) {
   const { liquidaciones, trabajadores, contratos, ctx, config } = datos;
   const anioStr = String(anio);
   const salida = [];
   let borradores = 0, sinContrato = 0;
   for (let m = 1; m <= 12; m++) {
+    // soloMes: la centralización pide un mes y no tiene por qué calcular el año.
+    // `meses` (1-12) limita el cálculo a los meses pedidos (Finanzas solo mira dos o tres)
+    if (soloMes && m !== Number(soloMes)) continue;
+    if (meses && !meses.includes(m)) continue;
     const mes = pad(m);
     const delMes = liquidacionesVigentes(
       liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr));
     borradores += delMes.filter(esBorrador).length;
     const aCalcular = incluirBorradores ? delMes : delMes.filter(l => !esBorrador(l));
     if (aCalcular.length) {
-      try { await asegurarIndicadores({ db, doc, getDoc, setDoc }, empresaId, { mes, anio: anioStr }); } catch { /* respaldo */ }
+      // soloLectura: sin setDoc, asegurarIndicadores no guarda los indicadores
+      // en parametros_legales (las referencias de Finanzas no escriben nada).
+      const fs = soloLectura ? { db, doc, getDoc } : { db, doc, getDoc, setDoc };
+      try { await asegurarIndicadores(fs, empresaId, { mes, anio: anioStr }); } catch { /* respaldo */ }
     }
     aCalcular.forEach(l => {
       const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
@@ -77,7 +111,12 @@ async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorrad
       salida.push({
         mes: m, trabajador, liquidacion: l, borrador: esBorrador(l),
         haberes: Number(fila[5201]) || 0, aportes: Number(fila[5410]) || 0,
+        asignacionFamiliar: Number(fila[2311]) || 0,
         descuentos: Number(fila[5301]) || 0, liquido: Number(fila[5501]) || 0,
+        fila,   // fila LRE completa (la usa la centralización contable)
+        // Para el flujo de caja: cotizaciones del trabajador (5341) e impuesto único (5361)
+        cotizaciones: Number(fila[5341]) || 0, impuestoUnico: Number(fila[5361]) || 0,
+        anticipos: Number(calc.anticipo) || 0,
       });
     });
   }
@@ -99,22 +138,34 @@ export async function costosManoObraRRHH(empresaId, anio) {
   if (enCache && Date.now() - enCache.t < 5 * 60 * 1000) return enCache.v;
   const p = (async () => {
     const datos = await cargarRRHH(empresaId);
-    const { obraDe } = await import('../../lib/obras');
-    let centros = [];
-    try { centros = (await getDocs(collection(db, 'empresas', empresaId, 'centros_costo'))).docs.map(d => ({ id: d.id, ...d.data() })); } catch { centros = []; }
+    // Obras y centros de costo: con `obras: []` obraDe nunca encontraba una obra
+    // por su nombre (un centro de costo llamado igual que la obra).
+    const { obraDe, cargarObrasYCentros } = await import('../../lib/obras');
+    let obras = [], centros = [];
+    try { ({ obras, centros } = await cargarObrasYCentros(empresaId)); } catch { obras = []; centros = []; }
     const { filas } = await calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores: true });
     return filas.map(f => {
       const t = f.trabajador || {};
-      const projectId = obraDe({ obras: [], centros }, { codigo: t.centroCosto, nombre: t.centroCostoNombre }) || t.projectId || null;
+      const l = f.liquidacion || {};
+      // Centro de costo y obra del MES liquidado: la liquidación guarda una
+      // copia al crearse. Leer solo la ficha cargaba todo el historial de quien
+      // cambió de obra a su obra actual. Liquidaciones antiguas sin la copia
+      // caen a la ficha.
+      const cc = l.centroCosto != null || l.centroCostoNombre != null
+        ? { codigo: l.centroCosto, nombre: l.centroCostoNombre }
+        : { codigo: t.centroCosto, nombre: t.centroCostoNombre };
+      const projectId = obraDe({ obras, centros }, cc) || l.projectId || t.projectId || null;
+      const costo = f.haberes - f.asignacionFamiliar + f.aportes;
       return {
         id: `rrhh_${f.liquidacion.id}`,
         employeeId: t.id || f.liquidacion.trabajadorId,
         nombre: `${t.nombre || t.nombres || ''} ${t.apellidoPaterno || ''}`.trim(),
         projectId, year: Number(anio), month: f.mes,
-        centroCosto: t.centroCostoNombre || t.centroCosto || '',
+        centroCosto: cc.nombre || cc.codigo || '',
         tipoManoObra: t.tipoManoObra || (t.tipo === 'OPERADOR' ? 'DIRECTO' : null),
         totalHaberes: f.haberes, totalDescuentos: f.descuentos, sueldoLiquido: f.liquido,
-        aporteEmpresa: f.aportes, totalCosto: f.haberes + f.aportes,
+        // Costo empresa: sin la asignación familiar (2311), que no es costo.
+        aporteEmpresa: f.aportes, totalCosto: costo,
         porcentajeIncidencia: 100, fuente: 'rrhh',
       };
     });
@@ -142,12 +193,13 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
     const delMes = filas.filter(f => f.mes === m);
     const haberes = delMes.reduce((s, f) => s + f.haberes, 0);
     const aportes = delMes.reduce((s, f) => s + f.aportes, 0);
+    const asigFam = delMes.reduce((s, f) => s + f.asignacionFamiliar, 0);
     const conLiquidacion = new Set(delMes.map(f => f.liquidacion.trabajadorId));
     const borradores = liquidacionesVigentes(
       liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr)).filter(esBorrador).length;
 
     let montoFiniquitos = 0, nFiniquitos = 0;
-    finiquitos
+    finiquitosVigentes(finiquitos)
       .filter(f => String(f.fechaTermino || '').slice(0, 7) === `${anioStr}-${mes}`)
       .forEach(f => {
         const trabajador = trabajadores.find(t => t.id === f.trabajadorId);
@@ -165,9 +217,85 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
     meses.push({
       mes: m - 1, liquidaciones: delMes.length, borradores,
       haberes: Math.round(haberes), aportes: Math.round(aportes),
-      remuneraciones: Math.round(haberes + aportes),
+      asignacionFamiliar: Math.round(asigFam),
+      remuneraciones: Math.round(haberes - asigFam + aportes),
       finiquitos: Math.round(montoFiniquitos), nFiniquitos,
     });
   }
   return { anio: Number(anio), meses, totalBorradores, sinContrato };
+}
+
+/**
+ * Códigos del LRE sumados para un mes, para la centralización contable en el
+ * Libro Diario (src/lib/contabilidad/centralizacion.js). Mismo motor y mismas
+ * filas que el archivo del LRE, así el asiento cuadra con lo declarado.
+ * Además separa `saludIsapre` (3143 + 3144 de quienes están en Isapre), porque
+ * Fonasa e Isapre se pagan a instituciones distintas.
+ *
+ * @returns {Promise<{ codigos, liquidaciones, borradores, sinContrato }>}
+ *   borradores = liquidaciones en borrador del mes (incluidas o no).
+ */
+export async function codigosLREMes(empresaId, anio, mes, { incluirBorradores = false } = {}) {
+  const datos = await cargarRRHH(empresaId);
+  const { filas, borradores, sinContrato } = await calcularLiquidacionesAnio(
+    empresaId, anio, datos, { incluirBorradores, soloMes: mes });
+  const codigos = { saludIsapre: 0 };
+  filas.filter(f => f.mes === Number(mes)).forEach(f => {
+    Object.entries(f.fila).forEach(([k, v]) => {
+      // Solo montos (haberes 2xxx, descuentos 3xxx, aportes 4xxx, totales 5xxx);
+      // la identificación (1xxx) no se suma.
+      if (Number(k) < 2000) return;
+      codigos[k] = (codigos[k] || 0) + (Number(v) || 0);
+    });
+    if (f.trabajador?.prevision === 'Isapre') {
+      codigos.saludIsapre += (Number(f.fila[3143]) || 0) + (Number(f.fila[3144]) || 0);
+    }
+  });
+  return { codigos, liquidaciones: filas.length, borradores, sinContrato };
+}
+
+/**
+ * Lo que RRHH tiene que pagar por cada mes pedido ("AAAA-MM"), una fila por
+ * liquidación vigente, con el MISMO motor que la liquidación y el LRE
+ * (liquidacionDe + filaLRE). Lo usa Finanzas como referencia junto al flujo
+ * de caja (src/lib/finanzas/referencias.js → resumirSueldos), sin escribir
+ * nada en Firestore.
+ *
+ * @returns {Promise<Array<{ mes: "AAAA-MM", projectId, trabajadorId, borrador,
+ *   pagado, liquido, cotizaciones, aportes, asignacionFamiliar, impuestoUnico,
+ *   anticipos }>>}
+ */
+export async function filasPagoRRHH(empresaId, meses, { incluirBorradores = false } = {}) {
+  const datos = await cargarRRHH(empresaId);
+  const { obraDe, cargarObrasYCentros } = await import('../../lib/obras');
+  let obras = [], centros = [];
+  try { ({ obras, centros } = await cargarObrasYCentros(empresaId)); } catch { obras = []; centros = []; }
+  const porAnio = new Map();
+  (meses || []).forEach(m => {
+    const [a, mm] = String(m).split('-').map(Number);
+    if (!a || !mm) return;
+    porAnio.set(a, [...(porAnio.get(a) || []), mm]);
+  });
+  const salida = [];
+  for (const [anio, ms] of porAnio) {
+    const { filas } = await calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores, meses: ms, soloLectura: true });
+    filas.forEach(f => {
+      const t = f.trabajador || {};
+      const l = f.liquidacion || {};
+      // Obra del mes liquidado: mismo criterio que costosManoObraRRHH
+      const cc = l.centroCosto != null || l.centroCostoNombre != null
+        ? { codigo: l.centroCosto, nombre: l.centroCostoNombre }
+        : { codigo: t.centroCosto, nombre: t.centroCostoNombre };
+      salida.push({
+        mes: `${anio}-${pad(f.mes)}`,
+        projectId: obraDe({ obras, centros }, cc) || l.projectId || t.projectId || null,
+        trabajadorId: l.trabajadorId || t.id || null,
+        borrador: f.borrador, pagado: l.estado === 'pagado',
+        liquido: f.liquido, cotizaciones: f.cotizaciones, aportes: f.aportes,
+        asignacionFamiliar: f.asignacionFamiliar, impuestoUnico: f.impuestoUnico,
+        anticipos: f.anticipos,
+      });
+    });
+  }
+  return salida;
 }

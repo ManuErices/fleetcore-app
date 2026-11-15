@@ -120,8 +120,8 @@ export const AYUDA_FILAS = {
   honorarios: "Monto BRUTO de la boleta (la retención va al SII por F29, es parte del bruto, no un costo adicional).",
   finiquitos: "Días trabajados, feriado proporcional e indemnizaciones legales (años de servicio, mes de aviso). No repetir lo que ya está en Remuneraciones.",
   rendiciones: "Solo gastos rendidos con respaldo. Un fondo por rendir no es gasto hasta que se rinde. Las rendiciones con factura a nombre de la empresa ya están en Compras.",
-  gastos_financieros: "Intereses, comisiones bancarias y comisiones/intereses de factoring pagados.",
-  leasing: "Cuotas de leasing pagadas en el mes.",
+  gastos_financieros: "Intereses, comisiones bancarias y comisiones/intereses de factoring devengados en el mes (14 A; en 14 D N°3, pagados). Lo facturado por bancos o factoring que viene en el RCV con regla de proveedor ya se carga aquí: no repetirlo a mano.",
+  leasing: "14 A (devengado): cuotas de leasing devengadas/facturadas en el mes, no las pagadas. Si la factura de la cuota viene en el RCV con regla de proveedor, ya se carga aquí sola: no escribirla a mano. En 14 D N°3, las pagadas.",
   patentes: "Patente municipal, contribuciones y permisos de circulación pagados.",
   depreciacion: "Solo 14 A: depreciación tributaria del activo fijo (normal o acelerada, tabla de vida útil del SII). La compra del activo no es gasto, lo es su depreciación. En 14 D N°3 se deja en cero (el activo ya se rebajó en Compras).",
   correccion_monetaria: "Solo 14 A (art. 41 LIR). Se escribe con su signo: positivo si es abono (aumenta la base), negativo si es cargo. Abono = activo fijo neto × variación del IPC; cargo = capital propio tributario inicial × variación del IPC. Factor del año: IPC de noviembre anterior a noviembre del año (desfase de un mes). La cifra definitiva la calcula la contadora al cierre.",
@@ -433,8 +433,17 @@ export function repartirRCVPorMes(filas, tipo, opciones = {}) {
  * Compatibilidad: la primera versión guardaba doc.rcv[filaId][mes] = traza y
  * cargaba el archivo completo en el mes del período; se toma como el aporte
  * anterior de ese período a ese mes.
+ *
+ * Meses tomados de una fuente interna (fijarMesDesdeFuente, períodos
+ * "rrhh-AAAA-MM" / "ot-AAAA-MM"): la fuente interna manda. Un archivo
+ * (Talana, Rindegastos…) NO suma en esos meses —antes se sumaba encima y la
+ * celda quedaba al doble—; el aporte del archivo para esos meses se descarta
+ * (y si ese mismo período había aportado antes, se resta). Los meses
+ * descartados quedan en traza.omitidosPorFuente para avisarlo.
+ * Con { reemplazarFijados: true } (el usuario lo pidió) se hace al revés: se
+ * borra el aporte de la fuente interna de esos meses y entra el archivo.
  */
-export function aplicarAporteRCV(doc, filaId, periodo, porMesNuevo, traza) {
+export function aplicarAporteRCV(doc, filaId, periodo, porMesNuevo, traza, { reemplazarFijados = false } = {}) {
   const [pAnio, pMes] = periodo.split("-").map(Number); // pMes 1-12
   const rcv = { ...(doc.rcv || {}) };
   const periodos = { ...(rcv.periodos || {}) };
@@ -447,18 +456,60 @@ export function aplicarAporteRCV(doc, filaId, periodo, porMesNuevo, traza) {
   if (pAnio === doc.anio) delete legado[pMes - 1];
   anterior = anterior || {};
 
+  // Meses fijados por una fuente interna (si quien aplica no es esa fuente)
+  const fijados = esFuenteInterna(periodo) ? {} : mesesFijados(doc, filaId);
+  const efectivo = {};
+  const omitidos = [];
+  const quitarFuente = {};  // mes → monto de la fuente interna que se reemplaza
+  Object.entries(porMesNuevo || {}).forEach(([k, v]) => {
+    const fuente = fijados[k];
+    if (fuente && !reemplazarFijados) { omitidos.push(Number(k)); return; }
+    if (fuente) quitarFuente[k] = { fuente, monto: Number(deFila[fuente]?.porMes?.[k]) || 0 };
+    efectivo[k] = v;
+  });
+  Object.entries(quitarFuente).forEach(([k, { fuente }]) => {
+    const porMes = { ...(deFila[fuente]?.porMes || {}) };
+    delete porMes[k];
+    if (Object.keys(porMes).length) deFila[fuente] = { ...deFila[fuente], porMes };
+    else delete deFila[fuente];
+  });
+
   const filas = doc.filas.map(f => {
     if (f.id !== filaId) return f;
     return {
       ...f,
       valores: f.valores.map((v, i) =>
-        Math.round((Number(v) || 0) - (Number(anterior[i]) || 0) + (Number(porMesNuevo[i]) || 0))),
+        Math.round((Number(v) || 0) - (Number(anterior[i]) || 0) - (Number(quitarFuente[i]?.monto) || 0)
+          + (Number(efectivo[i]) || 0))),
     };
   });
-  if (Object.keys(porMesNuevo).length) deFila[periodo] = { ...traza, porMes: porMesNuevo };
-  else delete deFila[periodo];
+  if (Object.keys(efectivo).length) {
+    deFila[periodo] = { ...traza, porMes: efectivo, ...(omitidos.length ? { omitidosPorFuente: omitidos } : {}) };
+  } else delete deFila[periodo];
   periodos[filaId] = deFila;
   return { ...doc, filas, rcv: { ...rcv, [filaId]: legado, periodos } };
+}
+
+/** ¿El período es una fuente interna de FleetCore ("rrhh-AAAA-MM", "ot-AAAA-MM")? */
+export const esFuenteInterna = (periodo) => /^(rrhh|ot)-\d{4}-\d{2}$/.test(String(periodo || ""));
+
+/** Meses de una fila tomados de una fuente interna: { [mes]: periodoFuente }. */
+export function mesesFijados(doc, filaId) {
+  const out = {};
+  Object.entries(doc?.rcv?.periodos?.[filaId] || {}).forEach(([periodo, p]) => {
+    if (!esFuenteInterna(periodo)) return;
+    Object.keys(p?.porMes || {}).forEach(k => { out[k] = periodo; });
+  });
+  return out;
+}
+
+/**
+ * Meses (0-11) de `porMes` que un archivo no podrá cargar en esa fila porque
+ * ya vienen de FleetCore. Para avisarlo en el modal antes de importar.
+ */
+export function mesesOmitidosPorFuente(doc, filaId, porMes) {
+  const fij = mesesFijados(doc, filaId);
+  return Object.keys(porMes || {}).filter(k => fij[k] && Number(porMes[k])).map(Number).sort((a, b) => a - b);
 }
 
 /** Aportes del RCV a un mes de una fila: [{ periodo, monto, archivo }]. */
@@ -524,7 +575,9 @@ export function fijarMesDesdeFuente(doc, filaId, mes, fuente, monto, traza = {})
     delete porMes[mes];
     if (Object.keys(porMes).length) deFila[periodo] = { ...p, porMes };
   });
-  if (monto) deFila[fuente] = { ...traza, monto, porMes: { [mes]: monto } };
+  // Se guarda aunque el monto sea 0: el mes queda tomado de la fuente (ej. RRHH
+  // dice que no hubo finiquitos) y un archivo posterior no debe sumarle nada.
+  deFila[fuente] = { ...traza, monto: Math.round(monto || 0), porMes: { [mes]: Math.round(monto || 0) } };
   periodos[filaId] = deFila;
   const legado = { ...(rcv[filaId] || {}) };
   delete legado[mes];
@@ -535,4 +588,43 @@ export function fijarMesDesdeFuente(doc, filaId, mes, fuente, monto, traza = {})
     }),
     rcv: { ...rcv, [filaId]: legado, periodos },
   };
+}
+
+/**
+ * Campos que cambiaron entre dos versiones del documento de un año del flujo
+ * mensual, como rutas de Firestore ({ "filas": [...], "rcv.periodos.compras.2026-03": {...} }).
+ * Un valor `undefined` significa borrar el campo. Sirve para guardar solo lo
+ * que cambió (updateDoc) en vez de pisar el documento entero: antes dos
+ * pestañas, o una pestaña vieja de 2025 y el RCV de enero que escribe en
+ * 2025, se borraban mutuamente lo guardado. Dentro de rcv.periodos se baja
+ * hasta fila y período, que es lo que cada importación toca.
+ */
+export function cambiosDocFlujo(antes = {}, despues = {}) {
+  const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const esObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  const union = (a, b) => new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const out = {};
+  for (const k of union(antes, despues)) {
+    if (k === "updatedAt" || k === "version") continue;
+    const a = antes[k], b = despues[k];
+    if (k === "rcv" && esObj(a) && esObj(b)) {
+      for (const x of union(a, b)) {
+        if (x === "periodos" && esObj(a.periodos || {}) && esObj(b.periodos || {})) {
+          const pa = a.periodos || {}, pb = b.periodos || {};
+          for (const fila of union(pa, pb)) {
+            if (!esObj(pa[fila] || {}) || !esObj(pb[fila] || {})) {
+              if (!igual(pa[fila], pb[fila])) out[`rcv.periodos.${fila}`] = pb[fila];
+              continue;
+            }
+            for (const per of union(pa[fila], pb[fila])) {
+              if (!igual(pa[fila]?.[per], pb[fila]?.[per])) out[`rcv.periodos.${fila}.${per}`] = pb[fila]?.[per];
+            }
+          }
+        } else if (!igual(a[x], b[x])) out[`rcv.${x}`] = b[x];
+      }
+      continue;
+    }
+    if (!igual(a, b)) out[k] = b;
+  }
+  return out;
 }

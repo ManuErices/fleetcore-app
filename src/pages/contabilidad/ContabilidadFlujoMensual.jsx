@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { doc, getDoc, getDocs, setDoc, collection, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, updateDoc, deleteField, collection, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
+import { hoyISO, partesISO } from "../../lib/fechas";
 import { useEmpresa } from "../../lib/useEmpresa";
 import * as XLSX from "xlsx";
 import { fmt, MESES, MESES_S, useContabilidad, leerTextoDetectando } from "./ContabilidadContext";
@@ -13,6 +14,7 @@ import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
   repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV, fijarMesDesdeFuente,
+  mesesFijados, cambiosDocFlujo,
 } from "../../lib/contabilidad/tributario";
 import {
   APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
@@ -20,6 +22,7 @@ import {
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
 import { detectarRendiciones, resumirRendiciones, resumirRendicionesDocs, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
+import { controlVentas } from "../../lib/contabilidad/ventasControl";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -141,6 +144,49 @@ function normalizar(raw, anio) {
     perdidaArrastre: Math.abs(num(raw.perdidaArrastre)),
     rcv: raw.rcv && typeof raw.rcv === "object" ? raw.rcv : {},
   };
+}
+
+// ─── Guardado por campos con control de versión ───────────────────────────────
+// Antes cada guardado hacía setDoc del documento completo del año: dos
+// pestañas (o una pestaña vieja de 2025 y el RCV de enero, que escribe en
+// 2025) se pisaban sin aviso. Ahora se escriben solo los campos que cambiaron
+// (updateDoc con rutas) y el documento lleva `version`: si en el servidor es
+// distinta de la que se cargó, alguien más guardó y no se escribe.
+class ConflictoVersion extends Error {
+  constructor(datos) { super("El flujo mensual cambió en otra pestaña o equipo."); this.datos = datos; }
+}
+
+/** Rutas de cambiosDocFlujo → objeto para updateDoc (undefined = borrar). */
+function rutasParaUpdate(cambios) {
+  return Object.fromEntries(Object.entries(cambios).map(([k, v]) =>
+    [k, v === undefined ? deleteField() : JSON.parse(JSON.stringify(v))]));  // JSON quita los undefined
+}
+
+/**
+ * Guarda `nuevo` en el documento del año comparándolo con `base` (lo que se
+ * leyó). Si `versionLeida` no es null y el servidor tiene otra, lanza
+ * ConflictoVersion con los datos del servidor. Devuelve la versión escrita.
+ */
+async function escribirFlujoAnio(ref, base, nuevo, versionLeida = null) {
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, { ...JSON.parse(JSON.stringify(nuevo)), version: 1, updatedAt: serverTimestamp() });
+    return 1;
+  }
+  const vServidor = Number(snap.data().version) || 0;
+  if (versionLeida !== null && vServidor !== versionLeida) throw new ConflictoVersion(snap.data());
+  const cambios = cambiosDocFlujo(base, nuevo);
+  if (!Object.keys(cambios).length) return vServidor;
+  await updateDoc(ref, { ...rutasParaUpdate(cambios), version: vServidor + 1, updatedAt: serverTimestamp() });
+  return vServidor + 1;
+}
+
+/** Lee el año `y`, le aplica `transformar` y guarda solo lo que cambió. */
+async function actualizarOtroAnio(empresaId, y, transformar) {
+  const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
+  const snap = await getDoc(ref);
+  const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
+  await escribirFlujoAnio(ref, base, transformar(base));
 }
 
 // ─── Subcomponentes visuales (diseño cuaderno, el mismo de Finanzas) ──────────
@@ -592,10 +638,152 @@ function ModalFleetCore({ empresaId, anio, data, onAplicar, onCerrar }) {
   );
 }
 
-function ModalRendiciones({ filas, archivo, anioActivo, onAplicar, onCerrar }) {
+/**
+ * Control de ventas (solo lectura): Ingresos de la planilla (lo que dejó el
+ * RCV de ventas o se escribió a mano) contra lo devengado en FleetCore:
+ * estados de pago de Rental y de Oficina Técnica. No escribe nada ni cambia la
+ * base imponible: sirve para ver EEPP sin factura o facturados en otro mes.
+ * Se carga recién al abrirla, para no leer Rental en cada visita.
+ */
+function HojaControlVentas({ empresaId, anio, ventas }) {
+  const [abierta, setAbierta] = useState(false);
+  const [docs, setDocs] = useState(null);   // { rental, ot }
+  const [error, setError] = useState("");
+  const [detalle, setDetalle] = useState(null);   // mes con detalle abierto
+
+  useEffect(() => {
+    if (!abierta || !empresaId) return;
+    let vivo = true;
+    setDocs(null); setError("");
+    (async () => {
+      try {
+        const [r, o] = await Promise.all([
+          getDocs(collection(db, "empresas", empresaId, "rentalPayments")).catch(() => null),
+          getDocs(query(collection(db, "empresas", empresaId, "estadoPagoIngresos"), where("year", "==", anio))).catch(() => null),
+        ]);
+        if (!vivo) return;
+        setDocs({
+          rental: r ? r.docs.map(d => ({ id: d.id, ...d.data() })) : [],
+          ot: o ? o.docs.map(d => d.data()) : [],
+          sinPermiso: !r || !o,
+        });
+      } catch (e) {
+        console.error("Error leyendo ventas de FleetCore:", e);
+        if (vivo) setError("No se pudieron leer los estados de pago.");
+      }
+    })();
+    return () => { vivo = false; };
+  }, [abierta, empresaId, anio]);
+
+  const meses = useMemo(() => (docs ? controlVentas(docs.rental, docs.ot, anio, ventas) : null), [docs, anio, ventas]);
+  const total = (k) => (meses || []).reduce((s, m) => s + m[k], 0);
+
+  return (
+    <Hoja titulo="Control de ventas"
+      extra={<Boton variante="texto" onClick={() => setAbierta(v => !v)} aria-expanded={abierta}>{abierta ? "Ocultar" : "Comparar con FleetCore"}</Boton>}>
+      <p className="m-0 -mt-1 text-[15px] text-cuaderno-grafito">
+        Ingresos de la planilla (RCV de ventas) contra los estados de pago emitidos en FleetCore. Es solo un control: no cambia la base imponible.
+      </p>
+      {abierta && (error ? <Nota etiqueta="Ojo:" className="mt-3">{error}</Nota> : !meses ? (
+        <p className="m-0 py-6 text-center text-[17px] text-cuaderno-grafito">Leyendo estados de pago…</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {docs.sinPermiso && <Nota etiqueta="Ojo:">No se pudo leer Rental u Oficina Técnica con tu usuario: la columna queda incompleta.</Nota>}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[16px]" style={{ minWidth: 720 }}>
+              <thead>
+                <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                  {["Mes", "Ventas planilla (RCV)", "EEPP Rental", "EEPP Oficina Técnica", "FleetCore", "Diferencia", "Revisar"].map((h, i) => (
+                    <th key={h} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 || i === 6 ? "text-left" : "text-right"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {meses.map(m => {
+                  const avisos = m.sinFactura.length + m.facturaOtroMes.length;
+                  const vacio = !m.rcv && !m.fleetcore;
+                  return (
+                    <React.Fragment key={m.mes}>
+                      <tr className="border-b border-cuaderno-renglon">
+                        <td className="px-2 py-1">{MESES[m.mes]}</td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.rcv} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.rental} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.ot} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.fleetcore} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right">{vacio ? null : <Cifra valor={m.diferencia} escala="pesos" vacio="0" />}</td>
+                        <td className="px-2 py-1 text-[14px]">
+                          {avisos > 0 && (
+                            <button onClick={() => setDetalle(d => (d === m.mes ? null : m.mes))}
+                              className="text-cuaderno-grafito underline underline-offset-[3px] decoration-cuaderno-columna hover:text-cuaderno-tinta">
+                              {[m.sinFactura.length && `${m.sinFactura.length} EEPP sin factura`, m.facturaOtroMes.length && `${m.facturaOtroMes.length} facturado en otro mes`].filter(Boolean).join(" · ")}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {detalle === m.mes && (
+                        <tr className="border-b border-cuaderno-renglon">
+                          <td colSpan={7} className="px-4 py-2 text-[15px]">
+                            {m.sinFactura.map(p => (
+                              <p key={"s" + p.numero} className="m-0">EEPP {p.numero} {p.cliente && `· ${p.cliente}`} · <Cifra valor={p.neto} escala="pesos" color="heredar" /> · sin factura registrada</p>
+                            ))}
+                            {m.facturaOtroMes.map(p => (
+                              <p key={"f" + p.numero} className="m-0">EEPP {p.numero} {p.cliente && `· ${p.cliente}`} · <Cifra valor={p.neto} escala="pesos" color="heredar" /> · factura {p.factura} de {MESES[p.mesFactura.mes].toLowerCase()} {p.mesFactura.anio}</p>
+                            ))}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="px-2 py-2">Total</td>
+                  {["rcv", "rental", "ot", "fleetcore", "diferencia"].map(k => (
+                    <td key={k} className="px-2 py-2 text-right"><Cifra valor={total(k)} escala="pesos" vacio="0" raya="total" /></td>
+                  ))}
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="m-0 text-[14px] text-cuaderno-grafito">
+            Rental: neto de cada estado de pago por su fecha de emisión, sin los anulados. Oficina Técnica: estados de pago + reajustes + multas del mes de cada obra (las retenciones no, la factura va por el total). Una diferencia positiva son ventas facturadas sin estado de pago en FleetCore (otros clientes o servicios); una negativa, estados de pago aún sin factura o facturados en otro mes.
+          </p>
+        </div>
+      ))}
+    </Hoja>
+  );
+}
+
+/**
+ * Aviso de meses que un archivo no va a cargar porque ya vienen de FleetCore
+ * (RRHH / Oficina Técnica). La fuente interna manda; solo si el usuario lo
+ * marca se reemplaza por el archivo.
+ */
+function AvisoFleetCore({ meses, fuente, reemplazar, onReemplazar }) {
+  const lista = meses.map(m => MESES[m]).join(", ");
+  return (
+    <section className="space-y-2">
+      <Nota etiqueta="Ojo:">
+        {lista} ya {meses.length === 1 ? "viene" : "vienen"} de FleetCore ({fuente}).
+        {reemplazar ? " Se reemplazará por lo del archivo." : " Esos meses se omiten para no contar dos veces; el resto se carga."}
+      </Nota>
+      <Casilla marcada={reemplazar} onCambiar={onReemplazar}
+        descripcion={`Quita lo traído de ${fuente} en ${meses.length === 1 ? "ese mes" : "esos meses"} y deja lo del archivo.`}>
+        Reemplazar los datos de FleetCore
+      </Casilla>
+    </section>
+  );
+}
+
+function ModalRendiciones({ filas, archivo, anioActivo, fijados = {}, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
+  const [reemplazar, setReemplazar] = useState(false);
   const [op, setOp] = useState({ incluirEnRevision: true, incluirComprobantes: true, incluirFacturasNoRecibidas: false });
   const r = useMemo(() => resumirRendiciones(filas, op), [filas, op]);
+  // Meses del año activo que ya vienen de Oficina Técnica ("Traer de FleetCore")
+  const mesesFleetCore = r.reparto.filter(m => m.anio === anioActivo && fijados[m.mes]).map(m => m.mes);
   const otrosAnios = [...new Set(r.reparto.filter(m => m.anio !== anioActivo).map(m => m.anio))];
   const periodoTxt = r.periodo ? `${MESES[r.periodo.mes].toLowerCase()} ${r.periodo.anio}` : "";
   return (
@@ -609,7 +797,7 @@ function ModalRendiciones({ filas, archivo, anioActivo, onAplicar, onCerrar }) {
         <div className="flex flex-wrap items-center justify-end gap-4">
           <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
           <Boton variante="primario" disabled={aplicando || !r.periodo}
-            onClick={async () => { setAplicando(true); try { await onAplicar(r); } finally { setAplicando(false); } }}>
+            onClick={async () => { setAplicando(true); try { await onAplicar(r, { reemplazar }); } finally { setAplicando(false); } }}>
             {aplicando ? "Cargando…" : <>Cargar <Cifra valor={r.total} escala="pesos" color="heredar" /> en Rendiciones</>}
           </Boton>
         </div>
@@ -669,6 +857,9 @@ function ModalRendiciones({ filas, archivo, anioActivo, onAplicar, onCerrar }) {
           {otrosAnios.length > 0 && ` Lo de ${otrosAnios.join(", ")} se guarda de inmediato en ese año.`}
         </p>
       </section>
+
+      {mesesFleetCore.length > 0 && <AvisoFleetCore meses={mesesFleetCore} fuente="Oficina Técnica"
+        reemplazar={reemplazar} onReemplazar={setReemplazar} />}
     </ModalCuaderno>
   );
 }
@@ -843,8 +1034,9 @@ function ModalHonorarios({ resumen, archivo, anioActivo, onAplicar, onCerrar }) 
   );
 }
 
-function ModalRemuneraciones({ resumen, archivo, anioActivo, onAplicar, onCerrar }) {
+function ModalRemuneraciones({ resumen, archivo, anioActivo, fijado = false, onAplicar, onCerrar }) {
   const [aplicando, setAplicando] = useState(false);
+  const [reemplazar, setReemplazar] = useState(false);
   const r = resumen;
   const periodoTxt = r.anio != null ? `${MESES[r.mes]} ${r.anio}` : "";
   return (
@@ -858,7 +1050,7 @@ function ModalRemuneraciones({ resumen, archivo, anioActivo, onAplicar, onCerrar
         <div className="flex flex-wrap items-center justify-end gap-4">
           <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
           <Boton variante="primario" disabled={aplicando || r.anio == null}
-            onClick={async () => { setAplicando(true); try { await onAplicar(); } finally { setAplicando(false); } }}>
+            onClick={async () => { setAplicando(true); try { await onAplicar({ reemplazar }); } finally { setAplicando(false); } }}>
             {aplicando ? "Cargando…" : `Cargar en ${periodoTxt.toLowerCase()}`}
           </Boton>
         </div>
@@ -886,6 +1078,8 @@ function ModalRemuneraciones({ resumen, archivo, anioActivo, onAplicar, onCerrar
           <LineaDesglose label="Finiquitos" valor={r.finiquitos} signo="=" fuerte />
         </section>
       )}
+
+      {fijado && <AvisoFleetCore meses={[r.mes]} fuente="RRHH" reemplazar={reemplazar} onReemplazar={setReemplazar} />}
 
       <section>
         <Titulo as="h3" tamano="sm">No se suma (ya está dentro de la remuneración total)</Titulo>
@@ -959,7 +1153,7 @@ function ConfigTributaria({ config, onCambiar, anio, tasa, tasaPPM }) {
 export default function ContabilidadFlujoMensual() {
   const { empresaId } = useEmpresa();
   const { configTributaria, guardarConfigTributaria } = useContabilidad();
-  const anioActual = new Date().getFullYear();
+  const anioActual = partesISO(hoyISO()).anio;   // año en Chile, no el del navegador
 
   const [anio, setAnio]           = useState(anioActual);
   const [data, setData]           = useState(() => docVacio(anioActual));
@@ -978,6 +1172,9 @@ export default function ContabilidadFlujoMensual() {
   const inputRcv = useRef(null);
 
   const dirty = JSON.stringify(data) !== JSON.stringify(original);
+  // Versión del documento del año tal como se cargó (null = aún no existe)
+  const versionRef = useRef(null);
+  const [conflicto, setConflicto] = useState(false);
 
   // ── Cargar documento del año activo ──
   useEffect(() => {
@@ -989,7 +1186,10 @@ export default function ContabilidadFlujoMensual() {
         const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(anio));
         const snap = await getDoc(ref);
         const norm = snap.exists() ? normalizar(snap.data(), anio) : docVacio(anio);
-        if (!cancelado) { setData(norm); setOriginal(norm); }
+        if (!cancelado) {
+          versionRef.current = snap.exists() ? (Number(snap.data().version) || 0) : null;
+          setData(norm); setOriginal(norm);
+        }
       } catch (e) {
         console.error("Error cargando flujo mensual:", e);
         if (!cancelado) { const vac = docVacio(anio); setData(vac); setOriginal(vac); }
@@ -1006,11 +1206,10 @@ export default function ContabilidadFlujoMensual() {
   // solo, 1 s después del último, y al salir de la pantalla se guarda lo que
   // quede pendiente.
   const [errorGuardado, setErrorGuardado] = useState(false);
-  const pendienteRef = useRef(null);      // { empresaId, anio, data } sin guardar
-  const escribir = useCallback(async ({ empresaId: emp, anio: a, data: d }) => {
+  const pendienteRef = useRef(null);      // { empresaId, anio, data, base } sin guardar
+  const escribir = useCallback(async ({ empresaId: emp, anio: a, data: d, base }) => {
     const ref = doc(db, "empresas", emp, "flujo_mensual", String(a));
-    // JSON quita los undefined, que Firestore rechaza
-    await setDoc(ref, { ...JSON.parse(JSON.stringify(d)), updatedAt: serverTimestamp() });
+    versionRef.current = await escribirFlujoAnio(ref, base, d, versionRef.current);
   }, []);
   const guardar = useCallback(async () => {
     const p = pendienteRef.current;
@@ -1022,8 +1221,18 @@ export default function ContabilidadFlujoMensual() {
       setOriginal(p.data);
       setErrorGuardado(false);
     } catch (e) {
-      console.error("Error guardando flujo mensual:", e);
-      setErrorGuardado(true);
+      if (e instanceof ConflictoVersion) {
+        // Otro guardó primero: se recarga lo del servidor y se avisa. Lo
+        // último escrito aquí no se guardó (hay que repetirlo).
+        pendienteRef.current = null;
+        const norm = normalizar(e.datos, p.anio);
+        versionRef.current = Number(e.datos.version) || 0;
+        setData(norm); setOriginal(norm);
+        setConflicto(true);
+      } else {
+        console.error("Error guardando flujo mensual:", e);
+        setErrorGuardado(true);
+      }
     } finally {
       setGuardando(false);
     }
@@ -1031,10 +1240,10 @@ export default function ContabilidadFlujoMensual() {
 
   useEffect(() => {
     if (cargando || !empresaId || !dirty) return;
-    pendienteRef.current = { empresaId, anio, data };
+    pendienteRef.current = { empresaId, anio, data, base: original };
     const t = setTimeout(guardar, 1000);
     return () => clearTimeout(t);
-  }, [data, dirty, cargando, empresaId, anio, guardar]);
+  }, [data, original, dirty, cargando, empresaId, anio, guardar]);
 
   // Al desmontar (cambiar de pestaña del módulo) o cerrar la página
   useEffect(() => {
@@ -1044,7 +1253,8 @@ export default function ContabilidadFlujoMensual() {
   }, [escribir]);
 
   async function cambiarAnio(nuevo) {
-    if (dirty) { pendienteRef.current = { empresaId, anio, data }; await guardar(); }
+    if (dirty) { pendienteRef.current = { empresaId, anio, data, base: original }; await guardar(); }
+    setConflicto(false);
     setAnio(nuevo);
   }
 
@@ -1192,12 +1402,7 @@ export default function ContabilidadFlujoMensual() {
     // Otros años (ej. facturas de diciembre que llegan en el RCV de enero):
     // se escriben de inmediato en el documento de ese año.
     try {
-      for (const y of otrosAnios) {
-        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
-        const snap = await getDoc(ref);
-        const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
-        await setDoc(ref, { ...aplicarTodo(base, y), updatedAt: serverTimestamp() });
-      }
+      for (const y of otrosAnios) await actualizarOtroAnio(empresaId, y, base => aplicarTodo(base, y));
     } catch (e) {
       console.error("Error guardando el RCV en otro año:", e);
       alert(`No se pudo guardar la parte de ${otrosAnios.join(", ")}. No se cargó nada; intenta nuevamente.`);
@@ -1208,7 +1413,7 @@ export default function ContabilidadFlujoMensual() {
     setRcv(null);
   }
   // Libro de remuneraciones → filas Remuneraciones y Finiquitos del mes del libro
-  async function aplicarRemuneraciones() {
+  async function aplicarRemuneraciones({ reemplazar = false } = {}) {
     const r = rem;
     const periodo = `${r.anio}-${String(r.mes + 1).padStart(2, "0")}`;
     const traza = {
@@ -1217,21 +1422,27 @@ export default function ContabilidadFlujoMensual() {
       descuentoAFC: r.descuentoAFC, duplicadosOmitidos: r.montoDuplicados,
       cargadoEn: new Date().toISOString(),
     };
-    const aplicar = d => [["remuneraciones", r.remuneraciones], ["finiquitos", r.finiquitos]].reduce((acc, [filaId, monto]) =>
-      aplicarAporteRCV(acc, filaId, periodo, monto ? { [r.mes]: monto } : {}, { ...traza, monto, documentosPorMes: { [r.mes]: r.trabajadores } }), d);
+    // Si el mes ya viene de RRHH ("Traer de FleetCore"), aplicarAporteRCV lo
+    // omite salvo que el usuario haya pedido reemplazar.
+    let omitido = false;
+    const aplicar = d => {
+      const fij = { ...mesesFijados(d, "remuneraciones"), ...mesesFijados(d, "finiquitos") };
+      if (fij[r.mes] && !reemplazar) omitido = true;
+      return [["remuneraciones", r.remuneraciones], ["finiquitos", r.finiquitos]].reduce((acc, [filaId, monto]) =>
+        aplicarAporteRCV(acc, filaId, periodo, monto ? { [r.mes]: monto } : {}, { ...traza, monto, documentosPorMes: { [r.mes]: r.trabajadores } },
+          { reemplazarFijados: reemplazar }), d);
+    };
     if (r.anio === anio) {
       setData(aplicar);
     } else {
       try {
-        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(r.anio));
-        const snap = await getDoc(ref);
-        const base = snap.exists() ? normalizar(snap.data(), r.anio) : docVacio(r.anio);
-        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base))), updatedAt: serverTimestamp() });
+        await actualizarOtroAnio(empresaId, r.anio, aplicar);
       } catch (e) {
         console.error("Error guardando remuneraciones:", e);
         alert(`No se pudo guardar en ${r.anio}. Intenta nuevamente.`);
         return;
       }
+      if (omitido) alert(`${MESES[r.mes]} ${r.anio} ya viene de RRHH (FleetCore): el libro no se cargó en ese mes.`);
     }
     setRem(null);
   }
@@ -1250,10 +1461,7 @@ export default function ContabilidadFlujoMensual() {
       setData(aplicar);
     } else {
       try {
-        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(anioCarga));
-        const snap = await getDoc(ref);
-        const base = snap.exists() ? normalizar(snap.data(), anioCarga) : docVacio(anioCarga);
-        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base))), updatedAt: serverTimestamp() });
+        await actualizarOtroAnio(empresaId, anioCarga, aplicar);
       } catch (e) {
         console.error("Error guardando honorarios:", e);
         alert(`No se pudo guardar en ${anioCarga}. Intenta nuevamente.`);
@@ -1288,7 +1496,7 @@ export default function ContabilidadFlujoMensual() {
 
   // Rendiciones → fila Rendiciones, cada gasto en el mes de su emisión; los
   // meses de otro año se guardan de inmediato en ese año.
-  async function aplicarRendiciones(r) {
+  async function aplicarRendiciones(r, { reemplazar = false } = {}) {
     const periodo = `${r.periodo.anio}-${String(r.periodo.mes + 1).padStart(2, "0")}`;
     const porAnio = {};
     r.reparto.forEach(m => {
@@ -1300,10 +1508,19 @@ export default function ContabilidadFlujoMensual() {
     const traza = { archivo: rend.archivo, documentos: r.documentos, monto: r.total, opciones: r.opciones, cargadoEn: new Date().toISOString() };
     // En los meses que trae el reporte, lo importado reemplaza la estimación
     // escrita a mano (ej. 6.000.000 fijos): la celda queda = suma de lo importado.
+    const omitidos = [];   // "mes año" que no se cargaron por venir de Oficina Técnica
     const aplicar = (d, y, extra = {}) => {
       const nuevo = aplicarAporteRCV(d, "rendiciones", periodo, porAnio[y]?.porMes || {},
-        { ...traza, ...extra, documentosPorMes: porAnio[y]?.documentosPorMes || {} });
-      const meses = Object.keys(porAnio[y]?.porMes || {}).map(Number);
+        { ...traza, ...extra, documentosPorMes: porAnio[y]?.documentosPorMes || {} },
+        { reemplazarFijados: reemplazar });
+      // Los meses que siguen tomados de Oficina Técnica no se recalculan: antes
+      // la celda quedaba = fuente interna + archivo (el doble).
+      const fij = mesesFijados(nuevo, "rendiciones");
+      const meses = Object.keys(porAnio[y]?.porMes || {}).map(Number).filter(m => {
+        if (!fij[m]) return true;
+        omitidos.push(`${MESES[m]} ${y}`);
+        return false;
+      });
       return {
         ...nuevo,
         filas: nuevo.filas.map(f => f.id !== "rendiciones" ? f : {
@@ -1312,17 +1529,14 @@ export default function ContabilidadFlujoMensual() {
       };
     };
     try {
-      for (const y of otrosAnios) {
-        const ref = doc(db, "empresas", empresaId, "flujo_mensual", String(y));
-        const snap = await getDoc(ref);
-        const base = snap.exists() ? normalizar(snap.data(), y) : docVacio(y);
-        await setDoc(ref, { ...JSON.parse(JSON.stringify(aplicar(base, y))), updatedAt: serverTimestamp() });
-      }
+      for (const y of otrosAnios) await actualizarOtroAnio(empresaId, y, base => aplicar(base, y));
     } catch (e) {
       console.error("Error guardando rendiciones en otro año:", e);
       alert(`No se pudo guardar la parte de ${otrosAnios.join(", ")}. No se cargó nada; intenta nuevamente.`);
       return;
     }
+    // Los meses del año activo ya se avisaron en el modal; aquí solo los de otros años
+    if (omitidos.length) alert(`No se cargaron ${omitidos.join(", ")}: ya vienen de Oficina Técnica (FleetCore).`);
     setData(d => aplicar(d, anio, { otrosAnios }));
     setRend(null);
   }
@@ -1348,14 +1562,19 @@ export default function ContabilidadFlujoMensual() {
     data.filas.forEach(f => f.valores.forEach((v, i) => { baseImponible[i] += f.signo * num(v); }));
     const impuesto = data.impuestoAuto ? impuestoMensualAcumulado(baseImponible, tasa, data.perdidaArrastre) : data.impuesto.map(num);
     const utilidad = baseImponible.map((v, i) => v - impuesto[i] - num(data.multas[i]));
+    // Base del PPM = ingresos brutos del mes (art. 84 LIR): solo la fila
+    // Ingresos (ventas). Antes entraba toda fila con signo +, incluida la
+    // corrección monetaria y filas manuales, que no son ingreso bruto.
     const ingresosMes = vacio12();
-    data.filas.filter(f => f.signo === 1).forEach(f => f.valores.forEach((v, i) => { ingresosMes[i] += num(v); }));
+    data.filas.filter(f => f.id === "ingresos").forEach(f => f.valores.forEach((v, i) => { ingresosMes[i] += num(v); }));
     const ppmSugerido = ingresosMes.map(v => Math.round(Math.max(0, v) * tasaPPM));
-    // Doble conteo: meses con Compras cargadas del RCV y Arriendos/Rendiciones a mano
+    // Doble conteo: meses con Compras cargadas del RCV y Arriendos/Rendiciones/
+    // Leasing/Gastos financieros a mano. Las cuotas de leasing y las comisiones
+    // de factoring vienen facturadas en el RCV: escritas a mano se repiten.
     const dobleConteo = [];
     MESES.forEach((_, i) => {
       if (!aportesRCV(data, "compras", i).length) return;
-      ["arriendos", "rendiciones"].forEach(id => {
+      ["arriendos", "rendiciones", "leasing", "gastos_financieros"].forEach(id => {
         const f = data.filas.find(x => x.id === id);
         // Solo lo escrito a mano (lo que vino del RCV ya está separado de Compras)
         const desdeRcv = aportesRCV(data, id, i).reduce((s, a) => s + a.monto, 0);
@@ -1383,6 +1602,10 @@ export default function ContabilidadFlujoMensual() {
       mejorMes, peorMes,
     };
   }, [data, tasa, tasaPPM]);
+  // Fila Ingresos tal como está (para el control de ventas; memo para que la
+  // comparación no se recalcule en cada tecla de otra fila)
+  const filaIngresos = data.filas.find(f => f.id === "ingresos")?.valores;
+  const ventasPlanilla = useMemo(() => (filaIngresos || []).map(num), [filaIngresos]);
 
   if (!empresaId) {
     return <div className="cuaderno px-8 pt-5 text-[18px] text-cuaderno-grafito">Cargando empresa…</div>;
@@ -1426,7 +1649,7 @@ export default function ContabilidadFlujoMensual() {
           </Boton>
           <span className="min-w-[90px] text-[15px] text-cuaderno-grafito" aria-live="polite">
             {errorGuardado
-              ? <Boton variante="texto" className="text-cuaderno-roja" onClick={() => { pendienteRef.current = { empresaId, anio, data }; guardar(); }}>No se guardó · reintentar</Boton>
+              ? <Boton variante="texto" className="text-cuaderno-roja" onClick={() => { pendienteRef.current = { empresaId, anio, data, base: original }; guardar(); }}>No se guardó · reintentar</Boton>
               : guardando || dirty ? "Guardando…" : <span className="inline-flex items-center gap-1"><VistoBueno titulo="" tamano={13} /> Guardado</span>}
           </span>
         </div>
@@ -1436,6 +1659,16 @@ export default function ContabilidadFlujoMensual() {
           console.error("Error guardando config tributaria:", e);
           alert("No se pudo guardar el régimen. Intenta nuevamente.");
         })} anio={anio} tasa={tasa} tasaPPM={tasaPPM} />
+
+      {conflicto && (
+        <div className="flex items-start justify-between gap-3">
+          <Nota etiqueta="Ojo:">
+            Alguien guardó cambios en el flujo {anio} desde otra pestaña o equipo. Se recargó la versión guardada;
+            tu último cambio no se guardó: revísalo y vuelve a ingresarlo.
+          </Nota>
+          <Boton variante="texto" onClick={() => setConflicto(false)}>Cerrar</Boton>
+        </div>
+      )}
 
       {errorRcv && (
         <div className="flex items-start justify-between gap-3">
@@ -1457,6 +1690,7 @@ export default function ContabilidadFlujoMensual() {
 
       {rend && (
         <ModalRendiciones filas={rend.filas} archivo={rend.archivo} anioActivo={anio}
+          fijados={mesesFijados(data, "rendiciones")}
           onAplicar={aplicarRendiciones} onCerrar={() => setRend(null)} />
       )}
 
@@ -1472,6 +1706,7 @@ export default function ContabilidadFlujoMensual() {
 
       {rem && (
         <ModalRemuneraciones resumen={rem} archivo={rem.archivo} anioActivo={anio}
+          fijado={rem.anio === anio && !!({ ...mesesFijados(data, "remuneraciones"), ...mesesFijados(data, "finiquitos") })[rem.mes]}
           onAplicar={aplicarRemuneraciones} onCerrar={() => setRem(null)} />
       )}
 
@@ -1481,7 +1716,7 @@ export default function ContabilidadFlujoMensual() {
           archivo={rcv.archivo}
           regimen={configTributaria.regimen}
           anioActivo={anio}
-          mesInicial={calculoRcv.resumen.mesSugerido?.anio === anio ? calculoRcv.resumen.mesSugerido.mes : new Date().getMonth()}
+          mesInicial={calculoRcv.resumen.mesSugerido?.anio === anio ? calculoRcv.resumen.mesSugerido.mes : partesISO(hoyISO()).mes - 1}
           valorActual={m => valorFila(rcv.tipo === "compras" ? "compras" : "ingresos", m)}
           onAplicar={aplicarRCV}
           onCambiarRegla={cambiarReglaProveedor}
@@ -1650,6 +1885,9 @@ export default function ContabilidadFlujoMensual() {
               </table>
             </div>
           </Hoja>
+
+          {/* Control de ventas contra FleetCore (solo lectura) */}
+          <HojaControlVentas empresaId={empresaId} anio={anio} ventas={ventasPlanilla} />
 
           {/* PPM */}
           <Hoja titulo="Pagos provisionales mensuales">

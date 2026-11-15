@@ -27,6 +27,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { clasificar, normalizar } from "./cartolas.js";
+import { sumarDias } from "../fechas";
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
 const col = (empresaId, nombre) => collection(db, "empresas", empresaId, nombre);
@@ -222,8 +223,8 @@ export async function guardarCartola(empresaId, cartola, preparada, { archivo, u
  */
 export async function buscarLineaNomina(empresaId, certificado) {
   const desde = certificado.fechas[0];
-  const hasta = new Date(desde); hasta.setDate(hasta.getDate() + 3);
-  const hastaISO = hasta.toISOString().slice(0, 10);
+  // Sumar días sobre el texto: new Date("AAAA-MM-DD") es medianoche UTC
+  const hastaISO = sumarDias(desde, 3);
   const snap = await getDocs(query(col(empresaId, "banco_movimientos"),
     where("fecha", ">=", desde),
     where("fecha", "<=", hastaISO)));

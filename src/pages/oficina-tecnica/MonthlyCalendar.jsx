@@ -1,19 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
-import { listActiveProjects, listMachines, listLogsByRange } from "../../lib/db";
+import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
+import { listActiveProjects, listMachines } from "../../lib/db";
+// Horas de máquina: dailyLogs (Excel) + partes diarios de WorkFleet, sin duplicar
+import { listarLogsObra } from "../../lib/partesDiarios";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 
 // Utilidades de fecha (sin cambios)
-function isoToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dateStr, days) {
-  const date = new Date(dateStr + 'T00:00:00');
-  date.setDate(date.getDate() + days);
-  return date.toISOString().split('T')[0];
-}
+// Hoy en hora de Chile (toISOString daba el día en UTC: desde las 21:00 ya era "mañana")
+const isoToday = hoyISO;
+const addDays = sumarDias;
 
 function getDateRange(start, end) {
   const dates = [];
@@ -35,7 +31,7 @@ function getDateRange(start, end) {
 function getDaysDiff(start, end) {
   const startDate = new Date(start + 'T00:00:00');
   const endDate = new Date(end + 'T00:00:00');
-  return Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  return Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1; // round: cambio de hora
 }
 
 export default function MonthlyCalendar() {
@@ -95,7 +91,7 @@ export default function MonthlyCalendar() {
 
     Promise.all([
       listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo }),
-      listLogsByRange(empresaId, selectedProject, dateFrom, dateTo)
+      listarLogsObra(empresaId, selectedProject, dateFrom, dateTo)
     ])
       .then(([machinesData, logsData]) => {
         if (active) {
@@ -184,20 +180,17 @@ export default function MonthlyCalendar() {
   };
 
   const setWeek = () => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
+    const dayOfWeek = desdeISO(isoToday()).getDay();
     const monday = addDays(isoToday(), -(dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     setDateFrom(monday);
     setDateTo(addDays(monday, 6));
   };
 
   const setMonth = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const lastDay = new Date(year, today.getMonth() + 1, 0).getDate();
-    setDateFrom(`${year}-${month}-01`);
-    setDateTo(`${year}-${month}-${String(lastDay).padStart(2, '0')}`);
+    const { anio, mes } = partesISO(isoToday());
+    const { desde, hasta } = limitesMes(anio, mes);
+    setDateFrom(desde);
+    setDateTo(hasta);
   };
 
   return (
@@ -305,6 +298,11 @@ export default function MonthlyCalendar() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="font-bold">Hrs mín: {(180 * daysInRange / 30).toFixed(1)} hrs</span>
+            </div>
+            {/* Leyenda de las dos fuentes (Excel / parte de WorkFleet) */}
+            <div className="flex items-center gap-3 text-slate-600">
+              <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" />Solo WorkFleet</span>
+              <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded ring-2 ring-amber-400" />Excel ≠ WorkFleet</span>
             </div>
           </div>
 
@@ -529,21 +527,35 @@ export default function MonthlyCalendar() {
                           const log = machineLogs[date.iso];
                           const isToday = date.iso === isoToday();
                           const productiveHrs = Number(log?.productiveHours) || 0;
-                          
+                          // Día que solo está en WorkFleet (nadie lo cargó en el Excel) o
+                          // que está en ambos con horas distintas: se marca para revisarlo
+                          const soloWF = log?.fuente === 'workfleet';
+                          const discrepancia = !!log?.discrepancia;
+                          const titulo = soloWF
+                            ? `Solo en WorkFleet (parte ${log.numeroReporte || ''})`.trim()
+                            : discrepancia
+                              ? `Excel ${productiveHrs.toFixed(1)} h · WorkFleet ${Number(log.horasWorkFleet || 0).toFixed(1)} h`
+                              : undefined;
+
                           return (
                             <td
                               key={date.iso}
+                              title={titulo}
                               className={`px-2 sm:px-3 py-2 sm:py-3 text-center border-r border-slate-200 ${
                                 isToday ? 'bg-blue-50/30' : ''
                               }`}
                             >
                               {productiveHrs > 0 ? (
-                                <div className="inline-flex items-center justify-center px-2 py-1 rounded-lg text-xs sm:text-sm font-bold bg-blue-100 text-blue-700">
+                                <div className={`inline-flex items-center justify-center px-2 py-1 rounded-lg text-xs sm:text-sm font-bold ${
+                                  soloWF ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
+                                } ${discrepancia ? 'ring-2 ring-amber-400' : ''}`}>
                                   {productiveHrs.toFixed(1)}
                                 </div>
                               ) : (
-                                <span className="text-slate-300 text-xs sm:text-sm">—</span>
+                                <span className={`text-xs sm:text-sm ${discrepancia ? 'text-amber-600 font-bold' : 'text-slate-300'}`}>—</span>
                               )}
+                              {soloWF && <div className="text-[9px] font-bold text-violet-600 mt-0.5">WF</div>}
+                              {discrepancia && <div className="text-[9px] font-bold text-amber-600 mt-0.5">WF {Number(log.horasWorkFleet || 0).toFixed(1)}</div>}
                             </td>
                           );
                         })}

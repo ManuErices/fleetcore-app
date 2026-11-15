@@ -12,6 +12,7 @@ import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal
 import { useToast, ToastContainer } from "../../components/Toast";
 import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
 import { machineLabel } from "../../utils/searchHelpers";
+import { hoyISO } from '../../lib/fechas';
 
 // Estandariza nombres propios (operadores, obras) a Capitalización de Título:
 // la data llega en MAYÚSCULAS ("JOSE BRAVO BRAVO") y se ve mejor uniforme.
@@ -836,7 +837,7 @@ export default function ReporteWorkFleet() {
       doc.text(`Generado: ${new Date().toLocaleString('es-CL')} · Reporte ${index + 1} de ${reportesAGenerar.length}`, pW - mg, pH - 5.5, { align: 'right' });
     });
 
-    doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reportes_WorkFleet_${hoyISO()}.pdf`);
     setReportesSeleccionados([]);
   };
 
@@ -1007,7 +1008,7 @@ export default function ReporteWorkFleet() {
     // Hoja de datos plana (todos los registros) al final
     XLSX.utils.book_append_sheet(wb, ws, 'Datos');
 
-    XLSX.writeFile(wb, `Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `Reportes_WorkFleet_${hoyISO()}.xlsx`);
   };
 
   // Descargar como PDF
@@ -1092,7 +1093,7 @@ export default function ReporteWorkFleet() {
       }
     });
 
-    doc.save(`Reportes_WorkFleet_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reportes_WorkFleet_${hoyISO()}.pdf`);
   };
 
   if (loading) {

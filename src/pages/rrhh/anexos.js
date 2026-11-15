@@ -20,6 +20,7 @@
 
 import { db } from '../../lib/firebase';
 import { doc, runTransaction } from 'firebase/firestore';
+import { hoyISO } from '../../lib/fechas';
 
 const vacio = (v) => v === undefined || v === null || String(v).trim() === '';
 
@@ -68,7 +69,7 @@ function vigenciaDe(anexo, contrato) {
   if (anexo?.tipo === 'prorroga' && contrato?.fechaFin) {
     return contrato.fechaFin < anexo.fechaAnexo ? contrato.fechaFin : anexo.fechaAnexo;
   }
-  return anexo?.fechaAnexo || new Date().toISOString().slice(0, 10);
+  return anexo?.fechaAnexo || hoyISO();
 }
 
 /** Cuántas prórrogas tiene el contrato (para la advertencia del Art. 159 N°4). */

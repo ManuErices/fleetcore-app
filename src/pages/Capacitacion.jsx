@@ -18,6 +18,7 @@ import EmpleadoModal from "./combustible/modals/EmpleadoModal";
 import ProyectoModal from "./combustible/modals/ProyectoModal";
 import EstacionModal from "./combustible/modals/EstacionModal";
 import CameraCapture from "../components/CameraCapture";
+import { hoyISO } from "../lib/fechas";
 
 const QUIZ_QUESTIONS = [
   {
@@ -145,7 +146,7 @@ export default function Capacitacion({ user, onComplete }) {
   const [simFlow, setSimFlow] = useState(""); // "entrada" | "entrega"
   const [simStep, setSimStep] = useState(2); // Start directly at step 2 (Selection & Control)
 
-  const TODAY = () => new Date().toISOString().split('T')[0];
+  const TODAY = () => hoyISO();
 
   const [simDatosControl, setSimDatosControl] = useState({
     projectId: '',

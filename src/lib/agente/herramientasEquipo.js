@@ -17,6 +17,7 @@ import { tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado } from 
 import { db, auth } from '../firebase';
 import { cargarDatosCaja } from '../finanzas/cajaDatos';
 import { proyectar, partidasSinCerrar } from '../finanzas/caja';
+import { conEstadoAlDia } from '../pagosDeuda';
 
 const MAX_MEMORIA = 40;
 
@@ -173,7 +174,7 @@ export const EJECUTORES_EQUIPO = {
         let vencida = 0;
         const acreedores = new Set();
         snap.docs.forEach(d => {
-          const x = d.data();
+          const x = conEstadoAlDia(d.data());   // mora y estado a hoy
           if (x.estado === 'vencido' && x.saldoPendiente > 0) { vencida += x.saldoPendiente; acreedores.add(x.proveedorNombre); }
         });
         return { deuda_vencida: Math.round(vencida), acreedores_con_deuda_vencida: acreedores.size };
