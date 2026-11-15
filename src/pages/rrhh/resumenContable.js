@@ -37,39 +37,35 @@ const leer = async (empresaId, nombre) => {
   catch { return []; }   // sin permiso sobre una colección: se calcula sin ella
 };
 
-/**
- * @returns {Promise<{ anio, meses: Array<{ mes, liquidaciones, borradores,
- *   haberes, aportes, remuneraciones, finiquitos, nFiniquitos }>,
- *   totalBorradores, sinContrato }>}
- *   mes va de 0 a 11.
- */
-export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = false } = {}) {
+/** Carga una vez todo lo que el motor de RRHH necesita. */
+async function cargarRRHH(empresaId) {
   const [liquidaciones, trabajadores, contratos, finiquitos, anticipos, licencias, ausencias] = await Promise.all([
     leer(empresaId, 'remuneraciones'), leer(empresaId, 'trabajadores'), leer(empresaId, 'contratos'),
     leer(empresaId, 'finiquitos'), leer(empresaId, 'anticipos'), leer(empresaId, 'licencias'), leer(empresaId, 'ausencias'),
   ]);
   let config = {};
   try { const s = await getDoc(doc(db, 'empresas', empresaId, 'config', 'lre')); if (s.exists()) config = s.data(); } catch { /* sin config */ }
-  const ctx = { anticipos, licencias, ausencias, liquidaciones };
-  const anioStr = String(anio);
-  let totalBorradores = 0, sinContrato = 0;
+  return { liquidaciones, trabajadores, contratos, finiquitos, ctx: { anticipos, licencias, ausencias, liquidaciones }, config };
+}
 
-  const meses = [];
+/**
+ * Cada liquidación vigente del año, calculada con el motor de RRHH:
+ * { mes (1-12), trabajador, liquidacion, haberes, aportes, descuentos, liquido, borrador }.
+ */
+async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores = false } = {}) {
+  const { liquidaciones, trabajadores, contratos, ctx, config } = datos;
+  const anioStr = String(anio);
+  const salida = [];
+  let borradores = 0, sinContrato = 0;
   for (let m = 1; m <= 12; m++) {
     const mes = pad(m);
     const delMes = liquidacionesVigentes(
       liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr));
-    const borradores = delMes.filter(esBorrador).length;
-    totalBorradores += borradores;
+    borradores += delMes.filter(esBorrador).length;
     const aCalcular = incluirBorradores ? delMes : delMes.filter(l => !esBorrador(l));
-
-    // UTM y UF del mes: el impuesto y los topes dependen de ellas
     if (aCalcular.length) {
       try { await asegurarIndicadores({ db, doc, getDoc, setDoc }, empresaId, { mes, anio: anioStr }); } catch { /* respaldo */ }
     }
-
-    let haberes = 0, aportes = 0, n = 0;
-    const conLiquidacion = new Set();
     aCalcular.forEach(l => {
       const trabajador = trabajadores.find(t => t.id === l.trabajadorId);
       const contratoDoc = contratos.find(c => c.id === l.contratoId);
@@ -78,11 +74,77 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
       const calc = liquidacionDe(trabajador, contrato, { ...l, tasaMutual: config.tasaMutual },
         extrasDelPeriodo(ctx, trabajador?.id, mes, anioStr, { trabajador, contrato }));
       const fila = filaLRE({ trabajador, contrato, liq: l, calc, iut: calc.iut, config });
-      haberes += Number(fila[5201]) || 0;
-      aportes += Number(fila[5410]) || 0;
-      n++;
-      conLiquidacion.add(l.trabajadorId);
+      salida.push({
+        mes: m, trabajador, liquidacion: l, borrador: esBorrador(l),
+        haberes: Number(fila[5201]) || 0, aportes: Number(fila[5410]) || 0,
+        descuentos: Number(fila[5301]) || 0, liquido: Number(fila[5501]) || 0,
+      });
     });
+  }
+  return { filas: salida, borradores, sinContrato };
+}
+
+/**
+ * Costo de mano de obra por obra y mes, desde las liquidaciones de RRHH, con
+ * la forma de `employeeMonthlyData` (lo que usan Dashboard, Consolidado y
+ * Estado de pago de Oficina Técnica). La obra sale del centro de costo del
+ * trabajador (vinculado a la obra en RRHH → Centros de costo) o, si no, de su
+ * obra asignada. Incluye borradores: para costear sirven las cargas desde
+ * Talana aunque no se hayan revisado para el Libro de Remuneraciones.
+ */
+const _cacheCostos = new Map();
+export async function costosManoObraRRHH(empresaId, anio) {
+  const clave = `${empresaId}|${anio}`;
+  const enCache = _cacheCostos.get(clave);
+  if (enCache && Date.now() - enCache.t < 5 * 60 * 1000) return enCache.v;
+  const p = (async () => {
+    const datos = await cargarRRHH(empresaId);
+    const { obraDe } = await import('../../lib/obras');
+    let centros = [];
+    try { centros = (await getDocs(collection(db, 'empresas', empresaId, 'centros_costo'))).docs.map(d => ({ id: d.id, ...d.data() })); } catch { centros = []; }
+    const { filas } = await calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores: true });
+    return filas.map(f => {
+      const t = f.trabajador || {};
+      const projectId = obraDe({ obras: [], centros }, { codigo: t.centroCosto, nombre: t.centroCostoNombre }) || t.projectId || null;
+      return {
+        id: `rrhh_${f.liquidacion.id}`,
+        employeeId: t.id || f.liquidacion.trabajadorId,
+        nombre: `${t.nombre || t.nombres || ''} ${t.apellidoPaterno || ''}`.trim(),
+        projectId, year: Number(anio), month: f.mes,
+        centroCosto: t.centroCostoNombre || t.centroCosto || '',
+        tipoManoObra: t.tipoManoObra || (t.tipo === 'OPERADOR' ? 'DIRECTO' : null),
+        totalHaberes: f.haberes, totalDescuentos: f.descuentos, sueldoLiquido: f.liquido,
+        aporteEmpresa: f.aportes, totalCosto: f.haberes + f.aportes,
+        porcentajeIncidencia: 100, fuente: 'rrhh',
+      };
+    });
+  })();
+  _cacheCostos.set(clave, { t: Date.now(), v: p });
+  p.catch(() => _cacheCostos.delete(clave));
+  return p;
+}
+
+/**
+ * @returns {Promise<{ anio, meses: Array<{ mes, liquidaciones, borradores,
+ *   haberes, aportes, remuneraciones, finiquitos, nFiniquitos }>,
+ *   totalBorradores, sinContrato }>}
+ *   mes va de 0 a 11.
+ */
+export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = false } = {}) {
+  const datos = await cargarRRHH(empresaId);
+  const { filas, borradores: totalBorradores, sinContrato } = await calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores });
+  const { liquidaciones, trabajadores, contratos, finiquitos } = datos;
+  const anioStr = String(anio);
+
+  const meses = [];
+  for (let m = 1; m <= 12; m++) {
+    const mes = pad(m);
+    const delMes = filas.filter(f => f.mes === m);
+    const haberes = delMes.reduce((s, f) => s + f.haberes, 0);
+    const aportes = delMes.reduce((s, f) => s + f.aportes, 0);
+    const conLiquidacion = new Set(delMes.map(f => f.liquidacion.trabajadorId));
+    const borradores = liquidacionesVigentes(
+      liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr)).filter(esBorrador).length;
 
     let montoFiniquitos = 0, nFiniquitos = 0;
     finiquitos
@@ -101,7 +163,7 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
       });
 
     meses.push({
-      mes: m - 1, liquidaciones: n, borradores,
+      mes: m - 1, liquidaciones: delMes.length, borradores,
       haberes: Math.round(haberes), aportes: Math.round(aportes),
       remuneraciones: Math.round(haberes + aportes),
       finiquitos: Math.round(montoFiniquitos), nFiniquitos,

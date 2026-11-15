@@ -5,8 +5,6 @@ import { claveEgresoPorCodigo } from "../../lib/planCuentas";
 import {
   listActiveProjects,
   listEmployees,
-  listEmployeeMonthlyData,
-  listEmployeeMonthlyDataByYear,
   listPurchaseOrders,
   listSubcontratosByProject,
   listRendicionesByProject,
@@ -16,7 +14,8 @@ import {
   listEstadoPagoIngresosByYear,
   upsertEstadoPagoIngresos
 } from "../../lib/db";
-import { listarConsumosCombustible } from "../../lib/combustible";
+import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
+import { manoObraAnio } from "../../lib/manoObra";
 
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -121,9 +120,12 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
     const totalCosto = Number(l.totalCosto) || 0;
     const pct = l.porcentajeIncidencia != null ? l.porcentajeIncidencia : 100;
     const costoObra = totalCosto * (pct / 100);
-    const esDirecto = employeeTipoManoObraMap[l.employeeId] === "DIRECTO";
+    // Las filas de RRHH traen su propio tipo de mano de obra y nombre: el
+    // trabajador puede no estar en la lista de la obra si llega por su centro
+    // de costo.
+    const esDirecto = (l.tipoManoObra || employeeTipoManoObraMap[l.employeeId]) === "DIRECTO";
     const prefijo = esDirecto ? "1.1 MANO DE OBRA DIRECTO" : "1.2 MANO DE OBRA INDIRECTO";
-    const clave = `${prefijo} — ${l.centroCosto || employeeNombreMap[l.employeeId] || "Sin centro de costo"}`;
+    const clave = `${prefijo} — ${l.centroCosto || l.nombre || employeeNombreMap[l.employeeId] || "Sin centro de costo"}`;
     items.manoDeObra.push({ clave, monto: costoObra });
   });
 
@@ -157,7 +159,7 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
     // Respaldo: si no se ha importado combustible por el módulo nuevo ese mes,
     // se usa el registro antiguo (fuelLogs) valorizado al precio "en vivo" del diésel
     fuelLogs.filter(f => f.date && f.date.startsWith(monthPrefix)).forEach(f => {
-      items.combustible.push({ clave: "4.1 DIÉSEL", monto: (Number(f.liters) || 0) * precioDiesel });
+      items.combustible.push({ clave: "4.1 DIÉSEL", monto: costoConsumo(f, precioDiesel) });
     });
   }
 
@@ -267,7 +269,7 @@ export default function PaymentStatus() {
       const yearEnd = `${year}-12-31`;
       const [emp, payroll, ocs, fuel, ingYear, subs, rends, combustibleRegs, combustiblePreciosYear] = await Promise.all([
         listEmployees(empresaId, projectId),
-        listEmployeeMonthlyDataByYear(empresaId, projectId, year),
+        manoObraAnio(empresaId, projectId, year),
         listPurchaseOrders(empresaId, projectId),
         listarConsumosCombustible(empresaId, projectId, yearStart, yearEnd),
         listEstadoPagoIngresosByYear(empresaId, projectId, year),

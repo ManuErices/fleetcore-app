@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listLogsByRange, listEmployeeMonthlyData, listMachines } from "../../lib/db";
-import { listarConsumosCombustible } from "../../lib/combustible";
+import { listActiveProjects, listLogsByRange, listMachines } from "../../lib/db";
+import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
+import { manoObraMes } from "../../lib/manoObra";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -71,7 +72,7 @@ export default function DashboardExecutive() {
       const [logs, fuel, employees, machineList] = await Promise.all([
         listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
-        listEmployeeMonthlyData(empresaId, selectedProject, year, month),
+        manoObraMes(empresaId, selectedProject, year, month),
         listMachines(empresaId, selectedProject)
       ]);
 
@@ -132,8 +133,8 @@ export default function DashboardExecutive() {
     fuelLogs.forEach(log => {
       const litros = Number(log.liters) || 0;
       totalLitros += litros;
-      const precio = fuelPrices?.diesel || 950;
-      totalCostoCombustible += litros * precio;
+      // Precio de la última carga registrada hasta ese día; si no hay, el de respaldo
+      totalCostoCombustible += costoConsumo(log, fuelPrices?.diesel || 950);
     });
 
     const consumoPromedioDia = diasTrabajados.size > 0 ? totalLitros / diasTrabajados.size : 0;
