@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useContabilidad, PeriodoSelector, MESES, MESES_S } from "./ContabilidadContext";
@@ -7,6 +7,7 @@ import {
   Cifra, Titulo, Hoja, LineaGuia, Nota, Resaltado, Campo, Pestanas, FechaHoja,
 } from "../finanzas/cuaderno";
 import { vidaUtilTributaria, VIDA_UTIL_TRIB } from "./ContabilidadDepreciacion";
+import { tasaPPMSugerida } from "../../lib/contabilidad/tributario";
 
 // ─── Tabla vida útil tributaria SII (años) ────────────────────────────────────
 // Resolución SII Exenta N° 43/2002 y circulares complementarias
@@ -210,14 +211,15 @@ function FormularioF29({ cuentas, saldosMap, periodoActivo, remanenteArrastrado 
 
 // ─── PPM — Pagos Provisionales Mensuales ─────────────────────────────────────
 function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
-  // La tasa se conserva entre visitas dentro de la sesión. La tasa PPM real se
-  // recalcula cada año según el resultado del ejercicio anterior: confírmala en
-  // el certificado del SII antes de declarar.
-  const [tasaPPM, setTasaPPM] = useState(() => {
-    const g = parseFloat(globalThis.__fleetcoreTasaPPM);
-    return Number.isFinite(g) ? g : 1.5;
-  });
-  useEffect(() => { globalThis.__fleetcoreTasaPPM = tasaPPM; }, [tasaPPM]);
+  // La tasa sale de la configuración tributaria de la empresa, la misma que usa
+  // el Flujo Mensual (antes era una variable de la sesión que se perdía al
+  // recargar y partía en 1,5%). En 14 A se edita aquí y queda guardada; en Pro
+  // Pyme la fija la ley según los ingresos del año anterior.
+  const { configTributaria, guardarConfigTributaria } = useContabilidad();
+  const anioPeriodo = parseInt(String(periodoActivo).slice(0, 4), 10);
+  const es14A = configTributaria.regimen === "14A";
+  const tasaPPM = Math.round(tasaPPMSugerida(configTributaria, anioPeriodo) * 100000) / 1000;
+  const setTasaPPM = (v) => { if (es14A) guardarConfigTributaria({ tasaPPM14A: v }).catch(() => {}); };
 
   const data = useMemo(() => {
     const ingresoCuentas = cuentas.filter(c => c.tipo === "ingreso");
@@ -244,9 +246,15 @@ function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
 
       <div className="max-w-2xl space-y-4">
         {/* Tasa configurable */}
-        <Campo etiqueta="Tasa PPM aplicable (%)" ayuda="Determinada en la renta anterior o provisional"
-          type="number" value={tasaPPM} onChange={e => setTasaPPM(parseFloat(e.target.value) || 0)}
-          step="0.1" min="0" max="100" className="w-64" />
+        {es14A ? (
+          <Campo etiqueta="Tasa PPM aplicable (%)" ayuda="La del F22 del año anterior. Se guarda para toda la empresa (también la usa el Flujo Mensual)."
+            type="number" value={tasaPPM} onChange={e => setTasaPPM(parseFloat(e.target.value) || 0)}
+            step="0.01" min="0" max="100" className="w-64" />
+        ) : (
+          <p className="m-0 text-[16px] text-cuaderno-grafito">
+            Tasa PPM {String(tasaPPM).replace(".", ",")}%: la fija la ley para el régimen elegido en el Flujo Mensual{configTributaria.regimen ? "" : " (régimen sin definir)"}.
+          </p>
+        )}
 
         {/* Cuadro */}
         <table className="w-full border-collapse">
@@ -273,7 +281,7 @@ function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
 }
 
 // ─── F22 — Impuesto Anual a la Renta ─────────────────────────────────────────
-function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurridos = 12, depreciacionContabilizada = 0 }) {
+function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurridos = 12, depreciacionContabilizada = 0, perdidaArrastre = 0 }) {
   const activos = useActivos();
 
   const data = useMemo(() => {
@@ -306,7 +314,11 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
     const depTribPer    = depreciacionTrib * factorMeses;
     const depTeorica    = depreciacionContable * factorMeses;
 
-    const rli           = utilidadFinanciera + depContPer - depTribPer;
+    const rliAntesPerdida = utilidadFinanciera + depContPer - depTribPer;
+    // Pérdida tributaria de años anteriores (art. 31 N°3, sin tope vigente):
+    // la misma que se ingresa en el Flujo Mensual del año.
+    const perdida       = Math.abs(Number(perdidaArrastre) || 0);
+    const rli           = rliAntesPerdida - perdida;
     const tasaPrimCat   = tasaImpuesto;
     const impuesto1Cat  = Math.max(0, rli * tasaPrimCat);
     const ppmAcumulado  = get(["ppm"]);
@@ -315,9 +327,9 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
 
     return { ingresosBrutos, costosYGastos, utilidadFinanciera,
              depreciacionContable: depContPer, depreciacionTrib: depTribPer,
-             depTeorica, difTemp: depContPer - depTribPer, rli, impuesto1Cat,
+             depTeorica, difTemp: depContPer - depTribPer, rli, impuesto1Cat, perdida, rliAntesPerdida,
              ppmAcumulado, saldoF22, devolucion, tasaPrimCat, mesesTranscurridos };
-  }, [cuentas, saldosMap, activos, tasaImpuesto, mesesTranscurridos, depreciacionContabilizada]);
+  }, [cuentas, saldosMap, activos, tasaImpuesto, mesesTranscurridos, depreciacionContabilizada, perdidaArrastre]);
 
   return (
     <Hoja titulo="Formulario 22 — Declaración Anual Renta" extra={<Marca>Art. 29–33 LIR</Marca>}>
@@ -351,8 +363,12 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
             )}
             <FilaTrib label="Depreciación tributaria (deducir)" valor={data.depreciacionTrib} indent />
             <FilaTrib label="Diferencia temporaria neta" valor={data.difTemp} indent />
+            {data.perdida > 0 && <>
+              <FilaTrib label="Renta antes de pérdidas anteriores" valor={data.rliAntesPerdida} />
+              <FilaTrib label="Pérdida tributaria de años anteriores (art. 31 N°3)" valor={-data.perdida} indent />
+            </>}
             <FilaTrib separador />
-            <FilaTrib label="Renta Líquida Imponible" valor={data.rli} raya="total" />
+            <FilaTrib label={data.rli < 0 ? "Pérdida tributaria que pasa al año siguiente" : "Renta Líquida Imponible"} valor={data.rli} raya="total" />
             <FilaTrib separador />
             <FilaTrib label={`Impuesto 1ª Categoría (${(data.tasaPrimCat*100).toFixed(1).replace(".", ",")}%)`} valor={data.impuesto1Cat} />
             <FilaTrib label="Menos: PPM acumulado" valor={data.ppmAcumulado} indent />
@@ -536,6 +552,20 @@ export default function ContabilidadTributario() {
     return Math.max(0, cred - deb);
   }, [cuentas, periodoActivo, saldosAcumulados]);
 
+  // Pérdida tributaria de años anteriores: la del Flujo Mensual del año, para
+  // que el F22 y el Flujo Mensual calculen el impuesto con la misma base.
+  const { empresaId } = useEmpresa();
+  const anioPeriodo = periodoActivo.slice(0, 4);
+  const [perdidaArrastre, setPerdidaArrastre] = useState(0);
+  useEffect(() => {
+    if (!empresaId) return;
+    let vivo = true;
+    getDoc(doc(db, "empresas", empresaId, "flujo_mensual", anioPeriodo))
+      .then(s => { if (vivo) setPerdidaArrastre(s.exists() ? Math.abs(Number(s.data().perdidaArrastre) || 0) : 0); })
+      .catch(() => { if (vivo) setPerdidaArrastre(0); });
+    return () => { vivo = false; };
+  }, [empresaId, anioPeriodo]);
+
   // Meses transcurridos del ejercicio hasta el corte
   const mesesTranscurridos = parseInt(periodoActivo.split("-")[1], 10) || 12;
 
@@ -581,7 +611,7 @@ export default function ContabilidadTributario() {
 
       {vistaActiva === "f29"  && <FormularioF29 cuentas={cuentas} saldosMap={saldosMes} periodoActivo={periodoActivo} remanenteArrastrado={remanenteArrastrado} />}
       {vistaActiva === "ppm"  && <ModuloPPM cuentas={cuentas} saldosMap={saldosMes} asientos={asientos} periodoActivo={periodoActivo} />}
-      {vistaActiva === "f22"  && <FormularioF22 cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} mesesTranscurridos={mesesTranscurridos} depreciacionContabilizada={depreciacionContabilizada} />}
+      {vistaActiva === "f22"  && <FormularioF22 cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} mesesTranscurridos={mesesTranscurridos} depreciacionContabilizada={depreciacionContabilizada} perdidaArrastre={perdidaArrastre} />}
       {vistaActiva === "dift" && <ImpuestoDiferido cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} />}
     </div>
   );

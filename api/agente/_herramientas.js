@@ -40,6 +40,9 @@ Flujo de caja:
 - Usa las herramientas que escriben directo en el flujo (cargar_partidas_flujo, mover_pago_flujo, crear_cuentas_flujo) solo si el usuario pide expresamente cambiar el original ahora, o para registrar algo que ya ocurrió.
 - Prioridades de pago: "Ineludible" (sueldos, imposiciones, impuestos, cuotas) no se mueve; "Para operar" se mueve con cuidado; "Conversable" es lo primero que se negocia.
 
+Contabilidad:
+- Para impuesto a la renta, base imponible, utilidad tributaria o gastos del año usa resumen_tributario: son las mismas cifras de Contabilidad → Flujo Mensual. Las cifras son una estimación con lo cargado (aclara qué filas están vacías si eso cambia mucho el resultado). Para asientos puntuales usa consultar_datos con journal_entries.
+
 Memoria del equipo:
 - Si alguien te cuenta algo que conviene saber en futuras conversaciones (una preferencia, una regla de la empresa, un dato estable como "el colchón real es 8 M" o "Copec factura los martes"), guárdalo con recordar. No guardes datos personales sensibles ni cosas de un solo uso.
 
@@ -190,7 +193,7 @@ export const HERRAMIENTAS = [
   },
   {
     name: 'consultar_datos',
-    description: 'Lectura general de una colección de la empresa, para preguntas que ninguna otra herramienta cubre. Devuelve documentos aligerados (sin fotos ni firmas). Colecciones: projects, machines, reportes_combustible, reportes_detallados, deuda_proveedores, finanzas_proveedores, finanzas_activos, flujo_cuentas, subcontratos, rendiciones, solicitudes_pasajes, purchaseOrders, workOrders, maintenancePlans, centros_costo, guias_despacho, equipos_surtidores, estaciones_combustible, empresas_combustible, ausencias, vacaciones, licencias. Prefiere las herramientas específicas cuando existan.',
+    description: 'Lectura general de una colección de la empresa, para preguntas que ninguna otra herramienta cubre. Devuelve documentos aligerados (sin fotos ni firmas). Colecciones: projects, machines, reportes_combustible, reportes_detallados, deuda_proveedores, finanzas_proveedores, proveedores (maestro de terceros por RUT), costos_fijos, journal_entries (asientos contables), chart_of_accounts (plan de cuentas), estadoPagoIngresos, flujo_cuentas, subcontratos, rendiciones, solicitudes_pasajes, purchaseOrders, workOrders, maintenancePlans, centros_costo, guias_despacho, equipos_surtidores, estaciones_combustible, empresas_combustible, ausencias, vacaciones, licencias. Prefiere las herramientas específicas cuando existan.',
     input_schema: {
       type: 'object',
       properties: {
@@ -201,6 +204,16 @@ export const HERRAMIENTAS = [
         limite: { type: 'integer', description: 'Máximo de documentos a devolver (1-100, por defecto 30).' },
       },
       required: ['coleccion'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'resumen_tributario',
+    description: 'Resumen del Flujo Mensual de Contabilidad para un año: cada fila (ingresos, compras, remuneraciones, honorarios, finiquitos, rendiciones, leasing, depreciación, etc.) por mes y total, base imponible por mes y del año, impuesto de primera categoría estimado (base acumulada menos pérdida de años anteriores, con la tasa del régimen), multas, PPM sugerido y pagado, y de qué importación o módulo vino cada fila. Úsala para preguntas de impuesto a la renta, utilidad tributaria o gastos del año.',
+    input_schema: {
+      type: 'object',
+      properties: { anio: { type: 'integer', description: 'Año comercial, por ejemplo 2026.' } },
+      required: ['anio'],
       additionalProperties: false,
     },
   },

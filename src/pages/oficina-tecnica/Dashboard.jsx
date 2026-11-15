@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { listActiveProjects, listLogsByRange, listFuelLogsByRange, listEmployeeMonthlyData, listMachines } from "../../lib/db";
+import { listActiveProjects, listLogsByRange, listEmployeeMonthlyData, listMachines } from "../../lib/db";
+import { listarConsumosCombustible } from "../../lib/combustible";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -69,7 +70,7 @@ export default function DashboardExecutive() {
 
       const [logs, fuel, employees, machineList] = await Promise.all([
         listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
-        listFuelLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
+        listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         listEmployeeMonthlyData(empresaId, selectedProject, year, month),
         listMachines(empresaId, selectedProject)
       ]);

@@ -11,8 +11,9 @@
  */
 
 import {
-  collection, doc, getDocs, addDoc, deleteDoc, query, where, orderBy, limit,
+  collection, doc, getDoc, getDocs, addDoc, deleteDoc, query, where, orderBy, limit,
 } from 'firebase/firestore';
+import { tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado } from '../contabilidad/tributario';
 import { db, auth } from '../firebase';
 import { cargarDatosCaja } from '../finanzas/cajaDatos';
 import { proyectar, partidasSinCerrar } from '../finanzas/caja';
@@ -39,7 +40,11 @@ export const COLECCIONES_CONSULTABLES = {
   reportes_detallados: 'fecha',
   deuda_proveedores: 'fechaVencimiento',
   finanzas_proveedores: null,
-  finanzas_activos: null,
+  proveedores: null,
+  costos_fijos: null,
+  journal_entries: 'fecha',
+  chart_of_accounts: null,
+  estadoPagoIngresos: null,
   flujo_cuentas: null,
   subcontratos: null,
   rendiciones: 'fecha',
@@ -176,6 +181,49 @@ export const EJECUTORES_EQUIPO = {
     ]);
 
     return { fecha: hoy, documentos_maquinas: documentos, combustible, reportes_diarios: reportes, caja, deuda };
+  },
+
+  // Lo mismo que muestra Contabilidad → Flujo Mensual: base imponible por mes,
+  // impuesto estimado (base acumulada − pérdida de arrastre, tasa del régimen),
+  // PPM sugerido y de dónde vino cada fila.
+  async resumen_tributario({ anio }, { empresaId }) {
+    const a = Number(anio) || new Date().getFullYear();
+    const [snapF, snapC] = await Promise.all([
+      getDoc(doc(db, 'empresas', empresaId, 'flujo_mensual', String(a))),
+      getDoc(doc(db, 'empresas', empresaId, 'config', 'tributario')).catch(() => null),
+    ]);
+    if (!snapF.exists()) return { anio: a, sin_datos: true, nota: 'No hay Flujo Mensual cargado para ese año.' };
+    const f = snapF.data();
+    const config = snapC?.exists() ? snapC.data() : {};
+    const num = v => Number(v) || 0;
+    const filas = (f.filas || []).map(x => ({ id: x.id, nombre: x.label, signo: x.signo, valores: (x.valores || []).map(num) }));
+    const base = Array.from({ length: 12 }, (_, i) => filas.reduce((s, x) => s + x.signo * (x.valores[i] || 0), 0));
+    const tasa = tasaPrimeraCategoria(config.regimen, a);
+    const perdida = Math.abs(num(f.perdidaArrastre));
+    const impuesto = f.impuestoAuto === false ? (f.impuesto || []).map(num) : impuestoMensualAcumulado(base, tasa, perdida);
+    const ingresos = Array.from({ length: 12 }, (_, i) => filas.filter(x => x.signo === 1).reduce((s, x) => s + (x.valores[i] || 0), 0));
+    const tasaPPM = tasaPPMSugerida(config, a);
+    const fuentes = {};
+    Object.entries(f.rcv?.periodos || {}).forEach(([fila, periodos]) => {
+      fuentes[fila] = Object.keys(periodos);
+    });
+    const suma = arr => Math.round(arr.reduce((s, v) => s + v, 0));
+    return {
+      anio: a,
+      regimen: config.regimen || 'sin definir (se usa 27%)',
+      tasa_primera_categoria: tasa,
+      perdida_arrastre: perdida,
+      filas: filas.map(x => ({ fila: x.nombre, tipo: x.signo === 1 ? 'ingreso' : 'gasto', total_anio: suma(x.valores), por_mes: x.valores.map(Math.round) })),
+      base_imponible_por_mes: base.map(Math.round),
+      base_imponible_anio: suma(base),
+      impuesto_estimado_por_mes: impuesto.map(Math.round),
+      impuesto_estimado_anio: suma(impuesto),
+      multas_anio: suma((f.multas || []).map(num)),
+      ppm_sugerido_anio: Math.round(suma(ingresos) * tasaPPM),
+      ppm_pagado_anio: suma((f.ppm || []).map(num)),
+      importado_desde: fuentes,
+      nota: 'Estimación del impuesto de primera categoría con los datos cargados; la cifra definitiva la da la declaración anual.',
+    };
   },
 
   async consultar_datos({ coleccion, desde, hasta, texto, limite = 30 }, { empresaId }) {

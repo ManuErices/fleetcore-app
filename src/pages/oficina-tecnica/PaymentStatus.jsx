@@ -7,7 +7,6 @@ import {
   listEmployees,
   listEmployeeMonthlyData,
   listEmployeeMonthlyDataByYear,
-  listFuelLogsByRange,
   listPurchaseOrders,
   listSubcontratosByProject,
   listRendicionesByProject,
@@ -17,6 +16,7 @@ import {
   listEstadoPagoIngresosByYear,
   upsertEstadoPagoIngresos
 } from "../../lib/db";
+import { listarConsumosCombustible } from "../../lib/combustible";
 
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -269,7 +269,7 @@ export default function PaymentStatus() {
         listEmployees(empresaId, projectId),
         listEmployeeMonthlyDataByYear(empresaId, projectId, year),
         listPurchaseOrders(empresaId, projectId),
-        listFuelLogsByRange(empresaId, projectId, yearStart, yearEnd),
+        listarConsumosCombustible(empresaId, projectId, yearStart, yearEnd),
         listEstadoPagoIngresosByYear(empresaId, projectId, year),
         listSubcontratosByProject(empresaId, projectId),
         listRendicionesByProject(empresaId, projectId),
