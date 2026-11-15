@@ -561,7 +561,11 @@ service cloud.firestore {
       // No se borran nunca: retroceder un correlativo genera folios repetidos.
       match /counters/{docId} {
         allow read:          if isAuth() && belongsToEmpresa(empresaId);
-        allow create, update: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
+        // El correlativo de combustible lo usan los operadores de WorkFleet
+        // (cualquier rol con escritura en la empresa); los demás, solo maquinaria.
+        allow create, update: if isSuperAdmin()
+                              || (belongsToEmpresa(empresaId) && canManageMaquinaria())
+                              || (docId == 'combustible' && belongsToEmpresa(empresaId) && canWriteEmpresa(empresaId));
         allow delete:        if false;
       }
     }
