@@ -233,6 +233,7 @@ function normalizarRCV(fila) {
     "_esNotaCredito":    tipoDoc === 61,
     "_esCombustibleSII": esComb,
     "_activoFijo":       n(fila["Monto Neto Activo Fijo"]) > 0,
+    "_netoActivoFijo":   n(fila["Monto Neto Activo Fijo"]),
   };
 }
 
@@ -557,6 +558,10 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
                     || findCuenta(c => c.tipo === "pasivo_corriente");
   const cCombustible = findCuenta(c => c.tipo === "costo" && /combustible/i.test(c.nombre))
                     || findCuenta(c => c.tipo === "costo" && /lubricante/i.test(c.nombre));
+  // Compras de activo fijo (columna "Monto Neto Activo Fijo" del RCV): van al
+  // activo, no a gasto. Antes se detectaba y no se usaba, y la compra de una
+  // máquina quedaba como gasto del mes.
+  const cActivoFijo  = findCuenta(c => c.tipo === "activo_no_corriente" && /activo fijo|maquinari|vehicul|equipo/i.test(c.nombre) && !/depreciaci/i.test(c.nombre));
 
   // Resuelve la cuenta contable a partir de la CLASIFICACIÓN completa, no solo
   // del tipo. Antes era `findCuenta(c => c.tipo === tipo)`, un .find() que
@@ -614,6 +619,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
   const asientos = Object.values(mapa).map(prov => {
     let totalNeto = 0, totalIVA = 0, totalExento = 0, totalTotal = 0;
     let totalImpEspec = 0;   // ← impuesto específico Ley 18.502
+    let totalActivoFijo = 0; // ← parte del neto que es compra de activo fijo
     const folios = [];
     let fechaRef = null;
 
@@ -631,6 +637,7 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       } else {
         // Factura afecta (Tipo 33): puede tener neto+IVA Y también monto exento
         totalNeto   += neto;
+        if (cActivoFijo) totalActivoFijo += Math.min(f["_netoActivoFijo"] || 0, neto);
         totalNeto   += f["_impTabaco"] || 0; // impuestos no recuperables (otros códigos, IVA no rec.) → mayor gasto
         totalIVA    += iva;
         totalExento += exento;   // ← Fix: exento de facturas mixtas (peajes, autopistas, etc.)
@@ -668,11 +675,17 @@ function generarAsientosDesdeNormalizadas(filasNorm, formato, cuentas, periodo) 
       });
     } else {
       // ── Resto de proveedores: lógica estándar ───────────────────────────
-      if (totalNeto > 0) lineas.push({
+      if (totalNeto - totalActivoFijo > 0) lineas.push({
         cuentaId:     prov.cuentaGastoId,
         cuentaNombre: prov.cuentaGastoNombre,
-        debe: totalNeto, haber: 0,
+        debe: totalNeto - totalActivoFijo, haber: 0,
         descripcion:  `Neto afecto — ${prov.clasificacion.label}`,
+      });
+      if (totalActivoFijo > 0) lineas.push({
+        cuentaId:     cActivoFijo.id,
+        cuentaNombre: cActivoFijo.nombre,
+        debe: totalActivoFijo, haber: 0,
+        descripcion:  "Compra de activo fijo (se deprecia, no es gasto del mes)",
       });
       if (totalIVA > 0) lineas.push({
         cuentaId:     cIVA.id,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut } from "./ContabilidadContext";
+import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut, leerTextoDetectando } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
 import {
@@ -571,14 +571,33 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
   // return null DESPUÉS de todos los hooks
   if (!isOpen) return null;
 
-  const handleFile = (e) => {
+  // Número del SII: puede venir como número o como texto "1.234.567"
+  const numSII = (v) => {
+    if (typeof v === "number") return v;
+    const n = parseFloat(String(v ?? "").replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+  // Fecha "dd/mm/aaaa" → "aaaa-mm-dd"
+  const fechaSII = (v) => {
+    if (typeof v === "number") return excelDateToISO(v);
+    const m = String(v ?? "").match(/(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : String(v ?? "").trim();
+  };
+
+  const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setError("");
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const wb = XLSX.read(ev.target.result, { type: "array" });
+    try {
+      // El SII entrega .xls que por dentro son tablas HTML en Windows-1252.
+      // Se decodifican antes y se leen como texto (raw): si no, los acentos
+      // salen dañados y las fechas dd/mm se leen como mm/dd.
+      const buf = await file.arrayBuffer();
+      const inicio = new TextDecoder("latin1").decode(buf.slice(0, 64)).trimStart();
+      const wb = inicio.startsWith("<")
+        ? XLSX.read(await leerTextoDetectando(file), { type: "string", raw: true })
+        : XLSX.read(buf, { type: "array" });
+      {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
         let headerIdx = -1;
@@ -595,26 +614,25 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
         const registros = [];
         for (let i = headerIdx + 1; i < raw.length; i++) {
           const row = raw[i];
-          const bruto = parseFloat(row[iBruto] || 0);
+          const bruto = numSII(row[iBruto]);
           if (!bruto) continue;
-          if (String(row[iEst] || "").toUpperCase() === "ANU") continue;
+          if (/^(ANU|NUL)/.test(String(row[iEst] || "").toUpperCase())) continue;
           registros.push({
             n: String(row[iN] || "").trim(),
             estado: String(row[iEst] || "").toUpperCase(),
-            fecha: typeof row[iFecha] === "number" ? excelDateToISO(row[iFecha]) : String(row[iFecha] || "").trim(),
+            fecha: fechaSII(row[iFecha]),
             rut: String(row[iRut] || "").trim(),
             nombre: String(row[iNombre] || "").trim(),
             bruto: Math.round(bruto),
-            retenido: Math.round(parseFloat(row[iRet] || 0)),
-            pagado: Math.round(parseFloat(row[iPagado] || 0)),
+            retenido: Math.round(numSII(row[iRet])),
+            pagado: Math.round(numSII(row[iPagado])),
           });
         }
         if (!registros.length) { setError("No se encontraron boletas vigentes en el archivo."); return; }
         setFilas(registros);
         setPaso(2);
-      } catch (err) { setError("Error leyendo el archivo: " + err.message); }
-    };
-    reader.readAsArrayBuffer(file);
+      }
+    } catch (err) { setError("Error leyendo el archivo: " + err.message); }
   };
 
   const totales = filas.reduce(
