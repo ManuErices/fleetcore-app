@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut, leerTextoDetectando, claveDocImport } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
+import ModalCentralizacion from "./ContabilidadCentralizacion";
 import {
   Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, Aviso, VistoBueno, Boton, Campo, ModalCuaderno,
   Segmentado, FechaHoja, IconoCerrar, IconoLapiz, IconoBorrar, IconoBajar, IconoMas, IconoDocumento,
@@ -874,6 +875,7 @@ export default function ContabilidadLibroDiario() {
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showHonModal, setShowHonModal] = useState(false);
+  const [showCentralizacion, setShowCentralizacion] = useState(false);
   const [showImportMenu, setShowImportMenu] = useState(false);
   const importMenuRef = useRef(null);
 
@@ -1176,6 +1178,15 @@ export default function ContabilidadLibroDiario() {
                   <span className="block text-[17px] text-cuaderno-tinta">Honorarios SII</span>
                   <span className="block text-[14px] text-cuaderno-grafito">Boletas recibidas (.xlsx)</span>
                 </button>
+                <div className="border-t border-cuaderno-renglon" />
+                {/* Desde RRHH, sin archivo: mismo cálculo que el Libro de Remuneraciones */}
+                <button
+                  onClick={() => { setShowImportMenu(false); setShowCentralizacion(true); }}
+                  className="block w-full px-4 py-2.5 text-left hover:bg-cuaderno-hoja"
+                >
+                  <span className="block text-[17px] text-cuaderno-tinta">Centralizar remuneraciones (RRHH)</span>
+                  <span className="block text-[14px] text-cuaderno-grafito">Un asiento por mes desde las liquidaciones</span>
+                </button>
               </div>
             )}
           </div>
@@ -1439,6 +1450,7 @@ export default function ContabilidadLibroDiario() {
         }}
       />
       <ModalExportPDF isOpen={showExport} onClose={() => setShowExport(false)} />
+      {showCentralizacion && <ModalCentralizacion onClose={() => setShowCentralizacion(false)} />}
       <ModalImportarHonorarios
         isOpen={showHonModal}
         onClose={() => setShowHonModal(false)}
