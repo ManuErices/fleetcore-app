@@ -402,12 +402,25 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
       const nuevos = [];
       const actualizados = [];
       const sinCambios = [];
+      const pagosConservados = [];
 
-      resultadoLectura.parseadas.forEach(item => {
-        const match = existentes[item.claveUpsert];
+      resultadoLectura.parseadas.forEach(itemExcel => {
+        const match = existentes[itemExcel.claveUpsert];
         if (!match) {
-          nuevos.push(item);
+          nuevos.push(itemExcel);
           return;
+        }
+        // Si en FleetCore se registraron pagos que el Excel todavía no trae
+        // (lo pagado en FleetCore es mayor), se conserva lo de FleetCore: antes
+        // la reimportación devolvía el saldo y el estado a los del Excel.
+        let item = itemExcel;
+        const pagadoFleet = Number(match.data.montoPagado) || 0;
+        if (pagadoFleet > (Number(itemExcel.montoPagado) || 0) + 1) {
+          const saldo = (Number(itemExcel.valorDoc) || 0) - pagadoFleet;
+          const mora = saldo > 0 ? diasMoraDesdeHoy(itemExcel.fechaVencimiento) : 0;
+          item = { ...itemExcel, montoPagado: pagadoFleet, saldoPendiente: saldo, diasMora: mora,
+                   estado: calcularEstado(saldo, Number(itemExcel.valorDoc) || 0, mora) };
+          pagosConservados.push({ proveedor: item.proveedorNombre, doc: item.numeroDoc, excel: Number(itemExcel.montoPagado) || 0, fleet: pagadoFleet });
         }
         const cambioSaldo = (match.data.saldoPendiente || 0) !== item.saldoPendiente;
         const cambioEstado = (match.data.estado || "") !== item.estado;
@@ -419,7 +432,7 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
         }
       });
 
-      setDiff({ nuevos, actualizados, sinCambios });
+      setDiff({ nuevos, actualizados, sinCambios, pagosConservados });
     } catch (err) {
       console.error("Error comparando con Firestore:", err);
       setErrorLectura("No se pudo comparar con los datos existentes en Firestore.");
@@ -456,7 +469,9 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
           const ref = _firestoreId
             ? doc(db, "empresas", empresaId, "deuda_proveedores", _firestoreId)
             : doc(collection(db, "empresas", empresaId, "deuda_proveedores"));
-          batch.set(ref, payload, { merge: false }); // sobreescritura completa, confirmado con Manu
+          // merge: true conserva lo que solo existe en FleetCore (comprobantes
+          // subidos, notas). Los campos del Excel se sobrescriben igual.
+          batch.set(ref, payload, { merge: true });
 
           const documentoId = _firestoreId || ref.id;
           const auditoriaRef = (entrada) => doc(collection(db, "empresas", empresaId, "deuda_auditoria"));
@@ -635,6 +650,11 @@ export default function FinanzasDeudaImportador({ onImportComplete }) {
             <LineaGuia etiqueta="Documentos nuevos"><span>{diff.nuevos.length}</span></LineaGuia>
             <LineaGuia etiqueta="Documentos que cambian"><span>{diff.actualizados.length}</span></LineaGuia>
             <LineaGuia etiqueta="Sin cambios"><span className="text-cuaderno-grafito">{diff.sinCambios.length}</span></LineaGuia>
+            {diff.pagosConservados?.length > 0 && (
+              <Nota etiqueta="Ojo:" className="mt-2">
+                {diff.pagosConservados.length} documento{diff.pagosConservados.length > 1 ? "s tienen" : " tiene"} pagos registrados en FleetCore que el Excel todavía no refleja. Se mantiene lo pagado en FleetCore (no se vuelve al saldo del Excel). Actualiza el Excel para que coincidan.
+              </Nota>
+            )}
           </div>
 
           {diff.actualizados.length > 0 && (

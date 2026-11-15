@@ -1,8 +1,13 @@
 import React, { useState } from "react";
 import * as XLSX from 'xlsx';
 import { upsertMachine, upsertDailyLog } from "../lib/db";
+import { useEmpresa } from "../lib/useEmpresa";
 
 export default function ExcelImporter({ projectId, onImportComplete }) {
+  // Todas las funciones de db.js reciben empresaId primero. Antes se llamaban
+  // sin él: los argumentos se corrían y las máquinas y reportes se escribían
+  // en una ruta equivocada (empresas/<objeto>/...).
+  const { empresaId } = useEmpresa();
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -224,7 +229,7 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
       // 🔍 PASO 1: Cargar TODAS las máquinas existentes del proyecto
       console.log("🔍 Cargando máquinas existentes del proyecto...");
       const { listMachines } = await import("../lib/db");
-      const existingMachines = await listMachines(projectId);
+      const existingMachines = await listMachines(empresaId, projectId);
       console.log(`✅ ${existingMachines.length} máquinas existentes encontradas`);
 
       // Crear un mapa de máquinas existentes por código y nombre
@@ -298,7 +303,7 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
             };
             
             // Guardar en Firebase
-            const machineId = await upsertMachine(machineData);
+            const machineId = await upsertMachine(empresaId, machineData);
             machineIdMap[machineKey] = machineId;
             importResults.machinesCreated++;
             console.log(`🆕 Máquina creada: ${machine.code || machine.name || 'SIN CÓDIGO'} (ID: ${machineId})`);
@@ -328,7 +333,7 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
       
       let existingLogs = [];
       if (minDate && maxDate) {
-        existingLogs = await listLogsByRange(projectId, minDate, maxDate);
+        existingLogs = await listLogsByRange(empresaId, projectId, minDate, maxDate);
         console.log(`✅ ${existingLogs.length} logs existentes encontrados en rango ${minDate} a ${maxDate}`);
       }
 
@@ -386,13 +391,13 @@ export default function ExcelImporter({ projectId, onImportComplete }) {
               console.log(`   🔄 Actualizando log existente (ID: ${existingLog.id})`);
               console.log(`      Antes: ${existingLog.productiveHours}h, ${existingLog.kilometraje || 0}km`);
               console.log(`      Ahora: ${logData.productiveHours}h, ${logData.kilometraje}km`);
-              await upsertDailyLog(logData);
+              await upsertDailyLog(empresaId, logData);
               importResults.logsUpdated++;
               console.log(`   ✅ Log actualizado exitosamente`);
             } else {
               // 🆕 Log NUEVO - crearlo
               console.log(`   💾 Creando nuevo log: ${logData.productiveHours}h, ${logData.kilometraje}km`);
-              await upsertDailyLog(logData);
+              await upsertDailyLog(empresaId, logData);
               importResults.logsCreated++;
               console.log(`   ✅ Log creado exitosamente`);
             }
