@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { listActiveProjects, listLogsByRange, listMachines } from "../../lib/db";
-import { listarConsumosCombustible } from "../../lib/combustible";
+import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
 import { manoObraMes } from "../../lib/manoObra";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
@@ -133,8 +133,8 @@ export default function DashboardExecutive() {
     fuelLogs.forEach(log => {
       const litros = Number(log.liters) || 0;
       totalLitros += litros;
-      const precio = fuelPrices?.diesel || 950;
-      totalCostoCombustible += litros * precio;
+      // Precio de la última carga registrada hasta ese día; si no hay, el de respaldo
+      totalCostoCombustible += costoConsumo(log, fuelPrices?.diesel || 950);
     });
 
     const consumoPromedioDia = diasTrabajados.size > 0 ? totalLitros / diasTrabajados.size : 0;

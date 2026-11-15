@@ -5,7 +5,7 @@ import {
   listPurchaseOrders,
   listMachines
 } from "../../lib/db";
-import { listarConsumosCombustible } from "../../lib/combustible";
+import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
 import { manoObraMes } from "../../lib/manoObra";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
@@ -185,8 +185,8 @@ export default function Consolidado() {
       const litros = Number(log.liters) || 0;
       totalLitros += litros;
       
-      // Calcular costo usando el precio en tiempo real
-      totalCosto += litros * precioDiesel;
+      // Precio de la última carga registrada hasta ese día; si no hay, el actual
+      totalCosto += costoConsumo(log, precioDiesel);
     });
 
     return {

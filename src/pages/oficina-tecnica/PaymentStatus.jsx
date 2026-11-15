@@ -14,7 +14,7 @@ import {
   listEstadoPagoIngresosByYear,
   upsertEstadoPagoIngresos
 } from "../../lib/db";
-import { listarConsumosCombustible } from "../../lib/combustible";
+import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
 import { manoObraAnio } from "../../lib/manoObra";
 
 const MONTHS = [
@@ -159,7 +159,7 @@ function calcEgresosMes(year, month, employees, payrollYearData, purchaseOrders,
     // Respaldo: si no se ha importado combustible por el módulo nuevo ese mes,
     // se usa el registro antiguo (fuelLogs) valorizado al precio "en vivo" del diésel
     fuelLogs.filter(f => f.date && f.date.startsWith(monthPrefix)).forEach(f => {
-      items.combustible.push({ clave: "4.1 DIÉSEL", monto: (Number(f.liters) || 0) * precioDiesel });
+      items.combustible.push({ clave: "4.1 DIÉSEL", monto: costoConsumo(f, precioDiesel) });
     });
   }
 

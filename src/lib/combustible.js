@@ -15,6 +15,13 @@
  *
  * Cada consumo trae `fuente`: "workfleet" | "excel" | "ambas", y los de
  * WorkFleet son de solo lectura (se corrigen en WorkFleet).
+ *
+ * Precio: el diésel cambia semana a semana, así que cada consumo se valoriza
+ * con el precio por litro de la última CARGA registrada en WorkFleet hasta
+ * ese día (entrada desde estación, precio = total ÷ litros de sus
+ * documentos), primero de la misma obra y si no, de cualquiera. Trae
+ * `precioLitro`, `costo` y `precioFecha`; si no hay ninguna carga con
+ * precio, `costo` queda null y la pantalla usa su precio de respaldo.
  */
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "./firebase";
@@ -64,13 +71,61 @@ export function unirConsumos(excel, workfleet) {
   return [...salida, ...libres].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
+/** Cargas (entradas) con precio por litro, ordenadas por fecha. */
+export function preciosDeCargas(reportes) {
+  return (reportes || [])
+    .filter(r => r.tipo === "entrada")
+    .map(r => {
+      const e = r.datosEntrada || {};
+      let precio = Number(r.precioPorLitro ?? e.precioPorLitro) || 0;
+      if (!precio) {
+        const total = Number(r.totalMonto ?? e.totalMonto) || 0;
+        const litros = Number(r.cantidad ?? e.cantidad) || 0;
+        precio = total > 0 && litros > 0 ? total / litros : 0;
+      }
+      return {
+        fecha: String(e.fechaDocumento || r.fecha || r.datosControl?.fecha || "").slice(0, 10),
+        projectId: r.projectId || r.datosControl?.projectId || "",
+        precio,
+      };
+    })
+    .filter(c => c.precio > 0 && c.fecha)
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+/** Precio vigente a una fecha: última carga hasta ese día (misma obra primero). */
+export function precioVigente(cargas, fecha, projectId) {
+  let mismaObra = null, cualquiera = null;
+  for (const c of cargas) {
+    if (c.fecha > fecha) break;
+    cualquiera = c;
+    if (projectId && c.projectId === projectId) mismaObra = c;
+  }
+  return mismaObra || cualquiera;
+}
+
+/** Agrega precioLitro / costo / precioFecha a cada consumo. */
+export function valorizarConsumos(consumos, cargas) {
+  return consumos.map(c => {
+    const p = precioVigente(cargas, c.date, c.projectId);
+    return p
+      ? { ...c, precioLitro: p.precio, costo: (Number(c.liters) || 0) * p.precio, precioFecha: p.fecha }
+      : { ...c, precioLitro: null, costo: null, precioFecha: null };
+  });
+}
+
+/** Costo de un consumo: el valorizado, o litros × precio de respaldo. */
+export const costoConsumo = (c, precioRespaldo) =>
+  c.costo != null ? c.costo : (Number(c.liters) || 0) * (Number(precioRespaldo) || 0);
+
 /** Consumos de una obra en un rango, de las dos fuentes y sin duplicar. */
 export async function listarConsumosCombustible(empresaId, projectId, desde, hasta) {
   const [excel, reportes] = await Promise.all([
     listFuelLogsByRange(empresaId, projectId, desde, hasta),
-    getDocs(query(collection(db, "empresas", empresaId, "reportes_combustible"), where("tipo", "==", "entrega")))
+    getDocs(query(collection(db, "empresas", empresaId, "reportes_combustible"), where("tipo", "in", ["entrega", "entrada"])))
       .then(s => s.docs.map(d => ({ id: d.id, ...d.data() })))
       .catch(() => []),
   ]);
-  return unirConsumos(excel, entregasComoConsumos(reportes, { projectId, desde, hasta }));
+  const consumos = unirConsumos(excel, entregasComoConsumos(reportes, { projectId, desde, hasta }));
+  return valorizarConsumos(consumos, preciosDeCargas(reportes));
 }
