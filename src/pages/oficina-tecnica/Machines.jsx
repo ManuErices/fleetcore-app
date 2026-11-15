@@ -71,7 +71,8 @@ export default function Machines() {
 
   const refresh = async (pid) => {
     if (!empresaId) return;
-    const m = await listMachines(empresaId, pid || null);
+    // Solo las que están hoy en la obra: al guardar aquí se asignan a ella
+    const m = await listMachines(empresaId, pid || null, { soloActual: true });
     setMachines(m);
   };
 

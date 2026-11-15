@@ -73,7 +73,7 @@ export default function DashboardExecutive() {
         listLogsByRange(empresaId, selectedProject, dateFrom, dateTo),
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         manoObraMes(empresaId, selectedProject, year, month),
-        listMachines(empresaId, selectedProject)
+        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
       ]);
 
       // Rendiciones

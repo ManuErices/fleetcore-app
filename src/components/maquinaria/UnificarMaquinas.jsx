@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   listarMaquinas, gruposDuplicados, fusionarMaquinas, planNormalizacion, aplicarNormalizacion,
-  nombreMaquina, estaActiva, PROPIEDADES, propiedadNormal,
+  nombreMaquina, estaActiva, PROPIEDADES, propiedadNormal, planSurtidores, migrarSurtidores,
 } from "../../lib/maquinas";
 
 const nombreProp = (v) => PROPIEDADES.find(p => p.id === propiedadNormal(v))?.nombre || v || "—";
@@ -27,10 +27,15 @@ export default function UnificarMaquinas({ empresaId, obras = [], onClose, onCam
   const [trabajando, setTrabajando] = useState("");
   const [principal, setPrincipal] = useState({});   // llave → id
   const [resultado, setResultado] = useState("");
+  const [surtidores, setSurtidores] = useState([]);
 
   const cargar = async () => {
     setError("");
-    try { setMaquinas(await listarMaquinas(empresaId)); }
+    try {
+      const lista = await listarMaquinas(empresaId);
+      setMaquinas(lista);
+      setSurtidores(await planSurtidores(empresaId, lista));
+    }
     catch (e) { setError(e.message); }
   };
   useEffect(() => { cargar(); }, [empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -44,6 +49,16 @@ export default function UnificarMaquinas({ empresaId, obras = [], onClose, onCam
     try {
       const n = await aplicarNormalizacion(empresaId, normalizacion);
       setResultado(`${n} fichas normalizadas.`);
+      await cargar(); onCambio?.();
+    } catch (e) { setError(e.message); }
+    setTrabajando("");
+  };
+
+  const migrar = async () => {
+    setTrabajando("surtidores");
+    try {
+      const r = await migrarSurtidores(empresaId, surtidores, (n) => setTrabajando(`surtidores|${n}`));
+      setResultado(`Surtidores: ${r.creados} pasados al maestro, ${r.unidos} unidos a una máquina que ya existía${r.reapuntados ? ` (${r.reapuntados} reportes de combustible re-apuntados)` : ""}.`);
       await cargar(); onCambio?.();
     } catch (e) { setError(e.message); }
     setTrabajando("");
@@ -109,9 +124,32 @@ export default function UnificarMaquinas({ empresaId, obras = [], onClose, onCam
                 )}
               </section>
 
-              {/* 2. Duplicados */}
+              {/* 2. Surtidores */}
               <section>
-                <h3 className="font-semibold text-slate-800 mb-1">2. Máquinas registradas más de una vez</h3>
+                <h3 className="font-semibold text-slate-800 mb-1">2. Camiones surtidores dentro del maestro</h3>
+                {surtidores.length === 0 ? (
+                  <p className="text-sm text-slate-500">Todos los surtidores ya son máquinas del maestro.</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-slate-600 mb-2">{surtidores.length} surtidor(es) siguen en la lista aparte de combustible. Pasan a ser máquinas marcadas como surtidor; sus reportes de combustible siguen apuntando a ellos.</p>
+                    <ul className="text-xs text-slate-600 max-h-40 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-100 mb-2">
+                      {surtidores.map(({ antiguo, destino }) => (
+                        <li key={antiguo.id} className="px-3 py-1.5">
+                          <b>{antiguo.nombre || antiguo.patente}</b> {antiguo.patente ? `(${antiguo.patente})` : ""}: {destino ? <>se une a la máquina <b>{nombreMaquina(destino)}</b>, que ya existe</> : "se crea en el maestro"}
+                        </li>
+                      ))}
+                    </ul>
+                    <button disabled={!!trabajando} onClick={migrar}
+                      className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold disabled:opacity-50">
+                      {trabajando.startsWith("surtidores") ? `Migrando ${trabajando.split("|")[1] || ""}…` : `Pasar ${surtidores.length} surtidor(es) al maestro`}
+                    </button>
+                  </>
+                )}
+              </section>
+
+              {/* 3. Duplicados */}
+              <section>
+                <h3 className="font-semibold text-slate-800 mb-1">3. Máquinas registradas más de una vez</h3>
                 {grupos.length === 0 ? (
                   <p className="text-sm text-slate-500">No hay fichas con la misma patente o código.</p>
                 ) : (

@@ -94,7 +94,7 @@ export default function MonthlyCalendar() {
     setIsLoading(true);
 
     Promise.all([
-      listMachines(empresaId, selectedProject),
+      listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo }),
       listLogsByRange(empresaId, selectedProject, dateFrom, dateTo)
     ])
       .then(([machinesData, logsData]) => {

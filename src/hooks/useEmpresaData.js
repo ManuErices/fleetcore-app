@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { esSurtidor } from "../lib/maquinas";
 
 export function useEmpresaData(empresaId) {
   const [projects, setProjects] = useState([]);
@@ -31,7 +32,13 @@ export function useEmpresaData(empresaId) {
         const loadedProjects = pSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedMachines = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedEmpleados = eSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const loadedEquipos = eqSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Surtidores: máquinas del maestro con esSurtidor + los de la colección
+        // antigua que aún no se migran (Admin → Máquinas → Revisar maestro)
+        const idsMaestro = new Set(loadedMachines.map(m => m.id));
+        const loadedEquipos = [
+          ...loadedMachines.filter(esSurtidor).map(m => ({ ...m, nombre: m.nombre || m.name || '' })),
+          ...eqSnap.docs.filter(d => !idsMaestro.has(d.id)).map(d => ({ id: d.id, ...d.data() })),
+        ];
         const loadedEmpresas = empSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedEstaciones = estSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const loadedSub = subSnap.docs.map(d => ({ id: d.id, ...d.data() }));

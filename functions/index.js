@@ -582,7 +582,9 @@ exports.onReporteCombustibleCreated = onDocumentCreated(
       const allTo = [...emails, operadorEmail, ...extraEmails].filter(Boolean);
 
       // Resolver labels
-      const equipoSurtidorLabel = await lookupLabel(empresaId, 'equipos_surtidores', ctrl.equipoSurtidorId, ['nombre', 'patente']);
+      // Los surtidores ahora son máquinas del maestro; la colección antigua queda de respaldo
+      const equipoSurtidorLabel = (await lookupLabel(empresaId, 'machines', ctrl.equipoSurtidorId, ['name', 'nombre', 'patente']))
+        || (await lookupLabel(empresaId, 'equipos_surtidores', ctrl.equipoSurtidorId, ['nombre', 'patente']));
       const machineLabel        = await lookupLabel(empresaId, 'machines', dataMov.machineId, ['name', 'nombre', 'code', 'patente']);
       const operadorLabel       = await lookupLabel(empresaId, 'trabajadores', dataMov.operadorId, ['nombre', 'apellido', 'name']);
 

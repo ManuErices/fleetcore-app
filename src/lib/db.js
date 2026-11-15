@@ -14,7 +14,7 @@ import {
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
-import { guardarMaquina } from "./maquinas";
+import { guardarMaquina, estuvoEnObra } from "./maquinas";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 
@@ -106,15 +106,21 @@ export async function deleteProject(empresaId, projectId) {
 // MÁQUINAS
 // ============================================
 
-export async function listMachines(empresaId, projectId) {
+/**
+ * Máquinas de la empresa, o de una obra. Con obra, entran las que estuvieron
+ * en ella (historial de obras), no solo las que están hoy: así los reportes
+ * de un mes pasado siguen mostrando la máquina aunque después se haya movido.
+ *   opciones.desde / hasta (AAAA-MM-DD): solo las que estuvieron en ese rango.
+ *   opciones.soloActual: solo las que están hoy en la obra (para editarlas).
+ */
+export async function listMachines(empresaId, projectId, { desde, hasta, soloActual = false } = {}) {
   if (!empresaId) return [];
   // Sin orderBy('code'): una máquina sin ese campo quedaba fuera del listado
-  // sin aviso. El filtro por proyecto se mantiene tal cual (los KPI por obra
-  // dependen de él); el orden se hace en memoria.
+  // sin aviso. El orden se hace en memoria.
   const snap = await getDocs(EMPRESA_COL(empresaId, 'machines'));
   const machines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const filtradas = (projectId !== undefined && projectId !== null)
-    ? machines.filter((m) => m.projectId === projectId)
+    ? machines.filter((m) => soloActual ? m.projectId === projectId : estuvoEnObra(m, projectId, desde, hasta))
     : machines;
   return filtradas.sort((a, b) =>
     String(a.code || a.patente || a.name || '').localeCompare(String(b.code || b.patente || b.name || ''), 'es')

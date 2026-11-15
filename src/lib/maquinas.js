@@ -29,7 +29,7 @@
  *              puntos y espacios ("TRRH-10" = "TRRH10").
  */
 import {
-  collection, doc, getDocs, addDoc, setDoc, serverTimestamp, writeBatch, deleteDoc, deleteField,
+  collection, doc, getDoc, getDocs, addDoc, setDoc, serverTimestamp, writeBatch, deleteDoc, deleteField,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
 
@@ -135,6 +135,53 @@ export function camposCambiados(nuevos, original) {
   return salida;
 }
 
+// ─── Historial de obras ────────────────────────────────────────────────────
+//
+// `projectId` es la obra ACTUAL. `historialObras` guarda por dónde ha pasado
+// la máquina: [{ projectId, desde: "AAAA-MM-DD" | null, hasta: … | null }]
+// (hasta null = sigue ahí; desde null = desde antes de que existiera el
+// historial). guardarMaquina lo mantiene solo cada vez que cambia la obra,
+// venga el cambio de Admin, Maquinaria, Oficina Técnica, Finanzas o el agente.
+
+export const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** Historial tras mover la máquina de `anterior` a `nueva` en `fecha`. */
+export function moverDeObra(historial, anterior, nueva, fecha = hoyISO()) {
+  if ((anterior || null) === (nueva || null)) return historial || [];
+  let h = (historial || []).map(e => ({ ...e }));
+  if (!h.length && anterior) h.push({ projectId: anterior, desde: null, hasta: null });
+  h.forEach(e => { if (!e.hasta) e.hasta = fecha; });
+  // Un tramo abierto y cerrado el mismo día era una corrección: se descarta
+  h = h.filter(e => !(e.desde && e.desde === e.hasta && e.desde === fecha));
+  if (nueva) h.push({ projectId: nueva, desde: fecha, hasta: null });
+  return h;
+}
+
+/** Tramos de obra de la máquina (si no hay historial, la obra actual sin fechas). */
+export function tramosObra(m) {
+  if (m?.historialObras?.length) return m.historialObras;
+  return m?.projectId ? [{ projectId: m.projectId, desde: null, hasta: null }] : [];
+}
+
+/** ¿Estuvo en la obra en algún momento entre desde y hasta (AAAA-MM-DD, opcionales)? */
+export function estuvoEnObra(m, projectId, desde, hasta) {
+  if (!projectId) return true;
+  if (m?.projectId === projectId && (!hasta || !m.historialObras?.length ||
+    tramosObra(m).some(e => e.projectId === projectId && !e.hasta && (!e.desde || e.desde <= hasta)))) return true;
+  return tramosObra(m).some(e => e.projectId === projectId
+    && (!hasta || !e.desde || e.desde <= hasta)
+    && (!desde || !e.hasta || e.hasta >= desde));
+}
+
+/** Obra en que estaba la máquina en una fecha (AAAA-MM-DD). */
+export function obraEnFecha(m, fecha) {
+  const t = tramosObra(m).filter(e => (!e.desde || e.desde <= fecha) && (!e.hasta || e.hasta >= fecha));
+  return (t[t.length - 1] || {}).projectId || (m?.historialObras?.length ? null : m?.projectId || null);
+}
+
 // ─── Lectura ────────────────────────────────────────────────────────────────
 
 export async function listarMaquinas(empresaId) {
@@ -162,7 +209,7 @@ export class MaquinaDuplicada extends Error {
  *   maquinas  → lista ya cargada (evita releer la colección al crear).
  * Devuelve el id.
  */
-export async function guardarMaquina(empresaId, datos, { id, original, origen = "", maquinas } = {}) {
+export async function guardarMaquina(empresaId, datos, { id, original, origen = "", maquinas, fechaObra } = {}) {
   if (!empresaId) throw new Error("Falta la empresa");
   const limpios = normalizarMaquina(datos);
   const usuario = auth.currentUser?.email || null;
@@ -176,6 +223,14 @@ export async function guardarMaquina(empresaId, datos, { id, original, origen = 
       if (otra) throw new MaquinaDuplicada(otra);
     }
     if (!Object.keys(cambios).length) return id;
+    if (cambios.projectId !== undefined && cambios.historialObras === undefined) {
+      // Se lee la ficha actual (no la que tenía la pantalla) para no perder tramos
+      let actual = original || {};
+      try { const snap = await getDoc(doc(col(empresaId), id)); if (snap.exists()) actual = snap.data(); } catch { /* sin conexión: lo de la pantalla */ }
+      if ((actual.projectId || null) === (cambios.projectId || null)) delete cambios.projectId;
+      else cambios.historialObras = moverDeObra(actual.historialObras, actual.projectId, cambios.projectId, fechaObra || hoyISO());
+      if (!Object.keys(cambios).length) return id;
+    }
     await setDoc(doc(col(empresaId), id), {
       ...cambios, updatedAt: serverTimestamp(), actualizadoPor: usuario, actualizadoDesde: origen,
     }, { merge: true });
@@ -187,6 +242,8 @@ export async function guardarMaquina(empresaId, datos, { id, original, origen = 
   const ref = await addDoc(col(empresaId), {
     ownership: "OWN", active: true,
     ...limpios,
+    ...(limpios.projectId && !limpios.historialObras
+      ? { historialObras: [{ projectId: limpios.projectId, desde: fechaObra || hoyISO(), hasta: null }] } : {}),
     createdAt: serverTimestamp(), creadoPor: usuario, creadoDesde: origen,
   });
   return ref.id;
@@ -237,7 +294,7 @@ export const REFERENCIAS_MAQUINA = [
   "rentalQuotes", "rentalPurchaseOrders", "rentalContracts", "rentalPayments",
   "costos_fijos", "finanzas_activos",
 ];
-const CAMPOS_ID = new Set(["machineId", "maquinaId", "activoVinculadoId"]);
+const CAMPOS_ID = new Set(["machineId", "maquinaId", "activoVinculadoId", "equipoSurtidorId", "maquinaProveedorId"]);
 
 /** Reemplaza los ids viejos por el nuevo dentro de un valor; devuelve [nuevoValor, cambió]. */
 export function reemplazarIds(valor, viejos, nuevo) {
@@ -288,6 +345,36 @@ export function fichaFusionada(principal, otras) {
 }
 
 /**
+ * Reemplaza en todas las colecciones de REFERENCIAS_MAQUINA los ids de
+ * `viejos` (Set) por `nuevo`. Devuelve { coleccion: documentos cambiados }.
+ */
+export async function reapuntarReferencias(empresaId, viejos, nuevo, onProgreso) {
+  const referencias = {};
+  for (const nombre of REFERENCIAS_MAQUINA) {
+    onProgreso?.(nombre);
+    let snap;
+    try { snap = await getDocs(collection(db, "empresas", empresaId, nombre)); } catch { continue; }
+    const cambios = [];
+    snap.docs.forEach(d => {
+      const nuevos = {};
+      Object.entries(d.data()).forEach(([k, v]) => {
+        if (CAMPOS_ID.has(k) && typeof v === "string" && viejos.has(v)) { nuevos[k] = nuevo; return; }
+        const [x, c] = reemplazarIds(v, viejos, nuevo);
+        if (c) nuevos[k] = x;
+      });
+      if (Object.keys(nuevos).length) cambios.push([d.ref, nuevos]);
+    });
+    for (let i = 0; i < cambios.length; i += 400) {
+      const batch = writeBatch(db);
+      cambios.slice(i, i + 400).forEach(([ref, nuevos]) => batch.update(ref, nuevos));
+      await batch.commit();
+    }
+    if (cambios.length) referencias[nombre] = cambios.length;
+  }
+  return referencias;
+}
+
+/**
  * Fusiona `otrasIds` en `principalId`: re-apunta todo el historial a la
  * principal, completa su ficha con los datos que solo tenían las otras y
  * borra las otras. Devuelve { referencias: { coleccion: n } }.
@@ -300,31 +387,12 @@ export async function fusionarMaquinas(empresaId, principalId, otrasIds, onProgr
   if (!principal) throw new Error("No se encontró la ficha principal");
   const otras = todas.filter(m => viejos.has(m.id));
 
-  const referencias = {};
-  for (const nombre of REFERENCIAS_MAQUINA) {
-    onProgreso?.(nombre);
-    let snap;
-    try { snap = await getDocs(collection(db, "empresas", empresaId, nombre)); } catch { continue; }
-    const cambios = [];
-    snap.docs.forEach(d => {
-      const datos = d.data();
-      const nuevos = {};
-      Object.entries(datos).forEach(([k, v]) => {
-        if (CAMPOS_ID.has(k) && typeof v === "string" && viejos.has(v)) { nuevos[k] = principalId; return; }
-        const [x, c] = reemplazarIds(v, viejos, principalId);
-        if (c) nuevos[k] = x;
-      });
-      if (Object.keys(nuevos).length) cambios.push([d.ref, nuevos]);
-    });
-    for (let i = 0; i < cambios.length; i += 400) {
-      const batch = writeBatch(db);
-      cambios.slice(i, i + 400).forEach(([ref, nuevos]) => batch.update(ref, nuevos));
-      await batch.commit();
-    }
-    if (cambios.length) referencias[nombre] = cambios.length;
-  }
+  const referencias = await reapuntarReferencias(empresaId, viejos, principalId, onProgreso);
 
   const { id: _id, ...ficha } = fichaFusionada(principal, otras);
+  // Historial de obras: los tramos de todas las fichas, en orden
+  const tramos = [principal, ...otras].flatMap(tramosObra);
+  if (tramos.length > 1) ficha.historialObras = tramos.sort((a, b) => String(a.desde || "").localeCompare(String(b.desde || "")));
   await setDoc(doc(col(empresaId), principalId), {
     ...ficha,
     fusionadas: [...(principal.fusionadas || []), ...otras.map(o => ({
@@ -396,4 +464,82 @@ export async function aplicarNormalizacion(empresaId, plan) {
     await batch.commit();
   }
   return plan.length;
+}
+
+// ─── Camiones surtidores ───────────────────────────────────────────────────
+//
+// Los camiones surtidores de combustible son máquinas del maestro con
+// `esSurtidor: true` (y `capacidad` en litros). Antes vivían en la colección
+// `equipos_surtidores`; mientras no se migren, se leen de ambas.
+
+export const esSurtidor = (m) => m?.esSurtidor === true || m?.categoria === "surtidor_combustible";
+
+const desdeSurtidorAntiguo = (s) => normalizarMaquina({
+  name: s.nombre || s.name || "", nombre: undefined,
+  patente: s.patente || "", code: s.code || s.patente || "",
+  type: s.tipo || s.type || "Camión surtidor",
+  marca: s.marca || "", modelo: s.modelo || "",
+  capacidad: s.capacidad ?? "",
+  esSurtidor: true,
+});
+
+/** Surtidores: máquinas marcadas + los de la colección antigua aún no migrados. */
+export async function cargarSurtidores(empresaId, maquinas) {
+  const lista = maquinas || await listarMaquinas(empresaId);
+  const delMaestro = lista.filter(esSurtidor);
+  let antiguos = [];
+  try { antiguos = (await getDocs(collection(db, "empresas", empresaId, "equipos_surtidores"))).docs.map(d => ({ id: d.id, ...d.data() })); }
+  catch { antiguos = []; }
+  const ids = new Set(delMaestro.map(m => m.id));
+  const pendientes = antiguos.filter(s => !ids.has(s.id))
+    .map(s => ({ ...s, nombre: s.nombre || s.name || "", name: s.name || s.nombre || "", _antiguo: true }));
+  return [...delMaestro.map(m => ({ ...m, nombre: m.nombre || m.name || "" })), ...pendientes];
+}
+
+/** Qué haría la migración: [{ antiguo, destino: maquina existente | null }]. */
+export async function planSurtidores(empresaId, maquinas) {
+  const lista = maquinas || await listarMaquinas(empresaId);
+  let antiguos = [];
+  try { antiguos = (await getDocs(collection(db, "empresas", empresaId, "equipos_surtidores"))).docs.map(d => ({ id: d.id, ...d.data() })); }
+  catch { antiguos = []; }
+  return antiguos.map(s => ({
+    antiguo: s,
+    destino: lista.find(m => m.id === s.id) || buscarMaquina(lista, { patente: s.patente, code: s.code || s.patente }) || null,
+  }));
+}
+
+/**
+ * Pasa los surtidores de `equipos_surtidores` al maestro:
+ *  · si ya hay una máquina con su patente, se marca como surtidor, se completa
+ *    y se re-apuntan los reportes de combustible al id de esa máquina;
+ *  · si no, se crea la máquina CON EL MISMO ID (los reportes siguen sirviendo).
+ * Luego se borra el documento antiguo.
+ */
+export async function migrarSurtidores(empresaId, plan, onProgreso) {
+  let creados = 0, unidos = 0, reapuntados = 0;
+  const usuario = auth.currentUser?.email || null;
+  for (const { antiguo, destino } of plan) {
+    onProgreso?.(antiguo.nombre || antiguo.patente || antiguo.id);
+    const datos = desdeSurtidorAntiguo(antiguo);
+    if (destino) {
+      const faltantes = { esSurtidor: true };
+      Object.entries(datos).forEach(([k, v]) => {
+        if ((destino[k] === undefined || destino[k] === null || destino[k] === "") && v !== "" && v != null) faltantes[k] = v;
+      });
+      await setDoc(doc(col(empresaId), destino.id), { ...faltantes, updatedAt: serverTimestamp(), actualizadoDesde: "migracion-surtidores" }, { merge: true });
+      if (destino.id !== antiguo.id) {
+        const r = await reapuntarReferencias(empresaId, new Set([antiguo.id]), destino.id);
+        reapuntados += Object.values(r).reduce((a, b) => a + b, 0);
+      }
+      unidos++;
+    } else {
+      await setDoc(doc(col(empresaId), antiguo.id), {
+        ownership: "OWN", active: true, ...datos,
+        createdAt: serverTimestamp(), creadoPor: usuario, creadoDesde: "migracion-surtidores",
+      }, { merge: true });
+      creados++;
+    }
+    await deleteDoc(doc(db, "empresas", empresaId, "equipos_surtidores", antiguo.id));
+  }
+  return { creados, unidos, reapuntados };
 }
