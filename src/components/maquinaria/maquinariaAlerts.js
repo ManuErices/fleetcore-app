@@ -3,6 +3,7 @@ import {
   listSpareParts, listMaintenancePlans, listMaintenanceEvents,
   listWorkOrders,
 } from "../../lib/db";
+import { desdeISO } from "../../lib/fechas";
 
 // ============================================================
 // buildMaquinariaAlerts — calcula todas las alertas del módulo
@@ -19,7 +20,8 @@ const DIAS_AVISO_CONTRATO = 15;  // contratos que terminan dentro de 15 días
 function diasHasta(fecha) {
   if (!fecha) return null;
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const f = new Date(fecha);
+  // "AAAA-MM-DD" a medianoche local (new Date(texto) lo toma en UTC: un día antes en Chile)
+  const f = (typeof fecha === "string" && desdeISO(fecha)) || new Date(fecha);
   return Math.ceil((f - hoy) / (1000 * 60 * 60 * 24));
 }
 

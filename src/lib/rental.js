@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
+import { hoyISO, desdeISO, isoLocal } from "./fechas";
 
 // ============================================================
 // MPF RENTAL — CAPA DE DATOS ADMINISTRATIVA
@@ -71,6 +72,7 @@ export const ESTADOS_EEPP = {
   pendiente: { label: "Pendiente", color: "bg-slate-100 text-slate-600 border-slate-200" },
   aprobado: { label: "Aprobado", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
   facturado: { label: "Facturado", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  abonado: { label: "Abonado", color: "bg-teal-100 text-teal-700 border-teal-200" },
   pagado: { label: "Pagado", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
   vencido: { label: "Vencido", color: "bg-red-100 text-red-700 border-red-200" },
   anulado: { label: "Anulado", color: "bg-slate-100 text-slate-400 border-slate-200" },
@@ -482,12 +484,13 @@ export function resumenCliente(clienteId, { contracts = [], quotes = [], payment
   const pagos = mio(payments).filter((p) => p.estado !== "anulado");
   const ocs = mio(purchaseOrders);
 
+  // saldoEEPP: un estado de pago abonado solo debe lo que falta.
   const porCobrar = pagos
     .filter((p) => estadoEfectivoEEPP(p) !== "pagado")
-    .reduce((s, p) => s + montoTotalEEPP(p), 0);
+    .reduce((s, p) => s + saldoEEPP(p), 0);
   const vencido = pagos
     .filter((p) => estadoEfectivoEEPP(p) === "vencido")
-    .reduce((s, p) => s + montoTotalEEPP(p), 0);
+    .reduce((s, p) => s + saldoEEPP(p), 0);
 
   return {
     contratos, cotizaciones, pagos, ocs,
@@ -678,7 +681,7 @@ export async function aceptarCotizacion(empresaId, quote, ocData = {}, file = nu
     estado: "aceptada",
     ocId,
     ocNumero: String(ocData.numeroOC || "").trim(),
-    fechaAceptacion: new Date().toISOString().slice(0, 10),
+    fechaAceptacion: hoyISO(),
     // La cotización queda apuntando a la ficha real. `clienteManual` se
     // conserva como registro de con qué datos se cotizó ese día.
     clienteId,
@@ -693,7 +696,7 @@ export async function rechazarCotizacion(empresaId, quoteId, motivo = "") {
   await updateDoc(EMPRESA_DOC(empresaId, "rentalQuotes", quoteId), {
     estado: "rechazada",
     motivoRechazo: motivo,
-    fechaRechazo: new Date().toISOString().slice(0, 10),
+    fechaRechazo: hoyISO(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -760,7 +763,7 @@ export async function upsertRentalPurchaseOrder(empresaId, oc) {
     cotizacionNumero: oc.cotizacionNumero || "",
     contratoId: oc.contratoId || null,
     contratoNumero: oc.contratoNumero || "",
-    fechaEmision: oc.fechaEmision || new Date().toISOString().slice(0, 10),
+    fechaEmision: oc.fechaEmision || hoyISO(),
     fechaVencimiento: oc.fechaVencimiento || "",
     moneda,
     valorUF: moneda === "UF" ? valorUF : null,
@@ -936,6 +939,23 @@ export async function upsertRentalContract(empresaId, contract) {
     }
   }
 
+  // Una máquina no puede quedar en dos contratos activos con fechas que se
+  // cruzan. Se valida aquí (no solo en la UI) porque la cotización → contrato
+  // y el contrato manual pasan por esta función.
+  if ((contract.estado || "borrador") === "activo") {
+    const activos = await listRentalContracts(empresaId, { estado: "activo" });
+    const choques = conflictosMaquinasContrato(
+      { id: contract.id, lineas, fechaInicio: contract.fechaInicio, fechaFin: contract.fechaFin },
+      activos
+    );
+    if (choques.length) {
+      const detalle = choques
+        .map((c) => `${c.linea.descripcion || c.linea.patente || c.linea.machineId} (contrato ${c.contrato.numero || c.contrato.id})`)
+        .join(", ");
+      throw new Error(`Equipo ya arrendado en esas fechas: ${detalle}`);
+    }
+  }
+
   const data = {
     clienteId: contract.clienteId,
     clienteNombre: contract.clienteNombre || "",
@@ -1068,50 +1088,89 @@ export async function deleteRentalContract(empresaId, contractId) {
   await deleteDoc(EMPRESA_DOC(empresaId, "rentalContracts", contractId));
 
   if (contrato) {
-    await liberarMaquinas(empresaId, (contrato.lineas || []).map((l) => l.machineId));
+    await liberarMaquinas(empresaId, (contrato.lineas || []).map((l) => l.machineId), contractId);
   }
+}
+
+// ¿Se cruzan dos rangos de fechas "AAAA-MM-DD"? Sin fecha de término = abierto.
+export function rangosSeCruzan(aIni, aFin, bIni, bFin) {
+  const ai = aIni || "0000-01-01", af = aFin || "9999-12-31";
+  const bi = bIni || "0000-01-01", bf = bFin || "9999-12-31";
+  return ai <= bf && bi <= af;
+}
+
+// Líneas del contrato cuya máquina ya está en OTRO contrato activo con fechas
+// que se cruzan. Devuelve [{ linea, contrato }].
+export function conflictosMaquinasContrato(contrato, contratosActivos = []) {
+  const choques = [];
+  for (const linea of contrato.lineas || []) {
+    if (!linea.machineId) continue;
+    for (const otro of contratosActivos) {
+      if (!otro || otro.id === contrato.id || otro.estado !== "activo") continue;
+      if (!(otro.lineas || []).some((l) => l.machineId === linea.machineId)) continue;
+      if (rangosSeCruzan(contrato.fechaInicio, contrato.fechaFin, otro.fechaInicio, otro.fechaFin)) {
+        choques.push({ linea, contrato: otro });
+      }
+    }
+  }
+  return choques;
+}
+
+const LIBRE = () => ({ disponibilidad: "disponible", contratoActivoId: null, clienteArriendoNombre: "", updatedAt: Timestamp.now() });
+
+// Lee las máquinas y deja solo las que hoy están tomadas por `contratoId`.
+// Antes se liberaban a ciegas: finalizar o borrar un contrato viejo soltaba
+// una máquina que ya estaba arrendada en OTRO contrato vigente.
+async function maquinasDelContrato(empresaId, machineIds, contratoId) {
+  const ids = [...new Set(machineIds.filter(Boolean))];
+  const snaps = await Promise.all(ids.map((id) => getDoc(EMPRESA_DOC(empresaId, "machines", id))));
+  return snaps
+    .filter((s) => s.exists() && s.data().contratoActivoId === contratoId)
+    .map((s) => s.id);
 }
 
 export async function syncMachineRentalStatus(empresaId, contract, machineIdsALiberar = []) {
   const batch = writeBatch(db);
   const arrendando = contract.estado === "activo";
+  const idsLineas = (contract.lineas || []).map((l) => l.machineId).filter(Boolean);
 
-  for (const linea of contract.lineas || []) {
-    if (!linea.machineId) continue;
-    batch.set(
-      EMPRESA_DOC(empresaId, "machines", linea.machineId),
-      {
-        disponibilidad: arrendando ? "arrendado" : "disponible",
-        contratoActivoId: arrendando ? contract.id : null,
-        clienteArriendoNombre: arrendando ? contract.clienteNombre || "" : "",
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true }
-    );
+  if (arrendando) {
+    for (const machineId of idsLineas) {
+      batch.set(
+        EMPRESA_DOC(empresaId, "machines", machineId),
+        {
+          disponibilidad: "arrendado",
+          contratoActivoId: contract.id,
+          clienteArriendoNombre: contract.clienteNombre || "",
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true }
+      );
+    }
+  } else {
+    // Contrato no activo: solo suelta las máquinas que sigue teniendo tomadas.
+    for (const machineId of await maquinasDelContrato(empresaId, idsLineas, contract.id)) {
+      batch.set(EMPRESA_DOC(empresaId, "machines", machineId), LIBRE(), { merge: true });
+    }
   }
 
-  for (const machineId of machineIdsALiberar) {
-    if (!machineId) continue;
-    batch.set(
-      EMPRESA_DOC(empresaId, "machines", machineId),
-      { disponibilidad: "disponible", contratoActivoId: null, clienteArriendoNombre: "", updatedAt: Timestamp.now() },
-      { merge: true }
-    );
+  // Máquinas que se quitaron del contrato: solo si seguían asignadas a él.
+  for (const machineId of await maquinasDelContrato(empresaId, machineIdsALiberar, contract.id)) {
+    batch.set(EMPRESA_DOC(empresaId, "machines", machineId), LIBRE(), { merge: true });
   }
 
   await batch.commit();
 }
 
-export async function liberarMaquinas(empresaId, machineIds = []) {
-  const ids = machineIds.filter(Boolean);
+// Libera máquinas. Con `contratoId`, solo las que están tomadas por ese contrato.
+export async function liberarMaquinas(empresaId, machineIds = [], contratoId) {
+  const ids = contratoId === undefined
+    ? machineIds.filter(Boolean)
+    : await maquinasDelContrato(empresaId, machineIds, contratoId);
   if (!ids.length) return;
   const batch = writeBatch(db);
   for (const machineId of ids) {
-    batch.set(
-      EMPRESA_DOC(empresaId, "machines", machineId),
-      { disponibilidad: "disponible", contratoActivoId: null, clienteArriendoNombre: "", updatedAt: Timestamp.now() },
-      { merge: true }
-    );
+    batch.set(EMPRESA_DOC(empresaId, "machines", machineId), LIBRE(), { merge: true });
   }
   await batch.commit();
 }
@@ -1216,7 +1275,7 @@ export async function upsertRentalPayment(empresaId, payment) {
     ivaUF: d.ivaUF,
     totalUF: d.totalUF,
     afectoIVA,
-    fechaEmision: payment.fechaEmision || new Date().toISOString().slice(0, 10),
+    fechaEmision: payment.fechaEmision || hoyISO(),
     fechaVencimiento: payment.fechaVencimiento || "",
     fechaAprobacion: payment.fechaAprobacion || "",
     fechaPago: payment.fechaPago || "",
@@ -1248,7 +1307,7 @@ export async function upsertRentalPayment(empresaId, payment) {
 
 export async function deleteRentalPayment(empresaId, paymentId) {
   const snap = await getDoc(EMPRESA_DOC(empresaId, "rentalPayments", paymentId));
-  if (snap.exists() && snap.data().estado === "pagado") {
+  if (snap.exists() && ["pagado", "abonado"].includes(snap.data().estado)) {
     throw new Error("No se puede eliminar un estado de pago ya pagado. Anúlalo en su lugar.");
   }
   for (const a of (snap.exists() ? snap.data().archivos || [] : [])) await borrarArchivo(a.path);
@@ -1259,7 +1318,7 @@ export async function deleteRentalPayment(empresaId, paymentId) {
 export async function aprobarEEPP(empresaId, paymentId, { fechaAprobacion, observaciones = "" } = {}) {
   await updateDoc(EMPRESA_DOC(empresaId, "rentalPayments", paymentId), {
     estado: "aprobado",
-    fechaAprobacion: fechaAprobacion || new Date().toISOString().slice(0, 10),
+    fechaAprobacion: fechaAprobacion || hoyISO(),
     observacionesAprobacion: observaciones,
     updatedAt: serverTimestamp(),
   });
@@ -1306,15 +1365,39 @@ export async function facturarEEPP(empresaId, paymentId, factura = {}, file = nu
   });
 }
 
+// Registra un pago (total o parcial). Antes todo pago dejaba el EEPP en
+// "pagado" aunque el monto fuera menor al total, y el saldo desaparecía de la
+// cobranza. Ahora los pagos se acumulan: si falta, queda "abonado" con su saldo.
 export async function registrarPagoEEPP(empresaId, paymentId, { fechaPago, medioPago = "", montoPagado } = {}) {
-  const patch = {
-    estado: "pagado",
-    fechaPago: fechaPago || new Date().toISOString().slice(0, 10),
+  const ref = EMPRESA_DOC(empresaId, "rentalPayments", paymentId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("El estado de pago no existe");
+  const actual = snap.data();
+  if (["pagado", "anulado"].includes(actual.estado)) throw new Error(`El estado de pago ya está ${actual.estado}`);
+
+  const saldoPrevio = saldoEEPP(actual);
+  const monto = montoPagado == null || montoPagado === "" ? saldoPrevio : Number(montoPagado);
+  if (!(monto > 0)) throw new Error("Indica el monto recibido");
+  const fecha = fechaPago || hoyISO();
+  const r = aplicarAbono(actual, monto);
+  await updateDoc(ref, {
+    estado: r.estado,
+    montoPagado: r.montoPagado,
+    saldo: r.saldo,
+    fechaPago: fecha,
     medioPago,
+    abonos: [...(actual.abonos || []), { fecha, monto, medioPago }],
     updatedAt: serverTimestamp(),
-  };
-  if (montoPagado != null) patch.montoPagado = Number(montoPagado);
-  await updateDoc(EMPRESA_DOC(empresaId, "rentalPayments", paymentId), patch);
+  });
+}
+
+// Pura: resultado de sumar un abono a un EEPP. Tolera $1 de redondeo.
+export function aplicarAbono(p, monto) {
+  const total = montoTotalEEPP(p);
+  const previo = p?.estado === "abonado" ? Number(p.montoPagado) || 0 : 0;
+  const montoPagado = previo + (Number(monto) || 0);
+  const saldo = Math.max(0, total - montoPagado);
+  return { estado: saldo <= 1 ? "pagado" : "abonado", montoPagado, saldo: saldo <= 1 ? 0 : saldo };
 }
 
 export async function anularEEPP(empresaId, paymentId, motivo = "") {
@@ -1348,7 +1431,7 @@ export async function registrarGestionCobranza(empresaId, paymentId, gestion = {
   const actuales = snap.exists() ? snap.data().gestiones || [] : [];
   const nueva = {
     id: `g_${Date.now()}`,
-    fecha: gestion.fecha || new Date().toISOString().slice(0, 10),
+    fecha: gestion.fecha || hoyISO(),
     tipo: gestion.tipo || "llamada", // llamada | correo | visita | compromiso
     detalle: gestion.detalle.trim(),
     compromisoPago: gestion.compromisoPago || "",
@@ -1372,6 +1455,14 @@ export function montoTotalEEPP(p) {
   return Number(p?.factura?.total ?? p?.total ?? p?.monto ?? 0);
 }
 
+// Lo que falta cobrar: 0 si está pagado o anulado; en un abonado, total − abonos.
+export function saldoEEPP(p) {
+  if (!p || ["pagado", "anulado"].includes(p.estado)) return 0;
+  const total = montoTotalEEPP(p);
+  if (p.estado === "abonado") return Math.max(0, total - (Number(p.montoPagado) || 0));
+  return total;
+}
+
 // Días que faltan para vencer (negativo = días de mora).
 export function diasParaVencer(p) {
   const venc = p?.factura?.fechaVencimiento || p?.fechaVencimiento;
@@ -1384,7 +1475,8 @@ export function diasVencidoEEPP(p) {
   return d != null && d < 0 ? Math.abs(d) : 0;
 }
 
-// Antigüedad de la deuda por tramos, sobre lo no pagado.
+// Antigüedad de la deuda por tramos, sobre lo no pagado (los abonados cuentan
+// por su saldo).
 export function agingCobranza(payments = []) {
   const tramos = {
     porVencer: { label: "Por vencer", monto: 0, cantidad: 0 },
@@ -1403,7 +1495,7 @@ export function agingCobranza(payments = []) {
       : dias <= 60 ? "d31_60"
       : dias <= 90 ? "d61_90"
       : "d90";
-    tramos[clave].monto += montoTotalEEPP(p);
+    tramos[clave].monto += saldoEEPP(p);
     tramos[clave].cantidad += 1;
   }
   return tramos;
@@ -1423,14 +1515,18 @@ export function suggestPaymentsForContract(contract, { prorratear = true, diasPa
 
   const inicio = parseFechaLocal(contract.fechaInicio);
   const fin = contract.fechaFin ? parseFechaLocal(contract.fechaFin) : null;
-  const limite = fin || new Date(inicio.getFullYear(), inicio.getMonth() + 11, 1);
+  // Contrato sin término: se proponen los períodos hasta el mes en curso
+  // (antes se cortaba en inicio + 11 meses y un contrato abierto de más de
+  // un año dejaba de proponer estados de pago).
+  const hoyChile = desdeISO(hoyISO());
+  const limite = fin || new Date(hoyChile.getFullYear(), hoyChile.getMonth(), 1);
   const afectoIVA = contract.afectoIVA !== false;
 
   const cobros = [];
   let cursor = new Date(inicio.getFullYear(), inicio.getMonth(), 1);
   let guard = 0;
 
-  while (cursor <= limite && guard < 36) {
+  while (cursor <= limite && guard < 240) {
     const anio = cursor.getFullYear();
     const mes = cursor.getMonth();
     const diasMes = new Date(anio, mes + 1, 0).getDate();
@@ -1464,8 +1560,9 @@ export function suggestPaymentsForContract(contract, { prorratear = true, diasPa
         afectoIVA,
         diasCubiertos,
         prorrateado: factor < 1,
-        fechaEmision: cierre.toISOString().slice(0, 10),
-        fechaVencimiento: sumarDias(cierre.toISOString(), Number(diasPago) || 30),
+        // isoLocal: `cierre` se construyó en hora local; toISOString lo pasaría a UTC.
+        fechaEmision: isoLocal(cierre),
+        fechaVencimiento: sumarDias(isoLocal(cierre), Number(diasPago) || 30),
         estado: "pendiente",
       });
     }
@@ -1591,7 +1688,7 @@ function parseFechaLocal(valor) {
 function sumarDias(fechaISO, dias) {
   const base = parseFechaLocal(fechaISO);
   base.setDate(base.getDate() + Number(dias || 0));
-  return base.toISOString().slice(0, 10);
+  return isoLocal(base);
 }
 
 // `tarifaValor` va en la moneda del documento: pesos enteros o UF con 2 decimales.
