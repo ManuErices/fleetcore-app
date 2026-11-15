@@ -79,12 +79,14 @@ async function cargarRRHH(empresaId) {
  * Cada liquidación vigente del año, calculada con el motor de RRHH:
  * { mes (1-12), trabajador, liquidacion, haberes, aportes, descuentos, liquido, borrador }.
  */
-async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores = false } = {}) {
+async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorradores = false, soloMes = null } = {}) {
   const { liquidaciones, trabajadores, contratos, ctx, config } = datos;
   const anioStr = String(anio);
   const salida = [];
   let borradores = 0, sinContrato = 0;
   for (let m = 1; m <= 12; m++) {
+    // soloMes: la centralización pide un mes y no tiene por qué calcular el año
+    if (soloMes && m !== Number(soloMes)) continue;
     const mes = pad(m);
     const delMes = liquidacionesVigentes(
       liquidaciones.filter(l => pad(l.mes) === mes && String(l.anio) === anioStr));
@@ -106,6 +108,7 @@ async function calcularLiquidacionesAnio(empresaId, anio, datos, { incluirBorrad
         haberes: Number(fila[5201]) || 0, aportes: Number(fila[5410]) || 0,
         asignacionFamiliar: Number(fila[2311]) || 0,
         descuentos: Number(fila[5301]) || 0, liquido: Number(fila[5501]) || 0,
+        fila,   // fila LRE completa (la usa la centralización contable)
       });
     });
   }
@@ -212,4 +215,33 @@ export async function resumenRRHHAnio(empresaId, anio, { incluirBorradores = fal
     });
   }
   return { anio: Number(anio), meses, totalBorradores, sinContrato };
+}
+
+/**
+ * Códigos del LRE sumados para un mes, para la centralización contable en el
+ * Libro Diario (src/lib/contabilidad/centralizacion.js). Mismo motor y mismas
+ * filas que el archivo del LRE, así el asiento cuadra con lo declarado.
+ * Además separa `saludIsapre` (3143 + 3144 de quienes están en Isapre), porque
+ * Fonasa e Isapre se pagan a instituciones distintas.
+ *
+ * @returns {Promise<{ codigos, liquidaciones, borradores, sinContrato }>}
+ *   borradores = liquidaciones en borrador del mes (incluidas o no).
+ */
+export async function codigosLREMes(empresaId, anio, mes, { incluirBorradores = false } = {}) {
+  const datos = await cargarRRHH(empresaId);
+  const { filas, borradores, sinContrato } = await calcularLiquidacionesAnio(
+    empresaId, anio, datos, { incluirBorradores, soloMes: mes });
+  const codigos = { saludIsapre: 0 };
+  filas.filter(f => f.mes === Number(mes)).forEach(f => {
+    Object.entries(f.fila).forEach(([k, v]) => {
+      // Solo montos (haberes 2xxx, descuentos 3xxx, aportes 4xxx, totales 5xxx);
+      // la identificación (1xxx) no se suma.
+      if (Number(k) < 2000) return;
+      codigos[k] = (codigos[k] || 0) + (Number(v) || 0);
+    });
+    if (f.trabajador?.prevision === 'Isapre') {
+      codigos.saludIsapre += (Number(f.fila[3143]) || 0) + (Number(f.fila[3144]) || 0);
+    }
+  });
+  return { codigos, liquidaciones: filas.length, borradores, sinContrato };
 }

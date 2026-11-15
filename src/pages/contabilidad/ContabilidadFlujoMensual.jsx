@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { doc, getDoc, getDocs, setDoc, updateDoc, deleteField, collection, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, updateDoc, deleteField, collection, serverTimestamp, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { hoyISO, partesISO } from "../../lib/fechas";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -22,6 +22,7 @@ import {
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
 import { detectarRendiciones, resumirRendiciones, resumirRendicionesDocs, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
+import { controlVentas } from "../../lib/contabilidad/ventasControl";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -634,6 +635,124 @@ function ModalFleetCore({ empresaId, anio, data, onAplicar, onCerrar }) {
         </>
       )}
     </ModalCuaderno>
+  );
+}
+
+/**
+ * Control de ventas (solo lectura): Ingresos de la planilla (lo que dejó el
+ * RCV de ventas o se escribió a mano) contra lo devengado en FleetCore:
+ * estados de pago de Rental y de Oficina Técnica. No escribe nada ni cambia la
+ * base imponible: sirve para ver EEPP sin factura o facturados en otro mes.
+ * Se carga recién al abrirla, para no leer Rental en cada visita.
+ */
+function HojaControlVentas({ empresaId, anio, ventas }) {
+  const [abierta, setAbierta] = useState(false);
+  const [docs, setDocs] = useState(null);   // { rental, ot }
+  const [error, setError] = useState("");
+  const [detalle, setDetalle] = useState(null);   // mes con detalle abierto
+
+  useEffect(() => {
+    if (!abierta || !empresaId) return;
+    let vivo = true;
+    setDocs(null); setError("");
+    (async () => {
+      try {
+        const [r, o] = await Promise.all([
+          getDocs(collection(db, "empresas", empresaId, "rentalPayments")).catch(() => null),
+          getDocs(query(collection(db, "empresas", empresaId, "estadoPagoIngresos"), where("year", "==", anio))).catch(() => null),
+        ]);
+        if (!vivo) return;
+        setDocs({
+          rental: r ? r.docs.map(d => ({ id: d.id, ...d.data() })) : [],
+          ot: o ? o.docs.map(d => d.data()) : [],
+          sinPermiso: !r || !o,
+        });
+      } catch (e) {
+        console.error("Error leyendo ventas de FleetCore:", e);
+        if (vivo) setError("No se pudieron leer los estados de pago.");
+      }
+    })();
+    return () => { vivo = false; };
+  }, [abierta, empresaId, anio]);
+
+  const meses = useMemo(() => (docs ? controlVentas(docs.rental, docs.ot, anio, ventas) : null), [docs, anio, ventas]);
+  const total = (k) => (meses || []).reduce((s, m) => s + m[k], 0);
+
+  return (
+    <Hoja titulo="Control de ventas"
+      extra={<Boton variante="texto" onClick={() => setAbierta(v => !v)} aria-expanded={abierta}>{abierta ? "Ocultar" : "Comparar con FleetCore"}</Boton>}>
+      <p className="m-0 -mt-1 text-[15px] text-cuaderno-grafito">
+        Ingresos de la planilla (RCV de ventas) contra los estados de pago emitidos en FleetCore. Es solo un control: no cambia la base imponible.
+      </p>
+      {abierta && (error ? <Nota etiqueta="Ojo:" className="mt-3">{error}</Nota> : !meses ? (
+        <p className="m-0 py-6 text-center text-[17px] text-cuaderno-grafito">Leyendo estados de pago…</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {docs.sinPermiso && <Nota etiqueta="Ojo:">No se pudo leer Rental u Oficina Técnica con tu usuario: la columna queda incompleta.</Nota>}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[16px]" style={{ minWidth: 720 }}>
+              <thead>
+                <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                  {["Mes", "Ventas planilla (RCV)", "EEPP Rental", "EEPP Oficina Técnica", "FleetCore", "Diferencia", "Revisar"].map((h, i) => (
+                    <th key={h} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 || i === 6 ? "text-left" : "text-right"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {meses.map(m => {
+                  const avisos = m.sinFactura.length + m.facturaOtroMes.length;
+                  const vacio = !m.rcv && !m.fleetcore;
+                  return (
+                    <React.Fragment key={m.mes}>
+                      <tr className="border-b border-cuaderno-renglon">
+                        <td className="px-2 py-1">{MESES[m.mes]}</td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.rcv} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.rental} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.ot} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right"><Cifra valor={m.fleetcore} escala="pesos" vacio="·" /></td>
+                        <td className="px-2 py-1 text-right">{vacio ? null : <Cifra valor={m.diferencia} escala="pesos" vacio="0" />}</td>
+                        <td className="px-2 py-1 text-[14px]">
+                          {avisos > 0 && (
+                            <button onClick={() => setDetalle(d => (d === m.mes ? null : m.mes))}
+                              className="text-cuaderno-grafito underline underline-offset-[3px] decoration-cuaderno-columna hover:text-cuaderno-tinta">
+                              {[m.sinFactura.length && `${m.sinFactura.length} EEPP sin factura`, m.facturaOtroMes.length && `${m.facturaOtroMes.length} facturado en otro mes`].filter(Boolean).join(" · ")}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {detalle === m.mes && (
+                        <tr className="border-b border-cuaderno-renglon">
+                          <td colSpan={7} className="px-4 py-2 text-[15px]">
+                            {m.sinFactura.map(p => (
+                              <p key={"s" + p.numero} className="m-0">EEPP {p.numero} {p.cliente && `· ${p.cliente}`} · <Cifra valor={p.neto} escala="pesos" color="heredar" /> · sin factura registrada</p>
+                            ))}
+                            {m.facturaOtroMes.map(p => (
+                              <p key={"f" + p.numero} className="m-0">EEPP {p.numero} {p.cliente && `· ${p.cliente}`} · <Cifra valor={p.neto} escala="pesos" color="heredar" /> · factura {p.factura} de {MESES[p.mesFactura.mes].toLowerCase()} {p.mesFactura.anio}</p>
+                            ))}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="px-2 py-2">Total</td>
+                  {["rcv", "rental", "ot", "fleetcore", "diferencia"].map(k => (
+                    <td key={k} className="px-2 py-2 text-right"><Cifra valor={total(k)} escala="pesos" vacio="0" raya="total" /></td>
+                  ))}
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="m-0 text-[14px] text-cuaderno-grafito">
+            Rental: neto de cada estado de pago por su fecha de emisión, sin los anulados. Oficina Técnica: estados de pago + reajustes + multas del mes de cada obra (las retenciones no, la factura va por el total). Una diferencia positiva son ventas facturadas sin estado de pago en FleetCore (otros clientes o servicios); una negativa, estados de pago aún sin factura o facturados en otro mes.
+          </p>
+        </div>
+      ))}
+    </Hoja>
   );
 }
 
@@ -1483,6 +1602,10 @@ export default function ContabilidadFlujoMensual() {
       mejorMes, peorMes,
     };
   }, [data, tasa, tasaPPM]);
+  // Fila Ingresos tal como está (para el control de ventas; memo para que la
+  // comparación no se recalcule en cada tecla de otra fila)
+  const filaIngresos = data.filas.find(f => f.id === "ingresos")?.valores;
+  const ventasPlanilla = useMemo(() => (filaIngresos || []).map(num), [filaIngresos]);
 
   if (!empresaId) {
     return <div className="cuaderno px-8 pt-5 text-[18px] text-cuaderno-grafito">Cargando empresa…</div>;
@@ -1762,6 +1885,9 @@ export default function ContabilidadFlujoMensual() {
               </table>
             </div>
           </Hoja>
+
+          {/* Control de ventas contra FleetCore (solo lectura) */}
+          <HojaControlVentas empresaId={empresaId} anio={anio} ventas={ventasPlanilla} />
 
           {/* PPM */}
           <Hoja titulo="Pagos provisionales mensuales">
