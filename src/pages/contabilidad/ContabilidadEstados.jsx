@@ -452,7 +452,10 @@ export default function ContabilidadEstados() {
   //  · Estado de Resultados          → MOVIMIENTOS del período (flujos del mes)
   const saldosAcum   = saldosAcumulados();
   const saldosMes    = saldosPeriodo();
-  const saldosDelAnio = saldosAnio();
+  // El ESF separa el resultado del ejercicio del histórico restando dos mapas;
+  // ambos deben incluir el asiento de cierre o la resta deja el resultado del
+  // año como "ejercicios anteriores" con signo contrario.
+  const saldosDelAnio = saldosAnio(null, { conCierre: true });
 
   const VISTAS = [
     { id: "balance8", label: "Balance 8 col."        },
