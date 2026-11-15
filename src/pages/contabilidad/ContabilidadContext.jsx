@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { collection, getDoc, getDocs, addDoc, updateDoc, deleteDoc, setDoc, doc, query, orderBy, where, serverTimestamp } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
+import { mesActualISO, partesISO, hoyISO } from "../../lib/fechas";
 import {
   REGIMENES_TRIBUTARIOS, CONFIG_TRIBUTARIA_DEFECTO,
   tasaPrimeraCategoria as tasaPrimeraCategoriaPara,
@@ -22,7 +23,10 @@ export function fmtM(n) {
   if (Math.abs(n) >= 1_000) return (n < 0 ? "-$" : "$") + (Math.abs(n) / 1_000).toFixed(0) + "K";
   return fmt(n);
 }
-export function mesKey(d = new Date()) {
+// Sin argumento: el mes actual en Chile (no el del reloj/zona del navegador).
+// Con un Date construido en hora local (new Date(a, m, 1)) da su "AAAA-MM".
+export function mesKey(d) {
+  if (!d) return mesActualISO();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 // ─── Reparación de caracteres mal decodificados ───────────────────────────────
@@ -78,6 +82,30 @@ export async function leerTextoDetectando(file) {
 // Normaliza un RUT para usarlo como clave estable (id de documento / lookup de reglas)
 export function normalizaRut(rut) {
   return String(rut || "").replace(/[-.\s]/g, "").toUpperCase();
+}
+/**
+ * Llave de un documento importado al Libro Diario: "origen|tipo|folio|rut".
+ * Deduplica por documento (no por grupo de proveedor) y por origen, así una
+ * venta y una compra con el mismo folio no se confunden.
+ */
+export function claveDocImport(origen, tipo, folio, rut) {
+  return `${origen}|${parseInt(tipo, 10) || 0}|${String(folio ?? "").trim().replace(/^0+/, "")}|${normalizaRut(rut)}`;
+}
+/**
+ * Llave "legado" de un documento: para asientos importados antes de importDocs,
+ * que solo guardaban importHash = "período|rut|folios" (rut con prefijo "NC-"
+ * o "NCE-" en las notas de crédito). No traen tipo de documento, así que solo
+ * distingue nota de crédito o no.
+ */
+export function claveDocLegado(origen, esNC, folio, rut) {
+  return `legado|${origen}|${esNC ? 1 : 0}|${String(folio ?? "").trim().replace(/^0+/, "")}|${normalizaRut(rut)}`;
+}
+function clavesDesdeHashLegado(origen, importHash) {
+  const [, rutTxt = "", foliosTxt = ""] = String(importHash).split("|");
+  const esNC = /^NCE?-/.test(rutTxt);
+  const rut = rutTxt.replace(/^NCE?-/, "");
+  return foliosTxt.split(",").filter(Boolean)
+    .map(f => claveDocLegado(origen, esNC, f.replace(/^NCE?°/, ""), rut));
 }
 export const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 export const MESES_S = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
@@ -147,8 +175,8 @@ export function ContabilidadProvider({ children }) {
   const [asientosTodos, setAsientosTodos] = useState([]);
   // Inicializar con el período actual para que el selector no aparezca vacío durante la carga
   const [periodos, setPeriodos] = useState(() => {
-    const d = new Date();
-    return [{ id: mesKey(d), mes: d.getMonth(), anio: d.getFullYear(), cerrado: false }];
+    const h = partesISO(hoyISO());
+    return [{ id: mesKey(), mes: h.mes - 1, anio: h.anio, cerrado: false }];
   });
   const [loadingCuentas, setLoadingC] = useState(true);
   const [loadingAsientos, setLoadingA] = useState(true);
@@ -263,10 +291,10 @@ export function ContabilidadProvider({ children }) {
     if (!empresaId) return;
     try {
       // Siempre generar los últimos 24 meses — esto nunca falla
-      const hoy = new Date();
+      const hoy = partesISO(hoyISO());   // mes actual en Chile
       const generados = [];
       for (let i = 0; i < 24; i++) {
-        const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+        const d = new Date(hoy.anio, hoy.mes - 1 - i, 1);
         const id = mesKey(d);
         generados.push({ id, mes: d.getMonth(), anio: d.getFullYear(), cerrado: false });
       }
@@ -344,17 +372,24 @@ export function ContabilidadProvider({ children }) {
     return mapa;
   }
 
+  // El asiento de cierre (origen "cierre") salda las cuentas de resultado
+  // contra Resultado del Ejercicio. Sirve para el balance, pero si entra a las
+  // cifras de RESULTADO deja diciembre y el F22 en cero después de cerrar.
+  // Por eso saldosPeriodo y saldosAnio lo excluyen salvo que se pida
+  // { conCierre: true } (el ESF, que compara contra saldosAcumulados).
+  const esCierre = (a) => a.origen === "cierre";
+
   /**
-   * MOVIMIENTOS de un período (por defecto, el activo).
-   * Úsalo para Estado de Resultados, F29 e IVA: son flujos del mes.
+   * MOVIMIENTOS de un período (por defecto, el activo), sin el asiento de cierre.
+   * Úsalo para Estado de Resultados, F29, PPM e IVA: son flujos del mes.
    */
-  const saldosPeriodo = useCallback((periodo = null) => {
+  const saldosPeriodo = useCallback((periodo = null, { conCierre = false } = {}) => {
     const p = periodo || periodoActivo;
-    return acumular(asientosTodos.filter(a => a.periodo === p));
+    return acumular(asientosTodos.filter(a => a.periodo === p && (conCierre || !esCierre(a))));
   }, [asientosTodos, periodoActivo]);
 
   /**
-   * SALDOS ACUMULADOS hasta el período indicado, inclusive.
+   * SALDOS ACUMULADOS hasta el período indicado, inclusive (con el cierre).
    * Úsalo para Estado de Situación Financiera y Balance de Comprobación:
    * un saldo de balance es la suma de todo lo ocurrido hasta la fecha de corte.
    * Los períodos son "YYYY-MM", así que la comparación de strings ya ordena bien.
@@ -365,14 +400,15 @@ export function ContabilidadProvider({ children }) {
   }, [asientosTodos, periodoActivo]);
 
   /**
-   * ACUMULADO DEL AÑO hasta el período indicado (enero → corte).
+   * ACUMULADO DEL AÑO hasta el período indicado (enero → corte), sin el cierre.
    * Úsalo para el F22 y cualquier cifra anual: la renta líquida imponible se
    * determina sobre el ejercicio, no sobre un mes.
    */
-  const saldosAnio = useCallback((hasta = null) => {
+  const saldosAnio = useCallback((hasta = null, { conCierre = false } = {}) => {
     const corte = hasta || periodoActivo;
     const anio = corte.split("-")[0];
-    return acumular(asientosTodos.filter(a => a.periodo && a.periodo.startsWith(anio) && a.periodo <= corte));
+    return acumular(asientosTodos.filter(a => a.periodo && a.periodo.startsWith(anio) && a.periodo <= corte
+      && (conCierre || !esCierre(a))));
   }, [asientosTodos, periodoActivo]);
 
   // Compatibilidad: `saldos()` conserva la firma anterior (movimientos del período).
@@ -545,23 +581,37 @@ export function ContabilidadProvider({ children }) {
     cargarAsientos();
   };
 
-  // Buscar qué importHash ya existen en Firestore para un período dado
-  // Permite detectar duplicados antes de importar
+  // Llaves de lo ya importado, para no duplicar al reimportar:
+  //   · importHash de cada asiento (formato antiguo: período|rut|folios del grupo)
+  //   · importDocs: una llave por DOCUMENTO, "origen|tipo|folio|rut"
+  //     (claveDocImport). Con esto un folio nuevo de un proveedor ya importado
+  //     entra solo, sin reimportar todo el grupo.
+  // Antes se filtraba origen == "iconstruye" y las ventas del RCV (origen
+  // "rcv_venta") nunca se reconocían como importadas. Ahora se miran todos los
+  // orígenes del período en Firestore (datos frescos) y, además, todos los
+  // asientos cargados en memoria (un documento puede haber caído en otro
+  // período). Los asientos reversados no cuentan: se reversan para reimportar.
   const buscarHashesExistentes = async (periodo_) => {
-    if (!empresaId) return new Set();
+    const hashes = new Set();
+    const agregar = (a) => {
+      if (!a || a.reversado || a.reversaDe) return;
+      if (a.importHash) hashes.add(a.importHash);
+      (a.importDocs || []).forEach(k => hashes.add(k));
+      // Importaciones antiguas: se reconstruye una llave por folio desde el hash
+      if (!a.importDocs && a.importHash && ["iconstruye", "rcv_venta"].includes(a.origen)) {
+        clavesDesdeHashLegado(a.origen, a.importHash).forEach(k => hashes.add(k));
+      }
+    };
+    asientosTodos.forEach(agregar);
+    if (!empresaId) return hashes;
     try {
       const snap = await getDocs(query(
         collection(db, "empresas", empresaId, "journal_entries"),
-        where("periodo", "==", periodo_),
-        where("origen", "==", "iconstruye")
+        where("periodo", "==", periodo_)
       ));
-      const hashes = new Set();
-      snap.docs.forEach(d => {
-        const h = d.data().importHash;
-        if (h) hashes.add(h);
-      });
-      return hashes;
-    } catch (e) { console.error("buscarHashesExistentes:", e); return new Set(); }
+      snap.docs.forEach(d => agregar(d.data()));
+    } catch (e) { console.error("buscarHashesExistentes:", e); }
+    return hashes;
   };
 
   // ── Reglas de clasificación de gasto por proveedor ─────────────────────────

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut, leerTextoDetectando } from "./ContabilidadContext";
+import { useContabilidad, PeriodoSelector, TIPOS_MAP, MESES, normalizaRut, leerTextoDetectando, claveDocImport } from "./ContabilidadContext";
 import ModalImportIConstruct from "./ContabilidadImportIConstruct";
 import ModalExportPDF from "./ContabilidadExportPDF";
 import {
@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
+import { hoyISO, serialExcelAISO } from "../../lib/fechas";
 
 // Categorías rápidas para reclasificar asientos importados desde el Libro Diario
 const CATEGORIAS_RAPIDAS = [
@@ -58,7 +59,7 @@ function cuadraturaAsiento(a) {
 // ─── Modal asiento ────────────────────────────────────────────────────────────
 const LINEA_EMPTY = { cuentaId: "", cuentaNombre: "", debe: "", haber: "", descripcion: "" };
 const ASIENTO_EMPTY = {
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: hoyISO(),
   glosa: "",
   tipo: "manual",
   lineas: [{ ...LINEA_EMPTY }, { ...LINEA_EMPTY }],
@@ -111,7 +112,7 @@ function ModalAsiento({ isOpen, onClose, editando, onSave, cuentas, periodoActiv
   React.useEffect(() => {
     setForm(editando
       ? { ...ASIENTO_EMPTY, ...editando, lineas: editando.lineas?.length ? editando.lineas : [{ ...LINEA_EMPTY }, { ...LINEA_EMPTY }] }
-      : { ...ASIENTO_EMPTY, fecha: new Date().toISOString().slice(0, 10) }
+      : { ...ASIENTO_EMPTY, fecha: hoyISO() }
     );
   }, [editando, isOpen]);
   if (!isOpen) return null;
@@ -516,12 +517,12 @@ function CuentaGastoChip({ asiento, onElegir }) {
 
 // ─── Helpers honorarios ───────────────────────────────────────────────────────
 function excelDateToISO(serial) {
-  if (!serial || isNaN(serial)) return new Date().toISOString().slice(0, 10);
-  return new Date(Math.floor(serial - 25569) * 86400 * 1000).toISOString().slice(0, 10);
+  if (!serial || isNaN(serial)) return hoyISO();
+  return serialExcelAISO(Math.floor(serial));
 }
 
 // ─── Modal Importar Honorarios SII ───────────────────────────────────────────
-function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActivo }) {
+function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActivo, buscarHashesExistentes }) {
   const fileRef = useRef(null);
   const [filas, setFilas] = useState([]);
   const [modo, setModo] = useState("consolidado");
@@ -564,8 +565,9 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
   // ¿Las 3 cuentas necesarias ya están resueltas automáticamente?
   // Si es así, no hace falta mostrar el paso 3 — se importa directo.
   const cuentasAutoResueltas = (hon, ret, liq) => {
-    // hon y liq son obligatorias; ret es opcional (si no hay retención en el archivo)
-    return !!(hon && liq);
+    // hon y liq son obligatorias; ret solo si el archivo trae retención
+    const conRetencion = filas.some(f => f.retenido > 0);
+    return !!(hon && liq && (ret || !conRetencion));
   };
 
   // return null DESPUÉS de todos los hooks
@@ -640,33 +642,67 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
     { bruto: 0, retenido: 0, pagado: 0 }
   );
 
-  const buildAsientos = () => {
+  // Llave por boleta (origen|tipo|folio|rut): reimportar el mismo informe no
+  // duplica, y un informe anual después de uno mensual solo agrega lo nuevo.
+  // Antes los asientos de honorarios no llevaban importHash.
+  const ORIGEN_HON = "importacion_honorarios";
+  const claveBoleta = (f) => claveDocImport(ORIGEN_HON, 0, f.n, f.rut);
+  // Mes contable de la boleta; si la fecha no se pudo leer, el período activo
+  const periodoDe = (f) => (/^\d{4}-\d{2}/.test(f.fecha) ? f.fecha.slice(0, 7) : periodoActivo);
+
+  const buildAsientos = (lista) => {
     const ctaHonNombre = cuentas.find(c => c.id === ctaHonorarios)?.nombre || "Honorarios";
     const ctaRetNombre = cuentas.find(c => c.id === ctaRetencion)?.nombre || "Retención Honorarios x Pagar";
     const ctaLiqNombre = cuentas.find(c => c.id === ctaLiquido)?.nombre || "Honorarios Líquidos x Pagar";
     if (modo === "consolidado") {
-      const fechaAsiento = filas[filas.length - 1]?.fecha || new Date().toISOString().slice(0, 10);
-      const [anio, mes] = fechaAsiento.split("-");
-      const lineas = [{ cuentaId: ctaHonorarios, cuentaNombre: ctaHonNombre, debe: totales.bruto, haber: "", descripcion: `Honorarios ${filas.length} prestadores` }];
-      if (totales.retenido > 0) lineas.push({ cuentaId: ctaRetencion, cuentaNombre: ctaRetNombre, debe: "", haber: totales.retenido, descripcion: "Retención 10.75% SII" });
-      lineas.push({ cuentaId: ctaLiquido, cuentaNombre: ctaLiqNombre, debe: "", haber: totales.pagado, descripcion: "Honorarios líquidos por pagar" });
-      return [{ fecha: fechaAsiento, glosa: `Honorarios recibidos — ${mes}/${anio} (${filas.length} boletas)`, tipo: "honorarios", periodo: `${anio}-${mes}`, totalDebe: totales.bruto, origen: "importacion_honorarios", lineas }];
+      // Un asiento por MES de las boletas (devengado). Antes todo el archivo
+      // (p. ej. el informe anual) quedaba en el mes de la última fila.
+      const porMes = {};
+      lista.forEach(f => { (porMes[periodoDe(f)] ||= []).push(f); });
+      return Object.entries(porMes).sort(([a], [b]) => a.localeCompare(b)).map(([periodo, delMes]) => {
+        const t = delMes.reduce((acc, f) => ({ bruto: acc.bruto + f.bruto, retenido: acc.retenido + f.retenido, pagado: acc.pagado + f.pagado }), { bruto: 0, retenido: 0, pagado: 0 });
+        const [anio, mes] = periodo.split("-");
+        // Fecha: la última boleta del mes
+        const fechaAsiento = delMes.map(f => f.fecha).filter(x => x.startsWith(periodo)).sort().pop() || `${periodo}-01`;
+        const lineas = [{ cuentaId: ctaHonorarios, cuentaNombre: ctaHonNombre, debe: t.bruto, haber: "", descripcion: `Honorarios ${delMes.length} boletas` }];
+        if (t.retenido > 0) lineas.push({ cuentaId: ctaRetencion, cuentaNombre: ctaRetNombre, debe: "", haber: t.retenido, descripcion: "Retención honorarios SII" });
+        lineas.push({ cuentaId: ctaLiquido, cuentaNombre: ctaLiqNombre, debe: "", haber: t.pagado, descripcion: "Honorarios líquidos por pagar" });
+        const importDocs = delMes.map(claveBoleta);
+        return { fecha: fechaAsiento, glosa: `Honorarios recibidos — ${mes}/${anio} (${delMes.length} boletas)`, tipo: "honorarios", periodo, totalDebe: t.bruto, origen: ORIGEN_HON,
+          importHash: `${ORIGEN_HON}|${periodo}|${[...importDocs].sort().join(",")}`, importDocs, lineas };
+      });
     } else {
-      return filas.map(f => {
-        const [anio, mes] = f.fecha.split("-");
+      return lista.map(f => {
         const lineas = [{ cuentaId: ctaHonorarios, cuentaNombre: ctaHonNombre, debe: f.bruto, haber: "", descripcion: `Boleta N°${f.n} — ${f.nombre}` }];
         if (f.retenido > 0) lineas.push({ cuentaId: ctaRetencion, cuentaNombre: ctaRetNombre, debe: "", haber: f.retenido, descripcion: `Retención ${f.rut}` });
         lineas.push({ cuentaId: ctaLiquido, cuentaNombre: ctaLiqNombre, debe: "", haber: f.pagado, descripcion: `Líquido ${f.nombre.split(" ")[0]}` });
-        return { fecha: f.fecha, glosa: `Honorarios — ${f.nombre} (${f.rut})`, tipo: "honorarios", periodo: `${anio}-${mes}`, totalDebe: f.bruto, origen: "importacion_honorarios", lineas };
+        const clave = claveBoleta(f);
+        return { fecha: f.fecha, glosa: `Honorarios — ${f.nombre} (${f.rut})`, tipo: "honorarios", periodo: periodoDe(f), totalDebe: f.bruto, origen: ORIGEN_HON,
+          importHash: clave, importDocs: [clave], lineas };
       });
     }
   };
 
   const handleImportar = async () => {
     if (!ctaHonorarios || !ctaLiquido) { setError("Debes seleccionar la cuenta de Honorarios y la cuenta de Pago."); return; }
+    // Con retención y sin cuenta de retención el asiento quedaría con una
+    // línea sin cuenta (cuentaId ""): se bloquea.
+    if (totales.retenido > 0 && !ctaRetencion) {
+      setError("Las boletas tienen retención y no hay cuenta de Retención de honorarios. Elígela en el paso de cuentas (o créala en el Plan de Cuentas, ej. 2-01-004) antes de importar.");
+      if (paso < 3) setPaso(3);
+      return;
+    }
     setSaving(true); setError("");
     try {
-      for (const a of buildAsientos()) await onSave(a);
+      const periodos = [...new Set(filas.map(periodoDe))];
+      const existentes = new Set();
+      if (buscarHashesExistentes) {
+        for (const p of periodos) (await buscarHashesExistentes(p)).forEach(k => existentes.add(k));
+      }
+      const nuevas = filas.filter(f => !existentes.has(claveBoleta(f)));
+      const omitidas = filas.length - nuevas.length;
+      for (const a of buildAsientos(nuevas)) await onSave(a);
+      if (omitidas) alert(`${omitidas} boleta${omitidas !== 1 ? "s ya estaban importadas" : " ya estaba importada"} y no se volvi${omitidas !== 1 ? "eron" : "ó"} a cargar.`);
       onClose(); resetear();
     } catch (err) { setError("Error guardando: " + err.message); }
     setSaving(false);
@@ -677,7 +713,8 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
   const cuentasTodas = cuentas.filter(c => c.activa !== false);
 
   const cerrar = () => { onClose(); resetear(); };
-  const textoImportar = saving ? "Guardando…" : `Importar ${modo === "consolidado" ? "1 asiento" : `${filas.length} asientos`}`;
+  const nAsientosHon = modo === "consolidado" ? new Set(filas.map(periodoDe)).size : filas.length;
+  const textoImportar = saving ? "Guardando…" : `Importar ${nAsientosHon} asiento${nAsientosHon !== 1 ? "s" : ""}`;
 
   return (
     <ModalCuaderno
@@ -791,7 +828,7 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
               onCambiar={setModo}
             />
             <p className="m-0 mt-1.5 text-[14px] text-cuaderno-grafito">
-              {modo === "consolidado" ? "1 asiento con el total del mes" : "1 asiento por cada prestador"}
+              {modo === "consolidado" ? "1 asiento por cada mes de las boletas" : "1 asiento por cada boleta"}
             </p>
           </div>
           {error && <Nota etiqueta="Ojo:">{error}</Nota>}
@@ -821,7 +858,7 @@ function ModalImportarHonorarios({ isOpen, onClose, cuentas, onSave, periodoActi
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function ContabilidadLibroDiario() {
-  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, reversarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto, reglasEfectivas } = useContabilidad();
+  const { asientos, cuentas, loadingAsientos, guardarAsiento, eliminarAsiento, reversarAsiento, periodoActivo, setPeriodoActivo, buscarHashesExistentes, reglasGasto: _reglasGasto, guardarReglaGasto, reglasEfectivas, configTributaria } = useContabilidad();
   const reglasGasto = _reglasGasto || {};
   // Para clasificar al importar se usan las reglas efectivas: lo que el usuario
   // decidió a mano, complementado con la cuenta que más usó con cada proveedor.
@@ -1395,6 +1432,7 @@ export default function ContabilidadLibroDiario() {
         guardarAsiento={guardarAsiento}
         periodoActivo={periodoActivo}
         buscarHashesExistentes={buscarHashesExistentes}
+        dieselRecuperablePct={configTributaria?.dieselRecuperablePct || 0}
         onImportDone={(periodoImportado) => {
           setShowImport(false);
           setPeriodoActivo(periodoImportado);
@@ -1407,6 +1445,7 @@ export default function ContabilidadLibroDiario() {
         cuentas={cuentas}
         onSave={guardarAsiento}
         periodoActivo={periodoActivo}
+        buscarHashesExistentes={buscarHashesExistentes}
       />
     </div>
   );

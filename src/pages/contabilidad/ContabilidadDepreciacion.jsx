@@ -21,6 +21,7 @@ import { useContabilidad, fmt, MESES } from "./ContabilidadContext";
 import {
   Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, FechaHoja,
 } from "../finanzas/cuaderno";
+import { clasificarActivos, depreciacionDelMes, DEPRECIAR_LEASING } from "../../lib/contabilidad/depreciacion";
 
 // ─── Vida útil tributaria ─────────────────────────────────────────────────────
 // Tabla del SII, en años. El lookup se hace normalizado porque el campo `tipo`
@@ -63,43 +64,23 @@ export const vidaUtilTributaria = (a) => VIDA_UTIL_TRIB[familiaTributaria(a)];
 
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 
-/** Meses transcurridos entre la fecha de compra y el cierre del período "YYYY-MM". */
-function mesesDesdeCompra(fechaCompra, periodo) {
-  if (!fechaCompra || !periodo) return null;
-  const c = new Date(fechaCompra);
-  if (isNaN(c)) return null;
-  const [a, m] = periodo.split("-").map(Number);
-  // Se deprecia desde el mes SIGUIENTE al de adquisición (criterio conservador
-  // y el más usado): un activo comprado en noviembre no carga el año completo.
-  return (a - c.getFullYear()) * 12 + (m - (c.getMonth() + 1));
-}
-
 /**
  * Depreciación lineal del MES para un activo, con valor residual y prorrateo.
- * Devuelve 0 si el activo aún no entra en servicio o ya está totalmente depreciado.
+ * Devuelve 0 si el activo aún no entra en servicio, ya está totalmente
+ * depreciado o no tiene fecha de compra (antes, sin fecha, se depreciaba todos
+ * los meses para siempre). El cálculo vive en lib/contabilidad/depreciacion.js
+ * y es el mismo que usa el F22.
  */
 export function depreciacionMensual(activo, periodo) {
-  const valor    = num(activo.valorCompra);
-  const residual = num(activo.valorResidual);
-  const anios    = num(activo.vidaUtilAnios) || vidaUtilTributaria(activo);
-  if (valor <= 0 || anios <= 0) return { monto: 0, motivo: "Sin valor de compra o vida útil" };
-  if (residual >= valor)        return { monto: 0, motivo: "Valor residual ≥ valor de compra" };
-
-  const depreciable = valor - residual;
-  const cuotaMes    = depreciable / (anios * 12);
-
-  const meses = mesesDesdeCompra(activo.fechaCompra, periodo);
-  if (meses === null) return { monto: Math.round(cuotaMes), motivo: "Sin fecha de compra — no se prorratea" };
-  if (meses <= 0)     return { monto: 0, motivo: "Aún no entra en servicio" };
-  if (meses > anios * 12) return { monto: 0, motivo: "Totalmente depreciado" };
-
-  return { monto: Math.round(cuotaMes), motivo: null, mesN: meses, totalMeses: anios * 12 };
+  const anios = num(activo.vidaUtilAnios) || vidaUtilTributaria(activo);
+  return depreciacionDelMes(activo, anios, periodo);
 }
 
 // ─── Hook de activos ──────────────────────────────────────────────────────────
 function useActivos() {
   const { empresaId } = useEmpresa();
   const [activos, setActivos] = useState([]);
+  const [excluidas, setExcluidas] = useState({ leasing: 0, arrendada: 0, inactiva: 0, otra: 0 });
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -109,14 +90,18 @@ function useActivos() {
       try {
         const snap = await getDocs(collection(db, "empresas", empresaId, "machines"));
         if (!vivo) return;
-        setActivos(snap.docs.filter(d => d.data().active !== false).map(d => ({
-          id: d.id,
-          nombre:         d.data().name || d.data().nombre || d.id,
-          tipo:           d.data().tipo || d.data().type || "",
-          valorCompra:    d.data().valorCompra    || "",
-          valorResidual:  d.data().valorResidual  || "",
-          fechaCompra:    d.data().fechaCompra    || "",
-          vidaUtilAnios:  d.data().vidaUtilAnios  || "",
+        // Solo bienes de la empresa: se excluyen arrendadas, leasing (ver
+        // DEPRECIAR_LEASING) e inactivas. Antes entraba toda máquina activa.
+        const { depreciables, excluidas: exc } = clasificarActivos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setExcluidas(exc);
+        setActivos(depreciables.map(m => ({
+          id: m.id,
+          nombre:         m.name || m.nombre || m.id,
+          tipo:           m.tipo || m.type || "",
+          valorCompra:    m.valorCompra    || "",
+          valorResidual:  m.valorResidual  || "",
+          fechaCompra:    m.fechaCompra    || "",
+          vidaUtilAnios:  m.vidaUtilAnios  || "",
         })));
       } catch (e) { console.error("useActivos:", e); }
       if (vivo) setCargando(false);
@@ -124,13 +109,13 @@ function useActivos() {
     return () => { vivo = false; };
   }, [empresaId]);
 
-  return { activos, cargando };
+  return { activos, excluidas, cargando };
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function ContabilidadDepreciacion() {
   const { cuentas, asientosTodos, periodoActivo, guardarAsiento, periodoCerrado } = useContabilidad();
-  const { activos, cargando } = useActivos();
+  const { activos, excluidas, cargando } = useActivos();
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState(null);
 
@@ -149,6 +134,7 @@ export default function ContabilidadDepreciacion() {
 
   const depreciables = detalle.filter(d => d.monto > 0);
   const total = depreciables.reduce((s, d) => s + d.monto, 0);
+  const sinFecha = detalle.filter(d => d.sinFecha).length;
 
   // ¿Ya se generó el asiento de este período? Se marca con origen "depreciacion".
   const yaGenerado = useMemo(
@@ -309,6 +295,24 @@ export default function ContabilidadDepreciacion() {
           </table>
         </div>
       </Hoja>
+
+      {!cargando && (excluidas.leasing > 0 || excluidas.arrendada > 0 || excluidas.otra > 0 || sinFecha > 0) && (
+        <Nota etiqueta="Nota:" tono="grafito">
+          {excluidas.leasing > 0 && <>
+            No se deprecian {excluidas.leasing} equipo{excluidas.leasing !== 1 ? "s" : ""} en leasing: sus cuotas ya se rebajan como gasto
+            {DEPRECIAR_LEASING ? "" : " (criterio por confirmar con el contador)"}.{" "}
+          </>}
+          {excluidas.arrendada > 0 && <>
+            Tampoco {excluidas.arrendada} arrendado{excluidas.arrendada !== 1 ? "s" : ""} a terceros, que no son activo de la empresa.{" "}
+          </>}
+          {excluidas.otra > 0 && <>
+            {excluidas.otra} equipo{excluidas.otra !== 1 ? "s" : ""} con propiedad no reconocida no se deprecia{excluidas.otra !== 1 ? "n" : ""} (revisar en Admin → Máquinas).{" "}
+          </>}
+          {sinFecha > 0 && <>
+            {sinFecha} activo{sinFecha !== 1 ? "s" : ""} sin fecha de compra no se deprecia{sinFecha !== 1 ? "n" : ""} hasta que se ingrese en su ficha.
+          </>}
+        </Nota>
+      )}
 
       <p className="m-0 text-[15px] leading-snug text-cuaderno-grafito">
         Cuando un activo no tiene vida útil propia se usa la tabla del SII según su familia.

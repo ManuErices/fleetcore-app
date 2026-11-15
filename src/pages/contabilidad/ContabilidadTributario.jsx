@@ -8,6 +8,7 @@ import {
 } from "../finanzas/cuaderno";
 import { vidaUtilTributaria, VIDA_UTIL_TRIB } from "./ContabilidadDepreciacion";
 import { tasaPPMSugerida } from "../../lib/contabilidad/tributario";
+import { clasificarActivos, depreciacionEjercicio, DEPRECIAR_LEASING } from "../../lib/contabilidad/depreciacion";
 
 // ─── Tabla vida útil tributaria SII (años) ────────────────────────────────────
 // Resolución SII Exenta N° 43/2002 y circulares complementarias
@@ -24,6 +25,9 @@ function calcDepContable(a) {
   return (!v || !y || r >= v) ? 0 : (v - r) / y;
 }
 
+// Usado solo por el impuesto diferido (metodología anual sin cambios por ahora;
+// no considera fecha de compra ni corta al fin de la vida útil — revisar junto
+// con la metodología de NIC 12). El F22 usa depreciacionEjercicio, mes a mes.
 function calcDepTributaria(a) {
   const v    = parseFloat(a.valorCompra) || 0;
   const r    = parseFloat(a.valorResidual) || 0;
@@ -35,14 +39,19 @@ function calcDepTributaria(a) {
 function useActivos() {
   const { empresaId } = useEmpresa();
   const [activos, setActivos] = useState([]);
+  const [excluidas, setExcluidas] = useState({ leasing: 0, arrendada: 0, inactiva: 0, otra: 0 });
 
   const cargar = useCallback(async () => {
     if (!empresaId) return;
     try {
       const snap = await getDocs(collection(db, "empresas", empresaId, "machines"));
-      setActivos(snap.docs
-        .filter(d => d.data().active !== false)
-        .map(d => ({
+      // Solo bienes de la empresa (propia o crédito automotriz) y activos: las
+      // arrendadas no son activo de la empresa y las de leasing ya rebajan sus
+      // cuotas como gasto (ver DEPRECIAR_LEASING en lib/contabilidad/depreciacion).
+      const { depreciables, excluidas: exc } = clasificarActivos(snap.docs.map(d => ({ id: d.id, ...d.data(), _doc: d })));
+      setExcluidas(exc);
+      setActivos(depreciables
+        .map(({ _doc: d }) => ({
           id:                d.id,
           nombre:            d.data().name || "",
           tipo:              d.data().tipo || (() => {
@@ -65,13 +74,30 @@ function useActivos() {
           vidaUtilAnios:     d.data().vidaUtilAnios || "",
           depreciacionAnual: d.data().depreciacionAnual || "",
           fechaCompra:       d.data().fechaCompra || "",
+          valorResidual:     d.data().valorResidual || "",
         }))
       );
     } catch (e) { console.error("useActivos:", e); }
   }, [empresaId]);
 
   useEffect(() => { cargar(); }, [cargar]);
-  return activos;
+  return { activos, excluidas };
+}
+
+/** Nota corta con los equipos que no entran a la depreciación y por qué. */
+function NotaExcluidas({ excluidas, sinFecha = 0 }) {
+  if (!excluidas.leasing && !excluidas.arrendada && !excluidas.otra && !sinFecha) return null;
+  return (
+    <Nota etiqueta="Nota:" tono="grafito" className="mt-3">
+      {excluidas.leasing > 0 && <>
+        Se excluyen {excluidas.leasing} equipo{excluidas.leasing !== 1 ? "s" : ""} en leasing (sus cuotas ya son gasto
+        {DEPRECIAR_LEASING ? "" : "; criterio por confirmar con el contador"}).{" "}
+      </>}
+      {excluidas.arrendada > 0 && <>Se excluyen {excluidas.arrendada} arrendado{excluidas.arrendada !== 1 ? "s" : ""} a terceros (no son de la empresa).{" "}</>}
+      {excluidas.otra > 0 && <>{excluidas.otra} con propiedad no reconocida tampoco (revisar en Admin → Máquinas).{" "}</>}
+      {sinFecha > 0 && <>{sinFecha} activo{sinFecha !== 1 ? "s" : ""} sin fecha de compra no se deprecia{sinFecha !== 1 ? "n" : ""}.</>}
+    </Nota>
+  );
 }
 
 
@@ -281,8 +307,8 @@ function ModuloPPM({ cuentas, saldosMap, asientos, periodoActivo }) {
 }
 
 // ─── F22 — Impuesto Anual a la Renta ─────────────────────────────────────────
-function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurridos = 12, depreciacionContabilizada = 0, perdidaArrastre = 0 }) {
-  const activos = useActivos();
+function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, anio, mesesTranscurridos = 12, depreciacionContabilizada = 0, perdidaArrastre = 0 }) {
+  const { activos, excluidas } = useActivos();
 
   const data = useMemo(() => {
     // Sin Math.abs: una cuenta de ingreso con saldo deudor (mes con más notas de
@@ -299,10 +325,19 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
     const costosYGastos      = get(["costo", "gasto_adm", "gasto_fin", "otro_resultado"]);
     const utilidadFinanciera = ingresosBrutos - costosYGastos;
 
-    // Depreciación desde módulo Activos Fijos
-    const depreciacionContable  = activos.reduce((s, a) => s + calcDepContable(a), 0);
-    const depreciacionTrib      = activos.reduce((s, a) => s + calcDepTributaria(a), 0);
-    const difTemp               = depreciacionContable - depreciacionTrib;
+    // Depreciación del ejercicio hasta el mes de corte, mes a mes desde la
+    // fecha de compra (desde el mes siguiente, y solo hasta completar la vida
+    // útil). Antes era la cuota anual × meses/12 para todo activo, aunque se
+    // hubiera comprado este año o ya estuviera totalmente depreciado.
+    // La teórica contable usa la misma vida útil que el asiento mensual
+    // (vida propia o tabla SII) para poder compararla con lo contabilizado.
+    let depTeorica = 0, depTribPer = 0, sinFecha = 0;
+    for (const a of activos) {
+      const t = depreciacionEjercicio(a, vidaUtilTributaria(a), anio, mesesTranscurridos);
+      if (t.sinFecha) { sinFecha++; continue; }
+      depTribPer += t.monto;
+      depTeorica += depreciacionEjercicio(a, parseFloat(a.vidaUtilAnios) || vidaUtilTributaria(a), anio, mesesTranscurridos).monto;
+    }
 
     // El agregado a la RLI solo tiene sentido sobre la depreciación que
     // EFECTIVAMENTE se rebajó como gasto en los asientos. Antes se sumaba la
@@ -310,9 +345,6 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
     // lo que inflaba la base imponible. Ahora se toma la cuenta contable y la
     // teórica solo se usa como referencia.
     const depContPer    = depreciacionContabilizada;
-    const factorMeses   = mesesTranscurridos / 12;
-    const depTribPer    = depreciacionTrib * factorMeses;
-    const depTeorica    = depreciacionContable * factorMeses;
 
     const rliAntesPerdida = utilidadFinanciera + depContPer - depTribPer;
     // Pérdida tributaria de años anteriores (art. 31 N°3, sin tope vigente):
@@ -328,8 +360,8 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
     return { ingresosBrutos, costosYGastos, utilidadFinanciera,
              depreciacionContable: depContPer, depreciacionTrib: depTribPer,
              depTeorica, difTemp: depContPer - depTribPer, rli, impuesto1Cat, perdida, rliAntesPerdida,
-             ppmAcumulado, saldoF22, devolucion, tasaPrimCat, mesesTranscurridos };
-  }, [cuentas, saldosMap, activos, tasaImpuesto, mesesTranscurridos, depreciacionContabilizada, perdidaArrastre]);
+             ppmAcumulado, saldoF22, devolucion, tasaPrimCat, mesesTranscurridos, sinFecha };
+  }, [cuentas, saldosMap, activos, tasaImpuesto, anio, mesesTranscurridos, depreciacionContabilizada, perdidaArrastre]);
 
   return (
     <Hoja titulo="Formulario 22 — Declaración Anual Renta" extra={<Marca>Art. 29–33 LIR</Marca>}>
@@ -379,6 +411,7 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
             }
           </tbody>
         </table>
+        <NotaExcluidas excluidas={excluidas} sinFecha={data.sinFecha} />
       </div>
     </Hoja>
   );
@@ -386,7 +419,7 @@ function FormularioF22({ cuentas, saldosMap, tasaImpuesto = 0.27, mesesTranscurr
 
 // ─── Diferencias temporarias e impuesto diferido ─────────────────────────────
 function ImpuestoDiferido({ cuentas, saldosMap, tasaImpuesto = 0.27 }) {
-  const activos = useActivos();
+  const { activos, excluidas } = useActivos();
 
   // Dep. anual total de la flota (contable y tributaria)
   const { depContableAnual, depTributariaAnual, detalle } = useMemo(() => {
@@ -520,6 +553,7 @@ function ImpuestoDiferido({ cuentas, saldosMap, tasaImpuesto = 0.27 }) {
                 Vida útil tributaria según tabla SII: Maquinaria 10 años · Vehículo 7 años · Herramienta 3 años · Otro 5 años.
                 Las diferencias generan {pasivoDiferido > 0 ? "un pasivo" : "un activo"} por impuesto diferido bajo NIC 12.
               </Nota>
+              <NotaExcluidas excluidas={excluidas} />
             </div>
           )}
         </div>
@@ -611,7 +645,7 @@ export default function ContabilidadTributario() {
 
       {vistaActiva === "f29"  && <FormularioF29 cuentas={cuentas} saldosMap={saldosMes} periodoActivo={periodoActivo} remanenteArrastrado={remanenteArrastrado} />}
       {vistaActiva === "ppm"  && <ModuloPPM cuentas={cuentas} saldosMap={saldosMes} asientos={asientos} periodoActivo={periodoActivo} />}
-      {vistaActiva === "f22"  && <FormularioF22 cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} mesesTranscurridos={mesesTranscurridos} depreciacionContabilizada={depreciacionContabilizada} perdidaArrastre={perdidaArrastre} />}
+      {vistaActiva === "f22"  && <FormularioF22 cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} anio={parseInt(anioPeriodo, 10)} mesesTranscurridos={mesesTranscurridos} depreciacionContabilizada={depreciacionContabilizada} perdidaArrastre={perdidaArrastre} />}
       {vistaActiva === "dift" && <ImpuestoDiferido cuentas={cuentas} saldosMap={saldosDelAnio} tasaImpuesto={tasaPrimeraCategoria} />}
     </div>
   );
