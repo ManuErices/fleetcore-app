@@ -17,6 +17,7 @@ import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
 import ReferenciaSubcontratos from "./ReferenciaSubcontratos";
+import ReferenciaCobrosYSueldos from "./ReferenciaCobrosYSueldos";
 import { cargarReales, cargarSaldosBancos } from "../../lib/banco/importacion.js";
 import {
   Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
@@ -568,12 +569,13 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
   enPropuesta = false, pagosCeldas = null, pagosOriginal = {}, cambiadas = null, t = 1 }) {
 
   const isEgreso = account.categoria === "EGRESOS";
-  // Solo los egresos abren el panel de detalle (datos de pago y contacto)
-  const abreDetalle = isEgreso && !!onOpenDetalle;
+  // Egresos e ingresos abren el panel de detalle: los egresos con datos de pago
+  // y contacto; los ingresos con los cobros de Rental de ese cliente (referencia).
+  const abreDetalle = !!onOpenDetalle;
   const propsDetalle = abreDetalle ? {
     role: "button",
     tabIndex: 0,
-    title: "Ver cómo pagar y contacto",
+    title: isEgreso ? "Ver cómo pagar y contacto" : "Ver detalle y cobros esperados",
     onClick: () => onOpenDetalle(account),
     onKeyDown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetalle(account); } },
   } : {};
@@ -676,7 +678,7 @@ function AccountRow({ account, weekColumns, payments, paymentsPaid, paymentNotas
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export default function FinanzasFlujoCaja() {
-  const { proyectoId, proyecto } = useFinanzas();
+  const { proyectoId, proyecto, proyectos = [] } = useFinanzas();
   const { empresaId, empresa } = useEmpresa();
   const { subcatsEgreso, subcatsIngreso, eliminarSubcat } = useSubcategorias(empresaId);
   const weekColumns = useMemo(() => getWeekColumns(), []);
@@ -1629,7 +1631,7 @@ export default function FinanzasFlujoCaja() {
               </tr>
 
               {!collapsed["INGRESOS"] && ingresos.map(c => (
-                <AccountRow key={c.id} account={c} {...filaProps} />
+                <AccountRow key={c.id} account={c} {...filaProps} onOpenDetalle={abrirDetalle} />
               ))}
 
               {/* Subtotal ingresos */}
@@ -1885,6 +1887,10 @@ export default function FinanzasFlujoCaja() {
       <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
         payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle} />
 
+      {/* Referencia: por cobrar (Rental, OT) y sueldos de RRHH (no escribe en el flujo) */}
+      <ReferenciaCobrosYSueldos empresaId={empresaId} ingresos={ingresos} payments={payments}
+        weekColumns={weekColumns} proyectoId={proyectoId} proyectos={proyectos} onAbrirCuenta={abrirDetalle} />
+
       {/* Panel lateral de detalle de cuenta (egresos) */}
       {cuentaDetalle && (
         <PanelDetalleCuenta
@@ -1897,7 +1903,8 @@ export default function FinanzasFlujoCaja() {
           bloqueado={showModalCuenta || showModalSaldo}
           onClose={() => setCuentaDetalleId(null)}
           onEditarCuenta={c => { setEditandoCuenta(c); setShowModalCuenta(true); }}
-          onVincularProveedor={handleVincularProveedor}/>
+          onVincularProveedor={handleVincularProveedor}
+          obraId={proyectoId}/>
       )}
 
       {/* Modales */}
