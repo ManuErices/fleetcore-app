@@ -344,24 +344,27 @@ export default function Subcontratos() {
         // NO guardamos year/month porque vamos a filtrar por fechaEP
       }));
 
-      // Guardar en Firebase (sin eliminar datos previos)
-      // Solo agregar los nuevos subcontratos
-      const batch = writeBatch(db);
-      subcontratosImportados.forEach(subcontrato => {
-        const docRef = doc(collection(db, 'empresas', empresaId, 'subcontratos'));
-        batch.set(docRef, {
-          ...subcontrato,
-          empresaId,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+      // Maestro de terceros: ficha por RUT y proveedorId en cada línea
+      const { asegurarTerceros, idTercero } = await import("../../lib/terceros");
+      const mapa = await asegurarTerceros(empresaId, subcontratosImportados.map(x => ({ rut: x.rutSubcontratista, razonSocial: x.razonSocialSubcontratista })));
+      const conTercero = subcontratosImportados.map(x => {
+        const proveedorId = idTercero(mapa, x.rutSubcontratista);
+        return proveedorId ? { ...x, proveedorId } : x;
       });
-      await batch.commit();
-      
+
+      // Antes cada importación creaba documentos nuevos y reimportar duplicaba
+      // los estados de pago. Ahora cada línea (SC + línea + EP + cuenta) tiene
+      // una llave estable: se actualiza en vez de duplicarse.
+      const { guardarSinDuplicar } = await import("../../lib/importacion");
+      const r = await guardarSinDuplicar(empresaId, "subcontratos", conTercero,
+        ["numeroSC", "numeroLineaSC", "numeroEP", "codigoCuentaCosto", "descripcionLinea", "projectId"], "sc");
+
       // Recargar
       await loadData();
       setShowImporter(false);
-      alert(`✅ ${subcontratosImportados.length} registros de subcontratos importados correctamente`);
+      alert(`Subcontratos importados: ${r.nuevas} nuevos, ${r.actualizadas} actualizados` +
+        (r.duplicadosEliminados ? `, ${r.duplicadosEliminados} duplicados de importaciones anteriores eliminados.` : "."));
+
     } catch (error) {
       console.error("Error importando Excel:", error);
       alert("❌ Error al importar el archivo: " + error.message);
