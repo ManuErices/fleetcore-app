@@ -4,6 +4,7 @@ import InviteUserPanel from "../InviteUserPanel";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
 import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion, cargarSurtidores, planSurtidores, migrarSurtidores, asegurarMaquina, listarMaquinas } from '../../lib/maquinas';
 import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
+import { rutTrabajador } from '../../lib/trabajadores';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
@@ -631,7 +632,8 @@ function OperadoresSection() {
   const save = async () => {
     const rutNorm = form.rut.trim();
     if (rutNorm) {
-      const duplicado = data.find(op => op.rut?.trim() === rutNorm && op.id !== editId);
+      // Mismo RUT aunque esté escrito con o sin puntos/guion (maestro de trabajadores)
+      const duplicado = data.find(op => op.id !== editId && (rutTrabajador(op.rut) ? rutTrabajador(op.rut) === rutTrabajador(rutNorm) : op.rut?.trim() === rutNorm));
       if (duplicado) {
         const nombre = [duplicado.nombres, duplicado.apellidoPaterno, duplicado.apellidoMaterno].filter(Boolean).join(' ') || duplicado.nombre || 'otro operador';
         alert(`El RUT ${rutNorm} ya está registrado para ${nombre}.`);
