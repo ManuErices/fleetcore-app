@@ -281,19 +281,17 @@ export async function listEmployees(empresaId, projectId) {
 
 export async function getEmployeeByRut(empresaId, projectId, rut) {
   try {
-    // Solo por RUT: al filtrar además por projectId no se encontraba al
-    // trabajador ya registrado (su ficha suele no tener proyecto) y cada
-    // importación de remuneraciones creaba un duplicado.
-    const snap = await getDocs(query(
-      EMPRESA_COL(empresaId, 'trabajadores'),
-      where("rut", "==", rut)
-    ));
-    if (snap.empty) return null;
-
-    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Por RUT normalizado (sin puntos ni guion): "12.345.678-5" y "12345678-5"
+    // son la misma persona. Antes se comparaba el texto exacto y cada formato
+    // distinto creaba una ficha duplicada.
+    const { fetchTrabajadores, rutTrabajador } = await import('./trabajadores');
+    const k = rutTrabajador(rut) || String(rut || '').toUpperCase().replace(/[^0-9K]/g, '');
+    if (!k) return null;
+    const docs = (await fetchTrabajadores(empresaId))
+      .filter(d => (rutTrabajador(d.rut) || String(d.rut || '').toUpperCase().replace(/[^0-9K]/g, '')) === k);
+    if (!docs.length) return null;
     // Si hay varias fichas con el mismo RUT, se prefiere la del proyecto pedido
-    const preferida = docs.find(d => d.projectId === projectId) || docs[0];
-    return preferida;
+    return docs.find(d => d.projectId === projectId) || docs[0];
   } catch (error) {
     console.error("❌ Error buscando empleado por RUT:", error);
     return null;

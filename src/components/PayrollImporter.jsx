@@ -183,15 +183,16 @@ export default function PayrollImporter({ empresaId, projectId, onImportComplete
             let employee = await getEmployeeByRut(empresaId, projectId, rut);
 
             if (employee) {
-              const updatePayload = {
-                id: employee.id,
-                projectId: projectId,
-                rut: rut,
-                nombre: baseData.nombre,
-                cargo: baseData.cargo,
-                gerencia: baseData.gerencia,
-                centroCosto: baseData.centroCosto
+              // La ficha es de RRHH: el Excel solo completa lo que esté vacío.
+              // Antes se pisaban nombre (con apellidos), RUT y centro de costo.
+              const updatePayload = { id: employee.id };
+              const candidatos = {
+                projectId, nombre: baseData.nombre, cargo: baseData.cargo,
+                gerencia: baseData.gerencia, centroCosto: baseData.centroCosto,
               };
+              Object.entries(candidatos).forEach(([k, v]) => {
+                if ((employee[k] === undefined || employee[k] === null || employee[k] === '') && v) updatePayload[k] = v;
+              });
               // Si el empleado ya tiene una clasificación (manual o de una importación anterior),
               // se respeta y NO se pisa. Solo se setea si nunca ha tenido una.
               if (!employee.tipoManoObra) {
