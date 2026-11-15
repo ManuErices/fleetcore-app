@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
 import { listEmployees, listEmployeeAssignments, listEmployeeMonthlyData } from './db';
+import { useEmpresa } from './useEmpresa';
 
 /**
  * Hook para obtener operadores asignados a máquinas
  * Devuelve un mapa: machineId -> operador con datos del mes
  */
 export function useOperatorAssignments(projectId, year = null, month = null) {
+  // empresaId va primero en todas las funciones de db.js. Antes se omitía y
+  // los argumentos se corrían: el mapa de operadores salía siempre vacío.
+  const { empresaId } = useEmpresa();
   const [operatorsByMachine, setOperatorsByMachine] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !empresaId) return;
 
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month || new Date().getMonth() + 1;
@@ -20,9 +24,9 @@ export function useOperatorAssignments(projectId, year = null, month = null) {
       try {
         // Cargar empleados, asignaciones y datos mensuales
         const [employees, assignments, monthlyData] = await Promise.all([
-          listEmployees(projectId),
-          listEmployeeAssignments(projectId, currentYear, currentMonth),
-          listEmployeeMonthlyData(projectId, currentYear, currentMonth)
+          listEmployees(empresaId, projectId),
+          listEmployeeAssignments(empresaId, projectId, currentYear, currentMonth),
+          listEmployeeMonthlyData(empresaId, projectId, currentYear, currentMonth)
         ]);
 
         // Crear mapa de datos mensuales por empleado
@@ -61,7 +65,7 @@ export function useOperatorAssignments(projectId, year = null, month = null) {
         setIsLoading(false);
       }
     })();
-  }, [projectId, year, month]);
+  }, [empresaId, projectId, year, month]);
 
   return { operatorsByMachine, isLoading };
 }

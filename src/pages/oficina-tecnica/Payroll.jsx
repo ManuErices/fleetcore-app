@@ -228,12 +228,12 @@ export default function Payroll() {
   const [assignments, setAssignments] = useState({});
 
   useEffect(() => {
-    if (!selectedProject) return;
+    if (!selectedProject || !empresaId) return;
     
     (async () => {
       try {
         const { listEmployeeAssignments } = await import("../../lib/db");
-        const assigns = await listEmployeeAssignments(selectedProject, selectedYear, selectedMonth);
+        const assigns = await listEmployeeAssignments(empresaId, selectedProject, selectedYear, selectedMonth);
         
         const assignMap = {};
         assigns.forEach(a => {
@@ -244,7 +244,7 @@ export default function Payroll() {
         console.error("Error cargando asignaciones:", err);
       }
     })();
-  }, [selectedProject, selectedYear, selectedMonth]);
+  }, [empresaId, selectedProject, selectedYear, selectedMonth]);
 
   const getMachineForEmployee = (employeeId) => {
     return assignments[employeeId] || '';

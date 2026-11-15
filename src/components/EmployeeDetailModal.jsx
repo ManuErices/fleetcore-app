@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { upsertEmployeeMonthlyData } from "../lib/db";
+import { useEmpresa } from "../lib/useEmpresa";
 
 export default function EmployeeDetailModal({ 
   employee, 
@@ -9,6 +10,8 @@ export default function EmployeeDetailModal({
   onClose, 
   onSave 
 }) {
+  // empresaId va primero en db.js (antes se omitía y el guardado fallaba)
+  const { empresaId } = useEmpresa();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -56,7 +59,7 @@ export default function EmployeeDetailModal({
         payload.id = monthlyData.id;
       }
 
-      await upsertEmployeeMonthlyData(payload);
+      await upsertEmployeeMonthlyData(empresaId, payload);
       
       if (onSave) {
         await onSave();
