@@ -663,29 +663,9 @@ export function KPICard({ label, valor, color = 'text-slate-700', bg = 'bg-white
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// PLAN DE CUENTAS CONTABLE (remuneraciones)
-// ─────────────────────────────────────────────────────────────
-export const PLAN_CUENTAS_DEFAULT = [
-  // DEBE — Gastos de remuneraciones
-  { lado:'debe',  codigo:'4-11-001', nombre:'Sueldos y salarios',              tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-002', nombre:'Horas extraordinarias',           tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-003', nombre:'Bonos de producción',             tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-004', nombre:'Colación y movilización',         tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-005', nombre:'Viáticos y gastos de viaje',      tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-010', nombre:'Cotización AFP (empleador)',       tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-011', nombre:'Seguro de Invalidez y Sobrev.',   tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-012', nombre:'Seguro de Cesantía (empleador)',  tipo:'gasto'  },
-  { lado:'debe',  codigo:'4-11-013', nombre:'Mutual de Seguridad',             tipo:'gasto'  },
-  // HABER — Pasivos y retenciones
-  { lado:'haber', codigo:'2-11-001', nombre:'Remuneraciones por pagar',        tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-002', nombre:'AFP por pagar (trabajador)',       tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-003', nombre:'Salud por pagar (trabajador)',     tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-004', nombre:'Seg. Cesantía por pagar (trab.)', tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-005', nombre:'Impuesto 2ª Categoría por pagar', tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-006', nombre:'AFP por pagar (empleador)',        tipo:'pasivo' },
-  { lado:'haber', codigo:'2-11-007', nombre:'Seg. Cesantía por pagar (emp.)',  tipo:'pasivo' },
-];
+// El plan de cuentas de remuneraciones (PLAN_CUENTAS_DEFAULT) se eliminó: no
+// se guardaba ni lo usaba ningún informe. Las cuentas se configuran en
+// Contabilidad → Libro Diario → Centralizar remuneraciones (config/centralizacion).
 
 
 // ─── Geografía Chile ───────────────────────────────────────────────────────

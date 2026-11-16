@@ -2,8 +2,9 @@ import React, { useState, useMemo } from "react";
 import { useContabilidad, TIPOS_CUENTA, TIPOS_MAP } from "./ContabilidadContext";
 import {
   Titulo, Hoja, Cifra, LineaGuia, Resaltado, Nota, VistoBueno, Boton, Campo, Casilla,
-  ModalCuaderno, FechaHoja, IconoMas, IconoLapiz, casoOracion,
+  ModalCuaderno, FechaHoja, IconoMas, IconoLapiz, casoOracion, Pestanas,
 } from "../finanzas/cuaderno";
+import ContabilidadMapeoOT from "./ContabilidadMapeoOT";
 
 // ─── Modal agregar/editar cuenta ─────────────────────────────────────────────
 const EMPTY_CUENTA = { codigo: "", nombre: "", tipo: "activo_corriente", descripcion: "", activa: true };
@@ -122,6 +123,8 @@ export default function ContabilidadPlanCuentas() {
     setResultadoDedup(eliminadas);
     setTimeout(() => setResultadoDedup(null), 4000);
   };
+  // "cuentas" = el plan contable; "ot" = mapeo de las cuentas de costo de Oficina Técnica
+  const [vista, setVista]           = useState("cuentas");
   const [showModal, setShowModal]   = useState(false);
   const [editando, setEditando]     = useState(null);
   const [busqueda, setBusqueda]     = useState("");
@@ -167,7 +170,7 @@ export default function ContabilidadPlanCuentas() {
           <Titulo>Plan de cuentas</Titulo>
           <p className="m-0 text-[17px] text-cuaderno-grafito">{cuentas.length} cuentas registradas</p>
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        {vista === "cuentas" && <div className="flex flex-wrap items-end gap-3">
           {/* Botón deduplicar — solo visible si hay duplicados */}
           {cuentas.length !== new Set(cuentas.map(c => c.codigo)).size && (
             <Boton onClick={deduplicarCuentas} disabled={deduplicando}>
@@ -177,8 +180,15 @@ export default function ContabilidadPlanCuentas() {
           <Boton variante="primario" onClick={() => { setEditando(null); setShowModal(true); }}>
             <IconoMas tamano={14} /> Nueva cuenta
           </Boton>
-        </div>
+        </div>}
       </header>
+
+      <Pestanas valor={vista} onCambiar={setVista} opciones={[
+        { id: "cuentas", label: "Cuentas" },
+        { id: "ot", label: "Cuentas de costo de Oficina Técnica" },
+      ]} />
+
+      {vista === "ot" ? <ContabilidadMapeoOT /> : <>
 
       {errorDedup && <Nota etiqueta="Ojo:">{errorDedup}</Nota>}
       {resultadoDedup !== null && (
@@ -285,6 +295,7 @@ export default function ContabilidadPlanCuentas() {
           </>
         )}
       </Hoja>
+      </>}
 
       <ModalCuenta isOpen={showModal} onClose={() => { setShowModal(false); setEditando(null); }} editando={editando} onSave={guardarCuenta} />
     </div>
