@@ -32,9 +32,8 @@ export function netoEEPPRental(p) {
 }
 
 /** Monto facturable de un registro de ingresos de Oficina Técnica. */
-export function ventaEstadoPagoOT(i) {
-  return num(i?.estadosPago) + num(i?.reajuste) + num(i?.reajustePolinomico) + num(i?.multas);
-}
+// Misma regla que src/lib/costosObra.js (venta bruta, sin retención)
+export { ventaOT as ventaEstadoPagoOT } from "../costosObra";
 
 /**
  * @param rentalPayments  docs de rentalPayments
