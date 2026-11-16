@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getSession } from '../lib/auth.js'
 import { generarConIA } from '../lib/claude.js'
-import { verificarPin, tienePin, crearPin } from '../lib/firmas.js'
+import { verificarPin, motivoPin, tienePin, crearPin } from '../lib/firmas.js'
 import {
   LIBROS, TIPOS_FOLIO, ESTADOS,
   crearFolio, firmarEmision, responderFolio, firmarRespuesta, obtenerFolios, getFolio
@@ -90,7 +90,7 @@ function PinModal({ session, accion, onSuccess, onClose }) {
         await crearPin(session.usuario, pin)
       }
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
+      if (!ok) { setError(motivoPin()); setLoading(false); return }
       onSuccess()
     } catch(e) { setError(e.message) }
     setLoading(false)

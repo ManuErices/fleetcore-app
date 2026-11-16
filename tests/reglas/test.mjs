@@ -159,6 +159,17 @@ await t("…y crea su vínculo de portal → permitido", assertSucceeds(setDoc(d
 
 await t("operario con email SIN verificar → negado", assertFails(setDoc(doc(as("juanNV","juan@a.cl",false).firestore(),"users/juanNV"),{role:"operador",empresaId:"A",trabajadorId:"t1"})));
 await t("admin pendiente con email sin verificar no ve la empresa → negado", assertFails(getDocs(query(collection(as("nv2","admin@a.cl",false).firestore(),"empresas"),where("adminEmail","==","admin@a.cl")))));
+
+await t("leer hash de PIN (aunque sea propio) → negado", assertFails(getDoc(doc(fsOf("ana"),"pins/ana"))));
+await t("crear PIN con desbloqueo propio → negado", assertFails(setDoc(doc(fsOf("bea"),"pins/bea"),{hash:"h",uid:"bea",bloqueadoHasta:0})));
+await t("usuarios con pinHash → negado", assertFails(setDoc(doc(fsOf("caro"),"usuarios/caro"),{username:"caro",uid:"caro",pinHash:"h"})));
+await t("usuarios sin pinHash → permitido", assertSucceeds(setDoc(doc(fsOf("caro"),"usuarios/caro"),{username:"caro",uid:"caro"})));
+
+await t("agente: primer uso del día → permitido", assertSucceeds(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:1})));
+await t("agente: sumar de a 1 → permitido", assertSucceeds(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:2})));
+await t("agente: reiniciar el contador → negado", assertFails(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:1})));
+await t("agente: contador de otro → negado", assertFails(setDoc(doc(fsOf("opA"),"agente_uso/adminA_2026-11-16"),{n:1})));
+await t("agente: borrar contador → negado", assertFails(deleteDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"))));
 console.log(`\n${ok} ok, ${fail} fallos`);
 await env.cleanup();
 process.exit(fail?1:0);

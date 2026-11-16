@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { obtenerDocumentos } from '../lib/documentos.js'
-import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, rechazarDocumento } from '../lib/firmas.js'
+import { ROLES_FIRMA, FLUJO, verificarPin, motivoPin, firmarDocumento, rechazarDocumento } from '../lib/firmas.js'
 import { getSession } from '../lib/auth.js'
 import ModalVerDocumento from '../components/ModalVerDocumento.jsx'
 
@@ -156,7 +156,7 @@ function ModalFirma({ docId, rolKey, session, rolLabel, onFirmado, onClose }) {
     setLoading(true)
     try {
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
+      if (!ok) { setError(motivoPin()); setLoading(false); return }
       const firma = await firmarDocumento(docId, rolKey, session.usuario, session.nombre, session.cargo || '')
       onFirmado(rolKey, firma)
     } catch(e) { setError(e.message) }
@@ -211,7 +211,7 @@ function ModalRechazo({ docId, rolKey, session, rolLabel, onRechazado, onClose }
     setLoading(true)
     try {
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
+      if (!ok) { setError(motivoPin()); setLoading(false); return }
       const rechazo = await rechazarDocumento(docId, rolKey, session.usuario, session.nombre, session.cargo || '', motivo)
       onRechazado(rolKey, rechazo)
     } catch(e) { setError(e.message) }

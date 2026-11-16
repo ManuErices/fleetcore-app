@@ -1,7 +1,7 @@
 // src/lib/auth.js
 import { db, auth } from './firebase.js'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
-import { hashPin } from './firmas.js'
+import { hashPin, llamarPin, MENSAJES_PIN } from './firmas.js'
 
 export const ROLES_SISTEMA = {
   admin:      { label: 'Administrador',        color: '#6C63D4' },
@@ -40,8 +40,11 @@ export async function login(usuario, pin) {
     if (user.estado === 'finiquitado' || user.estado === 'inactivo') {
       return { ok: false, error: 'Acceso denegado: tu relación laboral ha finalizado o tu cuenta está inactiva.' }
     }
-    const hash = await hashPin(pin)
-    if (hash !== user.pinHash) return { ok: false, error: 'PIN incorrecto' }
+    // El PIN se verifica en el servidor (el hash ya no se lee desde la app)
+    const r = await llamarPin('login', u, pin)
+    if (!r.ok) return { ok: false, error: r.motivo === 'inactivo'
+      ? 'Acceso denegado: tu relación laboral ha finalizado o tu cuenta está inactiva.'
+      : (MENSAJES_PIN[r.motivo] || 'PIN incorrecto') }
 
     const empresa = user.empresa || empresaDeRol(user.rol)
     const session = {
@@ -78,7 +81,7 @@ export async function registrar(usuario, nombre, rut, cargo, rol, pin) {
 
   await setDoc(doc(db, 'usuarios', u), {
     username: u, uid: auth.currentUser?.uid || null, nombre: nombre.trim(), rut: rut.trim(),
-    cargo: cargo.trim(), empresa, rol, pinHash,
+    cargo: cargo.trim(), empresa, rol,   // el hash del PIN va solo en pins (no legible desde la app)
     creadoEn: serverTimestamp(),
   })
 

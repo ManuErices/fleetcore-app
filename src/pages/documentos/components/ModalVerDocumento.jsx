@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { agregarObservacionDocumento, actualizarDocumento } from '../lib/documentos.js'
-import { verificarPin, firmarDocumento, rechazarDocumento, ROLES_FIRMA, FLUJO } from '../lib/firmas.js'
+import { verificarPin, motivoPin, firmarDocumento, rechazarDocumento, ROLES_FIRMA, FLUJO } from '../lib/firmas.js'
 
 const C = { navy:'#0D2B45', gold:'#C9A84C', green:'#15803d', red:'#dc2626', gray:'#64748b', border:'#e2e8f0' }
 
@@ -254,7 +254,7 @@ export default function ModalVerDocumento({ doc, session, onClose, onUpdateDoc }
     setLoadingAccion(true)
     try {
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setErrorAccion('PIN incorrecto'); setLoadingAccion(false); return }
+      if (!ok) { setErrorAccion(motivoPin()); setLoadingAccion(false); return }
       const rk = rolActivo || 'aprobado'
       const firma = await firmarDocumento(doc.id, rk, session.usuario, session.nombre, session.cargo || '')
       const updated = {
@@ -274,7 +274,7 @@ export default function ModalVerDocumento({ doc, session, onClose, onUpdateDoc }
     setLoadingAccion(true)
     try {
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setErrorAccion('PIN incorrecto'); setLoadingAccion(false); return }
+      if (!ok) { setErrorAccion(motivoPin()); setLoadingAccion(false); return }
       const rk = rolActivo || 'aprobado'
       const rechazo = await rechazarDocumento(doc.id, rk, session.usuario, session.nombre, session.cargo || '', motivoRechazo)
       const updated = {

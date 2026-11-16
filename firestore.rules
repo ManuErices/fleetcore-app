@@ -799,6 +799,23 @@ service cloud.firestore {
     // Va aparte de /users porque cada usuario puede editar su propio
     // documento: ahí podría darse el permiso a sí mismo.
     // ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
+    // /agente_uso — contador diario de turnos del asistente IA por usuario
+    // (api/agente/chat.js lo incrementa con el token del propio usuario).
+    // Solo se puede sumar de a 1 y hasta 300 por día: nadie puede reiniciar
+    // su contador ni borrarlo.
+    // ─────────────────────────────────────────────────────
+    match /agente_uso/{docId} {
+      allow read:   if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      allow create: if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}')
+                    && request.resource.data.keys().hasOnly(['n']) && request.resource.data.n == 1;
+      allow update: if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}')
+                    && request.resource.data.keys().hasOnly(['n'])
+                    && request.resource.data.n == resource.data.n + 1
+                    && request.resource.data.n <= 300;
+      allow delete: if false;
+    }
+
     match /plataforma/{docId} {
       allow read:  if isAuth();
       allow write: if isSuperAdmin();
@@ -885,15 +902,17 @@ service cloud.firestore {
     // pins y usuarios: sistema custom de auth del módulo documentos (no Firebase Auth)
     // Solo necesita ser accedido por cualquier usuario autenticado (no hay empresaId en estos docs)
     match /pins/{usuario} {
-      // El hash se lee para verificar la firma. Crear: solo si no existe (y
-      // queda con el uid de quien lo crea). Cambiar: solo su dueño. Antes
-      // cualquier usuario autenticado podía reemplazar el PIN de otro y
-      // firmar en su nombre.
-      allow read:   if isAuth();
-      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      // El hash ya no se lee desde la app: el PIN se verifica en el servidor
+      // (Cloud Function verificarPinFirma, con bloqueo por intentos). Antes
+      // cualquier usuario leía el hash de un PIN de 4 dígitos y lo rompía.
+      // Crear: solo si no existe, con el uid de quien lo crea. Cambiar: su dueño.
+      allow read:   if isSuperAdmin();
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid
+                    && !('intentosFallidos' in request.resource.data) && !('bloqueadoHasta' in request.resource.data);
       allow update: if isSuperAdmin()
                     || (isAuth() && resource.data.get('uid', null) == request.auth.uid
-                        && request.resource.data.get('uid', null) == request.auth.uid);
+                        && request.resource.data.get('uid', null) == request.auth.uid
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hash', 'createdAt', 'uid']));
       allow delete: if isSuperAdmin();
     }
     match /usuarios/{usuario} {
@@ -901,10 +920,13 @@ service cloud.firestore {
       // de su dueño y solo él lo cambia. Un admin puede cambiar únicamente el
       // estado (RRHH lo usa al desvincular o finiquitar).
       allow read:   if isAuth();
-      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      // Sin pinHash: el hash vive solo en /pins (que no se lee desde la app)
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid
+                    && !('pinHash' in request.resource.data);
       allow update: if isSuperAdmin()
                     || (isAuth() && resource.data.get('uid', null) == request.auth.uid
-                        && request.resource.data.get('uid', null) == request.auth.uid)
+                        && request.resource.data.get('uid', null) == request.auth.uid
+                        && !('pinHash' in request.resource.data.diff(resource.data).affectedKeys()))
                     || (isAnyAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'updatedAt']));
       allow delete: if isSuperAdmin();
     }

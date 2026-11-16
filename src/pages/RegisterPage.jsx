@@ -154,7 +154,6 @@ export default function RegisterPage() {
         role: 'admin_contrato',
         modulos: landingModules,
         cargo: '',
-        pinHash,
         createdAt: serverTimestamp(),
       });
 
@@ -167,7 +166,6 @@ export default function RegisterPage() {
         role: 'admin_contrato',
         modulos: landingModules,
         cargo: '',
-        pinHash,
         createdAt: serverTimestamp(),
       });
 
@@ -182,7 +180,6 @@ export default function RegisterPage() {
         cargo: '',
         empresa: empresa.razonSocial,
         rol: 'admin',
-        pinHash,
         creadoEn: serverTimestamp(),
       });
 

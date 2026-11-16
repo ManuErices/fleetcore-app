@@ -22,7 +22,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { INSTRUCCIONES, HERRAMIENTAS } from './_herramientas.js';
-import { tokenDe, validarToken } from '../_comun/sesion.js';
+import { tokenDe, validarToken, contarUsoAgente } from '../_comun/sesion.js';
 
 // Tope para que nadie use el endpoint como proxy gratis de la API.
 const MAX_BYTES = 1500 * 1024;
@@ -91,6 +91,12 @@ export default async function handler(req, res) {
       return res.status(500).json({
         error: 'Falta configurar ANTHROPIC_API_KEY en Vercel. Recuerda redeployar después de agregarla.',
       });
+    }
+
+    // Tope diario por usuario (lo hacen cumplir las reglas de Firestore)
+    const uso = await contarUsoAgente(idToken, sesion.uid);
+    if (!uso.ok && uso.limite) {
+      return res.status(429).json({ error: 'Llegaste al máximo de consultas al asistente por hoy. Vuelve a intentarlo mañana.' });
     }
 
     const { messages, contexto } = req.body || {};
