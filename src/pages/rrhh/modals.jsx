@@ -9,6 +9,8 @@ import * as Calc from './calculo';
 import * as PDFs from './pdfs';
 import { useContextoPeriodo, extrasDelPeriodo, liquidacionDuplicada, snapshotCentroCosto, finiquitoDuplicado } from './periodo';
 import { hoyISO, sumarDias } from '../../lib/fechas';
+import { claveOperador } from '../../lib/credencialesQR';
+import { buscarTrabajadorPorRut, fetchTrabajadores } from '../../lib/trabajadores';
 import { aplicarAnexo, prorrogasDe } from './anexos';
 import { useVacaciones, resumenVacaciones } from './vacaciones';
 
@@ -168,6 +170,9 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     tipo: 'OPERADOR', esSurtidor: false, projectId: null,
   };
   const [form,    setForm]    = useState(empty);
+  // Ficha existente abierta al detectar el RUT repetido: el guardado la edita.
+  const [fichaAbierta, setFichaAbierta] = useState(null);
+  const editId = editData?.id || fichaAbierta;
   const [centrosCosto, setCentrosCosto] = useState([]);
   const [tab, setTab] = useState('persona');
 
@@ -272,6 +277,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         setForm({ ...empty, empresa: empresa?.nombre || '' });
       }
     }
+    setFichaAbierta(null);
     setTab('persona');
   }, [editData, isOpen]);
 
@@ -348,6 +354,21 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
     if (!form.nombre || !form.apellidoPaterno || !form.rut) {
       alert('Nombre, apellido paterno y RUT son obligatorios.'); return;
     }
+    // Maestro de trabajadores: una ficha por RUT. Si ya hay otra con este RUT
+    // (también finiquitada: una recontratación reabre la misma ficha) no se
+    // crea una segunda; se ofrece abrir la existente.
+    try {
+      const lista = await fetchTrabajadores(empresaId);
+      const choque = buscarTrabajadorPorRut(lista.filter(t => t.id !== editId), form.rut);
+      if (choque) {
+        const nombre = [choque.nombre || choque.nombres, choque.apellidoPaterno, choque.apellidoMaterno].filter(Boolean).join(' ');
+        const abrir = window.confirm(`Ya existe una ficha con el RUT ${choque.rut}: ${nombre || '(sin nombre)'} (estado ${choque.estado || 'activo'}).\n\nNo se crea otra ficha para la misma persona. ¿Abrir la ficha existente para editarla?`);
+        if (abrir) { setFichaAbierta(choque.id); setForm({ ...empty, ...choque }); setTab('persona'); }
+        return;
+      }
+    } catch (e) {
+      alert('No se pudo verificar si el RUT ya existe: ' + (e?.message || e)); return;
+    }
     setSaving(true);
     try {
       const telefonoCompleto = form.telefono ? `${form.codigoPais}${form.telefono}` : '';
@@ -383,8 +404,8 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
         });
       }
 
-      if (editData?.id) {
-        await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editData.id), payload);
+      if (editId) {
+        await updateDoc(doc(db, 'empresas', empresaId, 'trabajadores', editId), payload);
         
         // Propagate state to linked user accounts
         const stateToSync = form.estado || 'activo';
@@ -417,7 +438,7 @@ function TrabajadorModal({ isOpen, onClose, editData, onSaved }) {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}
-      title={editData ? 'Editar Trabajador' : 'Nuevo Trabajador'}
+      title={editId ? 'Editar Trabajador' : 'Nuevo Trabajador'}
       subtitle="Registro de personal · Código del Trabajo"
       maxWidth="max-w-3xl">
 
@@ -2223,15 +2244,29 @@ function FiniquitoModal({ isOpen, onClose, editData, trabajadores, contratos, re
         updatedAt: serverTimestamp()
       });
 
-      // Propagate state to linked user accounts
-      if (trabajadorSel?.portalUid) {
-        try {
-          await updateDoc(doc(db, 'users', trabajadorSel.portalUid), { estado: 'finiquitado', updatedAt: serverTimestamp() });
-          await updateDoc(doc(db, 'empresas', empresaId, 'users', trabajadorSel.portalUid), { estado: 'finiquitado', updatedAt: serverTimestamp() });
-        } catch (e) {
-          console.warn('Could not sync user status in users subcollection:', e.message);
-        }
+      // El finiquito corta el acceso: toda cuenta de usuario vinculada a la
+      // ficha (portal, operador de WorkFleet, o la cuenta con su email en esta
+      // empresa) queda 'finiquitado' — las reglas solo dejan escribir a usuarios
+      // activos — y se borra la credencial del QR de acceso rápido.
+      const uidsVinculados = new Set();
+      if (trabajadorSel?.portalUid) uidsVinculados.add(trabajadorSel.portalUid);
+      const emailFicha = (trabajadorSel?.email || trabajadorSel?.portalEmail || '').toLowerCase().trim();
+      const consultas = [query(collection(db, 'users'), where('empresaId', '==', empresaId), where('trabajadorId', '==', form.trabajadorId))];
+      if (emailFicha) consultas.push(query(collection(db, 'users'), where('empresaId', '==', empresaId), where('email', '==', emailFicha)));
+      for (const q of consultas) {
+        try { (await getDocs(q)).forEach(d => uidsVinculados.add(d.id)); }
+        catch (e) { console.warn('No se pudieron buscar usuarios vinculados:', e?.code || e?.message); }
       }
+      for (const uid of uidsVinculados) {
+        try {
+          await updateDoc(doc(db, 'users', uid), { estado: 'finiquitado', updatedAt: serverTimestamp() });
+        } catch (e) {
+          console.warn('No se pudo marcar la cuenta como finiquitada:', e?.code || e?.message);
+        }
+        try { await updateDoc(doc(db, 'empresas', empresaId, 'users', uid), { estado: 'finiquitado', updatedAt: serverTimestamp() }); } catch { /* subcolección opcional */ }
+      }
+      try { await deleteDoc(doc(db, 'empresas', empresaId, 'credenciales_qr', claveOperador(form.trabajadorId))); }
+      catch (e) { console.warn('No se pudo borrar la credencial QR:', e?.code || e?.message); }
       const emailStr = trabajadorSel?.email || trabajadorSel?.portalEmail || '';
       if (emailStr) {
         const u = emailStr.split('@')[0].toLowerCase().trim();

@@ -1,5 +1,5 @@
 // src/lib/auth.js
-import { db } from './firebase.js'
+import { db, auth } from './firebase.js'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { hashPin } from './firmas.js'
 
@@ -77,7 +77,7 @@ export async function registrar(usuario, nombre, rut, cargo, rol, pin) {
   const empresa = empresaDeRol(rol)
 
   await setDoc(doc(db, 'usuarios', u), {
-    username: u, nombre: nombre.trim(), rut: rut.trim(),
+    username: u, uid: auth.currentUser?.uid || null, nombre: nombre.trim(), rut: rut.trim(),
     cargo: cargo.trim(), empresa, rol, pinHash,
     creadoEn: serverTimestamp(),
   })
@@ -85,6 +85,7 @@ export async function registrar(usuario, nombre, rut, cargo, rol, pin) {
   // Guarda también en 'pins' para compatibilidad con el sistema de firmas
   await setDoc(doc(db, 'pins', u), {
     hash: pinHash,
+    uid: auth.currentUser?.uid || null,   // dueño: solo él puede cambiarlo (reglas)
     createdAt: new Date().toISOString(),
   })
 

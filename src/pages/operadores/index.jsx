@@ -56,7 +56,10 @@ export default function OperadoresApp({ user, userRole, onLogout, onBackToSelect
             setEsSurtidor(true);
           }
           setAccesoMaquinaria(data.accesoMaquinaria !== false);
-          setVista('home');
+          // Cuenta finiquitada o desactivada: las reglas ya no le dejan
+          // escribir, así que no se le ofrecen formularios que fallarían.
+          const estado = data.estado || 'activo';
+          setVista(estado !== 'activo' && data.role !== 'superadmin' ? 'bloqueado' : 'home');
         } else {
           setVista('home');
         }
@@ -70,6 +73,19 @@ export default function OperadoresApp({ user, userRole, onLogout, onBackToSelect
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#0A0E1A' }}>
         <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (vista === 'bloqueado') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ background: '#0A0E1A' }}>
+        <p className="text-white font-black text-lg">Tu acceso está cerrado</p>
+        <p className="text-slate-400 text-sm max-w-xs">
+          Tu cuenta figura como finiquitada o inactiva en esta empresa, por eso ya no puedes registrar reportes.
+          Si es un error, avisa a la oficina para que la reactiven.
+        </p>
+        <button onClick={onLogout} className="px-5 py-2.5 rounded-xl bg-white/10 text-white text-sm font-semibold">Cerrar sesión</button>
       </div>
     );
   }

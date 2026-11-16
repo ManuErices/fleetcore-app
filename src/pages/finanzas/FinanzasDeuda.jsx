@@ -8,6 +8,7 @@ import FinanzasDeudaImportador from "./FinanzasDeudaImportador";
 import ComprobantesUploader from "./ComprobantesUploader";
 import HistorialAuditoria from "./HistorialAuditoria";
 import PagosDocumento from "./PagosDocumento";
+import { agruparDeudaPorAcreedor, totalesDeuda, llaveAcreedor } from "../../lib/finanzas/deuda.js";
 import { conEstadoAlDia } from "../../lib/pagosDeuda";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, Paginador, FechaHoja,
@@ -274,26 +275,9 @@ export default function FinanzasDeuda() {
   }
 
   // ── Agregación por acreedor ──────────────────────────────────────────────
-  const acreedores = useMemo(() => {
-    const mapa = {};
-    documentos.forEach(d => {
-      const key = d.proveedorSlug || d.proveedorNombre;
-      if (!mapa[key]) {
-        mapa[key] = {
-          nombre: d.proveedorNombre, rut: d.rut, tipoDeuda: d.tipoDeuda || "proveedor",
-          documentos: 0, saldoPendiente: 0, saldoVencido: 0, maxDiasMora: 0,
-          cedidoAFactoring: false, entidadFactoring: null,
-        };
-      }
-      const a = mapa[key];
-      a.documentos += 1;
-      a.saldoPendiente += d.saldoPendiente || 0;
-      if (d.estado === "vencido") a.saldoVencido += d.saldoPendiente || 0;
-      if ((d.diasMora || 0) > a.maxDiasMora) a.maxDiasMora = d.diasMora;
-      if (d.cedidoAFactoring) { a.cedidoAFactoring = true; a.entidadFactoring = d.entidadFactoring; }
-    });
-    return Object.values(mapa);
-  }, [documentos]);
+  // Misma agregación que el agente (lib/finanzas/deuda.js): saldo neto por
+  // acreedor (slug, ficha del maestro o nombre).
+  const acreedores = useMemo(() => agruparDeudaPorAcreedor(documentos), [documentos]);
 
   // Un acreedor pasa a "Historial" cuando TODOS sus documentos están en
   // saldoPendiente === 0 (totalmente pagado) — automático, sin botón manual,
@@ -338,19 +322,7 @@ export default function FinanzasDeuda() {
   }, [acreedoresHistorial, paginaHistorial]);
 
   // ── KPIs globales ────────────────────────────────────────────────────────
-  const kpis = useMemo(() => {
-    let saldoTotal = 0, saldoVencido = 0, saldoAnticipos = 0, deudaBruta = 0, montoPagadoTotal = 0;
-    let docsVencidos = 0, docsPendientes = 0;
-    documentos.forEach(d => {
-      saldoTotal += d.saldoPendiente || 0;
-      montoPagadoTotal += d.montoPagado || 0;
-      deudaBruta += d.valorDoc || 0;
-      if (d.estado === "vencido") { saldoVencido += d.saldoPendiente || 0; docsVencidos++; }
-      if (d.estado === "pendiente" || d.estado === "parcial") docsPendientes++;
-      if (d.estado === "anticipo_excedente") saldoAnticipos += d.saldoPendiente || 0;
-    });
-    return { saldoTotal, saldoVencido, saldoAnticipos, deudaBruta, montoPagadoTotal, docsVencidos, docsPendientes };
-  }, [documentos]);
+  const kpis = useMemo(() => totalesDeuda(documentos), [documentos]);
 
   const distribTipo = useMemo(() => {
     const m = { proveedor: 0, factoring: 0, financiera: 0 };
@@ -361,7 +333,7 @@ export default function FinanzasDeuda() {
 
   const documentosDelSeleccionado = useMemo(() => {
     if (!acreedorSeleccionado) return [];
-    return documentos.filter(d => d.proveedorNombre === acreedorSeleccionado.nombre);
+    return documentos.filter(d => llaveAcreedor(d) === acreedorSeleccionado.key);
   }, [documentos, acreedorSeleccionado]);
 
   function abrirDetalle(acreedor) {

@@ -78,10 +78,18 @@ service cloud.firestore {
 
     // Usuario tiene acceso de lectura/escritura a la empresa
     // (cualquier rol excepto trabajador y mandante pueden operar)
+    // Un usuario finiquitado o desactivado (users.estado distinto de 'activo')
+    // conserva su cuenta pero ya no escribe: el finiquito corta el acceso.
+    // Una sola lectura de la ficha (ver la nota de PERMISOS POR ÁREA).
     function canWriteEmpresa(empresaId) {
-      return belongsToEmpresa(empresaId)
-          && userRole() != 'trabajador'
-          && userRole() != 'mandante';
+      let u = fichaUsuario();
+      let rol = u.get('role', '');
+      let eid = u.get('empresaId', null);
+      return isAuth()
+          && (eid == empresaId || empresaId in u.get('empresasIds', eid != null ? [eid] : []))
+          && rol != 'trabajador'
+          && rol != 'mandante'
+          && u.get('estado', 'activo') == 'activo';
     }
 
     // Trabajador autenticado con cuenta @mpf.cl (u otro dominio de empresa)
@@ -112,6 +120,51 @@ service cloud.firestore {
       return isSuperAdmin() || isAdminContrato() || userRole() == 'administrativo' || isJefeTaller();
     }
 
+    // ── PERMISOS POR ÁREA ────────────────────────────────
+    // Antes cualquier rol con escritura (operador, mecánico, jefe de taller)
+    // podía escribir remuneraciones, bancos, flujo y asientos con el SDK: la
+    // separación era solo visual. Ahora se aplica la misma regla que el
+    // selector de apps (App.jsx): admin_contrato entra a todo; administrativo
+    // y operador solo a los módulos que tienen en `modulos`.
+    // Una sola lectura de la ficha y cálculo directo: encadenar los helpers
+    // de arriba (cada uno con su exists/get) superaba el límite de evaluación
+    // del motor de reglas y la petición entera fallaba.
+    function fichaUsuario() {
+      return isAuth() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? userData() : {};
+    }
+    // `modulos` es una lista; algunas fichas antiguas lo tienen como texto "a,b".
+    // patron: expresión regular con los módulos aceptados, p. ej. 'rrhh|finanzas'
+    function areaDe(empresaId, modulos, patron) {
+      let u = fichaUsuario();
+      let rol = u.get('role', '');
+      let ms = u.get('modulos', []);
+      let miembro = u.get('empresaId', '') == empresaId || empresaId in u.get('empresasIds', []);
+      return rol == 'superadmin'
+          || (miembro && u.get('estado', 'activo') == 'activo' && (rol == 'admin_contrato'
+              || ((rol == 'administrativo' || rol == 'operador')
+                  && ((ms is list && ms.hasAny(modulos)) || (ms is string && ms.matches('.*(' + patron + ').*'))))));
+    }
+    function puedeRRHH(empresaId)         { return areaDe(empresaId, ['rrhh'], 'rrhh'); }
+    function puedeFinanzas(empresaId)     { return areaDe(empresaId, ['finanzas'], 'finanzas'); }
+    function puedeContabilidad(empresaId) { return areaDe(empresaId, ['contabilidad'], 'contabilidad'); }
+    // Lectura de sueldos: RRHH, y las áreas que los usan como costo
+    // (Contabilidad, Finanzas y Oficina Técnica para mano de obra por obra).
+    function leeSueldos(empresaId) {
+      return areaDe(empresaId, ['rrhh', 'contabilidad', 'finanzas', 'fleetcore'], 'rrhh|contabilidad|finanzas|fleetcore');
+    }
+    // Lectura de finanzas: Finanzas, Contabilidad y Reportes (gerencia)
+    function leeFinanzas(empresaId) {
+      return areaDe(empresaId, ['finanzas', 'contabilidad', 'reportes'], 'finanzas|contabilidad|reportes');
+    }
+    // Personal de oficina (no terreno): admin y administrativo
+    function esOficina(empresaId) {
+      let u = fichaUsuario();
+      return u.get('role', '') == 'superadmin'
+          || ((u.get('empresaId', '') == empresaId || empresaId in u.get('empresasIds', []))
+              && u.get('estado', 'activo') == 'activo'
+              && u.get('role', '') in ['admin_contrato', 'administrativo']);
+    }
+
     // ── NUEVO ────────────────────────────────────────────
     // Id de la ficha de trabajador vinculada a quien hace la petición.
     // El portal guarda el índice uid → trabajadorDocId en trabajadores_portal.
@@ -140,7 +193,15 @@ service cloud.firestore {
     // ─────────────────────────────────────────────────────
 
     match /empresas/{empresaId} {
-      allow read:  if isAuth();
+      // Antes cualquier usuario autenticado leía todas las empresas (RUT,
+      // adminEmail, adminUid). Ahora: sus miembros, sus sub-empresas, y quien
+      // figura como admin (para vincularse en el primer ingreso).
+      allow read:  if isSuperAdmin()
+                   || esMiembroDe(empresaId)
+                   || (isAuth() && (
+                         resource.data.get('parentEmpresaId', '__ninguna__') in misEmpresas()
+                         || resource.data.get('adminUid', '') == request.auth.uid
+                         || resource.data.get('adminEmail', '__ninguno__') == request.auth.token.email));
       // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún);
       // O un administrador/usuario autorizado puede crear una sub-empresa
       allow create: if isSuperAdmin()
@@ -163,8 +224,10 @@ service cloud.firestore {
                        || isSuperAdmin()
                        || (userEmpresaId() == empresaId && isAnyAdmin())
                      );
+        // El propio usuario solo en una empresa de la que ya es miembro (antes
+        // podía crearse una ficha en la subcolección de cualquier empresa).
         allow write: if isAuth() && (
-                       request.auth.uid == uid
+                       (request.auth.uid == uid && belongsToEmpresa(empresaId))
                        || isSuperAdmin()
                        || (isAdminContrato() && userEmpresaId() == empresaId)
                      );
@@ -182,22 +245,38 @@ service cloud.firestore {
         allow create: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && request.resource.data.portalUid == request.auth.uid;
+        // …o, si RRHH ya tenía su ficha con el mismo email, la encuentra y se
+        // vincula a ella (una ficha por persona). Solo puede escribir el
+        // vínculo, y solo si la ficha no estaba vinculada a otra cuenta.
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.get('email', '') == request.auth.token.email;
+        allow update: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.get('email', '') == request.auth.token.email
+                    && resource.data.get('portalUid', '') in ['', null]
+                    && request.resource.data.portalUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['portalUid', 'portalEmail', 'updatedAt']);
       }
 
       match /trabajadores_portal/{uid} {
         allow read:  if isAuth() && request.auth.uid == uid;
         allow write: if isSuperAdmin()
                      || (canWriteEmpresa(empresaId));
-        // Trabajador crea su propio vínculo al aceptar una invitación
+        // Trabajador crea su propio vínculo al aceptar una invitación, y solo
+        // hacia una ficha que ya está vinculada a su cuenta (antes podía
+        // apuntar a la ficha de cualquiera y leer sus liquidaciones).
         allow create: if isAuth() && request.auth.uid == uid
                     && belongsToEmpresa(empresaId)
-                    && isTrabajador();
+                    && isTrabajador()
+                    && exists(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores/$(request.resource.data.trabajadorDocId))
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores/$(request.resource.data.trabajadorDocId)).data.get('portalUid', '') == request.auth.uid;
       }
 
       // ── CONTRATOS, ANEXOS, FINIQUITOS ───────────────────
       match /contratos/{docId} {
-        allow read, write: if isSuperAdmin()
-                           || canWriteEmpresa(empresaId);
+        allow read:  if isSuperAdmin() || leeSueldos(empresaId);
+        allow write: if isSuperAdmin() || puedeRRHH(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
@@ -206,8 +285,8 @@ service cloud.firestore {
       }
 
       match /finiquitos/{docId} {
-        allow read, write: if isSuperAdmin()
-                           || canWriteEmpresa(empresaId);
+        allow read:  if isSuperAdmin() || leeSueldos(empresaId);
+        allow write: if isSuperAdmin() || puedeRRHH(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
@@ -215,8 +294,8 @@ service cloud.firestore {
       }
 
       match /anexos/{docId} {
-        allow read, write: if isSuperAdmin()
-                           || canWriteEmpresa(empresaId);
+        allow read:  if isSuperAdmin() || leeSueldos(empresaId);
+        allow write: if isSuperAdmin() || puedeRRHH(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
@@ -225,8 +304,8 @@ service cloud.firestore {
 
       // ── REMUNERACIONES ───────────────────────────────────
       match /remuneraciones/{docId} {
-        allow read, write: if isSuperAdmin()
-                           || canWriteEmpresa(empresaId);
+        allow read:  if isSuperAdmin() || leeSueldos(empresaId);
+        allow write: if isSuperAdmin() || puedeRRHH(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
@@ -251,8 +330,8 @@ service cloud.firestore {
       // así que no hay campo que un trabajador pudiera falsear para cambiar su
       // propia liquidación aunque tuviera escritura.
       match /licencias/{docId} {
-        allow read, write: if isSuperAdmin()
-                           || canWriteEmpresa(empresaId);
+        allow read:  if isSuperAdmin() || leeSueldos(empresaId);
+        allow write: if isSuperAdmin() || puedeRRHH(empresaId);
         allow read: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && (resource == null || (resource.data.trabajadorId != null
@@ -365,7 +444,7 @@ service cloud.firestore {
       // ── RESTO DE COLECCIONES DE EMPRESA ──────────────────
       // Acceso completo para admins y roles operativos de la empresa
       match /projects/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /machines/{docId}              { allow read: if isAuth(); allow write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /machines/{docId}              { allow read: if isSuperAdmin() || belongsToEmpresa(empresaId); allow write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /dailyLogs/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelLogs/{docId}              { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /employees/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
@@ -378,73 +457,78 @@ service cloud.firestore {
       match /combustibleRegistros/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /combustiblePrecioMensual/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /actividades_disponibles/{docId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /bandas_salariales/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /bandas_salariales/{docId}     { allow read: if isSuperAdmin() || leeSueldos(empresaId); allow write: if isSuperAdmin() || puedeRRHH(empresaId); }
       // Catálogo de ítems de pago (bonos y descuentos con nombre propio).
       // Solo define nombres y clasificación: los montos viven dentro de cada
       // liquidación, que ya está protegida por su propia regla.
-      match /items_pago/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /items_pago/{docId}            { allow read: if isSuperAdmin() || leeSueldos(empresaId); allow write: if isSuperAdmin() || puedeRRHH(empresaId); }
       // Anticipos de remuneración y nóminas bancarias emitidas.
       // `nominas_pago` es el registro de lo efectivamente transferido: se crea
       // al generar el archivo y no debería editarse después.
-      match /anticipos/{docId}             { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /nominas_pago/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /anticipos/{docId}             { allow read: if isSuperAdmin() || leeSueldos(empresaId); allow write: if isSuperAdmin() || puedeRRHH(empresaId); }
+      match /nominas_pago/{docId}          { allow read: if isSuperAdmin() || leeSueldos(empresaId); allow write: if isSuperAdmin() || puedeRRHH(empresaId); }
       match /catalogo_maquinas/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /costos_fijos/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /costos_fijos/{docId}          { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
       match /empresas_combustible/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /equipos_surtidores/{docId}    { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /estaciones_combustible/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_config/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_cuentas/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_pagados/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_notas/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_pagos/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_config/{docId}          { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /flujo_cuentas/{docId}         { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /flujo_pagados/{docId}         { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /flujo_notas/{docId}           { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /flujo_pagos/{docId}           { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
       // Propuestas de flujo de caja: borradores que no tocan flujo_pagos hasta aprobarse
-      match /flujo_propuestas/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /flujo_propuestas/{docId}      { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
       // Memoria compartida del asistente IA (notas que el equipo le pide recordar)
-      match /agente_memoria/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      // Se carga en el contexto del asistente de todos: solo la oficina la escribe
+      // (un operador podía dejar instrucciones que el agente seguía para todos).
+      // Contraseñas para reimprimir los QR de acceso (src/lib/credencialesQR.js).
+      // Antes estaban en texto plano en trabajadores/users, legibles por operadores.
+      match /credenciales_qr/{docId}       { allow read, write: if esOficina(empresaId); }
+      match /agente_memoria/{docId}        { allow read: if isSuperAdmin() || canWriteEmpresa(empresaId); allow write: if esOficina(empresaId); }
 
       // ── BANCOS Y PROVEEDORES (Finanzas) ─────────────────
       // Estaban solo en la consola de Firebase y no en este archivo: al
       // publicarlo completo se perdían y Bancos/Proveedores dejaban de cargar.
-      match /banco_cuentas/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /banco_movimientos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /banco_importaciones/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /banco_reglas/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /banco_cuentas/{docId}         { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /banco_movimientos/{docId}     { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /banco_importaciones/{docId}   { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /banco_reglas/{docId}          { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
       match /proveedores/{docId}           { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
 
       // ── OTRAS COLECCIONES QUE USA LA APP Y FALTABAN AQUÍ ─
       // Límites de los reportes diarios (src/lib/reportesConfig.js)
       match /configuracion/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       // Documentos adjuntos a la ficha del trabajador (RRHH)
-      match /documentos_trabajadores/{docId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /documentos_trabajadores/{docId} { allow read: if isSuperAdmin() || leeSueldos(empresaId); allow write: if isSuperAdmin() || puedeRRHH(empresaId); }
       // Bitácora de cambios en reportes de combustible: se escribe una vez
       match /audit_log/{docId} {
         allow read:   if isSuperAdmin() || canWriteEmpresa(empresaId);
         allow create: if isSuperAdmin() || canWriteEmpresa(empresaId);
         allow update, delete: if isSuperAdmin();
       }
-      match /finanzas_activos/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /finanzas_ingresos/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /finanzas_proveedores/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /deuda_proveedores/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /deuda_proveedores/{docId}/pagos/{pagoId} { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /deuda_acuerdos/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /deuda_financieras/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /finanzas_activos/{docId}      { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /finanzas_ingresos/{docId}     { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /finanzas_proveedores/{docId}  { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /deuda_proveedores/{docId}     { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /deuda_proveedores/{docId}/pagos/{pagoId} { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /deuda_acuerdos/{docId}        { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
+      match /deuda_financieras/{docId}     { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeFinanzas(empresaId); }
       match /centros_costo/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelPrices/{docId}            { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /fuelPriceHistory/{docId}      { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /config/{docId}               { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /config/{docId}               { allow read: if isSuperAdmin() || canWriteEmpresa(empresaId); allow write: if esOficina(empresaId) || areaDe(empresaId, ['rrhh', 'contabilidad', 'finanzas'], 'rrhh|contabilidad|finanzas'); }
       match /guias_despacho/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /proveedores_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /solicitudes_pasajes/{docId}   { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
 
       // ── CONTABILIDAD Y COMBUSTIBLE ASOCIADOS ────────────
-      match /chart_of_accounts/{docId}     { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /journal_entries/{docId}       { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /active_periods/{docId}        { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /reglas_gasto/{docId}          { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /periods/{docId}               { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
-      match /flujo_mensual/{docId}         { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
+      match /chart_of_accounts/{docId}     { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeContabilidad(empresaId); }
+      match /journal_entries/{docId}       { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeContabilidad(empresaId); }
+      match /active_periods/{docId}        { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeContabilidad(empresaId); }
+      match /reglas_gasto/{docId}          { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if areaDe(empresaId, ['contabilidad', 'finanzas'], 'contabilidad|finanzas'); }
+      match /periods/{docId}               { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeContabilidad(empresaId); }
+      match /flujo_mensual/{docId}         { allow read: if isSuperAdmin() || leeFinanzas(empresaId); allow write: if isSuperAdmin() || puedeContabilidad(empresaId); }
       match /combustible_calculos/{docId}  { allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
       match /combustible_maquinaria/{docId}{ allow read, write: if isSuperAdmin() || canWriteEmpresa(empresaId); }
 
@@ -453,16 +537,16 @@ service cloud.firestore {
       // Se escriben una vez y no se tocan más: un registro de auditoría que se
       // puede editar o borrar no sirve para nada.
       match /deuda_auditoria/{docId} {
-        allow read:   if isSuperAdmin() || canWriteEmpresa(empresaId);
-        allow create: if isSuperAdmin() || canWriteEmpresa(empresaId);
+        allow read:   if isSuperAdmin() || leeFinanzas(empresaId);
+        allow create: if isSuperAdmin() || puedeFinanzas(empresaId);
         allow update, delete: if isSuperAdmin();
       }
 
       // NUEVA — la escribe el módulo de Contabilidad al eliminar/editar/reversar
       // asientos, fusionar cuentas duplicadas o limpiar reglas de gasto.
       match /contabilidad_auditoria/{docId} {
-        allow read:   if isSuperAdmin() || canWriteEmpresa(empresaId);
-        allow create: if isSuperAdmin() || canWriteEmpresa(empresaId);
+        allow read:   if isSuperAdmin() || leeFinanzas(empresaId);
+        allow create: if isSuperAdmin() || puedeContabilidad(empresaId);
         allow update, delete: if false;
       }
 
@@ -604,6 +688,68 @@ service cloud.firestore {
             && empresaActivaValida();
       }
 
+      // ── Alta legítima de un usuario sobre su propio documento ──
+      // Antes el `create` propio no revisaba nada: cualquiera que se
+      // registrara podía escribirse role:'superadmin' y el empresaId de otra
+      // empresa. Ahora el rol y la empresa solo se aceptan si vienen de uno
+      // de estos caminos, que se pueden verificar contra otro documento:
+      function empresaNueva() { return request.resource.data.get('empresaId', null); }
+      function sinMembresiasExtra() {
+        return request.resource.data.get('empresasIds', null) == null
+            || request.resource.data.empresasIds == [empresaNueva()]
+            || request.resource.data.get('empresasIds', []) == resource.data.get('empresasIds', []);
+      }
+      // 1. Dueño de la empresa: la empresa existe y dice que él es su admin
+      //    (RegisterPage / EmpresaSetup crean la empresa con adminUid antes).
+      function esDuenoDeEmpresa() {
+        return request.resource.data.get('role', null) == 'admin_contrato'
+            && empresaNueva() != null
+            && exists(/databases/$(database)/documents/empresas/$(empresaNueva()))
+            && (get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminUid', '') == request.auth.uid
+                || get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminEmail', '_') == request.auth.token.email);
+      }
+      // 2. Invitación vigente: mismo rol y empresa que la invitación, y si
+      //    tenía destinatario, el email de quien la acepta.
+      function aceptaInvitacion() {
+        let inv = request.resource.data.get('invitacionId', '');
+        return inv != ''
+            && exists(/databases/$(database)/documents/invitaciones/$(inv))
+            && get(/databases/$(database)/documents/invitaciones/$(inv)).data.get('usada', false) == false
+            && get(/databases/$(database)/documents/invitaciones/$(inv)).data.empresaId == empresaNueva()
+            && get(/databases/$(database)/documents/invitaciones/$(inv)).data.rol == request.resource.data.get('role', null)
+            && (get(/databases/$(database)/documents/invitaciones/$(inv)).data.get('emailDestino', '') == ''
+                || get(/databases/$(database)/documents/invitaciones/$(inv)).data.emailDestino.lower() == request.auth.token.email.lower());
+      }
+      // 3. Operario que la empresa ya registró en trabajadores con su email.
+      function esTrabajadorConEsteEmail() {
+        let tid = request.resource.data.get('trabajadorId', '');
+        return request.resource.data.get('role', null) == 'operador'
+            && tid != '' && empresaNueva() != null
+            && exists(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid))
+            && get(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid)).data.get('email', '_').lower() == request.auth.token.email.lower();
+      }
+      // 4. Sin empresa todavía (cuenta recién creada, antes de elegir empresa).
+      function sinEmpresaNiRol() {
+        return empresaNueva() == null
+            && request.resource.data.get('role', null) in [null, '', 'pendiente', 'operador']
+            && request.resource.data.get('empresasIds', []).size() == 0;
+      }
+      function altaPropiaValida() {
+        return sinMembresiasExtra()
+            && !(request.resource.data.get('role', null) in ['superadmin', 'mandante_admin'])
+            && (esDuenoDeEmpresa() || aceptaInvitacion() || esTrabajadorConEsteEmail() || sinEmpresaNiRol());
+      }
+
+      // ── Lo que un admin de empresa puede escribir en el doc de otro ──
+      // No puede dar 'superadmin' ni agregar empresas de las que él no es miembro.
+      function adminNoEscala() {
+        let nuevas = request.resource.data.get('empresasIds', []).toSet()
+                       .difference((resource == null ? [] : resource.data.get('empresasIds', [])).toSet());
+        return (request.resource.data.get('role', null) != 'superadmin'
+                || (resource != null && resource.data.get('role', null) == 'superadmin'))
+            && nuevas.hasOnly(misEmpresas());
+      }
+
       // Permiso unificado con cortocircuito para evitar recursión y habilitar listados masivos
       allow read: if isAuth() && (
                     request.auth.uid == uid
@@ -614,22 +760,28 @@ service cloud.firestore {
 
       // Permisos de creación
       allow create: if isAuth() && (
-                      request.auth.uid == uid
+                      (request.auth.uid == uid && altaPropiaValida())
                       || isSuperAdmin()
                       || (isAnyAdmin() && (request.resource.data.role == 'trabajador' || request.resource.data.role == 'operador')
-                          && esMiembroDe(request.resource.data.empresaId))
+                          && esMiembroDe(request.resource.data.empresaId) && adminNoEscala())
                     );
 
       // Permisos de actualización
       allow update: if isAuth() && (
                       // El propio usuario: solo datos no privilegiados + cambio de empresa activa
-                      (request.auth.uid == uid && noEscalaPrivilegios())
+                      (request.auth.uid == uid && (noEscalaPrivilegios()
+                          // cuenta que aún no tenía empresa y ahora la recibe por un camino válido
+                          || (resource.data.get('empresaId', null) == null && altaPropiaValida())
+                          // invitación aceptada con una cuenta que ya existía
+                          || (aceptaInvitacion() && sinMembresiasExtra())))
                       || isSuperAdmin()
-                      // Un admin gestiona usuarios de las empresas donde él es miembro
+                      // Un admin gestiona usuarios de las empresas donde él es miembro,
+                      // sin poder dar superadmin ni membresías que él no tiene
                       || (isAnyAdmin()
                           && (resource.data.get('empresaId', null) == null
                               || esMiembroDe(resource.data.empresaId))
-                          && esMiembroDe(request.resource.data.empresaId))
+                          && esMiembroDe(request.resource.data.empresaId)
+                          && adminNoEscala())
                     );
 
       allow delete: if isSuperAdmin();
@@ -651,9 +803,24 @@ service cloud.firestore {
     // /subscriptions — usePlan hook lee/escucha el plan activo
     // ─────────────────────────────────────────────────────
     match /subscriptions/{docId} {
-      allow read: if isAuth();
-      allow write: if isSuperAdmin() || (isAdminContrato() && docId == userEmpresaId());
-      allow create, update: if isAuth() && request.auth.uid == docId;
+      // El plan lo activan el superadmin o los webhooks de pago (Admin SDK).
+      // Desde la app solo se crea el período de prueba de una empresa nueva;
+      // antes un admin (o cualquiera, en subscriptions/{su uid}) podía
+      // escribirse status:'authorized'.
+      allow read: if isSuperAdmin()
+                  || (isAuth() && (docId == request.auth.uid || esMiembroDe(docId)
+                                   || resource.data.get('empresaId', '__ninguna__') in misEmpresas()));
+      allow create: if isSuperAdmin()
+                    || (isAuth()
+                        && (docId == request.auth.uid
+                            || (exists(/databases/$(database)/documents/empresas/$(docId))
+                                && get(/databases/$(database)/documents/empresas/$(docId)).data.get('adminUid', '') == request.auth.uid))
+                        && request.resource.data.get('status', '') == 'trial'
+                        && request.resource.data.get('planId', '') in ['', 'starter']);
+      // Mi Plan (AdminPanel) hoy cambia módulos con un pago simulado
+      // ("mock_webpay"): mientras el cobro real no esté conectado, el admin de
+      // la empresa sigue pudiendo actualizar SU suscripción.
+      allow update: if isSuperAdmin() || (isAdminContrato() && docId == userEmpresaId());
       allow delete: if isSuperAdmin();
     }
 
@@ -675,8 +842,11 @@ service cloud.firestore {
     // /invitaciones — sistema de invitaciones de empresa
     // ─────────────────────────────────────────────────────
     match /invitaciones/{token} {
-      // Cualquiera puede leer una invitación (para validarla al aceptar)
-      allow read: if true;
+      // Se lee por su token (id aleatorio) para validarla al aceptar, incluso
+      // sin sesión. Listar invitaciones queda para los admins de esa empresa.
+      allow get:  if true;
+      allow list: if isSuperAdmin()
+                  || ((isAdminContrato() || isMandanteAdmin()) && resource.data.empresaId == userEmpresaId());
       // superadmin puede crear cualquier invitación
       // admin_contrato puede crear invitaciones solo para su empresa
       // mandante_admin puede crear invitaciones de rol mandante para su empresa
@@ -687,9 +857,12 @@ service cloud.firestore {
       // Marcar una invitación como usada. Se acota a eso: antes cualquier usuario
       // autenticado podía reescribir el documento completo, incluido el rol y la
       // empresa a la que da acceso.
-      allow update: if isAuth()
-                    && request.resource.data.empresaId == resource.data.empresaId
-                    && request.resource.data.rol == resource.data.rol;
+      // Solo se marca como usada, por quien la acepta, y una sola vez.
+      allow update: if isSuperAdmin()
+                    || (isAuth()
+                        && resource.data.get('usada', false) == false
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usada', 'usadaPor', 'usadaEn'])
+                        && request.resource.data.usadaPor == request.auth.uid);
       // Solo admins pueden revocar
       allow delete: if isAnyAdmin();
     }
@@ -707,19 +880,28 @@ service cloud.firestore {
     // pins y usuarios: sistema custom de auth del módulo documentos (no Firebase Auth)
     // Solo necesita ser accedido por cualquier usuario autenticado (no hay empresaId en estos docs)
     match /pins/{usuario} {
-      allow read, write: if isAuth() && (
-        !exists(/databases/$(database)/documents/usuarios/$(usuario))
-        || get(/databases/$(database)/documents/usuarios/$(usuario)).data.get('estado', 'activo') == 'activo'
-        || isSuperAdmin()
-      );
+      // El hash se lee para verificar la firma. Crear: solo si no existe (y
+      // queda con el uid de quien lo crea). Cambiar: solo su dueño. Antes
+      // cualquier usuario autenticado podía reemplazar el PIN de otro y
+      // firmar en su nombre.
+      allow read:   if isAuth();
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      allow update: if isSuperAdmin()
+                    || (isAuth() && resource.data.get('uid', null) == request.auth.uid
+                        && request.resource.data.get('uid', null) == request.auth.uid);
+      allow delete: if isSuperAdmin();
     }
     match /usuarios/{usuario} {
-      allow read: if isAuth();
-      allow write: if isAuth() && (
-        !exists(/databases/$(database)/documents/usuarios/$(usuario))
-        || resource.data.get('estado', 'activo') == 'activo'
-        || isSuperAdmin()
-      );
+      // Guarda el pinHash con que se firma: igual que /pins, se crea con el uid
+      // de su dueño y solo él lo cambia. Un admin puede cambiar únicamente el
+      // estado (RRHH lo usa al desvincular o finiquitar).
+      allow read:   if isAuth();
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      allow update: if isSuperAdmin()
+                    || (isAuth() && resource.data.get('uid', null) == request.auth.uid
+                        && request.resource.data.get('uid', null) == request.auth.uid)
+                    || (isAnyAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'updatedAt']));
+      allow delete: if isSuperAdmin();
     }
     match /libros/{docId} {
       allow read: if isAuth();

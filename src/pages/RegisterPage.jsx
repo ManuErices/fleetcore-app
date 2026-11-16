@@ -173,8 +173,9 @@ export default function RegisterPage() {
 
       // 6. Signatures & documents records
       const u = email.split('@')[0].toLowerCase().trim();
-      await setDoc(doc(db, 'pins', u), { hash: pinHash, createdAt: new Date().toISOString() });
+      await setDoc(doc(db, 'pins', u), { hash: pinHash, uid: user.uid, createdAt: new Date().toISOString() });
       await setDoc(doc(db, 'usuarios', u), {
+        uid: user.uid,
         username: u,
         nombre: nombre.trim(),
         rut: rut.trim(),

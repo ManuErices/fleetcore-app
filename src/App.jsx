@@ -417,7 +417,17 @@ export default function App() {
     try {
       await signOut(auth);
       localStorage.removeItem('selectedApp');
-      navigate('/');
+      // En un equipo compartido de faena, el siguiente usuario no debe ver
+      // (ni sin conexión) los datos ni la conversación del anterior: se cierra
+      // Firestore, se borra su caché local y se recarga la app.
+      try { sessionStorage.clear(); } catch { /* modo privado */ }
+      try {
+        const { terminate, clearIndexedDbPersistence } = await import('firebase/firestore');
+        await terminate(db);
+        await clearIndexedDbPersistence(db);
+      } catch (e) { console.warn('No se pudo limpiar la caché offline:', e?.message); }
+      window.location.assign('/');
+      return;
     } catch (err) {
       console.error("Error en logout:", err);
     }

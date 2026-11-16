@@ -12,8 +12,9 @@
 import React, { useState, useEffect } from "react";
 import { db, auth } from "../lib/firebase";
 import {
-  doc, setDoc, serverTimestamp, getDocFromServer, collection,
+  doc, setDoc, updateDoc, getDocs, query, where, serverTimestamp, getDocFromServer, collection,
 } from "firebase/firestore";
+import { asegurarTrabajador, rutTrabajador, formatearRutTrabajador } from "../lib/trabajadores";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -74,6 +75,54 @@ export default function InviteAccept({ token, onAccepted }) {
     })();
   }, [token]);
 
+  // Maestro de trabajadores: una ficha por persona. Antes cada invitación
+  // aceptada creaba una ficha nueva aunque RRHH ya tuviera a la persona.
+  //   1. Ficha de RRHH con el mismo email y sin cuenta vinculada → se vincula
+  //      (las reglas solo dejan escribir portalUid/portalEmail en ese caso).
+  //   2. Si la cuenta puede leer la nómina, se busca por RUT (asegurarTrabajador).
+  //   3. Si no, ficha nueva con lo mínimo; "Revisar duplicados" la une por RUT.
+  const vincularFichaTrabajador = async (empresaId, uid, email) => {
+    const nombreParts = (form.nombre || "").trim().split(/\s+/);
+    const rutOk = rutTrabajador(form.rut);
+    const col = collection(db, "empresas", empresaId, "trabajadores");
+    try {
+      const snap = await getDocs(query(col, where("email", "==", email)));
+      const libre = snap.docs.find(d => {
+        const t = d.data();
+        const rutFicha = rutTrabajador(t.rut);
+        return (!t.portalUid || t.portalUid === uid) && (!rutOk || !rutFicha || rutFicha === rutOk);
+      });
+      if (libre) {
+        if (libre.data().portalUid !== uid) {
+          await updateDoc(libre.ref, { portalUid: uid, portalEmail: email, updatedAt: serverTimestamp() });
+        }
+        return libre.id;
+      }
+    } catch (e) { console.warn("No se pudo buscar la ficha por email:", e?.code || e?.message); }
+    const datos = {
+      nombre: nombreParts[0] || "",
+      apellidoPaterno: nombreParts.slice(1).join(" ") || "",
+      email,
+      portalUid: uid,
+      portalEmail: email,
+    };
+    if (rutOk) {
+      try {
+        const r = await asegurarTrabajador(empresaId, { ...datos, rut: rutOk }, { origen: "invitacion" });
+        if (r.creado || r.trabajador?.portalUid === uid) return r.id;
+      } catch (e) { console.warn("No se pudo buscar la ficha por RUT:", e?.code || e?.message); }
+    }
+    const trabajadorRef = doc(col);
+    await setDoc(trabajadorRef, {
+      ...datos,
+      rut: rutOk ? formatearRutTrabajador(rutOk) : (form.rut || ""),
+      estado: "activo",
+      origen: "invitacion",
+      createdAt: serverTimestamp(),
+    });
+    return trabajadorRef.id;
+  };
+
   const aceptarInvitacion = async (uid, emailOverride) => {
     setStep("accepting");
     try {
@@ -88,6 +137,8 @@ export default function InviteAccept({ token, onAccepted }) {
         nombre:    form.nombre || "",
         rut:       form.rut || "",
         estado:    "activo",
+        // Las reglas validan rol y empresa contra esta invitación
+        invitacionId: token,
         updatedAt: serverTimestamp(),
       };
       if (form.pin) {
@@ -100,20 +151,9 @@ export default function InviteAccept({ token, onAccepted }) {
       // Si el rol es 'trabajador', crear su registro en RRHH y el vínculo del portal
       // para que pueda acceder a /trabajador con sus credenciales reales
       if (invData.rol === 'trabajador') {
-        const nombreParts = (form.nombre || "").trim().split(/\s+/);
-        const trabajadorRef = doc(collection(db, "empresas", invData.empresaId, "trabajadores"));
-        await setDoc(trabajadorRef, {
-          nombre: nombreParts[0] || "",
-          apellidoPaterno: nombreParts.slice(1).join(" ") || "",
-          rut: form.rut || "",
-          email,
-          portalUid: uid,
-          portalEmail: email,
-          estado: "activo",
-          createdAt: serverTimestamp(),
-        });
+        const fichaId = await vincularFichaTrabajador(invData.empresaId, uid, email);
         await setDoc(doc(db, "empresas", invData.empresaId, "trabajadores_portal", uid), {
-          trabajadorDocId: trabajadorRef.id,
+          trabajadorDocId: fichaId,
           rut: form.rut || "",
           email,
         });
@@ -134,6 +174,7 @@ export default function InviteAccept({ token, onAccepted }) {
         // 1. Guardar en 'pins' para firmas
         await setDoc(doc(db, "pins", u), {
           hash: pinHash,
+          uid,
           createdAt: new Date().toISOString(),
         });
 
@@ -142,6 +183,7 @@ export default function InviteAccept({ token, onAccepted }) {
         const empresaNombre = empresa?.nombre || "MPF Ingeniería Civil SpA";
         await setDoc(doc(db, "usuarios", u), {
           username: u,
+          uid,
           nombre: (form.nombre || "").trim(),
           rut: (form.rut || "").trim(),
           cargo: "",

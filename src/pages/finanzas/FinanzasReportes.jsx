@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { fechaISO } from "../../lib/fechas";
+import { fechaISO, hoyISO, mesActualISO } from "../../lib/fechas";
+import { costoOC, mesSubcontrato } from "../../lib/costosObra";
+import { costoDelMesEnPesos, costoVigenteEnMes, sumarMesesClave } from "../../lib/finanzas/costosFijos.js";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
@@ -21,11 +23,11 @@ const fmtM = (n) => {
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const MESES_FULL = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
+// Mes "AAAA-MM" de una fecha "AAAA-MM-DD" (o Timestamp), en hora de Chile.
 function mesKey(fecha) {
   if (!fecha) return null;
-  const d = new Date(fecha.includes("T") ? fecha : fecha + "T12:00:00");
-  if (isNaN(d)) return null;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const iso = typeof fecha === "string" ? fecha : fechaISO(fecha);
+  return /^\d{4}-\d{2}/.test(iso || "") ? iso.slice(0, 7) : null;
 }
 function parseFecha(f) {
   if (!f) return null;
@@ -40,7 +42,7 @@ export default function FinanzasReportes() {
   const [indicadores, setIndicadores] = useState(null);
   const { empresaId } = useEmpresa();
   const [loading, setLoading]   = useState(true);
-  const [anio, setAnio]         = useState(new Date().getFullYear());
+  const [anio, setAnio]         = useState(Number(hoyISO().slice(0, 4)));
   const [rawData, setRawData]   = useState({ ingresos: [], egresos: [], costosFijos: [], proveedores: [] });
   const [exporting, setExporting] = useState(false);
   const reportRef = useRef(null);
@@ -69,7 +71,7 @@ export default function FinanzasReportes() {
         if (proyectoId !== "todos" && r.projectId !== proyectoId) return;
         resultado.egresos.push({
           fuente: "rendicion", monto: parseFloat(r.montoAprobado) || 0,
-          fecha: r.fechaEmision || r.fechaAprobacion || "",
+          mes: mesKey(r.fechaEmision || r.fechaAprobacion),
           proveedor: r.proveedor || "", projectId: r.projectId || "",
         });
         if (r.proveedor) resultado.proveedores.push({ nombre: r.proveedor, monto: parseFloat(r.montoAprobado) || 0 });
@@ -82,9 +84,11 @@ export default function FinanzasReportes() {
       snap.docs.forEach(d => {
         const s = d.data();
         if (proyectoId !== "todos" && s.projectId !== proyectoId) return;
-        const monto = parseFloat(s.saldoPorPagarSC) || parseFloat(s.totalPagoNeto) || 0;
-        const fecha = s.fechaEP || (s.createdAt ? fechaISO(s.createdAt) : "") || "" /* día en Chile */;
-        resultado.egresos.push({ fuente: "subcontrato", monto, fecha, proveedor: s.razonSocialSubcontratista || "", projectId: s.projectId || "" });
+        // Costo = monto bruto del EP en el mes asociado al trabajo (costosObra.js).
+        // Antes: saldo por pagar del contrato, repetido en cada línea de EP.
+        const monto = parseFloat(s.montoEP) || 0;
+        const mes = mesSubcontrato(s) || mesKey(s.createdAt);
+        resultado.egresos.push({ fuente: "subcontrato", monto, mes, proveedor: s.razonSocialSubcontratista || "", projectId: s.projectId || "" });
         if (s.razonSocialSubcontratista) resultado.proveedores.push({ nombre: s.razonSocialSubcontratista, monto });
       });
     } catch (e) {}
@@ -95,8 +99,8 @@ export default function FinanzasReportes() {
       snap.docs.forEach(d => {
         const o = d.data();
         if (proyectoId !== "todos" && o.projectId !== proyectoId) return;
-        const monto = parseFloat(o.totalMonto) || 0;
-        resultado.egresos.push({ fuente: "oc", monto, fecha: o.fecha || "", proveedor: o.proveedor || "", projectId: o.projectId || "" });
+        const monto = costoOC(o);   // lo facturado, no lo comprometido
+        resultado.egresos.push({ fuente: "oc", monto, mes: mesKey(o.fecha), proveedor: o.proveedor || "", projectId: o.projectId || "" });
         if (o.proveedor) resultado.proveedores.push({ nombre: o.proveedor, monto });
       });
     } catch (e) {}
@@ -113,14 +117,12 @@ export default function FinanzasReportes() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  // Costo fijo llevado a mes y a pesos. Si está en UF o dólares y no hay valor
-  // del día, vale 0 (mejor fuera que mal sumado).
-  const cfMensualEnPesos = useCallback((c) => {
-    const m = parseFloat(c.monto) || 0;
-    const div = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 }[c.frecuencia];
-    if (!div) return 0;
-    return aPesos(m / div, c.moneda, indicadores) ?? 0;
-  }, [indicadores]);
+  // Costos fijos de un mes, en pesos: solo los que corren ese mes (ya
+  // empezaron y no terminaron, costosFijos.js). Si está en UF o dólares y no
+  // hay valor del día, vale 0 (mejor fuera que mal sumado).
+  const cfDelMes = useCallback((c, mes) => costoDelMesEnPesos(c, mes, indicadores) ?? 0, [indicadores]);
+  const cfTotalMes = useCallback((mes) => rawData.costosFijos.reduce((s, c) => s + cfDelMes(c, mes), 0), [rawData, cfDelMes]);
+  const mesHoy = mesActualISO();
 
   // ── Datos por mes del año seleccionado ────────────────────────────────────
   const mesesData = useMemo(() => {
@@ -130,35 +132,33 @@ export default function FinanzasReportes() {
         .filter(i => i.mes === key)
         .reduce((s, i) => s + (i.monto || 0), 0);
       const egr = rawData.egresos
-        .filter(e => mesKey(e.fecha) === key)
+        .filter(e => e.mes === key)
         .reduce((s, e) => s + e.monto, 0);
-      // costos fijos mensualizados
-      const cfMes = rawData.costosFijos
-        .filter(c => c.activo !== false)
-        .reduce((s, c) => s + cfMensualEnPesos(c), 0);
+      // costos fijos que corren ese mes
+      const cfMes = cfTotalMes(key);
       const totalEgr = egr + cfMes;
       return { mes: m, key, label: MESES[m], ingresos: ing, egresos: totalEgr, margen: ing - totalEgr, costosFijos: cfMes, egresosVar: egr };
     });
-  }, [rawData, anio, cfMensualEnPesos]);
+  }, [rawData, anio, cfTotalMes]);
 
   // ── Proyección próximos 6 meses ───────────────────────────────────────────
   const proyeccion = useMemo(() => {
-    const hoy = new Date();
     const promIngresos = mesesData.filter(m => m.ingresos > 0).reduce((s, m) => s + m.ingresos, 0) / (mesesData.filter(m => m.ingresos > 0).length || 1);
     const promEgresos  = mesesData.filter(m => m.egresos > 0).reduce((s, m) => s + m.egresos, 0)  / (mesesData.filter(m => m.egresos > 0).length || 1);
-    const cfFijo = rawData.costosFijos.filter(c => c.activo !== false).reduce((s, c) => s + cfMensualEnPesos(c), 0);
     return Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(hoy.getFullYear(), hoy.getMonth() + i + 1, 1);
+      const key = sumarMesesClave(mesHoy, i + 1);
+      const [a, m] = key.split("-").map(Number);
+      const cfFijo = cfTotalMes(key);   // los que terminan dejan de sumar
       return {
-        label: MESES[d.getMonth()],
-        mes: MESES_FULL[d.getMonth()] + " " + d.getFullYear(),
+        label: MESES[m - 1],
+        mes: MESES_FULL[m - 1] + " " + a,
         ingresos: promIngresos,
         egresos: Math.max(promEgresos, cfFijo),
         costosFijos: cfFijo,
         value: promIngresos - Math.max(promEgresos, cfFijo),
       };
     });
-  }, [mesesData, rawData, cfMensualEnPesos]);
+  }, [mesesData, cfTotalMes, mesHoy]);
 
   // ── Ranking proveedores ───────────────────────────────────────────────────
   const rankingProveedores = useMemo(() => {
@@ -177,16 +177,18 @@ export default function FinanzasReportes() {
   // ── Costos fijos vs variables ─────────────────────────────────────────────
   const cfPorCategoria = useMemo(() => {
     const mapa = {};
-    rawData.costosFijos.filter(c => c.activo !== false).forEach(c => {
+    // Costos fijos del mes en curso (los terminados o por empezar no cuentan)
+    rawData.costosFijos.forEach(c => {
       const cat = c.categoria || "otro";
-      const mensual = cfMensualEnPesos(c);
+      const mensual = cfDelMes(c, mesHoy);
+      if (!mensual) return;
       mapa[cat] = (mapa[cat] || 0) + mensual;
     });
     return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
-  }, [rawData, cfMensualEnPesos]);
+  }, [rawData, cfDelMes, mesHoy]);
 
   const totalCF  = useMemo(() => cfPorCategoria.reduce((s, [, v]) => s + v, 0), [cfPorCategoria]);
-  const totalVar = useMemo(() => rawData.egresos.reduce((s, e) => s + e.monto, 0), [rawData]);
+  const totalVar = useMemo(() => rawData.egresos.filter(e => String(e.mes || "").startsWith(`${anio}-`)).reduce((s, e) => s + e.monto, 0), [rawData, anio]);
 
   // ── Totales anuales ───────────────────────────────────────────────────────
   const totalIngresos = useMemo(() => mesesData.reduce((s, m) => s + m.ingresos, 0), [mesesData]);
@@ -339,7 +341,7 @@ export default function FinanzasReportes() {
         <Hoja titulo="3. Costos fijos y variables"
           extra={<span className="text-[15px] text-cuaderno-grafito">llevados a mes</span>}>
           <LineaGuia etiqueta="Costos fijos al mes"><Cifra valor={totalCF} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
-          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{rawData.costosFijos.filter(c => c.activo !== false).length} registros activos</p>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{rawData.costosFijos.filter(c => costoVigenteEnMes(c, mesHoy)).length} vigentes este mes</p>
           <LineaGuia etiqueta="Egresos variables del año"><Cifra valor={totalVar} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
           <p className="m-0 -mt-1 mb-2 text-right text-[13px] text-cuaderno-grafito">compras, rendiciones y subcontratos</p>
 

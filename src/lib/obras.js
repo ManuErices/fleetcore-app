@@ -42,3 +42,33 @@ export function obraDe({ obras = [], centros = [] }, { codigo, nombre } = {}) {
   }
   return null;
 }
+
+// ─── Obras duplicadas ──────────────────────────────────────────────────────
+
+/** Nombre o código comparable: sin tildes, mayúsculas, signos ni espacios repetidos. */
+export function normalizarObra(v) {
+  return norm(v).replace(/[^a-z0-9ñ]+/g, " ").trim();
+}
+
+/**
+ * Obra ya existente con el mismo código o el mismo nombre (normalizados),
+ * distinta de `id` (la que se está editando). null si no hay choque.
+ * Se usa antes de crear una obra desde cualquier pantalla (Proyectos,
+ * Admin, combustible, agente): dos obras con el mismo nombre dividían los
+ * costos y los reportes en dos.
+ */
+export function obraDuplicada(obras, { codigo, nombre, name, id } = {}) {
+  const c = normalizarObra(codigo), n = normalizarObra(nombre ?? name);
+  if (!c && !n) return null;
+  return (obras || []).find(o => o.id !== id && (
+    (c && normalizarObra(o.codigo) === c) ||
+    (n && normalizarObra(o.name ?? o.nombre) === n)
+  )) || null;
+}
+
+/** Mensaje para el usuario cuando obraDuplicada encuentra una. */
+export function mensajeObraDuplicada(o) {
+  const nombre = o?.name || o?.nombre || "(sin nombre)";
+  const inactiva = o?.active === false ? " (desactivada: actívala en lugar de crear otra)" : "";
+  return `Ya existe la obra "${nombre}"${o?.codigo ? ` (código ${o.codigo})` : ""}${inactiva}.`;
+}

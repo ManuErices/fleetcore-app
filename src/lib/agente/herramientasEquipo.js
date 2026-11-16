@@ -13,7 +13,9 @@
 import {
   collection, doc, getDoc, getDocs, addDoc, deleteDoc, query, where, orderBy, limit,
 } from 'firebase/firestore';
-import { tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado } from '../contabilidad/tributario';
+import { normalizarFlujoMensual, calcularFlujoMensual } from '../contabilidad/tributario';
+import { entregasComoConsumos, unirConsumos } from '../combustible';
+import { hoyISO, sumarDias } from '../fechas';
 import { db, auth } from '../firebase';
 import { cargarDatosCaja } from '../finanzas/cajaDatos';
 import { proyectar, partidasSinCerrar } from '../finanzas/caja';
@@ -21,15 +23,7 @@ import { conEstadoAlDia } from '../pagosDeuda';
 
 const MAX_MEMORIA = 40;
 
-const hoyISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-const sumarDias = (iso, n) => {
-  const [a, m, d] = iso.split('-').map(Number);
-  const f = new Date(a, m - 1, d + n);
-  return `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}`;
-};
+// Fechas en hora de Chile (fechas.js): antes se usaba la hora del navegador.
 
 // Colecciones que consultar_datos puede leer, con su campo de fecha si tiene.
 // Quedan fuera las de remuneraciones y contratos: datos personales que se
@@ -141,10 +135,22 @@ export const EJECUTORES_EQUIPO = {
         return { vencidos: alertas.filter(a => a.vencido).length, proximos_30_dias: alertas.filter(a => !a.vencido).length, detalle: alertas.slice(0, 15) };
       }),
       seccion(async () => {
-        const snap = await getDocs(query(collection(db, 'empresas', empresaId, 'reportes_combustible'), where('fecha', '==', hoy)));
-        const docs = snap.docs.map(d => d.data()).filter(r => !r.deleted);
-        const litros = docs.filter(r => r.tipo === 'entrega').reduce((s, r) => s + (Number(r.cantidadLitros) || 0), 0);
-        return { reportes_hoy: docs.length, litros_entregados_hoy: Math.round(litros) };
+        // Mismo criterio que Oficina Técnica (src/lib/combustible.js): las
+        // entregas de WorkFleet guardan litros y fecha en datosEntrega, y un
+        // despacho que también está en el Excel (fuelLogs) cuenta una vez.
+        // Antes se leía solo r.cantidadLitros y la mayoría salía en cero.
+        const [snap, snapX] = await Promise.all([
+          getDocs(query(collection(db, 'empresas', empresaId, 'reportes_combustible'), where('tipo', '==', 'entrega'))),
+          getDocs(query(collection(db, 'empresas', empresaId, 'fuelLogs'), where('date', '==', hoy))).catch(() => ({ docs: [] })),
+        ]);
+        const reportes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => !r.deleted);
+        const consumos = unirConsumos(snapX.docs.map(d => ({ id: d.id, ...d.data() })), entregasComoConsumos(reportes, { desde: hoy, hasta: hoy }));
+        const litros = consumos.reduce((s, c) => s + (Number(c.liters) || 0), 0);
+        return {
+          entregas_hoy: consumos.length,
+          desde_workfleet: consumos.filter(c => c.fuente !== 'excel').length,
+          litros_entregados_hoy: Math.round(litros),
+        };
       }),
       seccion(async () => {
         const [snapR, snapM] = await Promise.all([
@@ -188,22 +194,20 @@ export const EJECUTORES_EQUIPO = {
   // impuesto estimado (base acumulada − pérdida de arrastre, tasa del régimen),
   // PPM sugerido y de dónde vino cada fila.
   async resumen_tributario({ anio }, { empresaId }) {
-    const a = Number(anio) || new Date().getFullYear();
+    const a = Number(anio) || Number(hoyISO().slice(0, 4));
     const [snapF, snapC] = await Promise.all([
       getDoc(doc(db, 'empresas', empresaId, 'flujo_mensual', String(a))),
       getDoc(doc(db, 'empresas', empresaId, 'config', 'tributario')).catch(() => null),
     ]);
     if (!snapF.exists()) return { anio: a, sin_datos: true, nota: 'No hay Flujo Mensual cargado para ese año.' };
-    const f = snapF.data();
+    // Mismo documento normalizado y mismo cálculo que la planilla
+    // (tributario.js): signos de las filas fijas desde FILAS_BASE y PPM solo
+    // sobre la fila Ingresos.
+    const f = normalizarFlujoMensual(snapF.data(), a);
     const config = snapC?.exists() ? snapC.data() : {};
-    const num = v => Number(v) || 0;
-    const filas = (f.filas || []).map(x => ({ id: x.id, nombre: x.label, signo: x.signo, valores: (x.valores || []).map(num) }));
-    const base = Array.from({ length: 12 }, (_, i) => filas.reduce((s, x) => s + x.signo * (x.valores[i] || 0), 0));
-    const tasa = tasaPrimeraCategoria(config.regimen, a);
-    const perdida = Math.abs(num(f.perdidaArrastre));
-    const impuesto = f.impuestoAuto === false ? (f.impuesto || []).map(num) : impuestoMensualAcumulado(base, tasa, perdida);
-    const ingresos = Array.from({ length: 12 }, (_, i) => filas.filter(x => x.signo === 1).reduce((s, x) => s + (x.valores[i] || 0), 0));
-    const tasaPPM = tasaPPMSugerida(config, a);
+    const c = calcularFlujoMensual(f, config);
+    const filas = f.filas.map(x => ({ id: x.id, nombre: x.label, signo: x.signo, valores: x.valores }));
+    const base = c.baseImponible, impuesto = c.impuesto, tasa = c.tasa, perdida = f.perdidaArrastre;
     const fuentes = {};
     Object.entries(f.rcv?.periodos || {}).forEach(([fila, periodos]) => {
       fuentes[fila] = Object.keys(periodos);
@@ -219,9 +223,12 @@ export const EJECUTORES_EQUIPO = {
       base_imponible_anio: suma(base),
       impuesto_estimado_por_mes: impuesto.map(Math.round),
       impuesto_estimado_anio: suma(impuesto),
-      multas_anio: suma((f.multas || []).map(num)),
-      ppm_sugerido_anio: Math.round(suma(ingresos) * tasaPPM),
-      ppm_pagado_anio: suma((f.ppm || []).map(num)),
+      utilidad_liquida_anio: suma(c.utilidad),
+      multas_anio: suma(f.multas),
+      tasa_ppm: c.tasaPPM,
+      ppm_sugerido_por_mes: c.ppmSugerido,
+      ppm_sugerido_anio: suma(c.ppmSugerido),
+      ppm_pagado_anio: suma(f.ppm),
       importado_desde: fuentes,
       nota: 'Estimación del impuesto de primera categoría con los datos cargados; la cifra definitiva la da la declaración anual.',
     };

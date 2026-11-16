@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { listActiveProjects, listEmployees, listMachines, listEmployeeMonthlyData, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment, upsertEmployee } from "../../lib/db";
+import { listActiveProjects, listEmployees, listMachines, upsertEmployeeMonthlyData, upsertEmployeeAssignment, getEmployeeAssignment, upsertEmployee } from "../../lib/db";
 import { useEmpresa } from "../../lib/useEmpresa";
-import { mesActualISO } from "../../lib/fechas";
+import { mesActualISO, limitesMes } from "../../lib/fechas";
+// Misma fuente que Dashboard / Consolidado / Estado de pago: RRHH primero,
+// Excel solo para quien RRHH no tiene ese mes (manoObra.js)
+import { manoObraMes } from "../../lib/manoObra";
+import { activaEnPeriodo } from "../../lib/maquinasPeriodo";
 import PayrollImporter from "../../components/PayrollImporter";
 import EmployeeDetailModal from "../../components/EmployeeDetailModal";
 
@@ -61,14 +65,17 @@ export default function Payroll() {
     
     setIsLoading(true);
     try {
+      const { desde, hasta } = limitesMes(selectedYear, selectedMonth);
       const [emp, mach, monthly] = await Promise.all([
-        listEmployees(empresaId, selectedProject),
-        listMachines(empresaId, selectedProject),
-        listEmployeeMonthlyData(empresaId, selectedProject, selectedYear, selectedMonth)
+        // Todas las fichas (también finiquitados): las liquidaciones de RRHH
+        // llegan a la obra por centro de costo, no por trabajador.projectId
+        listEmployees(empresaId),
+        listMachines(empresaId, selectedProject, { desde, hasta }),
+        manoObraMes(empresaId, selectedProject, selectedYear, selectedMonth)
       ]);
-      
+
       setEmployees(emp);
-      setMachines(mach.filter(m => m.active !== false));
+      setMachines(mach.filter(m => activaEnPeriodo(m, desde, hasta)));
       setMonthlyData(monthly);
     } catch (err) {
       console.error("Error cargando datos:", err);
@@ -84,7 +91,16 @@ export default function Payroll() {
   // Combinar empleados con TODAS sus liquidaciones del mes (puede haber más de una,
   // por ejemplo cuando trabajaron en distintos Centros de Costo el mismo mes)
   const employeesWithMonthlyData = React.useMemo(() => {
-    return employees.map(emp => {
+    // Filas de RRHH/Excel cuyo trabajador no está en la lista: se muestran igual
+    const conocidos = new Set(employees.map(e => e.id));
+    const extra = [];
+    monthlyData.forEach(m => {
+      if (m.employeeId && !conocidos.has(m.employeeId)) {
+        conocidos.add(m.employeeId);
+        extra.push({ id: m.employeeId, nombre: m.nombre || "Sin nombre", tipoManoObra: m.tipoManoObra || undefined });
+      }
+    });
+    return [...employees, ...extra].map(emp => {
       const empLines = monthlyData.filter(m => m.employeeId === emp.id);
       const hasDataForMonth = empLines.length > 0;
       const rawLines = hasDataForMonth ? empLines : [{ ...EMPTY_LINE, employeeId: emp.id, centroCosto: emp.centroCosto || '' }];
@@ -97,7 +113,9 @@ export default function Payroll() {
           employeeId: emp.id,
           totalCosto,
           porcentajeIncidencia,
-          costoObra: totalCosto * (porcentajeIncidencia / 100)
+          costoObra: totalCosto * (porcentajeIncidencia / 100),
+          fuente: l.fuente || (l.id ? "excel" : undefined),
+          soloLectura: l.fuente === "rrhh"
         };
       });
 
@@ -110,7 +128,11 @@ export default function Payroll() {
         ...emp,
         // Clasificación por cuenta contable — usa la reclasificación manual si existe,
         // si no cae al campo "tipo" legado (OPERADOR→Directo, GASTO_GENERAL→Indirecto)
-        tipoManoObra: emp.tipoManoObra || (emp.tipo === 'OPERADOR' ? 'DIRECTO' : 'INDIRECTO'),
+        tipoManoObra: emp.tipoManoObra || lines.find(l => l.tipoManoObra)?.tipoManoObra || (emp.tipo === 'OPERADOR' ? 'DIRECTO' : 'INDIRECTO'),
+        nombre: emp.nombre || [emp.nombres, emp.apellidoPaterno].filter(Boolean).join(' ') || lines[0]?.nombre || 'Sin nombre',
+        // RRHH manda: sus liquidaciones se ven aquí pero se corrigen en RRHH
+        fuente: lines.some(l => l.fuente === "rrhh") ? (lines.some(l => l.fuente === "excel") ? "ambas" : "rrhh") : "excel",
+        soloLectura: lines.every(l => l.soloLectura),
         diasTrabajados,
         totalCosto,
         costoObra,
@@ -357,6 +379,9 @@ export default function Payroll() {
       );
     }
     const line = emp.lines[0];
+    if (line.soloLectura) {
+      return <span className="text-sm text-slate-600" title="Liquidación de RRHH: la obra sale del centro de costo">{Math.round(line.porcentajeIncidencia)}%</span>;
+    }
     return (
       <input
         type="number"
@@ -401,6 +426,9 @@ export default function Payroll() {
                   <td className="px-4 py-2 text-center text-sm text-slate-700">{line.diasTrabajados}</td>
                   <td className="px-4 py-2 text-right text-sm font-semibold text-slate-700">{formatCurrency(line.totalCosto)}</td>
                   <td className="px-4 py-2 text-center">
+                    {line.soloLectura ? (
+                      <span className="text-sm text-slate-600" title="Liquidación de RRHH (solo lectura)">{Math.round(line.porcentajeIncidencia)}% · RRHH</span>
+                    ) : (
                     <input
                       type="number"
                       min="0"
@@ -415,6 +443,7 @@ export default function Payroll() {
                       onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
                       className="w-20 text-center input-modern py-1"
                     />
+                    )}
                   </td>
                   <td className={`px-4 py-2 text-right text-sm font-bold ${accentClass}`}>{formatCurrency(line.costoObra)}</td>
                 </tr>
@@ -622,7 +651,7 @@ export default function Payroll() {
                             )}
                           </div>
                           <button
-                            onClick={() => handleOpenEmployeeDetail(emp)}
+                            onClick={() => emp.soloLectura ? alert("Liquidación de RRHH: se revisa y corrige en RRHH → Liquidaciones.") : handleOpenEmployeeDetail(emp)}
                             className="group flex items-center gap-3 text-left w-full hover:bg-blue-50 -mx-2 px-2 py-2 rounded-lg transition-all"
                           >
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md flex-shrink-0">
@@ -642,7 +671,7 @@ export default function Payroll() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>
                               </div>
-                              <div className="text-xs text-slate-500">{emp.rut}</div>
+                              <div className="text-xs text-slate-500">{emp.rut} <span className="ml-1 text-[10px] font-semibold uppercase text-slate-400" title="Origen del costo">{emp.fuente === "rrhh" ? "RRHH" : emp.fuente === "ambas" ? "RRHH + Excel" : "Excel"}</span></div>
                             </div>
                           </button>
                           <select
@@ -759,7 +788,7 @@ export default function Payroll() {
                             )}
                           </div>
                           <button
-                            onClick={() => handleOpenEmployeeDetail(emp)}
+                            onClick={() => emp.soloLectura ? alert("Liquidación de RRHH: se revisa y corrige en RRHH → Liquidaciones.") : handleOpenEmployeeDetail(emp)}
                             className="group flex items-center gap-3 text-left w-full hover:bg-blue-50 -mx-2 px-2 py-2 rounded-lg transition-all"
                           >
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-md flex-shrink-0">
@@ -779,7 +808,7 @@ export default function Payroll() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>
                               </div>
-                              <div className="text-xs text-slate-500">{emp.rut}</div>
+                              <div className="text-xs text-slate-500">{emp.rut} <span className="ml-1 text-[10px] font-semibold uppercase text-slate-400" title="Origen del costo">{emp.fuente === "rrhh" ? "RRHH" : emp.fuente === "ambas" ? "RRHH + Excel" : "Excel"}</span></div>
                             </div>
                           </button>
                           <select
@@ -832,7 +861,7 @@ export default function Payroll() {
           {searchTerm.trim() ? (
             <>No se encontraron personas que coincidan con "{searchTerm}".</>
           ) : (
-            <>No hay liquidaciones cargadas para {months.find(m => m.value === selectedMonth)?.label} {selectedYear}. Importa el Excel de ese mes para ver los datos.</>
+            <>No hay liquidaciones cargadas para {months.find(m => m.value === selectedMonth)?.label} {selectedYear}. Se muestran las liquidaciones de RRHH de la obra (por centro de costo) y, para quien no está en RRHH, el Excel importado.</>
           )}
         </div>
       )}

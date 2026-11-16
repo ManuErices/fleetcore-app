@@ -9,6 +9,7 @@ import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { rutLlave, planificarUnificacion, aplicarUnificacion } from "../../lib/terceros";
 import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
 import { fechaISO } from "../../lib/fechas";
+import { costoOC, saldoSubcontratos } from "../../lib/costosObra";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Resaltado, Pestanas, FechaHoja, ModalCuaderno, BarraProporcion,
   IconoMas, IconoLapiz, IconoBorrar, casoTitulo, Nota, VistoBueno,
@@ -279,12 +280,14 @@ export default function FinanzasProveedores() {
   const [sortDir, setSortDir]         = useState("desc");
   const [activeTab, setActiveTab]     = useState("proveedores"); // proveedores | transacciones
   const [sinConvertir, setSinConvertir] = useState(0);
+  const [saldoSub, setSaldoSub]       = useState(0);
 
   const cargar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
     setLoading(true);
     const txs = []; // todas las transacciones normalizadas
     let sinConvertir = 0;   // registros en UF/USD sin valor del día (fuera de los totales)
+    let filasSC = [];       // filas de EP de subcontratos (para el saldo, una vez por contrato)
 
     try {
       // 1. Rendiciones
@@ -311,15 +314,19 @@ export default function FinanzasProveedores() {
     try {
       // 2. Subcontratos
       const snapS = await getDocs(collection(db, "empresas", empresaId, "subcontratos"));
+      filasSC = snapS.docs.map(d => d.data());
       snapS.docs.forEach(d => {
         const s = d.data();
         const proveedor = normalizar(s.razonSocialSubcontratista);
         if (!proveedor) return;
+        // Costo = monto bruto del EP (costosObra.js). Antes se sumaba el saldo
+        // por pagar del contrato, que cada fila de EP repite: el saldo de un
+        // contrato con 10 líneas se contaba 10 veces.
         txs.push({
           _fuente: "subcontrato",
           _key: proveedor,
           _rut: normalizar(s.rutSubcontratista || ""),
-          _monto: parseFloat(s.saldoPorPagarSC) || parseFloat(s.totalPagoNeto) || 0,
+          _monto: parseFloat(s.montoEP) || 0,
           _fecha: s.fechaEP || (s.createdAt ? fechaISO(s.createdAt) : "") || "",   // día en Chile, no UTC
           _descripcion: s.descripcionLinea || s.descricpionCuentaCosto || "",
           projectId: s.projectId || "",
@@ -341,7 +348,7 @@ export default function FinanzasProveedores() {
           _fuente: "oc",
           _key: proveedor,
           _rut: normalizar(o.rutProveedor || ""),
-          _monto: parseFloat(o.totalMonto) || 0,
+          _monto: costoOC(o),          // lo facturado contra la OC, no lo comprometido
           _fecha: o.fecha || "",
           _descripcion: o.nombreOC || o.numeroOC || "",
           projectId: o.projectId || "",
@@ -392,6 +399,7 @@ export default function FinanzasProveedores() {
     const mapaProveedores = {};
     // Aplicar filtro de proyecto sobre las transacciones
     const txsFiltradas = proyectoId !== "todos" ? txs.filter(tx => tx.projectId === proyectoId) : txs;
+    setSaldoSub(saldoSubcontratos(proyectoId !== "todos" ? filasSC.filter(s => s.projectId === proyectoId) : filasSC));
 
     txsFiltradas.forEach(tx => {
       // Se agrupa por RUT cuando lo hay: el mismo proveedor escrito de dos
@@ -532,8 +540,10 @@ export default function FinanzasProveedores() {
         <Hoja titulo="Resumen">
           <LineaGuia etiqueta="Proveedores"><span>{proveedores.length}</span></LineaGuia>
           <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">{todasTxs.length} movimientos</p>
-          <LineaGuia etiqueta="Órdenes de compra"><Cifra valor={totalOC} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
-          <LineaGuia etiqueta="Subcontratos, saldo por pagar"><Cifra valor={totalSub} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <LineaGuia etiqueta="Órdenes de compra, facturado"><Cifra valor={totalOC} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <LineaGuia etiqueta="Subcontratos, estados de pago"><Cifra valor={totalSub} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <LineaGuia etiqueta="Subcontratos, saldo por pagar"><Cifra valor={saldoSub} escala="pesos" color="grafito" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">una vez por contrato</p>
           <LineaGuia etiqueta="Rendiciones aprobadas"><Cifra valor={totalRend} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
         </Hoja>
 

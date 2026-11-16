@@ -1,3 +1,4 @@
+import { activaEnPeriodo } from "../../lib/maquinasPeriodo";
 import React, { useEffect, useMemo, useState } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
@@ -95,7 +96,10 @@ export default function MonthlyCalendar() {
     ])
       .then(([machinesData, logsData]) => {
         if (active) {
-          setMachines(machinesData.filter(m => m.active !== false));
+          // Activa en el período (fechaBaja / meses pasados), o con partes en el rango:
+          // una máquina vendida no desaparece de los meses en que trabajó.
+          const conLogs = new Set(logsData.map(l => l.machineId));
+          setMachines(machinesData.filter(m => conLogs.has(m.id) || activaEnPeriodo(m, dateFrom, dateTo)));
           setLogs(logsData);
         }
       })

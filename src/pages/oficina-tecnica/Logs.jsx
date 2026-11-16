@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { activaEnPeriodo } from "../../lib/maquinasPeriodo";
 import { listActiveProjects, listMachines, upsertDailyLog } from "../../lib/db";
 import { listarLogsObra } from "../../lib/partesDiarios";
 import { useEmpresa } from "../../lib/useEmpresa";
@@ -77,7 +78,8 @@ export default function Logs() {
       setWfPorMaquina(wf);
 
       setRows(
-        m.filter(x => x.active !== false).map(mm => {
+        // Activa ese día (fechaBaja) o con parte ya registrado ese día
+        m.filter(x => byMachine[x.id] || wf[x.id] || activaEnPeriodo(x, date, date)).map(mm => {
           const existing = byMachine[mm.id];
           return {
             id: existing?.id || "",

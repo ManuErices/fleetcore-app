@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { fechaISO } from "../../lib/fechas";
+import { fechaISO, hoyISO, limitesMes } from "../../lib/fechas";
+import { costoOC, mesSubcontrato, saldoSubcontratos, ventaOT, retencionOT } from "../../lib/costosObra";
+import { manoObraAnio, costoObraFila } from "../../lib/manoObra";
+import { entregasComoConsumos, unirConsumos, preciosDeCargas, valorizarConsumos, costoConsumo } from "../../lib/combustible";
+import { useFuelPrices } from "../../lib/fuelPriceService";
+import { sumarMesesClave } from "../../lib/finanzas/costosFijos.js";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { cargarIngresosDelFlujo, cuentaEsDeObra } from "../../lib/finanzas/ingresos.js";
 import {
@@ -20,18 +25,20 @@ function fmtM(n) {
   if (abs >= 1000000) return (n<0?"-":"") + "$" + (abs/1000000).toFixed(1).replace(".",",") + "M";
   return (n<0?"-":"") + "$" + Math.round(abs).toLocaleString("es-CL");
 }
+// Mes "AAAA-MM" de una fecha "AAAA-MM-DD" o Timestamp, en hora de Chile (fechas.js).
 function mesKey(fecha) {
   if (!fecha) return null;
-  try {
-    const d = new Date(fecha.includes("T") ? fecha : fecha+"T12:00:00");
-    if (isNaN(d)) return null;
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  } catch { return null; }
+  const iso = typeof fecha === "string" ? fecha : fechaISO(fecha);
+  return /^\d{4}-\d{2}/.test(iso || "") ? iso.slice(0, 7) : null;
 }
+const FUENTES_EGRESO = [
+  ["manoObra", "Mano de obra"], ["combustible", "Combustible"], ["oc", "Órdenes de compra (facturado)"],
+  ["subcontrato", "Subcontratos (estados de pago)"], ["rendicion", "Rendiciones"],
+];
 
 // ─── Hoja de una obra ─────────────────────────────────────────────────────────
 function ProyectoPanel({ proyecto, datos, mes, anio }) {
-  const { ingresos, egresos, egrPorFuente, proveedores, flujoPorMes } = datos;
+  const { ingresos, egresos, egrPorFuente, proveedores, flujoPorMes, retencion, ingresosFlujo, saldoSC } = datos;
   const neto   = ingresos - egresos;
   const margen = ingresos > 0 ? ((neto/ingresos)*100).toFixed(1) : null;
   const maxProv = proveedores[0]?.total || 1;
@@ -50,15 +57,23 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
 
       <div className="px-6 py-4 grid gap-x-12 gap-y-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div>
-          <LineaGuia etiqueta="Ingresos"><Cifra valor={ingresos} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
-          <LineaGuia etiqueta="Egresos"><Cifra valor={-egresos} escala="pesos" vacio="$0" /></LineaGuia>
-          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">rendiciones, compras y subcontratos</p>
+          <LineaGuia etiqueta="Venta del mes"><Cifra valor={ingresos} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">estado de pago al mandante, bruto (Oficina Técnica)</p>
+          {retencion > 0 && <LineaGuia etiqueta="Retención, por cobrar al final" className="text-[15px] min-h-[30px]"><Cifra valor={retencion} escala="pesos" color="grafito" /></LineaGuia>}
+          <LineaGuia etiqueta="Costo"><Cifra valor={-egresos} escala="pesos" vacio="$0" /></LineaGuia>
+          <p className="m-0 -mt-1 mb-1 text-right text-[13px] text-cuaderno-grafito">mano de obra, combustible, compras, subcontratos y rendiciones, como el Dashboard de Oficina Técnica</p>
           <LineaGuia etiqueta="Margen">
             <span className={margen !== null && parseFloat(margen) < 0 ? "text-cuaderno-roja" : ""}>
               {margen !== null ? `${margen.replace(".", ",")}%` : "—"}
             </span>
           </LineaGuia>
-          {ingresos === 0 && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">sin ingresos en el flujo para esta obra</p>}
+          {ingresos === 0 && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">sin estado de pago al mandante este mes</p>}
+          {ingresosFlujo !== 0 && (
+            <LineaGuia etiqueta="Cobros anotados en el flujo" className="text-[15px] min-h-[30px]"><Cifra valor={ingresosFlujo} escala="pesos" color="grafito" /></LineaGuia>
+          )}
+          {saldoSC > 0 && (
+            <LineaGuia etiqueta="Subcontratos, saldo por pagar" className="text-[15px] min-h-[30px]"><Cifra valor={saldoSC} escala="pesos" color="grafito" /></LineaGuia>
+          )}
 
           <div className="mt-4">
             <p className="m-0 mb-1 text-[16px] text-cuaderno-grafito">En qué se fue el egreso</p>
@@ -66,11 +81,7 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
               <p className="m-0 text-[15px] text-cuaderno-grafito">Sin egresos este período.</p>
             ) : (
               <div className="space-y-2.5">
-                {[
-                  { label: "Rendiciones",       val: egrPorFuente.rendicion },
-                  { label: "Órdenes de compra", val: egrPorFuente.oc },
-                  { label: "Subcontratos",      val: egrPorFuente.subcontrato },
-                ].map(({ label, val }) => {
+                {FUENTES_EGRESO.map(([k, label]) => ({ label, val: egrPorFuente[k] || 0 })).filter(f => f.val !== 0).map(({ label, val }) => {
                   const pct = egresos > 0 ? (val / egresos) * 100 : 0;
                   return (
                     <div key={label}>
@@ -125,23 +136,22 @@ function ProyectoPanel({ proyecto, datos, mes, anio }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function FinanzasObras() {
-  const hoy = new Date();
+  const hoyIso = hoyISO();
   const { empresaId } = useEmpresa();
-  const [mes,  setMes]  = useState(hoy.getMonth());
-  const [anio, setAnio] = useState(hoy.getFullYear());
+  const { prices: fuelPrices } = useFuelPrices(false);
+  const precioDieselRespaldo = fuelPrices?.diesel || 950;   // mismo respaldo que el Dashboard de OT
+  const [mes,  setMes]  = useState(Number(hoyIso.slice(5, 7)) - 1);
+  const [anio, setAnio] = useState(Number(hoyIso.slice(0, 4)));
   const [proyectos, setProyectos] = useState([]);
   const [rawData,   setRawData]   = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [busqueda,  setBusqueda]  = useState("");
 
   const keyActual = `${anio}-${String(mes+1).padStart(2,"0")}`;
-  const anios = Array.from({length:5}, (_,i) => hoy.getFullYear()-2+i);
+  const anios = Array.from({length:5}, (_,i) => Number(hoyIso.slice(0, 4))-2+i);
 
   // Últimos 6 meses para gráfico
-  const ultimos6 = useMemo(() => Array.from({length:6}, (_,i) => {
-    const d = new Date(anio, mes-5+i, 1);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-  }), [mes, anio]);
+  const ultimos6 = useMemo(() => Array.from({length:6}, (_,i) => sumarMesesClave(keyActual, i - 5)), [keyActual]);
 
   const cargar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
@@ -152,71 +162,90 @@ export default function FinanzasObras() {
       const listaP = snapP.docs.map(d => ({id:d.id,...d.data()}));
       setProyectos(listaP);
 
-      // Datos financieros: acumular por projectId
+      // Costo y venta por obra con las MISMAS reglas que el Dashboard de Oficina
+      // Técnica (src/lib/costosObra.js): OC = facturado, subcontratos = monto
+      // del EP en el mes asociado, mano de obra de RRHH (respaldo Excel) y
+      // combustible WorkFleet + Excel valorizado. Venta = estado de pago al
+      // mandante, bruta; la retención aparte. Antes: OC comprometida, saldo
+      // del subcontrato por cada línea de EP y sin mano de obra ni combustible.
       const acum = {}; // { [projectId]: { ingresos, egresos, egrPorFuente, proveedores:{}, flujo:{} } }
 
       const init = () => ({
-        ingresos: 0, egresos: 0,
-        egrPorFuente: { rendicion:0, oc:0, subcontrato:0 },
+        ingresos: 0, egresos: 0, retencion: 0, ingresosFlujo: 0, saldoSC: 0,
+        egrPorFuente: { manoObra:0, combustible:0, rendicion:0, oc:0, subcontrato:0 },
         proveedores: {},
         flujo: Object.fromEntries(ultimos6.map(k=>[k,{ingresos:0,egresos:0}])),
       });
       const get = (pid) => { if (!acum[pid]) acum[pid]=init(); return acum[pid]; };
+      const egreso = (pid, k, fuente, m, proveedor) => {
+        if (!pid || !k || !m) return;
+        const enMes = k === keyActual, enGrafico = ultimos6.includes(k);
+        if (!enMes && !enGrafico) return;
+        const a = get(pid);
+        if (enMes) { a.egresos += m; a.egrPorFuente[fuente] += m; if (proveedor) a.proveedores[proveedor] = (a.proveedores[proveedor]||0) + m; }
+        if (enGrafico) a.flujo[k].egresos += m;
+      };
+      const leer = (nombre) => getDocs(collection(db,"empresas",empresaId,nombre))
+        .then(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        .catch(e => { console.warn(nombre, e); return []; });
 
-      // Ingresos: de las cuentas de ingreso del flujo de caja, asignadas a cada
-      // obra por su campo "Proyecto". (Antes se leía finanzas_ingresos, que
-      // nunca se llenó, y todas las obras salían con ingresos en cero.)
+      const desde = `${ultimos6[0]}-01`;
+      const [ua, um] = keyActual.split("-").map(Number);
+      const hasta = limitesMes(ua, um).hasta;
+      const [ingresosOT, rendiciones, ocs, subcontratos, fuelLogs, reportesComb] = await Promise.all([
+        leer("estadoPagoIngresos"), leer("rendiciones"), leer("purchaseOrders"), leer("subcontratos"),
+        leer("fuelLogs"),
+        getDocs(query(collection(db,"empresas",empresaId,"reportes_combustible"), where("tipo","in",["entrega","entrada"])))
+          .then(s => s.docs.map(d => ({ id: d.id, ...d.data() }))).catch(() => []),
+      ]);
+
+      // Venta del mandante (ventaOT) y retención
+      ingresosOT.forEach(i => {
+        if (!i.projectId || !i.year || !i.month) return;
+        const k = `${i.year}-${String(i.month).padStart(2,"0")}`;
+        const v = ventaOT(i);
+        if (k === keyActual) { const a = get(i.projectId); a.ingresos += v; a.retencion += retencionOT(i); }
+        if (ultimos6.includes(k)) get(i.projectId).flujo[k].ingresos += v;
+      });
+
+      // Cobros anotados en el flujo de caja (referencia: caja, no devengado)
       try {
         const { porCuenta } = await cargarIngresosDelFlujo(empresaId);
         for (const { cuenta, porMes } of porCuenta) {
           const obra = listaP.find(p => cuentaEsDeObra(cuenta, p));
-          if (!obra) continue;
-          const a = get(obra.id);
-          for (const [k, m] of Object.entries(porMes)) {
-            if (k === keyActual) a.ingresos += m;
-            if (ultimos6.includes(k)) a.flujo[k].ingresos += m;
-          }
+          if (obra && porMes[keyActual]) get(obra.id).ingresosFlujo += porMes[keyActual];
         }
       } catch (e) { console.warn("Sin ingresos del flujo:", e); }
 
-      // Rendiciones
-      const snapR = await getDocs(collection(db,"empresas",empresaId,"rendiciones"));
-      snapR.docs.forEach(d => {
-        const r=d.data(); if(!r.projectId) return;
-        const a=get(r.projectId); const k=mesKey(r.fechaEmision||r.fechaAprobacion);
-        const m=parseFloat(r.montoAprobado)||parseFloat(r.montoSolicitado)||0;
-        if(k===keyActual){ a.egresos+=m; a.egrPorFuente.rendicion+=m; }
-        if(ultimos6.includes(k)) a.flujo[k].egresos+=m;
-        if(r.proveedor&&m>0) a.proveedores[r.proveedor]=(a.proveedores[r.proveedor]||0)+m;
+      // Rendiciones (montoAprobado por fecha de emisión, como OT)
+      rendiciones.forEach(r => egreso(r.projectId, mesKey(r.fechaEmision), "rendicion", parseFloat(r.montoAprobado)||0, r.proveedor));
+      // Órdenes de compra: lo facturado
+      ocs.forEach(o => egreso(o.projectId, mesKey(o.fecha), "oc", costoOC(o), o.proveedor));
+      // Subcontratos: monto del EP en el mes asociado; saldo una vez por contrato
+      subcontratos.forEach(s => egreso(s.projectId, mesSubcontrato(s) || mesKey(s.createdAt), "subcontrato", parseFloat(s.montoEP)||0, s.razonSocialSubcontratista));
+      const scPorObra = {};
+      subcontratos.forEach(s => { if (s.projectId) (scPorObra[s.projectId] ||= []).push(s); });
+      Object.entries(scPorObra).forEach(([pid, filas]) => { const sal = saldoSubcontratos(filas); if (sal) get(pid).saldoSC = sal; });
+
+      // Combustible: WorkFleet + Excel sin duplicar, valorizado (mismas funciones que listarConsumosCombustible)
+      const cargas = preciosDeCargas(reportesComb);
+      listaP.forEach(p => {
+        const excel = fuelLogs.filter(l => l.projectId === p.id && l.date >= desde && l.date <= hasta);
+        const consumos = valorizarConsumos(unirConsumos(excel, entregasComoConsumos(reportesComb, { projectId: p.id, desde, hasta })), cargas);
+        consumos.forEach(c => egreso(p.id, mesKey(c.date), "combustible", costoConsumo(c, precioDieselRespaldo)));
       });
 
-      // Órdenes de compra
-      const snapOC = await getDocs(collection(db,"empresas",empresaId,"purchaseOrders"));
-      snapOC.docs.forEach(d => {
-        const o=d.data(); if(!o.projectId) return;
-        const a=get(o.projectId); const k=mesKey(o.fecha);
-        const m=parseFloat(o.totalMonto)||0;
-        if(k===keyActual){ a.egresos+=m; a.egrPorFuente.oc+=m; }
-        if(ultimos6.includes(k)) a.flujo[k].egresos+=m;
-        if(o.proveedor&&m>0) a.proveedores[o.proveedor]=(a.proveedores[o.proveedor]||0)+m;
-      });
-
-      // Subcontratos
-      const snapS = await getDocs(collection(db,"empresas",empresaId,"subcontratos"));
-      snapS.docs.forEach(d => {
-        const s=d.data(); if(!s.projectId) return;
-        const a=get(s.projectId);
-        const fecha=s.fechaEP||(s.createdAt ? fechaISO(s.createdAt) : "")||"" /* día en Chile */;
-        const k=mesKey(fecha); const m=parseFloat(s.saldoPorPagarSC)||parseFloat(s.totalPagoNeto)||0;
-        if(k===keyActual){ a.egresos+=m; a.egrPorFuente.subcontrato+=m; }
-        if(ultimos6.includes(k)) a.flujo[k].egresos+=m;
-        if(s.razonSocialSubcontratista&&m>0) a.proveedores[s.razonSocialSubcontratista]=(a.proveedores[s.razonSocialSubcontratista]||0)+m;
-      });
+      // Mano de obra: liquidaciones de RRHH (respaldo Excel) × % de incidencia
+      const aniosG = [...new Set(ultimos6.map(k => Number(k.slice(0, 4))))];
+      await Promise.all(listaP.map(async p => {
+        const filas = (await Promise.all(aniosG.map(a => manoObraAnio(empresaId, p.id, a).catch(() => [])))).flat();
+        filas.forEach(f => egreso(p.id, `${f.year}-${String(f.month).padStart(2,"0")}`, "manoObra", costoObraFila(f)));
+      }));
 
       setRawData(acum);
     } catch(e) { console.error(e); }
     finally { setLoading(false); }
-  }, [empresaId, keyActual, ultimos6]);
+  }, [empresaId, keyActual, ultimos6, precioDieselRespaldo]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -230,7 +259,7 @@ export default function FinanzasObras() {
         return true;
       })
       .map(p => {
-        const d = rawData[p.id] || { ingresos:0,egresos:0,egrPorFuente:{rendicion:0,oc:0,subcontrato:0},proveedores:{},flujo:{} };
+        const d = rawData[p.id] || { ingresos:0,egresos:0,retencion:0,ingresosFlujo:0,saldoSC:0,egrPorFuente:{},proveedores:{},flujo:{} };
         return { proyecto: p, datos: d, actividad: d.ingresos+d.egresos };
       })
       .sort((a,b) => b.actividad - a.actividad);
@@ -261,7 +290,7 @@ export default function FinanzasObras() {
         <div>
           <Titulo>Por obra</Titulo>
           <p className="m-0 text-[17px] text-cuaderno-grafito">
-            Ingresos, egresos y margen de cada proyecto en {MESES_FULL[mes].toLowerCase()} de {anio}.
+            Venta, costo y margen de cada obra en {MESES_FULL[mes].toLowerCase()} de {anio}.
             {!loading && ` ${conActividad.length} con movimientos, de ${proyectos.length}.`}
           </p>
         </div>

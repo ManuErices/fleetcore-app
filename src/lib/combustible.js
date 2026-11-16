@@ -21,28 +21,50 @@
  * ese día (entrada desde estación, precio = total ÷ litros de sus
  * documentos), primero de la misma obra y si no, de cualquiera. Trae
  * `precioLitro`, `costo` y `precioFecha`; si no hay ninguna carga con
- * precio, `costo` queda null y la pantalla usa su precio de respaldo.
+ * precio, `costo` queda null y la pantalla usa su precio de respaldo
+ * (fetchFuelPrices: primero el precio manual de fuelPrices/current).
+ *
+ * Camión aljibe (combustibleRegistros, Oficina Técnica → Combustible): es el
+ * control del diésel que salió del camión, importado por obra, con precio
+ * FIJADO por mes (combustiblePrecioMensual). PRECEDENCIA: en un mes en que la
+ * obra tiene registros del aljibe, esos registros SON el consumo del mes y se
+ * descartan los de WorkFleet y fuelLogs de ese mes (son el mismo diésel). Los
+ * meses sin registros del aljibe siguen con WorkFleet + Excel. Antes solo
+ * Estado de pago aplicaba esta regla y el Dashboard/Consolidado/Combustible
+ * mostraban otros litros para el mismo mes. Un registro del aljibe se asocia
+ * a la máquina por patente/código (si no calza, queda sin máquina); su precio
+ * es el fijado para el mes, si no la última carga de WorkFleet, si no null
+ * (precio de respaldo de la pantalla).
+ *
+ * Obra de una entrega de WorkFleet sin projectId: la obra en que estaba la
+ * máquina ese día (obraEnFecha, igual que partesDiarios.js), para que litros
+ * y horas de la misma máquina caigan en la misma obra (L/h, costo/hora).
  */
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "./firebase";
-import { listFuelLogsByRange } from "./db";
+import { listFuelLogsByRange, listCombustibleRegistros, listCombustiblePrecioMensualByYear } from "./db";
+import { obraEnFecha, normalizarPatente, listarMaquinas } from "./maquinas";
 
 const TOLERANCIA_LITROS = 1;
 
 /** Entregas de WorkFleet → mismo formato que fuelLogs. */
-export function entregasComoConsumos(reportes, { projectId, desde, hasta } = {}) {
+export function entregasComoConsumos(reportes, { projectId, desde, hasta, maquinasPorId = {} } = {}) {
   return (reportes || [])
     .filter(r => r.tipo === "entrega")
     .map(r => {
       const e = r.datosEntrega || {};
+      const machineId = e.machineId || r.machineId || "";
+      const date = String(e.fecha || r.fecha || r.datosControl?.fecha || "").slice(0, 10);
+      let obra = r.projectId || r.datosControl?.projectId || "";
+      if (!obra && maquinasPorId[machineId] && date) obra = obraEnFecha(maquinasPorId[machineId], date) || "";
       return {
         id: `wf_${r.id}`,
         reporteId: r.id,
-        machineId: e.machineId || r.machineId || "",
-        date: String(e.fecha || r.fecha || r.datosControl?.fecha || "").slice(0, 10),
+        machineId,
+        date,
         liters: Number(e.cantidadLitros ?? r.cantidadLitros) || 0,
         origin: "WorkFleet",
-        projectId: r.projectId || r.datosControl?.projectId || "",
+        projectId: obra,
         operador: r.operadorNombre || e.receptorNombre || "",
         horometro: e.horometroOdometro ?? null,
         fuente: "workfleet",
@@ -126,14 +148,76 @@ export async function listarCargasCombustible(empresaId) {
   return preciosDeCargas(reportes);
 }
 
-/** Consumos de una obra en un rango, de las dos fuentes y sin duplicar. */
+/**
+ * Registros del camión aljibe → forma de consumo. `preciosMes` = { "AAAA-MM": precioLitro }.
+ * La máquina se busca por patente o código normalizado.
+ */
+export function registrosAljibeComoConsumos(registros, { desde, hasta, maquinas = [], preciosMes = {} } = {}) {
+  const porLlave = {};
+  maquinas.forEach(m => {
+    [m.patente, m.code, m.codigo].forEach(v => { const k = normalizarPatente(v); if (k && !porLlave[k]) porLlave[k] = m.id; });
+  });
+  return (registros || [])
+    .map(r => {
+      const date = String(r.fecha || "").slice(0, 10);
+      const precio = Number(preciosMes[date.slice(0, 7)]) || 0;
+      return {
+        id: `cb_${r.id}`,
+        registroId: r.id,
+        machineId: porLlave[normalizarPatente(r.codigoPatente)] || "",
+        patente: r.codigoPatente || "",
+        date,
+        liters: Number(r.litros) || 0,
+        origin: "Camión aljibe",
+        projectId: r.projectId || "",
+        horometro: r.horometro ?? null,
+        fuente: "aljibe",
+        soloLectura: true,
+        precioMes: precio || null,
+      };
+    })
+    .filter(c => c.date && c.liters > 0)
+    .filter(c => (!desde || c.date >= desde) && (!hasta || c.date <= hasta));
+}
+
+/**
+ * Precedencia del camión aljibe: en cada mes con registros del aljibe se
+ * quedan solo ellos; en los demás meses, los consumos WorkFleet/Excel.
+ */
+export function aplicarPrecedenciaAljibe(consumos, aljibe) {
+  const mesesAljibe = new Set((aljibe || []).map(c => c.date.slice(0, 7)));
+  if (!mesesAljibe.size) return consumos;
+  return [...consumos.filter(c => !mesesAljibe.has(String(c.date).slice(0, 7))), ...aljibe]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+/** Valoriza: el aljibe con su precio fijado del mes; el resto (y el aljibe sin precio) con las cargas. */
+function valorizarTodo(consumos, cargas) {
+  const conPrecioMes = consumos.filter(c => c.precioMes);
+  const resto = valorizarConsumos(consumos.filter(c => !c.precioMes), cargas);
+  return [
+    ...conPrecioMes.map(c => ({ ...c, precioLitro: c.precioMes, costo: c.liters * c.precioMes, precioFecha: c.date.slice(0, 7) })),
+    ...resto,
+  ].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+/** Consumos de una obra en un rango, de todas las fuentes y sin duplicar. */
 export async function listarConsumosCombustible(empresaId, projectId, desde, hasta) {
-  const [excel, reportes] = await Promise.all([
+  const anios = [];
+  if (projectId && desde && hasta) for (let a = Number(desde.slice(0, 4)); a <= Number(hasta.slice(0, 4)); a++) anios.push(a);
+  const [excel, reportes, maquinas, registros, precios] = await Promise.all([
     listFuelLogsByRange(empresaId, projectId, desde, hasta),
     getDocs(query(collection(db, "empresas", empresaId, "reportes_combustible"), where("tipo", "in", ["entrega", "entrada"])))
       .then(s => s.docs.map(d => ({ id: d.id, ...d.data() })))
       .catch(() => []),
+    listarMaquinas(empresaId).catch(() => []),
+    projectId ? listCombustibleRegistros(empresaId, projectId).catch(() => []) : Promise.resolve([]),
+    Promise.all(anios.map(a => listCombustiblePrecioMensualByYear(empresaId, projectId, a).catch(() => []))).then(r => r.flat()),
   ]);
-  const consumos = unirConsumos(excel, entregasComoConsumos(reportes, { projectId, desde, hasta }));
-  return valorizarConsumos(consumos, preciosDeCargas(reportes));
+  const maquinasPorId = Object.fromEntries(maquinas.map(m => [m.id, m]));
+  const preciosMes = {};
+  precios.forEach(p => { if (Number(p.precioLitro) > 0) preciosMes[`${p.year}-${String(p.month).padStart(2, "0")}`] = Number(p.precioLitro); });
+  const consumos = unirConsumos(excel, entregasComoConsumos(reportes, { projectId, desde, hasta, maquinasPorId }));
+  const aljibe = registrosAljibeComoConsumos(registros, { desde, hasta, maquinas, preciosMes });
+  return valorizarTodo(aplicarPrecedenciaAljibe(consumos, aljibe), preciosDeCargas(reportes));
 }

@@ -1,2 +1,2 @@
-import { db } from '../../../lib/firebase.js'
-export { db }
+import { db, auth } from '../../../lib/firebase.js'
+export { db, auth }

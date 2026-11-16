@@ -25,6 +25,7 @@ import {
   agregarCuentaNueva, proponerColchon, cambiarEstado, aplicarPropuesta,
 } from '../finanzas/propuestasDatos';
 import { conEstadoAlDia } from '../pagosDeuda';
+import { agruparDeudaPorAcreedor, totalesDeuda } from '../finanzas/deuda.js';
 
 const MAX_PARTIDAS_LOTE = 60;
 const MAX_CUENTAS_LOTE = 30;
@@ -360,29 +361,28 @@ export const EJECUTORES_FINANZAS = {
     return { ok: true, partida: key, pagado };
   },
 
+  // Misma agregación que Finanzas → Deuda (lib/finanzas/deuda.js): saldo NETO
+  // por acreedor (los anticipos rebajan) y agrupado por proveedor, no por
+  // nombre escrito. Antes solo se sumaban saldos positivos.
   async deuda_proveedores({ solo_vencida = false }, { empresaId }) {
     const snap = await getDocs(collection(db, 'empresas', empresaId, 'deuda_proveedores'));
-    const porAcreedor = new Map();
-    snap.docs.forEach(d => {
-      const x = conEstadoAlDia(d.data());   // mora y estado a hoy, no los de la importación
-      if (!(x.saldoPendiente > 0)) return;
-      if (solo_vencida && x.estado !== 'vencido') return;
-      const nombre = x.proveedorNombre || 'Acreedor';
-      const a = porAcreedor.get(nombre) || { acreedor: nombre, tipo: x.tipoDeuda || 'proveedor', documentos: 0, saldo: 0, vencido: 0, max_dias_mora: 0, proximo_vencimiento: null };
-      a.documentos++;
-      a.saldo += x.saldoPendiente;
-      if (x.estado === 'vencido') a.vencido += x.saldoPendiente;
-      a.max_dias_mora = Math.max(a.max_dias_mora, x.diasMora || 0);
-      if (x.estado !== 'vencido' && x.fechaVencimiento && (!a.proximo_vencimiento || x.fechaVencimiento < a.proximo_vencimiento)) {
-        a.proximo_vencimiento = x.fechaVencimiento;
-      }
-      porAcreedor.set(nombre, a);
-    });
-    const lista = [...porAcreedor.values()].sort((a, b) => b.saldo - a.saldo);
+    const docs = snap.docs.map(d => conEstadoAlDia({ id: d.id, ...d.data() }));   // mora y estado a hoy
+    const t = totalesDeuda(docs);
+    const lista = agruparDeudaPorAcreedor(docs)
+      .filter(a => a.saldoPendiente !== 0)
+      .filter(a => !solo_vencida || a.saldoVencido > 0)
+      .sort((a, b) => b.saldoPendiente - a.saldoPendiente);
     return {
-      total_pendiente: Math.round(lista.reduce((s, a) => s + a.saldo, 0)),
-      total_vencido: Math.round(lista.reduce((s, a) => s + a.vencido, 0)),
-      acreedores: lista.slice(0, 40).map(a => ({ ...a, saldo: Math.round(a.saldo), vencido: Math.round(a.vencido) })),
+      total_pendiente: Math.round(t.saldoTotal),
+      total_vencido: Math.round(t.saldoVencido),
+      anticipos_a_favor: Math.round(t.saldoAnticipos),
+      nota: 'Saldos netos, igual que Finanzas → Deuda: los anticipos o excedentes a favor rebajan el saldo del acreedor.',
+      acreedores: lista.slice(0, 40).map(a => ({
+        acreedor: a.nombre, tipo: a.tipoDeuda, documentos: a.documentos,
+        saldo: Math.round(a.saldoPendiente), vencido: Math.round(a.saldoVencido),
+        ...(a.anticipos ? { anticipos: Math.round(a.anticipos) } : {}),
+        max_dias_mora: a.maxDiasMora, proximo_vencimiento: a.proximoVencimiento,
+      })),
     };
   },
 };

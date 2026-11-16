@@ -2107,38 +2107,55 @@ function perteneceA(trabajador, cc) {
 }
 
 /**
+ * ¿La fila de costo (costosManoObraRRHH) se liquidó en este centro? Usa el
+ * centro de costo guardado en la liquidación (el del mes), no la ficha actual.
+ */
+function filaEsDelCentro(fila, cc) {
+  const v = claveCC(fila?.centroCosto);
+  if (!v) return false;
+  return [cc.codigo, cc.id, cc.nombre].filter(Boolean).map(claveCC).includes(v);
+}
+
+const NOMBRES_MES_CC = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
  * Detalle de un centro de costo: quién está asignado, cuánto cuesta cada uno y
  * quién quedó fuera. Antes las tarjetas no eran clickeables y no había forma de
  * ver la composición de un centro ni de mover gente entre centros.
  */
-function CentroCostoDetalleModal({ centro, todosActivos, contratos, liquidaciones, centros, empresaId, onClose, onReload }) {
+function CentroCostoDetalleModal({ centro, todosActivos, contratos, liquidaciones, centros, empresaId, onClose, onReload, costos }) {
   const [tab, setTab] = useState('asignados');
   const [seleccion, setSeleccion] = useState(new Set());
   const [busqueda, setBusqueda] = useState('');
   const [guardando, setGuardando] = useState(false);
-  const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
+  const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 
   if (!centro) return null;
 
-  const hoy = new Date();
-  const mesAct = String(hoy.getMonth() + 1).padStart(2, '0');
-  const anioAct = String(hoy.getFullYear());
+  // Costo individual: costo empresa de la liquidación del mes cargada a ESTE
+  // centro (haberes − asignación familiar + aportes del empleador), el mismo
+  // de Oficina Técnica (costosManoObraRRHH). Antes: imponible + no imponible,
+  // sin aportes, y el sueldo base cuando no había liquidación.
+  const filasCentro = (costos?.filas || []).filter(f => filaEsDelCentro(f, centro));
+  const costoPorTrab = new Map();
+  filasCentro.forEach(f => costoPorTrab.set(f.employeeId, (costoPorTrab.get(f.employeeId) || 0) + (Number(f.totalCosto) || 0)));
+  const costoDe = (t) => costoPorTrab.has(t.id)
+    ? { monto: costoPorTrab.get(t.id), fuente: 'liquidación' }
+    : { monto: 0, fuente: 'sin liquidación en este centro' };
 
-  // Costo individual: liquidación del mes si existe, si no el sueldo base pactado
-  const costoDe = (t) => {
-    const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
-    if (!contrato) return { monto: 0, fuente: 'sin contrato' };
-    const liq = liquidaciones.find(l => l.trabajadorId === t.id && l.mes === mesAct && l.anio === anioAct);
-    if (!liq) return { monto: parseInt(contrato.sueldoBase) || 0, fuente: 'sueldo base' };
-    const calc = liquidacionDe(t, contrato, liq);
-    return { monto: calc.imponible + calc.noImponible, fuente: 'liquidación' };
-  };
-
+  const idsAsignados = new Set();
   const asignados = todosActivos.filter(t => perteneceA(t, centro))
-    .map(t => ({ ...t, ...costoDe(t) }))
-    .sort((a, b) => b.monto - a.monto);
+    .map(t => { idsAsignados.add(t.id); return { ...t, ...costoDe(t) }; });
+  // Liquidados en este centro ese mes que hoy figuran en otro (cambiaron de centro)
+  const trabPorId = new Map(todosActivos.map(t => [t.id, t]));
+  [...costoPorTrab.entries()].filter(([id]) => !idsAsignados.has(id)).forEach(([id, monto]) => {
+    const t = trabPorId.get(id);
+    const fila = filasCentro.find(f => f.employeeId === id);
+    asignados.push({ ...(t || {}), id, nombre: t?.nombre || fila?.nombre || id, monto, fuente: 'liquidado aquí, hoy en otro centro' });
+  });
+  asignados.sort((a, b) => b.monto - a.monto);
 
-  const costoTotal = asignados.reduce((s, t) => s + t.monto, 0);
+  const costoTotal = filasCentro.reduce((s, f) => s + (Number(f.totalCosto) || 0), 0);
   const pct = centro.presupuesto > 0 ? Math.round((costoTotal / centro.presupuesto) * 100) : 0;
   const sobrePpto = centro.presupuesto > 0 && costoTotal > centro.presupuesto;
 
@@ -2410,6 +2427,38 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
       .then(snap => setObras(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))))
       .catch(() => setObras([]));
   }, [empresaId]);
+  // Costo de mano de obra por centro: el mismo motor que Oficina Técnica
+  // (costosManoObraRRHH: costo empresa de cada liquidación, borradores
+  // incluidos, con el centro de costo guardado en la liquidación). Se muestra
+  // el último mes con liquidaciones hasta el mes actual.
+  const [costos, setCostos] = useState({ filas: [], anio: null, mes: null, cargando: true });
+  useEffect(() => {
+    if (!empresaId) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const { costosManoObraRRHH } = await import('./resumenContable');
+        const hoy = hoyChile();
+        let anio = Number(hoy.slice(0, 4));
+        const mesHoy = Number(hoy.slice(5, 7));
+        let filas = (await costosManoObraRRHH(empresaId, anio).catch(() => [])).filter(f => f.month <= mesHoy);
+        if (!filas.length) { anio -= 1; filas = await costosManoObraRRHH(empresaId, anio).catch(() => []); }
+        const mes = filas.reduce((m, f) => Math.max(m, Number(f.month) || 0), 0);
+        if (vivo) setCostos({ filas: filas.filter(f => Number(f.month) === mes), anio, mes, cargando: false });
+      } catch (e) {
+        console.error('Costos por centro:', e);
+        if (vivo) setCostos({ filas: [], anio: null, mes: null, cargando: false });
+      }
+    })();
+    return () => { vivo = false; };
+  }, [empresaId, liquidaciones]);
+  const etiquetaMes = costos.mes ? `${NOMBRES_MES_CC[costos.mes - 1]} ${costos.anio}` : 'sin liquidaciones';
+
+  // Códigos únicos: dos centros con el mismo código hacían que un trabajador
+  // (o una liquidación) calzara con los dos.
+  const codigoUsado = (codigo, salvoId = null) =>
+    centros.some(c => c.id !== salvoId && claveCC(c.codigo) === claveCC(codigo));
+
   const nombreObra = (id) => obras.find(o => o.id === id)?.name || '';
   const obrasSinCentro = obras.filter(o => o.active !== false && !centros.some(c => c.projectId === o.id));
   const crearDesdeObras = async () => {
@@ -2417,9 +2466,14 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
     if (!window.confirm(`Crear ${obrasSinCentro.length} centros de costo, uno por cada obra que aún no tiene: ${obrasSinCentro.map(o => o.name).join(', ')}?`)) return;
     setSaving(true);
     try {
+      const usados = new Set(centros.map(c => claveCC(c.codigo)));
       for (const o of obrasSinCentro) {
+        const base = String(o.code || o.codigo || o.name || '').toUpperCase().slice(0, 17);
+        let codigo = base, n = 2;
+        while (usados.has(claveCC(codigo))) codigo = `${base}-${n++}`;
+        usados.add(claveCC(codigo));
         await addDoc(collection(db, 'empresas', empresaId, 'centros_costo'), {
-          codigo: String(o.code || o.codigo || o.name || '').toUpperCase().slice(0, 20),
+          codigo,
           nombre: o.name || '', descripcion: 'Creado desde la obra', presupuesto: 0,
           projectId: o.id, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         });
@@ -2434,10 +2488,11 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
   const [detalle, setDetalle] = useState(null);
 
   const activos = trabajadores.filter(t => t.estado === 'activo');
-  const fmt = n => `$${(n || 0).toLocaleString('es-CL')}`;
+  const fmt = n => `$${Math.round(n || 0).toLocaleString('es-CL')}`;
 
   const handleSave = async () => {
     if (!form.codigo || !form.nombre) { alert('Completa código y nombre.'); return; }
+    if (codigoUsado(form.codigo, editId)) { alert(`Ya existe un centro de costo con el código ${form.codigo.toUpperCase()}.`); return; }
     setSaving(true);
     try {
       const payload = {
@@ -2465,29 +2520,29 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
     setEditId(c.id);
   };
 
+  // No se borra un centro con trabajadores asignados: quedarían apuntando a
+  // un centro que no existe y su costo no se cargaría a ninguna obra.
+  const asignadosA = (cc) => activos.filter(t => perteneceA(t, cc));
+  const pedirBorrar = (cc) => {
+    const n = asignadosA(cc).length;
+    if (n > 0) { alert(`${cc.nombre} tiene ${n} trabajador${n !== 1 ? 'es' : ''} asignado${n !== 1 ? 's' : ''}. Muévelos a otro centro antes de eliminarlo.`); return; }
+    setConfirm(cc);
+  };
+
   const handleDelete = async () => {
+    if (asignadosA(confirm).length > 0) { setConfirm(null); return; }
     try { await deleteDoc(doc(db, 'empresas', empresaId, 'centros_costo', confirm.id)); onReload(); }
     catch (e) { alert('Error: ' + e.message); }
     setConfirm(null);
   };
 
-  // Calcular costo real por centro de costo basado en liquidaciones
+  // Costo por centro: liquidaciones del mes cargadas a ese centro (el de la
+  // liquidación, no el de la ficha de hoy), costo empresa con aportes del
+  // empleador. Mismo número que la mano de obra de Oficina Técnica.
   const centrosConData = centros.map(cc => {
     // Trabajadores asignados al centro
     const asignados = activos.filter(t => perteneceA(t, cc));
-
-    // Sumar liquidaciones del último mes de los trabajadores asignados
-    const hoy = new Date();
-    const mesAct = String(hoy.getMonth() + 1).padStart(2, '0');
-    const anioAct = String(hoy.getFullYear());
-    const costoMes = asignados.reduce((sum, t) => {
-      const contrato = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
-      if (!contrato) return sum;
-      const liq = liquidaciones.find(l => l.trabajadorId === t.id && l.mes === mesAct && l.anio === anioAct);
-      if (!liq) return sum + (parseInt(contrato.sueldoBase) || 0);
-      const calc = liquidacionDe(t, contrato, liq);
-      return sum + calc.imponible + calc.noImponible;
-    }, 0);
+    const costoMes = Math.round(costos.filas.filter(f => filaEsDelCentro(f, cc)).reduce((s, f) => s + (Number(f.totalCosto) || 0), 0));
 
     const pct = cc.presupuesto > 0 ? Math.min(100, Math.round((costoMes / cc.presupuesto) * 100)) : 0;
     return { ...cc, _asignados: asignados, _costoMes: costoMes, _pct: pct };
@@ -2506,7 +2561,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
         {[
           { label: 'Centros definidos', value: centros.length, color: 'text-violet-600', mono: false },
           { label: 'Presupuesto total', value: fmt(totalPresupuesto), color: 'text-slate-700', mono: true },
-          { label: 'Costo mes actual', value: fmt(totalCosto), color: totalCosto > totalPresupuesto ? 'text-red-500' : 'text-emerald-600', mono: true },
+          { label: `Costo ${etiquetaMes}`, value: costos.cargando ? '…' : fmt(totalCosto), color: totalCosto > totalPresupuesto ? 'text-red-500' : 'text-emerald-600', mono: true },
         ].map(({ label, value, color, mono }) => (
           <div key={label} className="rounded-xl px-4 py-3.5 border border-slate-100 bg-white shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
@@ -2586,7 +2641,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
                     <button onClick={e => { e.stopPropagation(); handleEdit(cc); }} className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
-                    <button onClick={e => { e.stopPropagation(); setConfirm(cc); }} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors">
+                    <button onClick={e => { e.stopPropagation(); pedirBorrar(cc); }} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
@@ -2596,7 +2651,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
                 {cc.presupuesto > 0 && (
                   <div className="mb-3">
                     <div className="flex justify-between text-[11px] mb-1">
-                      <span className="text-slate-400 font-medium">Ejecución mes actual</span>
+                      <span className="text-slate-400 font-medium">Ejecución {etiquetaMes}</span>
                       <span className="font-black" style={{ color: barColor }}>{cc._pct}%</span>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -2645,6 +2700,7 @@ function CentrosCostoSection({ trabajadores, contratos, liquidaciones, centros, 
           liquidaciones={liquidaciones}
           centros={centros}
           empresaId={empresaId}
+          costos={costos}
           onClose={() => setDetalle(null)}
           onReload={onReload}
         />

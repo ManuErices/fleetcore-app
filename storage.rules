@@ -19,6 +19,40 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    // ── Aislamiento por empresa ──────────────────────────────
+    // Antes casi todo era `autenticado()`: un usuario de cualquier empresa
+    // podía leer o borrar contratos, finiquitos y documentos de otra. Ahora
+    // se mira su ficha en Firestore (users/{uid}): empresa activa o lista de
+    // membresías, y el rol para los archivos de RRHH.
+    function usuario() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function esSuper() {
+      return autenticado() && usuario().get('role', '') == 'superadmin';
+    }
+    function miembro(empresaId) {
+      return autenticado() && (
+        esSuper()
+        || usuario().get('empresaId', '') == empresaId
+        || empresaId in usuario().get('empresasIds', [])
+      );
+    }
+    // Personal de la empresa (todos menos el portal del trabajador y el mandante)
+    function personal(empresaId) {
+      return miembro(empresaId) && !(usuario().get('role', '') in ['trabajador', 'mandante']);
+    }
+    // Quien maneja documentos laborales (contratos, finiquitos, anexos)
+    function rrhh(empresaId) {
+      return miembro(empresaId)
+          && !(usuario().get('role', '') in ['trabajador', 'mandante', 'operador', 'mecanico', 'jefe_taller']);
+    }
+    // El trabajador del portal, sobre su propia carpeta
+    function esMiCarpeta(empresaId, trabajadorId) {
+      return autenticado()
+          && firestore.exists(/databases/(default)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid))
+          && firestore.get(/databases/(default)/documents/empresas/$(empresaId)/trabajadores_portal/$(request.auth.uid)).data.get('trabajadorDocId', '') == trabajadorId;
+    }
+
     function esPdfOImagen() {
       return request.resource.contentType.matches('image/.*')
           || request.resource.contentType == 'application/pdf';
@@ -36,32 +70,32 @@ service firebase.storage {
     // forma {coleccion}/{docId}/{fileName} del resto — por eso necesita su
     // propia regla; sin ella la subida fallaba con storage/unauthorized.
     match /empresas/{empresaId}/logo {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if miembro(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 2 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*');
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     // Documentos de equipos (leasing, permiso circulación, SOAP, etc.)
     match /empresas/{empresaId}/machineDocuments/{machineId}/{fileName} {
-      allow read:  if autenticado();
+      allow read:   if personal(empresaId);
       // Subida: cualquier usuario autenticado de la empresa (el control fino
       // de rol se hace en Firestore sobre la colección machineDocuments).
       // Límite de 15 MB y solo PDF o imágenes.
-      allow write: if autenticado()
+      allow write:  if personal(empresaId)
                    && request.resource.size < 15 * 1024 * 1024
                    && esPdfOImagen();
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     // Fotos de respaldo de órdenes de trabajo (checklist de mantención)
     match /empresas/{empresaId}/workOrders/{workOrderId}/{fileName} {
-      allow read:  if autenticado();
-      allow write: if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                    && request.resource.size < 15 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     // ════════════════════════════════════════════════════════
@@ -78,20 +112,20 @@ service firebase.storage {
     // aceptados calzan con TIPOS_PERMITIDOS del componente de subida.
     // ════════════════════════════════════════════════════════
     match /empresas/{empresaId}/documentos/{trabajadorId}/{fileName} {
-      allow read:  if autenticado();
-      allow write: if autenticado()
+      allow read:   if rrhh(empresaId) || esMiCarpeta(empresaId, trabajadorId);
+      allow write:  if rrhh(empresaId)
                    && request.resource.size < 10 * 1024 * 1024
                    && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if rrhh(empresaId);
     }
 
     // Anexos de contrato firmados y escaneados (los sube SubirDocumentoAnexo)
     match /empresas/{empresaId}/anexos/{trabajadorId}/{fileName} {
-      allow read:  if autenticado();
-      allow write: if autenticado()
+      allow read:   if rrhh(empresaId) || esMiCarpeta(empresaId, trabajadorId);
+      allow write:  if rrhh(empresaId)
                    && request.resource.size < 10 * 1024 * 1024
                    && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if rrhh(empresaId);
     }
 
     // Evidencia de finiquitos firmados/ratificados ante notario o DT.
@@ -99,21 +133,21 @@ service firebase.storage {
     // que la validez se respalda con la foto/escaneo del documento firmado.
     //   empresas/{empresaId}/finiquitos/{finiquitoId}/{timestamp}_{nombre}
     match /empresas/{empresaId}/finiquitos/{docId}/{fileName} {
-      allow read:  if autenticado();
-      allow write: if autenticado()
+      allow read:   if rrhh(empresaId);
+      allow write:  if rrhh(empresaId)
                    && request.resource.size < 10 * 1024 * 1024
                    && esPdfOImagen();
-      allow delete: if autenticado();
+      allow delete: if rrhh(empresaId);
     }
 
     // Contratos firmados vía ValidaFirma (PDF final descargado del proceso FES).
     //   empresas/{empresaId}/contratos/{contratoId}/{timestamp}_{nombre}
     match /empresas/{empresaId}/contratos/{docId}/{fileName} {
-      allow read:  if autenticado();
-      allow write: if autenticado()
+      allow read:   if rrhh(empresaId);
+      allow write:  if rrhh(empresaId)
                    && request.resource.size < 15 * 1024 * 1024
                    && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if rrhh(empresaId);
     }
 
     // ════════════════════════════════════════════════════════
@@ -134,45 +168,72 @@ service firebase.storage {
     // contratos llegan en .doc o .docx.
     // ════════════════════════════════════════════════════════
     match /empresas/{empresaId}/rentalClients/{docId}/{fileName} {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 15 * 1024 * 1024
                     && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     match /empresas/{empresaId}/rentalQuotes/{docId}/{fileName} {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 15 * 1024 * 1024
                     && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     match /empresas/{empresaId}/rentalPurchaseOrders/{docId}/{fileName} {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 15 * 1024 * 1024
                     && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     match /empresas/{empresaId}/rentalContracts/{docId}/{fileName} {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 15 * 1024 * 1024
                     && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
     }
 
     // La factura es el respaldo tributario del cobro: se sube, no se pisa.
     // Si hay que corregirla, se anula el estado de pago y se emite otro.
     match /empresas/{empresaId}/rentalPayments/{docId}/{fileName} {
-      allow read:   if autenticado();
-      allow write:  if autenticado()
+      allow read:   if personal(empresaId);
+      allow write:  if personal(empresaId)
                     && request.resource.size < 15 * 1024 * 1024
                     && (esPdfOImagen() || esWord());
-      allow delete: if autenticado();
+      allow delete: if personal(empresaId);
+    }
+
+    // ── Resto de las carpetas de una empresa ─────────────────
+    // (activos, costos_fijos, deuda_comprobantes y las que se agreguen).
+    // Las carpetas laborales quedan fuera: tienen su regla propia arriba.
+    match /empresas/{empresaId}/{carpeta}/{resto=**} {
+      allow read, delete: if personal(empresaId)
+                          && !(carpeta in ['documentos', 'anexos', 'finiquitos', 'contratos']);
+      allow write:        if personal(empresaId)
+                          && !(carpeta in ['documentos', 'anexos', 'finiquitos', 'contratos'])
+                          && request.resource.size < 20 * 1024 * 1024;
+    }
+
+    // Fotos y guías de los reportes de combustible (WorkFleet). Antes no había
+    // regla para esta ruta: la subida fallaba y la foto se guardaba en base64.
+    match /reportes/{empresaId}/{resto=**} {
+      allow read:   if miembro(empresaId);
+      allow write:  if miembro(empresaId)
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*|application/pdf');
+      allow delete: if personal(empresaId);
+    }
+
+    // Pasajes: la ruta no lleva empresa (pasajes/{solicitud}/…); se mantiene
+    // para usuarios autenticados hasta moverla bajo empresas/{id}.
+    match /pasajes/{resto=**} {
+      allow read, write: if autenticado() && (request.resource == null || request.resource.size < 15 * 1024 * 1024);
     }
   }
 }

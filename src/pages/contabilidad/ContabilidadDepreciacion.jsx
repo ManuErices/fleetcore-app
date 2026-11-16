@@ -24,41 +24,10 @@ import {
 import { clasificarActivos, depreciacionDelMes, DEPRECIAR_LEASING } from "../../lib/contabilidad/depreciacion";
 
 // ─── Vida útil tributaria ─────────────────────────────────────────────────────
-// Tabla del SII, en años. El lookup se hace normalizado porque el campo `tipo`
-// de /machines viene en mayúsculas y con nombres operativos ("EXCAVADORA",
-// "CAMIÓN COMBUSTIBLE"), no con las claves de esta tabla. Antes se consultaba
-// directo y caía siempre al default de 5 años.
-export const VIDA_UTIL_TRIB = {
-  maquinaria:  10,
-  vehiculo:     7,
-  herramienta:  3,
-  otro:         5,
-};
-
-const norm = (s) => String(s ?? "")
-  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-
-/** Resuelve la familia tributaria de un activo a partir de su tipo o su nombre. */
-export function familiaTributaria(activo) {
-  const t = norm(activo?.tipo);
-  const n = norm(activo?.nombre);
-  if (VIDA_UTIL_TRIB[t]) return t;
-
-  const texto = `${t} ${n}`;
-  const VEHICULO = ["camioneta", "camion", "furgon", "vehiculo", "bus", "minibus",
-    "suv", "jeep", "pickup", "van", "hilux", "aljibe"];
-  const HERRAMIENTA = ["herramienta", "martillo", "compactador", "generador",
-    "soldadora", "placa", "vibro"];
-  const MAQUINARIA = ["excavadora", "bulldozer", "cargador", "motoniveladora",
-    "retroexcavadora", "grua", "maquinaria", "rodillo", "tolva"];
-
-  if (MAQUINARIA.some(k => texto.includes(k)))   return "maquinaria";
-  if (VEHICULO.some(k => texto.includes(k)))     return "vehiculo";
-  if (HERRAMIENTA.some(k => texto.includes(k)))  return "herramienta";
-  return "otro";
-}
-
-export const vidaUtilTributaria = (a) => VIDA_UTIL_TRIB[familiaTributaria(a)];
+// Tabla del SII por familia: vive en lib/contabilidad/vidaUtil.js, compartida
+// con Finanzas → Activos para que las dos pantallas deprecien igual.
+import { VIDA_UTIL_TRIB, familiaTributaria, vidaUtilTributaria } from "../../lib/contabilidad/vidaUtil";
+export { VIDA_UTIL_TRIB, familiaTributaria, vidaUtilTributaria };
 
 // ─── Cálculo ──────────────────────────────────────────────────────────────────
 
@@ -91,7 +60,8 @@ function useActivos() {
         const snap = await getDocs(collection(db, "empresas", empresaId, "machines"));
         if (!vivo) return;
         // Solo bienes de la empresa: se excluyen arrendadas, leasing (ver
-        // DEPRECIAR_LEASING) e inactivas. Antes entraba toda máquina activa.
+        // DEPRECIAR_LEASING) e inactivas sin fecha de baja. Las dadas de baja
+        // entran y se deprecian hasta el mes de la baja.
         const { depreciables, excluidas: exc } = clasificarActivos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setExcluidas(exc);
         setActivos(depreciables.map(m => ({
@@ -102,6 +72,8 @@ function useActivos() {
           valorResidual:  m.valorResidual  || "",
           fechaCompra:    m.fechaCompra    || "",
           vidaUtilAnios:  m.vidaUtilAnios  || "",
+          // Dada de baja: se deprecia hasta ese mes (depreciacionEntre)
+          fechaBaja:      m.fechaBaja      || "",
         })));
       } catch (e) { console.error("useActivos:", e); }
       if (vivo) setCargando(false);
@@ -275,7 +247,7 @@ export default function ContabilidadDepreciacion() {
                   </td>
                   <td className="px-2 py-2 text-[14px]">
                     {d.monto > 0
-                      ? <span className="text-cuaderno-grafito">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}</span>
+                      ? <span className="text-cuaderno-grafito">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}{d.fechaBaja ? ` · baja ${d.fechaBaja}` : ""}</span>
                       : <Resaltado color="durazno">{d.motivo}</Resaltado>}
                   </td>
                 </tr>
