@@ -54,7 +54,10 @@ Roles live in `users/{uid}.role`. Only two matter for access control gates:
 - **Storage** (`storage.rules`): every `empresas/{id}/…` path checks membership via `firestore.get(users/{uid})`; labor files (contratos, finiquitos, anexos, documentos) only RRHH roles, plus the portal worker for his own folder. Fuel photos `reportes/{empresaId}/…`.
 - **Cloud Functions**: HTTP functions acting for a user verify the Firebase idToken (`uidVerificado(req)`) and overwrite `callerUid`/`userId` from it. The client adds `Authorization: Bearer` to every call to the functions automatically (fetch wrapper in `src/lib/firebase.js`).
 - **QR passwords** live only in `empresas/{id}/credenciales_qr/{trab_<id>|user_<uid>}` (`src/lib/credencialesQR.js`, office only); old plain-text `password` fields are moved there when an admin opens Admin → Operadores/Usuarios.
-- PINs (`pins`, `usuarios`) carry the owner's `uid`; only he can change them. Logout terminates Firestore and clears the offline cache.
+- PINs: the hash lives only in `pins/{usuario}` and is NOT readable from the app; verification, existence check and Documentos login go through the Cloud Function `verificarPinFirma` (lockout 15 min after 5 failures). `usuarios` docs can't carry `pinHash` (superadmin runs `migrarPinsUsuarios` once). Logout terminates Firestore and clears the offline cache.
+- Linking by email (operator via `trabajadorId`, admin via `adminEmail`) requires `email_verified`; EmpresaSetup offers to send the verification email.
+- Finiquito: besides the client, `onFiniquitoGuardado` (Functions, Admin SDK) marks linked users `finiquitado`, revokes their sessions and deletes the QR credential.
+- Assistant quota: `api/agente/chat.js` increments `agente_uso/{uid}_{AAAA-MM-DD}` with the user's own token; rules only allow +1 up to 300/day (429 after that).
 - Rule tests: `tests/reglas/test.mjs` (Firestore + Storage emulator).
 
 ### Firestore data model
