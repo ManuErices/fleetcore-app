@@ -16,7 +16,8 @@
  */
 import { collection, doc, getDocs, writeBatch } from "firebase/firestore";
 import { db, auth } from "./firebase";
-import { normalizarRut, formatearRut, validarRut } from "./proveedores";
+import { formatearRut } from "./proveedores";
+import { rutLlave } from "./rut.js";
 
 /** Colecciones que nombran a un tercero, y dónde guardan su RUT y nombre. */
 export const FUENTES_TERCEROS = [
@@ -29,11 +30,8 @@ export const FUENTES_TERCEROS = [
 
 const colProv = (empresaId) => collection(db, "empresas", empresaId, "proveedores");
 
-/** RUT usable como llave: con dígito verificador válido. */
-export function rutLlave(rut) {
-  const n = normalizarRut(rut);
-  return n.length >= 7 && validarRut(n) ? n : "";
-}
+/** RUT usable como llave: con dígito verificador válido (vive en rut.js, puro). */
+export { rutLlave };
 
 /** Mapa rutNormalizado → id de ficha, de las fichas existentes. */
 export async function mapaFichas(empresaId) {

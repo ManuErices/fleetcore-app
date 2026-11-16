@@ -611,9 +611,18 @@ service cloud.firestore {
       }
 
       // ── MPF RENTAL: clientes y contratos de arriendo ──
+      // rentalClients = maestro único de clientes (src/lib/clientes.js).
+      // Rental lo administra (canManageMaquinaria). Contabilidad (RCV de
+      // ventas), Finanzas y Oficina Técnica (mandante de la obra) solo pueden
+      // CREAR fichas nuevas con id estable rut_<rutNormalizado> (asegurarClientes);
+      // no modifican ni borran las existentes. areaDe = una lectura de la ficha.
       match /rentalClients/{docId} {
         allow read:  if isAuth() && belongsToEmpresa(empresaId);
         allow write: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
+        allow create: if request.resource.data.get('rutNormalizado', '') is string
+                      && request.resource.data.get('rutNormalizado', '') != ''
+                      && docId == 'rut_' + request.resource.data.rutNormalizado
+                      && areaDe(empresaId, ['contabilidad', 'finanzas', 'fleetcore'], 'contabilidad|finanzas|fleetcore');
       }
 
       match /rentalContracts/{docId} {

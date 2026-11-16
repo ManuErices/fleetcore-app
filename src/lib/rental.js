@@ -12,7 +12,9 @@ import {
   writeBatch,
   runTransaction,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
+import { clientePorRut, rutCliente } from "./clientesBase.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 import { hoyISO, desdeISO, isoLocal } from "./fechas";
@@ -402,16 +404,22 @@ export async function upsertRentalClient(empresaId, client) {
   if (rutLimpio && !validaRut(rutLimpio)) throw new Error("El RUT ingresado no es válido");
 
   // Un RUT no se repite dentro de la empresa: evita clientes duplicados que
-  // después rompen la consolidación de deuda.
+  // después rompen la consolidación de deuda. rentalClients es el maestro
+  // único de clientes (src/lib/clientes.js): la misma regla de RUT que usan
+  // obras, Contabilidad y Finanzas.
+  const llave = rutCliente(rutLimpio);
+  let existentes = null;
   if (rutLimpio) {
-    const existentes = await listRentalClients(empresaId, { incluirInactivos: true });
-    const choque = existentes.find((c) => limpiarRut(c.rut) === rutLimpio && c.id !== client.id);
+    existentes = await listRentalClients(empresaId, { incluirInactivos: true });
+    const otros = existentes.filter((c) => c.id !== client.id);
+    const choque = clientePorRut(otros, rutLimpio) || otros.find((c) => limpiarRut(c.rut) === rutLimpio);
     if (choque) throw new Error(`El RUT ya está registrado en el cliente "${choque.nombre}"`);
   }
 
   const data = {
     nombre,
     rut: rutLimpio ? formatRut(rutLimpio) : "",
+    rutNormalizado: llave,
     giro: (client.giro || "").trim(),
     // Datos que se extraen del certificado de estatutos
     representanteNombre: (client.representanteNombre || "").trim(),
@@ -438,6 +446,12 @@ export async function upsertRentalClient(empresaId, client) {
   }
   data.archivos = [];
   data.createdAt = serverTimestamp();
+  // Con RUT, id estable `rut_<rut>` (igual que asegurarClientes): dos altas
+  // simultáneas del mismo RUT caen en la misma ficha.
+  if (llave && !(existentes || []).some((c) => c.id === `rut_${llave}`)) {
+    await setDoc(EMPRESA_DOC(empresaId, "rentalClients", `rut_${llave}`), data);
+    return `rut_${llave}`;
+  }
   const ref = await addDoc(EMPRESA_COL(empresaId, "rentalClients"), data);
   return ref.id;
 }
@@ -634,7 +648,7 @@ async function resolverClienteDeCotizacion(empresaId, quote) {
   const rutLimpio = limpiarRut(manual.rut);
   if (rutLimpio) {
     const existentes = await listRentalClients(empresaId, { incluirInactivos: true });
-    const yaEsta = existentes.find((c) => limpiarRut(c.rut) === rutLimpio);
+    const yaEsta = clientePorRut(existentes, rutLimpio) || existentes.find((c) => limpiarRut(c.rut) === rutLimpio);
     if (yaEsta) return { clienteId: yaEsta.id, clienteNombre: yaEsta.nombre, creado: false };
   }
 
