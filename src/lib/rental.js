@@ -16,6 +16,7 @@ import {
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 import { hoyISO, desdeISO, isoLocal } from "./fechas";
+import { leasingDeMaquina } from "./finanzas/costosFijos.js";
 
 // ============================================================
 // MPF RENTAL — CAPA DE DATOS ADMINISTRATIVA
@@ -1632,7 +1633,11 @@ export function computeRentabilidad(machines, contracts, payments, events, opts 
       nombre: m.name || `${m.marca || ""} ${m.modelo || ""}`.trim() || m.code || m.id,
       code: m.code || "",
       ingreso: 0,
-      leasing: Number(m.leasingMensual || 0) * mesesLeasing,
+      // Leasing: el de Finanzas → Costos vinculado a la máquina (UF a pesos,
+      // sin los terminados) si viene `opts.leasingPorMaquina`; si la máquina
+      // no tiene, el campo manual leasingMensual de la ficha.
+      leasing: leasingDeMaquina(m, opts.leasingPorMaquina).monto * mesesLeasing,
+      leasingFuente: leasingDeMaquina(m, opts.leasingPorMaquina).fuente,
       mantencion: 0,
       repuestos: 0,
     };

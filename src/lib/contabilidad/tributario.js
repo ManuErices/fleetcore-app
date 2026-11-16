@@ -628,3 +628,120 @@ export function cambiosDocFlujo(antes = {}, despues = {}) {
   }
   return out;
 }
+
+// ─── Documento del Flujo Mensual y su cálculo ─────────────────────────────────
+// Lo usan la planilla (ContabilidadFlujoMensual) y el agente (resumen_tributario),
+// para que los dos den la misma base, impuesto y PPM. Antes el agente usaba el
+// signo guardado en cada fila (la planilla lo fuerza desde FILAS_BASE) y
+// calculaba el PPM sobre todas las filas +1, no solo Ingresos.
+
+/** Filas fijas por defecto (mismo orden que el Excel original). */
+export const FILAS_BASE = [
+  { id: "ingresos",       label: "Ingresos",       signo: 1  },
+  { id: "compras",        label: "Compras",        signo: -1 },
+  { id: "remuneraciones", label: "Remuneraciones", signo: -1 },
+  { id: "arriendos",      label: "Arriendos",      signo: -1 },
+  { id: "honorarios",     label: "Honorarios",     signo: -1 },
+  { id: "finiquitos",     label: "Finiquitos",     signo: -1 },
+  { id: "rendiciones",    label: "Rendiciones",    signo: -1 },
+  { id: "gastos_financieros", label: "Gastos financieros", signo: -1 },
+  { id: "leasing",        label: "Leasing",        signo: -1 },
+  { id: "patentes",       label: "Patentes y contribuciones", signo: -1 },
+  { id: "depreciacion",   label: "Depreciación (14 A)", signo: -1 },
+  // Signo +: el valor se escribe con su signo (abono positivo, cargo negativo)
+  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: 1 },
+];
+
+const vacio12 = () => Array(12).fill(0);
+const numF = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+const sumaF = arr => arr.reduce((s, v) => s + numF(v), 0);
+
+export function docFlujoVacio(anio) {
+  return {
+    anio,
+    filas: FILAS_BASE.map(f => ({ ...f, fija: true, valores: vacio12() })),
+    impuesto: vacio12(),
+    impuestoAuto: true,
+    ppm: vacio12(),
+    multas: vacio12(),
+    perdidaArrastre: 0,
+    rcv: {},
+  };
+}
+
+/** Normaliza el documento de Firestore (campos faltantes, signos de filas fijas, filas fijas nuevas). */
+export function normalizarFlujoMensual(raw, anio) {
+  if (!raw) return docFlujoVacio(anio);
+  const filasRaw = Array.isArray(raw.filas) ? raw.filas : [];
+  const filas = filasRaw.map(f => ({
+    id: f.id || ("custom_" + Math.random().toString(36).slice(2)),
+    label: f.label || "Sin nombre",
+    // Las filas fijas toman el signo de FILAS_BASE (así un cambio de criterio,
+    // como el de Corrección monetaria, llega también a los años ya guardados)
+    signo: (f.fija && FILAS_BASE.find(b => b.id === f.id)?.signo) || (f.signo === -1 ? -1 : 1),
+    fija: !!f.fija,
+    valores: Array.isArray(f.valores) && f.valores.length === 12 ? f.valores.map(numF) : vacio12(),
+  }));
+  const fix12 = arr => (Array.isArray(arr) && arr.length === 12 ? arr.map(numF) : vacio12());
+  // Filas fijas nuevas (gastos financieros, leasing, patentes): se agregan a
+  // los años ya guardados, justo después de la última fila fija existente.
+  let filasFinal = filas.length ? filas : docFlujoVacio(anio).filas;
+  const faltantes = FILAS_BASE.filter(b => !filasFinal.some(f => f.id === b.id));
+  if (faltantes.length) {
+    const ultimaFija = filasFinal.reduce((idx, f, i) => (f.fija ? i : idx), -1);
+    filasFinal = [
+      ...filasFinal.slice(0, ultimaFija + 1),
+      ...faltantes.map(b => ({ ...b, fija: true, valores: vacio12() })),
+      ...filasFinal.slice(ultimaFija + 1),
+    ];
+  }
+  const impuesto = fix12(raw.impuesto);
+  return {
+    anio,
+    filas: filasFinal,
+    impuesto,
+    // Años guardados antes del cálculo automático: si ya tenían Impto a mano,
+    // se respeta (modo manual) hasta que el usuario lo cambie.
+    impuestoAuto: typeof raw.impuestoAuto === "boolean" ? raw.impuestoAuto : !impuesto.some(v => v !== 0),
+    ppm: fix12(raw.ppm),
+    multas: fix12(raw.multas),
+    perdidaArrastre: Math.abs(numF(raw.perdidaArrastre)),
+    rcv: raw.rcv && typeof raw.rcv === "object" ? raw.rcv : {},
+  };
+}
+
+/**
+ * Cálculo del Flujo Mensual sobre un documento ya normalizado.
+ *   Base imponible = Σ signo × valor; Impto = sobre la base acumulada menos la
+ *   pérdida de arrastre (o el manual); Utilidad líquida = base − impto − multas;
+ *   PPM sugerido = solo la fila Ingresos (ingresos brutos, art. 84 LIR) × tasa.
+ */
+export function calcularFlujoMensual(data, config = {}) {
+  const anio = Number(data?.anio) || new Date().getFullYear();
+  const tasa = tasaPrimeraCategoria(config?.regimen, anio);
+  const tasaPPM = tasaPPMSugerida(config, anio);
+  const filas = data?.filas || [];
+  const baseImponible = vacio12();
+  filas.forEach(f => (f.valores || []).forEach((v, i) => { if (i < 12) baseImponible[i] += f.signo * numF(v); }));
+  const impuesto = data?.impuestoAuto !== false
+    ? impuestoMensualAcumulado(baseImponible, tasa, data?.perdidaArrastre)
+    : (data.impuesto || vacio12()).map(numF);
+  const multas = (data?.multas || vacio12()).map(numF);
+  const utilidad = baseImponible.map((v, i) => v - impuesto[i] - multas[i]);
+  const ingresosMes = vacio12();
+  filas.filter(f => f.id === "ingresos").forEach(f => (f.valores || []).forEach((v, i) => { if (i < 12) ingresosMes[i] += numF(v); }));
+  const ppmSugerido = ingresosMes.map(v => Math.round(Math.max(0, v) * tasaPPM));
+  return {
+    anio, tasa, tasaPPM,
+    baseImponible, impuesto, utilidad, ingresosMes, ppmSugerido,
+    totalBaseImponible: sumaF(baseImponible),
+    totalUtilidad: sumaF(utilidad),
+    rentaTrasPerdida: sumaF(baseImponible) - numF(data?.perdidaArrastre),
+    totalIngresos: sumaF(filas.filter(f => f.signo === 1).flatMap(f => f.valores || [])),
+    totalGastos: sumaF(filas.filter(f => f.signo === -1).flatMap(f => f.valores || [])),
+    totalImpuesto: sumaF(impuesto),
+    totalPpmSugerido: sumaF(ppmSugerido),
+    totalPpm: sumaF(data?.ppm || []),
+    totalMultas: sumaF(multas),
+  };
+}

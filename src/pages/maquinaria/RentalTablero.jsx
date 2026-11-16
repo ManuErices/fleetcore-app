@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { listMachines, listRentalContracts, buildIngresoPorMaquina } from "../../lib/db";
+import { cargarLeasingPorMaquina } from "../../lib/finanzas/leasingMaquinas";
+import { leasingDeMaquina } from "../../lib/finanzas/costosFijos.js";
 
 const CLP = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
 
@@ -9,6 +11,9 @@ export default function RentalTablero() {
   const [machines, setMachines] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Leasing vinculado en Finanzas → Costos (UF a pesos); respaldo: leasingMensual de la ficha
+  const [leasingPorMaquina, setLeasingPorMaquina] = useState(() => new Map());
+  useEffect(() => { if (empresaId) cargarLeasingPorMaquina(empresaId).then(setLeasingPorMaquina); }, [empresaId]);
 
   useEffect(() => {
     if (!empresaId) return;
@@ -30,19 +35,19 @@ export default function RentalTablero() {
     return machines
       .filter((m) => m.disponibilidad !== "dada_de_baja" && m.status !== "dada_de_baja")
       .map((m) => {
-        const leasing = Number(m.leasingMensual || 0);
+        const { monto: leasing, fuente: leasingFuente } = leasingDeMaquina(m, leasingPorMaquina);
         const info = ingresoPorMaquina[m.id];
         const ingreso = info ? info.ingresoMensual : 0;
         const arrendada = !!info;
         const margen = ingreso - leasing;
         return {
-          m, leasing, ingreso, margen, arrendada,
+          m, leasing, leasingFuente, ingreso, margen, arrendada,
           clienteNombre: info?.clienteNombre || "",
           nombre: m.name || `${m.marca || ""} ${m.modelo || ""}`.trim() || m.code || m.id,
         };
       })
       .sort((a, b) => a.margen - b.margen); // peores primero (los que queman leasing arriba)
-  }, [machines, ingresoPorMaquina]);
+  }, [machines, ingresoPorMaquina, leasingPorMaquina]);
 
   const totales = useMemo(() => {
     const leasingTotal = filas.reduce((s, f) => s + f.leasing, 0);
@@ -115,6 +120,7 @@ export default function RentalTablero() {
       <p className="text-xs text-slate-400">
         El ingreso mensual estimado normaliza tarifas diarias (×30) y por hora (×180 h/mes) a un valor mensual comparable con el leasing.
         Las máquinas sin leasing ni contrato aparecen con margen "—".
+        El leasing sale de Finanzas → Costos (leasing vinculado a la máquina, en pesos con la UF del día, sin los terminados); si la máquina no tiene uno vinculado, se usa el leasing mensual anotado en su ficha.
       </p>
     </div>
   );

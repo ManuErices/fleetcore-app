@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import {
   aplicarAporteRCV, fijarMesDesdeFuente, mesesFijados, mesesOmitidosPorFuente, aportesRCV, cambiosDocFlujo,
+  normalizarFlujoMensual, calcularFlujoMensual,
 } from "./tributario.js";
 
 const doc0 = () => ({
@@ -83,6 +84,34 @@ assert.equal(val(k, "rendiciones", 0), 200);
   ]);
   assert.equal(c["rcv.periodos.compras.2026-01"], undefined);
   assert.ok(!("filas" in c));
+}
+
+// 9) Cálculo compartido planilla/agente: el signo de una fila fija viene de
+//    FILAS_BASE (no del guardado) y el PPM solo de la fila Ingresos.
+{
+  const v = (x) => { const a = Array(12).fill(0); a[0] = x; return a; };
+  const raw = {
+    filas: [
+      { id: "ingresos", label: "Ingresos", signo: 1, fija: true, valores: v(1000) },
+      { id: "compras", label: "Compras", signo: 1, fija: true, valores: v(400) },          // signo guardado mal
+      { id: "correccion_monetaria", label: "CM", signo: -1, fija: true, valores: v(50) },  // fija con signo +
+      { id: "custom_1", label: "Otro ingreso", signo: 1, fija: false, valores: v(100) },
+    ],
+    multas: v(10),
+  };
+  const d = normalizarFlujoMensual(raw, 2026);
+  assert.equal(d.impuestoAuto, true);
+  const c = calcularFlujoMensual(d, { regimen: "14D3", ingresosSobre50milUF: false });
+  assert.equal(c.baseImponible[0], 1000 - 400 + 50 + 100);
+  assert.equal(c.tasa, 0.125);
+  assert.equal(c.impuesto[0], Math.round(750 * 0.125));
+  assert.equal(c.utilidad[0], 750 - Math.round(750 * 0.125) - 10);
+  assert.equal(c.ppmSugerido[0], Math.round(1000 * 0.00125));   // solo Ingresos
+  assert.equal(c.totalBaseImponible, 750);
+  // Impuesto manual guardado se respeta
+  const m = normalizarFlujoMensual({ ...raw, impuesto: v(99) }, 2026);
+  assert.equal(m.impuestoAuto, false);
+  assert.equal(calcularFlujoMensual(m, {}).impuesto[0], 99);
 }
 
 console.log("tributario.test.js: ok");

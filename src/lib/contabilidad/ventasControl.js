@@ -33,7 +33,14 @@ export function netoEEPPRental(p) {
 
 /** Monto facturable de un registro de ingresos de Oficina Técnica. */
 // Misma regla que src/lib/costosObra.js (venta bruta, sin retención)
-export { ventaOT as ventaEstadoPagoOT } from "../costosObra";
+// Misma regla que ventaOT en src/lib/costosObra.js (venta bruta, sin retención).
+// Se escribe aquí porque costosObra.js carga Firestore (subcontratosEP) y este
+// archivo debe seguir siendo puro (centralizacion.test.js lo prueba con node).
+// Antes era `export { ventaOT as ventaEstadoPagoOT } from …`, que no crea el
+// nombre local: controlVentas fallaba con ReferenceError.
+export function ventaEstadoPagoOT(i) {
+  return num(i?.estadosPago) + num(i?.reajuste) + num(i?.reajustePolinomico) + num(i?.multas);
+}
 
 /**
  * @param rentalPayments  docs de rentalPayments

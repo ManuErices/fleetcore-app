@@ -209,7 +209,7 @@ export const HERRAMIENTAS = [
   },
   {
     name: 'resumen_tributario',
-    description: 'Resumen del Flujo Mensual de Contabilidad para un año: cada fila (ingresos, compras, remuneraciones, honorarios, finiquitos, rendiciones, leasing, depreciación, etc.) por mes y total, base imponible por mes y del año, impuesto de primera categoría estimado (base acumulada menos pérdida de años anteriores, con la tasa del régimen), multas, PPM sugerido y pagado, y de qué importación o módulo vino cada fila. Úsala para preguntas de impuesto a la renta, utilidad tributaria o gastos del año.',
+    description: 'Resumen del Flujo Mensual de Contabilidad para un año: cada fila (ingresos, compras, remuneraciones, honorarios, finiquitos, rendiciones, leasing, depreciación, etc.) por mes y total, base imponible por mes y del año, impuesto de primera categoría estimado (base acumulada menos pérdida de años anteriores, con la tasa del régimen), multas, utilidad líquida, PPM sugerido (solo sobre la fila Ingresos, por mes) y pagado, y de qué importación o módulo vino cada fila. Usa el mismo cálculo que la planilla. Úsala para preguntas de impuesto a la renta, utilidad tributaria o gastos del año.',
     input_schema: {
       type: 'object',
       properties: { anio: { type: 'integer', description: 'Año comercial, por ejemplo 2026.' } },
@@ -366,7 +366,7 @@ export const HERRAMIENTAS = [
   },
   {
     name: 'deuda_proveedores',
-    description: 'Deuda pendiente con proveedores, factoring y financieras, agrupada por acreedor: saldo, monto vencido, días de mora máximos y próximo vencimiento.',
+    description: 'Deuda pendiente con proveedores, factoring y financieras, agrupada por acreedor igual que Finanzas → Deuda: saldo neto (los anticipos a favor rebajan), monto vencido, días de mora máximos y próximo vencimiento.',
     input_schema: {
       type: 'object',
       properties: { solo_vencida: { type: 'boolean' } },

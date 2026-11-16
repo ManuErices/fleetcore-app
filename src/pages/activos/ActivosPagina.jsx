@@ -8,7 +8,8 @@ import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { guardarMaquina, desdeFichaActivo, MaquinaDuplicada, REFERENCIAS_MAQUINA, reemplazarIds } from "../../lib/maquinas";
 import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
-import { hoyISO, partesISO } from "../../lib/fechas";
+import { hoyISO, partesISO, mesActualISO } from "../../lib/fechas";
+import { resumenDepreciacion } from "../../lib/contabilidad/vidaUtil";
 
 /**
  * ¿Qué registros apuntan a esta máquina? Recorre las colecciones de
@@ -54,7 +55,7 @@ const EMPTY = {
   ownership:"OWNED", propietario:"", projectId:"",
   valorCompra:"", valorLibros:"", fechaCompra:"", vidaUtilAnios:"", moneda:"CLP",
   depreciacionAnual:"", vencPermisoCirculacion:"", vencSeguro:"",
-  vencRevisionTecnica:"", vencSoapCivil:"", notasDoc:"", notas:"", activo:true, machineId:null,
+  vencRevisionTecnica:"", vencSoapCivil:"", notasDoc:"", notas:"", activo:true, machineId:null, valorResidual:"",
   archivosDoc: { vencPermisoCirculacion:"", vencSeguro:"", vencRevisionTecnica:"", vencSoapCivil:"" },
 };
 
@@ -80,18 +81,26 @@ function estadoDoc(f) {
   const d=diasR(f); if(d===null) return null;
   if(d<0) return "vencido"; if(d<=30) return "urgente"; if(d<=90) return "pronto"; return "ok";
 }
-function depAnual(a) {
-  if(a.depreciacionAnual) return parseFloat(a.depreciacionAnual)||0;
-  const v=parseFloat(a.valorCompra)||0, y=parseFloat(a.vidaUtilAnios)||0;
-  return (!v||!y)?0:v/y;
+// Depreciación con el MISMO cálculo que Contabilidad → Depreciación
+// (lib/contabilidad/depreciacion.js vía vidaUtil.js): lineal, con valor
+// residual, desde el mes siguiente a la compra hasta completar la vida útil
+// (la propia o la del SII). Leasing y arrendadas no se deprecian. Antes aquí
+// era depreciacionAnual o compra ÷ vida, sin residual, incluía leasing y
+// arrendadas y no se detenía nunca.
+function depInfo(a) {
+  // Contabilidad clasifica la familia con el tipo de la ficha (tipo o type)
+  return resumenDepreciacion({ ...a, tipo: a.tipoFicha || a.tipo, active: a.activo }, mesActualISO());
 }
+const depAnual = (a) => depInfo(a).anual;
+// Valor libro: compra − depreciación acumulada. Los que no se deprecian
+// (leasing, arrendadas) muestran el valor libro anotado o el de compra.
 function valorLibros(a) {
-  if(a.valorLibros) return parseFloat(a.valorLibros)||0;
-  const v=parseFloat(a.valorCompra)||0;
-  if(!v||!a.fechaCompra) return v;
-  const yrs=(new Date()-new Date(a.fechaCompra))/(365.25*86400000);
-  return Math.max(0,v-depAnual(a)*yrs);
+  const d = depInfo(a);
+  if (d.depreciable) return d.valorLibro;
+  return parseFloat(a.valorLibros) || parseFloat(a.valorCompra) || 0;
 }
+// La ficha que se guarda no lleva los campos auxiliares de esta pantalla.
+const sinAuxiliares = ({ tipoFicha: _t, ...resto }) => resto;
 function tieneAlerta(a) {
   return DOCS_DEF.some(({key})=>{ const e=estadoDoc(a[key]); return e==="vencido"||e==="urgente"; });
 }
@@ -237,7 +246,7 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
     if(!form.nombre) return;
     setSaving(true); await onSave(form); setSaving(false); onClose();
   };
-  const depEst=depAnual(form); const vlEst=valorLibros(form);
+  const infoEst=depInfo(form); const depEst=infoEst.anual; const vlEst=valorLibros(form);
   const PASOS = [{ id: 1, label: "1. Identificación" }, { id: 2, label: "2. Valor" }, { id: 3, label: "3. Documentos" }];
   return (
     <ModalCuaderno
@@ -313,17 +322,24 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
           <Campo etiqueta="Vida útil, en años" type="number" min="1" max="50" value={form.vidaUtilAnios} onChange={e => set("vidaUtilAnios", e.target.value)} placeholder="10" />
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <Campo etiqueta="Depreciación anual" type="number" value={form.depreciacionAnual} onChange={e => set("depreciacionAnual", e.target.value)}
-            placeholder="Se calcula sola" ayuda="Opcional" />
-          <Campo etiqueta="Valor libro actual" type="number" value={form.valorLibros} onChange={e => set("valorLibros", e.target.value)}
-            placeholder="Se calcula solo" ayuda="Opcional" />
+          <Campo etiqueta="Valor residual" type="number" value={form.valorResidual} onChange={e => set("valorResidual", e.target.value)}
+            placeholder="0" ayuda="Lo que valdrá al final de su vida útil" />
+          {!infoEst.depreciable && (
+            <Campo etiqueta="Valor libro actual" type="number" value={form.valorLibros} onChange={e => set("valorLibros", e.target.value)}
+              placeholder="Valor de compra" ayuda="Opcional, no se deprecia" />
+          )}
         </div>
-        {form.valorCompra && form.vidaUtilAnios && (
+        {form.valorCompra && (
           <div className="border border-cuaderno-azul rounded-md px-4 py-2">
-            <Titulo as="h3" tamano="sm">Depreciación estimada</Titulo>
-            <LineaGuia etiqueta="Al año"><span>{fmt(depEst, form.moneda)}</span></LineaGuia>
-            <LineaGuia etiqueta="Al mes"><span>{fmt(depEst / 12, form.moneda)}</span></LineaGuia>
-            <LineaGuia etiqueta="Valor libro hoy"><span className="border-b-[3px] border-double border-current">{fmt(vlEst, form.moneda)}</span></LineaGuia>
+            <Titulo as="h3" tamano="sm">Depreciación, como en Contabilidad</Titulo>
+            {infoEst.depreciable ? (<>
+              <LineaGuia etiqueta={`Este año (vida útil ${infoEst.vida} años${infoEst.vidaSII ? ", tabla SII" : ""})`}><span>{fmt(depEst, form.moneda)}</span></LineaGuia>
+              <LineaGuia etiqueta="Este mes"><span>{fmt(infoEst.mensual, form.moneda)}</span></LineaGuia>
+              <LineaGuia etiqueta="Valor libro hoy"><span className="border-b-[3px] border-double border-current">{fmt(vlEst, form.moneda)}</span></LineaGuia>
+              {infoEst.estado && <p className="m-0 text-[14px] text-cuaderno-grafito">{infoEst.estado}.</p>}
+            </>) : (
+              <p className="m-0 py-1 text-[15px] text-cuaderno-grafito">{infoEst.motivoTexto}</p>
+            )}
           </div>
         )}
         <Campo as="textarea" rows={2} etiqueta="Notas" value={form.notas} onChange={e => set("notas", e.target.value)} placeholder="Financiamiento, garantías" />
@@ -367,7 +383,7 @@ function ModalActivo({isOpen,onClose,onSave,editando,projects}) {
 
 function PanelDetalle({ activo, onClose, onEdit, projects, empresaId, onDocUploaded, onFechaUpdated }) {
   if (!activo) return null;
-  const vl = valorLibros(activo); const dep = depAnual(activo);
+  const vl = valorLibros(activo); const info = depInfo(activo); const dep = info.anual;
   const proyecto = projects.find(p => p.id === activo.projectId);
   const subtitulo = [TIPO_MAP[activo.tipo]?.label, activo.code, [activo.marca, activo.modelo].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   return (
@@ -391,9 +407,16 @@ function PanelDetalle({ activo, onClose, onEdit, projects, empresaId, onDocUploa
           <Titulo as="h3" tamano="sm">Valor</Titulo>
           <LineaGuia etiqueta="Valor de compra"><span>{fmt(activo.valorCompra, activo.moneda)}</span></LineaGuia>
           <LineaGuia etiqueta="Valor libro"><span className="border-b-[3px] border-double border-current">{fmt(vl, activo.moneda)}</span></LineaGuia>
-          <LineaGuia etiqueta="Depreciación al año"><span>{dep > 0 ? fmt(dep, activo.moneda) : "—"}</span></LineaGuia>
-          <LineaGuia etiqueta="Depreciación al mes"><span>{dep > 0 ? fmt(dep / 12, activo.moneda) : "—"}</span></LineaGuia>
-          <LineaGuia etiqueta="Vida útil"><span>{activo.vidaUtilAnios ? `${activo.vidaUtilAnios} años` : "—"}</span></LineaGuia>
+          {info.depreciable ? (<>
+            <LineaGuia etiqueta="Depreciación este año"><span>{dep > 0 ? fmt(dep, activo.moneda) : "—"}</span></LineaGuia>
+            <LineaGuia etiqueta="Depreciación este mes"><span>{info.mensual > 0 ? fmt(info.mensual, activo.moneda) : "—"}</span></LineaGuia>
+            <LineaGuia etiqueta="Depreciación acumulada"><span>{info.acumulada > 0 ? fmt(info.acumulada, activo.moneda) : "—"}</span></LineaGuia>
+            <LineaGuia etiqueta="Vida útil"><span>{info.vida} años{info.vidaSII ? " (tabla SII)" : ""}</span></LineaGuia>
+            {info.estado && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">{info.estado}</p>}
+          </>) : (
+            <LineaGuia etiqueta="Depreciación"><span className="text-cuaderno-grafito">no se deprecia</span></LineaGuia>
+          )}
+          {!info.depreciable && <p className="m-0 text-right text-[13px] text-cuaderno-grafito">{info.motivoTexto}</p>}
           <LineaGuia etiqueta="Fecha de compra"><span>{activo.fechaCompra || "—"}</span></LineaGuia>
         </div>
       </div>
@@ -466,6 +489,7 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
       const todos=snapM.docs.map(d=>({
         id:d.id, machineId:d.id, _source:"machines",
         nombre:      d.data().name        || "",
+        tipoFicha:   d.data().tipo || d.data().type || "",
         tipo:        d.data().tipo || (() => {
           const type = (d.data().type || "").toLowerCase();
           const name = (d.data().name || "").toLowerCase();
@@ -497,6 +521,7 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
         // Campos financieros (ahora en /machines directamente)
         valorCompra:            d.data().valorCompra            || "",
         valorLibros:            d.data().valorLibros            || "",
+        valorResidual:          d.data().valorResidual          || "",
         fechaCompra:            d.data().fechaCompra            || "",
         vidaUtilAnios:          d.data().vidaUtilAnios          || "",
         depreciacionAnual:      d.data().depreciacionAnual      || "",
@@ -524,8 +549,8 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
   // `active` en vez de `activo` y sin duplicar patentes.
   const handleSave = async (form) => {
     try {
-      await guardarMaquina(empresaId, desdeFichaActivo(form), {
-        id: editando?.id, original: editando ? desdeFichaActivo(editando) : null, origen,
+      await guardarMaquina(empresaId, desdeFichaActivo(sinAuxiliares(form)), {
+        id: editando?.id, original: editando ? desdeFichaActivo(sinAuxiliares(editando)) : null, origen,
       });
     } catch (e) {
       alert(e instanceof MaquinaDuplicada ? e.message : "No se pudo guardar: " + e.message);
@@ -584,7 +609,7 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
     const a=confirmEliminar;
     if(!a) return;
     try {
-      await guardarMaquina(empresaId, desdeFichaActivo({ ...a, activo:false }), { id:a.id, original:desdeFichaActivo(a), origen });
+      await guardarMaquina(empresaId, desdeFichaActivo(sinAuxiliares({ ...a, activo:false })), { id:a.id, original:desdeFichaActivo(sinAuxiliares(a)), origen });
     } catch(e){ alert("No se pudo marcar inactivo: "+e.message); return; }
     cerrarEliminar();
     if(detalle?.id===a.id) setDetalle(null);
@@ -617,6 +642,13 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
   const sinConvertir=useMemo(()=>activosActivos.filter(a=>enPesos(a,1)===null).length,[activosActivos,indicadores]);
   const valorTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+(enPesos(a,valorLibros(a))||0),0),[activosActivos,indicadores]);
   const depTotal=useMemo(()=>activosActivos.reduce((s,a)=>s+(enPesos(a,depAnual(a))||0),0),[activosActivos,indicadores]);
+  const depMes=useMemo(()=>activosActivos.reduce((s,a)=>s+(enPesos(a,depInfo(a).mensual)||0),0),[activosActivos,indicadores]);
+  // Los que no entran a la depreciación, por motivo (como Contabilidad → Depreciación)
+  const noDepreciables=useMemo(()=>{
+    const c={};
+    activosActivos.forEach(a=>{ const m=depInfo(a).motivo; if(m) c[m]=(c[m]||0)+1; });
+    return c;
+  },[activosActivos]);
   const conAlertas=useMemo(()=>activosActivos.filter(tieneAlerta).length,[activosActivos]);
 
   // ── Solo presentación ─────────────────────────────────────────────────────
@@ -624,7 +656,7 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
     { col: "nombre", label: "Activo",              align: "text-left",  cls: "" },
     { col: "tipo",   label: "Tipo",                align: "text-left",  cls: "" },
     { col: "valor",  label: "Valor libro",         align: "text-right", cls: "" },
-    { col: "dep",    label: "Depreciación al año", align: "text-right", cls: "hidden md:table-cell" },
+    { col: "dep",    label: "Depreciación del año", align: "text-right", cls: "hidden md:table-cell" },
   ];
 
   if (loading) return (
@@ -665,8 +697,17 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
           </div>
           <div>
             <LineaGuia etiqueta="Valor libro total"><Cifra valor={valorTotal} escala="pesos" color="tinta" vacio="$0" raya="doble" /></LineaGuia>
-            <LineaGuia etiqueta="Depreciación al año"><Cifra valor={depTotal} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
-            <p className="m-0 -mt-1 text-right text-[13px] text-cuaderno-grafito"><Cifra valor={depTotal / 12} escala="pesos" color="heredar" vacio="$0" /> al mes</p>
+            <LineaGuia etiqueta="Depreciación de este año"><Cifra valor={depTotal} escala="pesos" color="tinta" vacio="$0" /></LineaGuia>
+            <p className="m-0 -mt-1 text-right text-[13px] text-cuaderno-grafito"><Cifra valor={depMes} escala="pesos" color="heredar" vacio="$0" /> este mes, igual que el asiento de Contabilidad → Depreciación</p>
+            {Object.keys(noDepreciables).length > 0 && (
+              <p className="m-0 text-right text-[13px] text-cuaderno-grafito">
+                No se deprecian: {[
+                  noDepreciables.leasing && `${noDepreciables.leasing} en leasing (la cuota ya es gasto)`,
+                  noDepreciables.arrendada && `${noDepreciables.arrendada} arrendada${noDepreciables.arrendada > 1 ? "s" : ""} a terceros (no son de la empresa)`,
+                  noDepreciables.otra && `${noDepreciables.otra} con propiedad no reconocida`,
+                ].filter(Boolean).join(", ")}.
+              </p>
+            )}
             {sinConvertir > 0 && (
               <Nota etiqueta="Ojo:">{sinConvertir} activo{sinConvertir > 1 ? "s" : ""} en UF o dólares quedan fuera de los totales: no hay valor del día para pasarlos a pesos.</Nota>
             )}
@@ -739,7 +780,8 @@ export default function ActivosPagina({ proyectoId: proyectoExterno, selectorPro
                           {vl > 0 ? (a.moneda && a.moneda !== "CLP" ? fmt(vl, a.moneda) : <Cifra valor={vl} escala="pesos" color="tinta" />) : <span className="text-cuaderno-grafito">—</span>}
                         </td>
                         <td className="px-2 py-2 text-right text-[15px] text-cuaderno-grafito whitespace-nowrap hidden md:table-cell">
-                          {dep > 0 ? (a.moneda && a.moneda !== "CLP" ? fmt(dep, a.moneda) : <Cifra valor={dep} escala="pesos" color="heredar" />) : "—"}
+                          {dep > 0 ? (a.moneda && a.moneda !== "CLP" ? fmt(dep, a.moneda) : <Cifra valor={dep} escala="pesos" color="heredar" />)
+                            : depInfo(a).depreciable ? "—" : <span title={depInfo(a).motivoTexto}>no se deprecia</span>}
                         </td>
                         <td className="px-2 py-2 text-[15px] hidden lg:table-cell whitespace-nowrap">
                           {alerta ? <Resaltado color="rosa">por vencer</Resaltado> : <span className="inline-flex items-center gap-1 text-cuaderno-verde"><VistoBueno tamano={12} titulo="" /> al día</span>}

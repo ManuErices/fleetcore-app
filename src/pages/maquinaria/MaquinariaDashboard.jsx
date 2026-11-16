@@ -7,6 +7,8 @@ import {
   listSpareParts, listMaintenancePlans, listMaintenanceEvents,
   listRentalContracts, buildIngresoPorMaquina,
 } from "../../lib/db";
+import { cargarLeasingPorMaquina } from "../../lib/finanzas/leasingMaquinas";
+import { leasingDeMaquina } from "../../lib/finanzas/costosFijos.js";
 
 const CLP = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
 
@@ -17,6 +19,9 @@ export default function MaquinariaDashboard() {
 
   const [raw, setRaw] = useState({ machines: [], workOrders: [], failures: [], spareParts: [], plans: [], events: [], contracts: [] });
   const [loading, setLoading] = useState(true);
+  // Leasing vinculado en Finanzas → Costos (UF a pesos); respaldo: leasingMensual de la ficha
+  const [leasingPorMaquina, setLeasingPorMaquina] = useState(() => new Map());
+  useEffect(() => { if (empresaId) cargarLeasingPorMaquina(empresaId).then(setLeasingPorMaquina); }, [empresaId]);
 
   useEffect(() => {
     if (!empresaId) return;
@@ -55,7 +60,7 @@ export default function MaquinariaDashboard() {
   // ── KPIs de Rental (financiero) ──
   const ingresoPorMaquina = buildIngresoPorMaquina(contracts);
   const ingresoMensual = machines.reduce((s, m) => s + (ingresoPorMaquina[m.id]?.ingresoMensual || 0), 0);
-  const leasingMensual = machines.reduce((s, m) => s + Number(m.leasingMensual || 0), 0);
+  const leasingMensual = machines.reduce((s, m) => s + leasingDeMaquina(m, leasingPorMaquina).monto, 0);
   const margenMensual = ingresoMensual - leasingMensual;
   const arrendadas = machines.filter((m) => ingresoPorMaquina[m.id]).length;
   const utilizacion = machines.length ? Math.round((arrendadas / machines.length) * 100) : 0;

@@ -5,6 +5,7 @@ import {
   listMachines, listRentalContracts, listRentalPayments,
   listMaintenanceEvents, computeRentabilidad,
 } from "../../lib/db";
+import { cargarLeasingPorMaquina } from "../../lib/finanzas/leasingMaquinas";
 
 const CLP = (n) => "$" + Number(Math.round(n) || 0).toLocaleString("es-CL");
 
@@ -19,6 +20,9 @@ export default function RentalRentabilidad() {
 
   const [raw, setRaw] = useState({ machines: [], contracts: [], payments: [], events: [] });
   const [loading, setLoading] = useState(true);
+  // Leasing vinculado en Finanzas → Costos (UF a pesos); respaldo: leasingMensual de la ficha
+  const [leasingPorMaquina, setLeasingPorMaquina] = useState(() => new Map());
+  useEffect(() => { if (empresaId) cargarLeasingPorMaquina(empresaId).then(setLeasingPorMaquina); }, [empresaId]);
 
   // Período: 'mes' (un mes), 'anio' (un año), 'total'
   const [modo, setModo] = useState("mes");
@@ -61,8 +65,8 @@ export default function RentalRentabilidad() {
     }) : raw.payments;
     const events = projectId ? raw.events.filter((e) => validIds.has(e.machineId)) : raw.events;
 
-    return computeRentabilidad(machines, contracts, payments, events, { desde, hasta });
-  }, [raw, projectId, desde, hasta]);
+    return computeRentabilidad(machines, contracts, payments, events, { desde, hasta, leasingPorMaquina });
+  }, [raw, projectId, desde, hasta, leasingPorMaquina]);
 
   const totales = useMemo(() => ({
     ingreso: filas.reduce((s, f) => s + f.ingreso, 0),
@@ -152,6 +156,7 @@ export default function RentalRentabilidad() {
         El ingreso cuenta todos los cobros emitidos del período (incluye pendientes) y se reparte entre las máquinas de cada contrato
         según su tarifa. "Mantención" es el costo total de las órdenes de trabajo cerradas (mano de obra + repuestos).
         {modo === "total" && " En modo total, el leasing se imputa como 1 mes de referencia."}
+        {" "}El leasing sale de Finanzas → Costos (leasing vinculado a la máquina, en pesos con la UF del día, sin los terminados); si la máquina no tiene uno vinculado, se usa el leasing mensual de su ficha.
       </p>
     </div>
   );
