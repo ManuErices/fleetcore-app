@@ -8,7 +8,7 @@ import { db, storage } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFinanzas, ProyectoSelector } from "./FinanzasContext";
 import { obtenerIndicadores, aPesos } from "../../lib/finanzas/monedas.js";
-import { costoTerminado, diasEntre } from "../../lib/finanzas/costosFijos.js";
+import { costoTerminado, diasEntre, montoMensual, CATEGORIAS_FINANCIAMIENTO } from "../../lib/finanzas/costosFijos.js";
 import { hoyISO, desdeISO } from "../../lib/fechas";
 import {
   Cifra, Titulo, Hoja, LineaGuia, Boton, Campo, Segmentado, Casilla, Nota, Resaltado, VistoBueno,
@@ -63,14 +63,7 @@ const EMPTY = {
 };
 
 // ─── Utilidades ───────────────────────────────────────────────────────────────
-function montoMensual(c) {
-  const m = parseFloat(c.monto) || 0;
-  if (c.frecuencia === "mensual")    return m;
-  if (c.frecuencia === "trimestral") return m / 3;
-  if (c.frecuencia === "semestral")  return m / 6;
-  if (c.frecuencia === "anual")      return m / 12;
-  return 0;
-}
+// montoMensual vive en lib/finanzas/costosFijos.js (lo usan también Reportes y Rental).
 function fmt(n, moneda = "CLP") {
   if (moneda === "UF")  return `UF ${n.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (moneda === "USD") return `US$${n.toLocaleString("es-CL", { minimumFractionDigits: 2 })}`;
@@ -324,7 +317,7 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
     if (!form.nombre || !form.monto || !form.fechaInicio) return;
     setSaving(true);
     const payload = { ...form, monto: parseFloat(form.monto) || 0 };
-    if (form.categoria !== "leasing" && form.categoria !== "otro") {
+    if (!CATEGORIAS_FINANCIAMIENTO.includes(form.categoria)) {
       delete payload.activoVinculadoId;
     }
     if (TIENE_CUOTAS.includes(form.categoria) && form.cuotasTotales) {
@@ -350,7 +343,10 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
   // Activos filtrados según categoría seleccionada
   const activosFiltrados = activos.filter(a => {
     if (form.categoria === "leasing") return a.ownership === "LEASING";
-    if (form.categoria === "otro")    return a.tipo === "vehiculo" && (a.ownership === "OWNED" || a.ownership === "CREDITO_AUTO");
+    // Créditos (bancario o automotriz): cualquier máquina o vehículo propio o
+    // con crédito automotriz. Antes el crédito bancario no se podía vincular
+    // y el automotriz solo a vehículos.
+    if (form.categoria === "otro" || form.categoria === "credito") return ["OWNED", "OWN", "CREDITO_AUTO"].includes(a.ownership);
     return false;
   });
 
@@ -403,18 +399,18 @@ function ModalCosto({ isOpen, onClose, onSave, editando, empresaId }) {
             onCambiar={id => set("categoria", id)}
           />
 
-          {/* Activo vinculado (solo leasing y crédito automotriz) */}
-          {(form.categoria === "leasing" || form.categoria === "otro") && (
+          {/* Activo vinculado (leasing y créditos) */}
+          {CATEGORIAS_FINANCIAMIENTO.includes(form.categoria) && (
             <div className="border border-cuaderno-azul rounded-md px-4 py-3 space-y-2">
               <p className="m-0 text-[17px]">Vincular a un activo</p>
               <p className="m-0 -mt-1 text-[14px] text-cuaderno-grafito">
-                {form.categoria === "leasing" ? "Activos registrados con financiamiento leasing" : "Vehículos registrados en FleetCore"}
+                {form.categoria === "leasing" ? "Activos registrados con financiamiento leasing" : "Máquinas y vehículos propios o con crédito automotriz"}
               </p>
               {loadingActivos ? (
                 <p className="m-0 text-[15px] text-cuaderno-grafito">Buscando activos…</p>
               ) : activosFiltrados.length === 0 ? (
                 <p className="m-0 text-[15px] text-cuaderno-grafito">
-                  {form.categoria === "leasing" ? "No hay activos con leasing registrados." : "No hay vehículos registrados."}
+                  {form.categoria === "leasing" ? "No hay activos con leasing registrados." : "No hay máquinas propias o con crédito registradas."}
                 </p>
               ) : (
                 <Campo as="select" etiqueta="Activo" value={form.activoVinculadoId || ""} onChange={e => handleVincularActivo(e.target.value)}>

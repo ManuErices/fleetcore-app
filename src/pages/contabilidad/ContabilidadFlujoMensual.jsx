@@ -14,7 +14,7 @@ import {
   REGIMENES_TRIBUTARIOS, tasaPrimeraCategoria, tasaPPMSugerida, impuestoMensualAcumulado,
   AYUDA_FILAS, detectarTipoRCV, resumirRCVCompras, resumirRCVVentas, NOMBRE_DOC,
   repartirRCVPorMes, aplicarAporteRCV, aportesRCV, separarRCVPorFila, FILAS_DESTINO_RCV, fijarMesDesdeFuente,
-  mesesFijados, cambiosDocFlujo,
+  mesesFijados, cambiosDocFlujo, docFlujoVacio, normalizarFlujoMensual, calcularFlujoMensual,
 } from "../../lib/contabilidad/tributario";
 import {
   APORTES_EMPLEADOR, detectarLibroRemuneraciones, resumirLibroRemuneraciones,
@@ -71,80 +71,15 @@ import { controlVentas } from "../../lib/contabilidad/ventasControl";
  *   }
  */
 
-// ─── Filas fijas por defecto (mismo orden que el Excel original) ─────────────
-const FILAS_BASE = [
-  { id: "ingresos",       label: "Ingresos",       signo: 1  },
-  { id: "compras",        label: "Compras",        signo: -1 },
-  { id: "remuneraciones", label: "Remuneraciones", signo: -1 },
-  { id: "arriendos",      label: "Arriendos",      signo: -1 },
-  { id: "honorarios",     label: "Honorarios",     signo: -1 },
-  { id: "finiquitos",     label: "Finiquitos",     signo: -1 },
-  { id: "rendiciones",    label: "Rendiciones",    signo: -1 },
-  { id: "gastos_financieros", label: "Gastos financieros", signo: -1 },
-  { id: "leasing",        label: "Leasing",        signo: -1 },
-  { id: "patentes",       label: "Patentes y contribuciones", signo: -1 },
-  { id: "depreciacion",   label: "Depreciación (14 A)", signo: -1 },
-  // Signo +: el valor se escribe con su signo (abono positivo, cargo negativo)
-  { id: "correccion_monetaria", label: "Corrección monetaria (14 A)", signo: 1 },
-];
-
+// ─── Documento y filas fijas ─────────────────────────────────────────────────
+// FILAS_BASE, el documento vacío, la normalización y el cálculo (base, impto,
+// utilidad, PPM) viven en lib/contabilidad/tributario.js: el agente
+// (resumen_tributario) usa exactamente lo mismo.
 const vacio12 = () => Array(12).fill(0);
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 const sum = arr => arr.reduce((s, v) => s + (num(v)), 0);
-
-function docVacio(anio) {
-  return {
-    anio,
-    filas: FILAS_BASE.map(f => ({ ...f, fija: true, valores: vacio12() })),
-    impuesto: vacio12(),
-    impuestoAuto: true,
-    ppm: vacio12(),
-    multas: vacio12(),
-    perdidaArrastre: 0,
-    rcv: {},
-  };
-}
-
-// Normaliza lo que viene de Firestore por si faltan campos o cambia el esquema
-function normalizar(raw, anio) {
-  if (!raw) return docVacio(anio);
-  const filasRaw = Array.isArray(raw.filas) ? raw.filas : [];
-  const filas = filasRaw.map(f => ({
-    id: f.id || ("custom_" + Math.random().toString(36).slice(2)),
-    label: f.label || "Sin nombre",
-    // Las filas fijas toman el signo de FILAS_BASE (así un cambio de criterio,
-    // como el de Corrección monetaria, llega también a los años ya guardados)
-    signo: (f.fija && FILAS_BASE.find(b => b.id === f.id)?.signo) || (f.signo === -1 ? -1 : 1),
-    fija: !!f.fija,
-    valores: Array.isArray(f.valores) && f.valores.length === 12 ? f.valores.map(num) : vacio12(),
-  }));
-  const fix12 = arr => (Array.isArray(arr) && arr.length === 12 ? arr.map(num) : vacio12());
-  // Filas fijas nuevas (gastos financieros, leasing, patentes): se agregan a
-  // los años ya guardados, justo después de la última fila fija existente.
-  let filasFinal = filas.length ? filas : docVacio(anio).filas;
-  const faltantes = FILAS_BASE.filter(b => !filasFinal.some(f => f.id === b.id));
-  if (faltantes.length) {
-    const ultimaFija = filasFinal.reduce((idx, f, i) => (f.fija ? i : idx), -1);
-    filasFinal = [
-      ...filasFinal.slice(0, ultimaFija + 1),
-      ...faltantes.map(b => ({ ...b, fija: true, valores: vacio12() })),
-      ...filasFinal.slice(ultimaFija + 1),
-    ];
-  }
-  const impuesto = fix12(raw.impuesto);
-  return {
-    anio,
-    filas: filasFinal,
-    impuesto,
-    // Años guardados antes del cálculo automático: si ya tenían Impto a mano,
-    // se respeta (modo manual) hasta que el usuario lo cambie.
-    impuestoAuto: typeof raw.impuestoAuto === "boolean" ? raw.impuestoAuto : !impuesto.some(v => v !== 0),
-    ppm: fix12(raw.ppm),
-    multas: fix12(raw.multas),
-    perdidaArrastre: Math.abs(num(raw.perdidaArrastre)),
-    rcv: raw.rcv && typeof raw.rcv === "object" ? raw.rcv : {},
-  };
-}
+const docVacio = docFlujoVacio;
+const normalizar = normalizarFlujoMensual;
 
 // ─── Guardado por campos con control de versión ───────────────────────────────
 // Antes cada guardado hacía setDoc del documento completo del año: dos
@@ -749,6 +684,106 @@ function HojaControlVentas({ empresaId, anio, ventas }) {
           </div>
           <p className="m-0 text-[14px] text-cuaderno-grafito">
             Rental: neto de cada estado de pago por su fecha de emisión, sin los anulados. Oficina Técnica: estados de pago + reajustes + multas del mes de cada obra (las retenciones no, la factura va por el total). Una diferencia positiva son ventas facturadas sin estado de pago en FleetCore (otros clientes o servicios); una negativa, estados de pago aún sin factura o facturados en otro mes.
+          </p>
+        </div>
+      ))}
+    </Hoja>
+  );
+}
+
+/**
+ * Conciliación (solo lectura) de la mano de obra: Oficina Técnica y
+ * Contabilidad usan el mismo motor de RRHH pero con criterios distintos, a
+ * propósito. OT carga a la obra el costo empresa de TODAS las liquidaciones
+ * del mes, borradores incluidos, y no cuenta finiquitos (no son costo de la
+ * obra del mes). Contabilidad ("Traer de FleetCore") toma solo liquidaciones
+ * emitidas y suma los finiquitos del mes de término. Esta hoja muestra cómo
+ * se pasa de una cifra a la otra. No escribe nada.
+ */
+function HojaControlManoObra({ empresaId, anio, data }) {
+  const [abierta, setAbierta] = useState(false);
+  const [datos, setDatos] = useState(null);   // { ot: [12], rrhh: resumenRRHHAnio }
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!abierta || !empresaId) return;
+    let vivo = true;
+    setDatos(null); setError("");
+    (async () => {
+      try {
+        const { costosManoObraRRHH, resumenRRHHAnio } = await import("../rrhh/resumenContable");
+        const [filas, rrhh] = await Promise.all([
+          costosManoObraRRHH(empresaId, anio),
+          resumenRRHHAnio(empresaId, anio, { incluirBorradores: false }),
+        ]);
+        if (!vivo) return;
+        const ot = vacio12();
+        filas.forEach(f => { const m = Number(f.month) - 1; if (m >= 0 && m < 12) ot[m] += num(f.totalCosto); });
+        setDatos({ ot: ot.map(Math.round), rrhh });
+      } catch (e) {
+        console.error("Conciliación mano de obra:", e);
+        if (vivo) setError("No se pudieron leer las liquidaciones de RRHH con tu usuario.");
+      }
+    })();
+    return () => { vivo = false; };
+  }, [abierta, empresaId, anio]);
+
+  const valor = (id, m) => num(data.filas.find(f => f.id === id)?.valores[m]);
+  const meses = datos ? MESES.map((_, m) => {
+    const r = datos.rrhh.meses.find(x => x.mes === m) || {};
+    const ot = datos.ot[m];
+    const rem = num(r.remuneraciones), fin = num(r.finiquitos);
+    return {
+      m, ot, borradores: ot - rem, nBorradores: num(r.borradores), rem, fin,
+      contabilidad: rem + fin, planilla: valor("remuneraciones", m) + valor("finiquitos", m),
+    };
+  }) : [];
+  const total = (k) => meses.reduce((s, x) => s + x[k], 0);
+
+  return (
+    <Hoja titulo="Mano de obra: Oficina Técnica y Contabilidad"
+      extra={<Boton variante="texto" onClick={() => setAbierta(v => !v)} aria-expanded={abierta}>{abierta ? "Ocultar" : "Conciliar"}</Boton>}>
+      <p className="m-0 -mt-1 text-[15px] text-cuaderno-grafito">
+        Por qué el costo de mano de obra de Oficina Técnica no es igual a Remuneraciones + Finiquitos de esta planilla. Solo lectura.
+      </p>
+      {abierta && (error ? <Nota etiqueta="Ojo:" className="mt-3">{error}</Nota> : !datos ? (
+        <p className="m-0 py-6 text-center text-[17px] text-cuaderno-grafito">Leyendo liquidaciones…</p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[16px]" style={{ minWidth: 760 }}>
+              <thead>
+                <tr className="shadow-[inset_0_-1.5px_0_rgb(var(--cuaderno-tinta))]">
+                  {["Mes", "Oficina Técnica", "− Borradores", "= Liquidaciones emitidas", "+ Finiquitos", "= Contabilidad (RRHH)", "En la planilla"].map((h, i) => (
+                    <th key={h} className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {meses.map(x => (
+                  <tr key={x.m} className="border-b border-cuaderno-renglon">
+                    <td className="px-2 py-1">{MESES[x.m]}</td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={x.ot} escala="pesos" vacio="·" /></td>
+                    <td className="px-2 py-1 text-right" title={x.nBorradores ? `${x.nBorradores} liquidación(es) en borrador` : undefined}><Cifra valor={x.borradores} escala="pesos" vacio="·" /></td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={x.rem} escala="pesos" vacio="·" /></td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={x.fin} escala="pesos" vacio="·" /></td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={x.contabilidad} escala="pesos" vacio="·" /></td>
+                    <td className="px-2 py-1 text-right"><Cifra valor={x.planilla} escala="pesos" vacio="·" /></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="px-2 py-2">Total</td>
+                  {["ot", "borradores", "rem", "fin", "contabilidad", "planilla"].map(k => (
+                    <td key={k} className="px-2 py-2 text-right"><Cifra valor={total(k)} escala="pesos" vacio="0" raya="total" /></td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="m-0 text-[14px] text-cuaderno-grafito">
+            Oficina Técnica carga a cada obra el costo empresa de las liquidaciones del mes (haberes − asignación familiar + aportes del empleador), incluidas las que siguen en borrador, y no cuenta los finiquitos. Contabilidad, con "Traer de FleetCore", toma solo las liquidaciones emitidas (Remuneraciones) y suma los finiquitos en el mes de término (Finiquitos). "En la planilla" es lo que hoy tienen esas dos filas: si no calza con "Contabilidad (RRHH)", el mes viene de otra importación (Talana) o se escribió a mano. Los meses en que Oficina Técnica usa el Excel de sueldos por falta de liquidaciones no aparecen aquí.
           </p>
         </div>
       ))}
@@ -1558,16 +1593,10 @@ export default function ContabilidadFlujoMensual() {
   const tasa    = tasaPrimeraCategoria(configTributaria.regimen, anio);
   const tasaPPM = tasaPPMSugerida(configTributaria, anio);
   const calc = useMemo(() => {
-    const baseImponible = vacio12();
-    data.filas.forEach(f => f.valores.forEach((v, i) => { baseImponible[i] += f.signo * num(v); }));
-    const impuesto = data.impuestoAuto ? impuestoMensualAcumulado(baseImponible, tasa, data.perdidaArrastre) : data.impuesto.map(num);
-    const utilidad = baseImponible.map((v, i) => v - impuesto[i] - num(data.multas[i]));
-    // Base del PPM = ingresos brutos del mes (art. 84 LIR): solo la fila
-    // Ingresos (ventas). Antes entraba toda fila con signo +, incluida la
-    // corrección monetaria y filas manuales, que no son ingreso bruto.
-    const ingresosMes = vacio12();
-    data.filas.filter(f => f.id === "ingresos").forEach(f => f.valores.forEach((v, i) => { ingresosMes[i] += num(v); }));
-    const ppmSugerido = ingresosMes.map(v => Math.round(Math.max(0, v) * tasaPPM));
+    // Base, impuesto, utilidad y PPM: el mismo cálculo que usa el agente
+    // (calcularFlujoMensual). El PPM va solo sobre la fila Ingresos.
+    const r = calcularFlujoMensual(data, configTributaria);
+    const { baseImponible, impuesto, utilidad, ppmSugerido } = r;
     // Doble conteo: meses con Compras cargadas del RCV y Arriendos/Rendiciones/
     // Leasing/Gastos financieros a mano. Las cuotas de leasing y las comisiones
     // de factoring vienen facturadas en el RCV: escritas a mano se repiten.
@@ -1581,27 +1610,13 @@ export default function ContabilidadFlujoMensual() {
         if (f && num(f.valores[i]) - desdeRcv > 0) dobleConteo.push({ mes: i, fila: f.label });
       });
     });
-    const totalIngresos = sum(data.filas.filter(f => f.signo === 1).flatMap(f => f.valores));
-    const totalGastos   = sum(data.filas.filter(f => f.signo === -1).flatMap(f => f.valores));
     const filasTotales  = Object.fromEntries(data.filas.map(f => [f.id, sum(f.valores)]));
     let mejorMes = 0, peorMes = 0;
     utilidad.forEach((v, i) => { if (v > utilidad[mejorMes]) mejorMes = i; if (v < utilidad[peorMes]) peorMes = i; });
-    return {
-      baseImponible, utilidad, filasTotales,
-      totalBaseImponible: sum(baseImponible),
-      totalUtilidad: sum(utilidad),
-      // Renta líquida después de rebajar la pérdida de años anteriores; si
-      // queda negativa, es la pérdida que pasa al año siguiente.
-      rentaTrasPerdida: sum(baseImponible) - num(data.perdidaArrastre),
-      totalIngresos, totalGastos,
-      impuesto, ppmSugerido, dobleConteo,
-      totalImpuesto: sum(impuesto),
-      totalPpmSugerido: sum(ppmSugerido),
-      totalPpm: sum(data.ppm),
-      totalMultas: sum(data.multas),
-      mejorMes, peorMes,
-    };
-  }, [data, tasa, tasaPPM]);
+    // rentaTrasPerdida: renta líquida después de rebajar la pérdida de años
+    // anteriores; si queda negativa, es la pérdida que pasa al año siguiente.
+    return { ...r, filasTotales, dobleConteo, mejorMes, peorMes };
+  }, [data, configTributaria]);
   // Fila Ingresos tal como está (para el control de ventas; memo para que la
   // comparación no se recalcule en cada tecla de otra fila)
   const filaIngresos = data.filas.find(f => f.id === "ingresos")?.valores;
@@ -1888,6 +1903,9 @@ export default function ContabilidadFlujoMensual() {
 
           {/* Control de ventas contra FleetCore (solo lectura) */}
           <HojaControlVentas empresaId={empresaId} anio={anio} ventas={ventasPlanilla} />
+
+          {/* Mano de obra: OT vs Contabilidad (solo lectura) */}
+          <HojaControlManoObra empresaId={empresaId} anio={anio} data={data} />
 
           {/* PPM */}
           <Hoja titulo="Pagos provisionales mensuales">
