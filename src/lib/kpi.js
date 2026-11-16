@@ -1,3 +1,6 @@
+import { estaActiva } from "./maquinas";
+import { activaEnPeriodo } from "./maquinasPeriodo";
+
 export function toNumber(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
@@ -80,7 +83,7 @@ export function calcLogCosts(log, machine) {
   };
 }
 
-export function calcRangeKPIs(logs, machineById) {
+export function calcRangeKPIs(logs, machineById, { desde, hasta } = {}) {
   let totalP = 0, totalS = 0, totalD = 0;
   let internalCost = 0, clientCost = 0;
   let projectedValue = 0;
@@ -88,7 +91,8 @@ export function calcRangeKPIs(logs, machineById) {
   // Calcular totales y valor proyectado
   for (const machineId in machineById) {
     const machine = machineById[machineId];
-    if (machine && machine.active !== false) {
+    // Sin campo `active` = activa; con fechaBaja, activa hasta esa fecha
+    if (machine && (desde || hasta ? activaEnPeriodo(machine, desde, hasta) : estaActiva(machine))) {
       // Para calcular días en rango, necesitamos saber el rango
       // Por ahora asumimos 30 días, pero podría pasarse como parámetro
       projectedValue += calcProjectedValue(machine, 30);

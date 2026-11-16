@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { listActiveProjects, listMachines, deleteMachine } from "../../lib/db";
-import { guardarMaquina, listarMaquinas, MaquinaDuplicada, esPropia, esArrendada, propiedadNormal, nombreMaquina } from "../../lib/maquinas";
+import { guardarMaquina, listarMaquinas, MaquinaDuplicada, esPropia, esArrendada, propiedadNormal, nombreMaquina, estaActiva } from "../../lib/maquinas";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useOperatorAssignments } from "../../lib/useOperatorAssignments";
 import ExcelImporter from "../../components/ExcelImporter";
@@ -281,7 +281,7 @@ export default function Machines() {
           <StatBadge label="Total equipos" value={machines.length} color="blue" />
           <StatBadge label="Propios" value={ownMachines.length} color="emerald" />
           <StatBadge label="Arrendados" value={rentedMachines.length} color="orange" />
-          <StatBadge label="Activos" value={machines.filter(m => m.active).length} color="slate" />
+          <StatBadge label="Activos" value={machines.filter(estaActiva).length} color="slate" />
         </div>
       </div>
 

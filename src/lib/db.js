@@ -328,7 +328,15 @@ export async function deleteFuelLog(empresaId, fuelLogId) {
 // EMPLOYEES (EMPLEADOS)
 // ============================================
 
-export async function listEmployees(empresaId, projectId) {
+/**
+ * Trabajadores (ficha maestra `trabajadores`). Por defecto TODOS, también
+ * finiquitados/inactivos: el costo histórico los necesita (tipo de mano de
+ * obra, nombre). Para selectores de personal vigente usa `{ soloActivos: true }`
+ * (estado "activo" o sin estado).
+ */
+export const trabajadorActivo = (t) => !t?.estado || t.estado === 'activo';
+
+export async function listEmployees(empresaId, projectId, { soloActivos = false } = {}) {
   console.log(`👥 Cargando trabajadores${projectId ? ` del proyecto ${projectId}` : ''}`);
   if (!empresaId) return [];
   try {
@@ -338,9 +346,10 @@ export async function listEmployees(empresaId, projectId) {
     // parecían borrados. Quien no tiene proyecto se muestra igual.
     const snap = await getDocs(EMPRESA_COL(empresaId, 'trabajadores'));
     const employees = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const filtrados = (projectId !== undefined && projectId !== null)
+    const delProyecto = (projectId !== undefined && projectId !== null)
       ? employees.filter(e => e.projectId === projectId || !e.projectId)
       : employees;
+    const filtrados = soloActivos ? delProyecto.filter(trabajadorActivo) : delProyecto;
     console.log(`✅ ${filtrados.length} trabajadores cargados`);
     return filtrados;
   } catch (error) {
@@ -984,9 +993,14 @@ export async function deleteAllSubcontratos(empresaId, projectId, year, month) {
 export async function getSubcontratosStats(empresaId, projectId, year, month) {
   const subcontratos = await listSubcontratos(empresaId, projectId, year, month);
   
+  const { saldoSubcontratos, costoSubcontratos } = await import('./costosObra');
   const stats = {
     totalPagado: 0,
-    totalSaldo: 0,
+    // Saldo por pagar: UNA vez por contrato (cada fila de EP repite el saldo
+    // del contrato completo; antes se sumaba por fila y se multiplicaba)
+    totalSaldo: saldoSubcontratos(subcontratos),
+    // Costo = monto bruto del EP (costosObra.js), no el neto pagado
+    totalCosto: costoSubcontratos(subcontratos),
     cantidad: subcontratos.length,
     porSubcontratista: {},
     porCuentaCosto: {}
@@ -995,7 +1009,6 @@ export async function getSubcontratosStats(empresaId, projectId, year, month) {
   subcontratos.forEach(s => {
     const pago = Number(s.totalPagoNeto) || 0;
     stats.totalPagado += pago;
-    stats.totalSaldo += Number(s.saldoPorPagarSC) || 0;
     
     // Por subcontratista
     const subcontratista = s.razonSocialSubcontratista || 'Sin subcontratista';

@@ -106,14 +106,35 @@ function isRecentEnough(lastUpdated) {
 // ============================================
 
 /**
+ * Precio ingresado a mano en Oficina Técnica → Precio combustible
+ * (FuelPriceManager guarda en fuelPrices/current). Manda sobre cualquier
+ * estimación: antes se guardaba ahí pero nadie lo leía.
+ */
+async function getManualPrices(empresaId) {
+  if (!empresaId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'empresas', empresaId, 'fuelPrices', 'current'));
+    const data = snap.exists() ? snap.data() : null;
+    return data && Number(data.diesel) > 0 ? { ...data, source: data.source || 'manual' } : null;
+  } catch (error) {
+    console.error("Error obteniendo precio manual:", error);
+    return null;
+  }
+}
+
+/**
  * Obtiene precios con sistema de fallback en cascada
  * 
  * Prioridad:
+ * 0. Precio manual (fuelPrices/current), si existe
  * 1. Caché de Firebase (si es reciente, < 24h)
  * 2. Precios internacionales (estimado desde WTI)
  * 3. Valores por defecto
  */
 export async function fetchFuelPrices(empresaId) {
+  const manual = await getManualPrices(empresaId);
+  if (manual) return manual;
+
   const cachedPrice = await getCachedPrices(empresaId);
   if (cachedPrice && isRecentEnough(cachedPrice.lastUpdated || cachedPrice.cachedAt)) {
     return cachedPrice;

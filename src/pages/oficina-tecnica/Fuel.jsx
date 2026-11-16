@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { listActiveProjects, listMachines } from "../../lib/db";
 import { listarConsumosCombustible } from "../../lib/combustible";
+import { activaEnPeriodo } from "../../lib/maquinasPeriodo";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
 import FuelImporter from "../../components/FuelImporter";
@@ -82,10 +83,18 @@ export default function Fuel() {
     (async () => {
       setIsLoading(true);
       try {
-        const m = await listMachines(empresaId, selectedProject);
-        if (active) setMachines(m.filter(x => x.active !== false));
-
-        const logs = await listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo);
+        const [m, logs] = await Promise.all([
+          listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo }),
+          listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
+        ]);
+        // Máquinas que estuvieron en la obra en el rango y activas en él, o con
+        // consumo en el rango (una máquina vendida no pierde sus meses pasados)
+        const conConsumo = new Set(logs.map(l => l.machineId));
+        const visibles = m.filter(x => conConsumo.has(x.id) || activaEnPeriodo(x, dateFrom, dateTo));
+        // Registros del camión aljibe cuya patente no calza con ninguna máquina:
+        // una fila aparte para que el total de litros cuadre con Dashboard/Estado de pago
+        if (conConsumo.has("")) visibles.push({ id: "", code: "S/M", name: "Sin máquina (camión aljibe)" });
+        if (active) setMachines(visibles);
         if (active) setFuelLogs(logs);
       } catch (err) {
         console.error("Error cargando datos:", err);

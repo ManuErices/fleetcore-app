@@ -3,12 +3,17 @@ import { listActiveProjects, listMachines } from "../../lib/db";
 // Horas de máquina: dailyLogs (Excel) + partes diarios de WorkFleet, sin duplicar
 import { listarLogsObra } from "../../lib/partesDiarios";
 import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
-import { manoObraMes } from "../../lib/manoObra";
+import { manoObraRango, costoObraFila } from "../../lib/manoObra";
+// Fuente única de OC / subcontratos (criterios de la empresa: OC = facturado,
+// subcontrato = montoEP en su mes asociado)
+import { costoOC, comprometidoOC, costoSubcontratos, subcontratosDelPeriodo } from "../../lib/costosObra";
+import { costosMantencionObra } from "../../lib/mantencionObra";
+import { activaEnPeriodo } from "../../lib/maquinasPeriodo";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useEmpresa } from "../../lib/useEmpresa";
 import { useFuelPrices } from "../../lib/fuelPriceService";
-import { hoyISO, inicioMesISO, partesISO } from "../../lib/fechas";
+import { hoyISO, inicioMesISO } from "../../lib/fechas";
 
 // Utilidades de fecha (en hora de Chile: toISOString daba el día en UTC)
 const isoToday = hoyISO;
@@ -32,6 +37,7 @@ export default function DashboardExecutive() {
   const [rendiciones, setRendiciones] = useState([]);
   const [subcontratos, setSubcontratos] = useState([]);
   const [ocs, setOcs] = useState([]);
+  const [mantencion, setMantencion] = useState({ total: 0, filas: [] });
 
   const { prices: fuelPrices } = useFuelPrices(true);
 
@@ -53,14 +59,14 @@ export default function DashboardExecutive() {
     if (!empresaId || !selectedProject) return;
     setIsLoading(true);
     try {
-      // new Date("AAAA-MM-01") es medianoche UTC → en Chile, el mes anterior
-      const { anio: year, mes: month } = partesISO(dateFrom);
-
-      const [logs, fuel, employees, machineList] = await Promise.all([
+      // Mano de obra del rango (mes en curso hasta hoy): cada liquidación
+      // prorrateada por la parte del mes dentro del rango, igual que Consolidado
+      const [logs, fuel, employees, machineList, mant] = await Promise.all([
         listarLogsObra(empresaId, selectedProject, dateFrom, dateTo),
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
-        manoObraMes(empresaId, selectedProject, year, month),
-        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
+        manoObraRango(empresaId, selectedProject, dateFrom, dateTo),
+        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo }),
+        costosMantencionObra(empresaId, selectedProject, dateFrom, dateTo)
       ]);
 
       // Rendiciones
@@ -71,7 +77,8 @@ export default function DashboardExecutive() {
       // Subcontratos
       const subSnap = await getDocs(query(collection(db, 'empresas', empresaId, 'subcontratos'), where("projectId", "==", selectedProject)));
       const allSub = subSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const filtSub = allSub.filter(s => s.fechaEP >= dateFrom && s.fechaEP <= dateTo);
+      // Por MES ASOCIADO del EP (respaldo: fecha EP), no por fecha de emisión
+      const filtSub = subcontratosDelPeriodo(allSub, { desde: dateFrom, hasta: dateTo });
 
       // OCs
       const ocSnap = await getDocs(query(collection(db, 'empresas', empresaId, 'purchaseOrders'), where("projectId", "==", selectedProject)));
@@ -81,10 +88,13 @@ export default function DashboardExecutive() {
       setDailyLogs(logs);
       setFuelLogs(fuel);
       setEmployeeData(employees);
-      setMachines(machineList);
+      // Equipos que estuvieron en la obra y activos en el rango (fechaBaja), o con horas/litros
+      const conMovimiento = new Set([...logs, ...fuel].map(x => x.machineId));
+      setMachines(machineList.filter(m => conMovimiento.has(m.id) || activaEnPeriodo(m, dateFrom, dateTo)));
       setRendiciones(filtRend);
       setSubcontratos(filtSub);
       setOcs(filtOc);
+      setMantencion(mant);
     } catch (err) {
       console.error("Error cargando datos:", err);
     } finally {
@@ -131,27 +141,29 @@ export default function DashboardExecutive() {
     const eficienciaKmLitro = totalLitros > 0 ? totalKilometraje / totalLitros : 0;
 
     // 3. PERSONAL
-    const totalEmpleados = employeeData.length;
-    const totalSueldoLiquido = employeeData.reduce((sum, emp) => sum + (Number(emp.sueldoLiquido) || 0), 0);
-    // Solo el % de incidencia en esta obra (igual que Estado de pago)
-    const totalCostoEmpresa = employeeData.reduce((sum, emp) => {
-      const pct = emp.porcentajeIncidencia != null ? Number(emp.porcentajeIncidencia) : 100;
-      return sum + (Number(emp.totalCosto) || 0) * (pct / 100);
-    }, 0);
+    const totalEmpleados = new Set(employeeData.map(e => e.employeeId || e.id)).size;
+    const totalSueldoLiquido = employeeData.reduce((sum, emp) => sum + (Number(emp.sueldoLiquido) || 0) * (emp.factorRango ?? 1), 0);
+    // % de incidencia en esta obra × parte del mes dentro del rango (igual que Consolidado)
+    const totalCostoEmpresa = employeeData.reduce((sum, emp) => sum + costoObraFila(emp) * (emp.factorRango ?? 1), 0);
 
     // 4. RENDICIONES
     const totalRendiciones = rendiciones.reduce((sum, r) => sum + (Number(r.montoAprobado) || 0), 0);
     const promedioRendicion = rendiciones.length > 0 ? totalRendiciones / rendiciones.length : 0;
 
     // 5. SUBCONTRATOS
-    const totalSubcontratos = subcontratos.reduce((sum, s) => sum + (Number(s.montoEP) || 0), 0);
+    const totalSubcontratos = costoSubcontratos(subcontratos);
 
     // 6. ÓRDENES DE COMPRA
-    const totalOC = ocs.reduce((sum, o) => sum + (Number(o.totalMonto) || 0), 0);
-    const totalFacturado = ocs.reduce((sum, o) => sum + (Number(o.totalFacturado) || 0), 0);
+    // Costo = lo FACTURADO; comprometido y por facturar quedan como información
+    const totalOC = ocs.reduce((sum, o) => sum + comprometidoOC(o).comprometido, 0);
+    const totalFacturado = ocs.reduce((sum, o) => sum + costoOC(o), 0);
+    const porFacturarOC = ocs.reduce((sum, o) => sum + comprometidoOC(o).porFacturar, 0);
 
-    // 7. TOTALES
-    const totalCostos = totalCostoCombustible + totalCostoEmpresa + totalRendiciones + totalSubcontratos + totalOC;
+    // 7. MANTENCIÓN Y REPUESTOS (OT cerradas de Maquinaria, por obra de la máquina ese día)
+    const totalMantencion = mantencion.total || 0;
+
+    // 8. TOTALES
+    const totalCostos = totalCostoCombustible + totalCostoEmpresa + totalRendiciones + totalSubcontratos + totalFacturado + totalMantencion;
     const costoPorHora = totalHorasProductivas > 0 ? totalCostos / totalHorasProductivas : 0;
     const costoPorKm = totalKilometraje > 0 ? totalCostos / totalKilometraje : 0;
 
@@ -188,15 +200,19 @@ export default function DashboardExecutive() {
       // OC
       totalOC: Math.round(totalOC),
       totalFacturado: Math.round(totalFacturado),
-      saldoPorRecibir: Math.round(totalOC - totalFacturado),
+      saldoPorRecibir: Math.round(porFacturarOC),
       cantidadOC: ocs.length,
+
+      // Mantención
+      totalMantencion: Math.round(totalMantencion),
+      cantidadMantencion: mantencion.filas?.length || 0,
 
       // Totales
       totalCostos: Math.round(totalCostos),
       costoPorHora: Math.round(costoPorHora),
       costoPorKm: Math.round(costoPorKm)
     };
-  }, [dailyLogs, fuelLogs, employeeData, machines, rendiciones, subcontratos, ocs, fuelPrices]);
+  }, [dailyLogs, fuelLogs, employeeData, machines, rendiciones, subcontratos, ocs, fuelPrices, mantencion]);
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('es-CL', {
@@ -358,9 +374,20 @@ export default function DashboardExecutive() {
           icon="📦"
           items={[
             { label: 'Total OCs', value: kpis.cantidadOC + ' órdenes' },
-            { label: 'Monto Total', value: formatCurrency(kpis.totalOC) },
-            { label: 'Facturado', value: formatCurrency(kpis.totalFacturado) },
-            { label: 'Saldo por Recibir', value: formatCurrency(kpis.saldoPorRecibir), highlight: true }
+            { label: 'Costo (facturado)', value: formatCurrency(kpis.totalFacturado), highlight: true },
+            { label: 'Comprometido', value: formatCurrency(kpis.totalOC) },
+            { label: 'Por facturar', value: formatCurrency(kpis.saldoPorRecibir) }
+          ]}
+        />
+
+        {/* Mantención y repuestos (Maquinaria) */}
+        <AnalysisCard
+          title="Mantención y repuestos (Maquinaria)"
+          icon="🔧"
+          items={[
+            { label: 'OT cerradas', value: kpis.cantidadMantencion },
+            { label: 'Costo', value: formatCurrency(kpis.totalMantencion), highlight: true },
+            { label: '% del Total', value: (kpis.totalCostos > 0 ? ((kpis.totalMantencion / kpis.totalCostos) * 100).toFixed(1) : "0.0") + '%' }
           ]}
         />
 

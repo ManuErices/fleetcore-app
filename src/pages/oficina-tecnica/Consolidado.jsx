@@ -3,10 +3,15 @@ import { useEmpresa } from "../../lib/useEmpresa";
 import { 
   listActiveProjects, 
   listPurchaseOrders,
-  listMachines
+  listMachines,
+  listEstadoPagoIngresosByYear
 } from "../../lib/db";
 import { listarConsumosCombustible, costoConsumo } from "../../lib/combustible";
-import { manoObraRango, costoObraFila } from "../../lib/manoObra";
+import { manoObraRango, costoObraFila, fraccionesMeses } from "../../lib/manoObra";
+// Fuente única (costosObra.js): OC = facturado, subcontrato = montoEP en su mes
+// asociado, saldo una vez por contrato, venta bruta del mandante sin retención
+import { costoOC, comprometidoOC, costoSubcontratos, subcontratosDelPeriodo, saldoSubcontratos, ventaOT, retencionOT } from "../../lib/costosObra";
+import { costosMantencionObra, LINEA_MANTENCION } from "../../lib/mantencionObra";
 import { hoyISO, sumarDias, desdeISO, partesISO, limitesMes } from "../../lib/fechas";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebase";
@@ -46,6 +51,8 @@ export default function Consolidado() {
   const [rendiciones, setRendiciones] = useState([]);
   const [subcontratos, setSubcontratos] = useState([]);
   const [machines, setMachines] = useState([]);
+  const [ingresos, setIngresos] = useState([]); // estadoPagoIngresos de los meses del rango, con factorRango
+  const [mantencion, setMantencion] = useState({ total: 0, filas: [] });
 
   // Estado para expandir/colapsar secciones
   const [expandedSections, setExpandedSections] = useState({
@@ -91,14 +98,23 @@ export default function Consolidado() {
       console.log(`📊 Cargando datos consolidados: ${dateFrom} a ${dateTo}`);
 
       // Cargar datos base en paralelo (sin logs de flota)
-      const [fuel, employees, orders, machineList] = await Promise.all([
+      // Ingresos del mandante (Estado de pago): meses que toca el rango, cada
+      // uno con la parte del mes dentro del rango (mismo prorrateo que la mano de obra)
+      const fracciones = fraccionesMeses(dateFrom, dateTo);
+      const anios = [...new Set(Object.keys(fracciones).map(k => Number(k.slice(0, 4))))];
+      const [fuel, employees, orders, machineList, ingresosAnios, mant] = await Promise.all([
         listarConsumosCombustible(empresaId, selectedProject, dateFrom, dateTo),
         // Todas las liquidaciones de los meses del rango (antes solo el mes de
         // dateFrom), cada una con la parte del mes que cae en el rango
         manoObraRango(empresaId, selectedProject, dateFrom, dateTo),
         listPurchaseOrders(empresaId, selectedProject),
-        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo })
+        listMachines(empresaId, selectedProject, { desde: dateFrom, hasta: dateTo }),
+        Promise.all(anios.map(a => listEstadoPagoIngresosByYear(empresaId, selectedProject, a))),
+        costosMantencionObra(empresaId, selectedProject, dateFrom, dateTo)
       ]);
+      const ingresosRango = ingresosAnios.flat()
+        .map(i => ({ ...i, factorRango: fracciones[`${i.year}-${String(i.month).padStart(2, "0")}`] || 0 }))
+        .filter(i => i.factorRango > 0);
 
       // Cargar rendiciones y filtrar por fechaEmision
       const rendicionesSnap = await getDocs(
@@ -110,15 +126,12 @@ export default function Consolidado() {
         return r.fechaEmision >= dateFrom && r.fechaEmision <= dateTo;
       });
 
-      // Cargar subcontratos y filtrar por fechaEP
+      // Cargar subcontratos y filtrar por MES ASOCIADO (respaldo: fecha EP)
       const subcontratosSnap = await getDocs(
         query(collection(db, 'empresas', empresaId, 'subcontratos'), where("projectId", "==", selectedProject))
       );
       const allSubcontratos = subcontratosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const subcont = allSubcontratos.filter(s => {
-        if (!s.fechaEP) return false;
-        return s.fechaEP >= dateFrom && s.fechaEP <= dateTo;
-      });
+      const subcont = subcontratosDelPeriodo(allSubcontratos, { desde: dateFrom, hasta: dateTo });
 
       console.log(`📋 Filtrado rendiciones: ${rend.length} de ${allRendiciones.length}`);
       console.log(`📋 Filtrado subcontratos: ${subcont.length} de ${allSubcontratos.length}`);
@@ -135,6 +148,8 @@ export default function Consolidado() {
       setRendiciones(rend);
       setSubcontratos(subcont);
       setMachines(machineList);
+      setIngresos(ingresosRango);
+      setMantencion(mant);
 
       console.log('✅ Datos cargados:', {
         fuel: fuel.length,
@@ -219,15 +234,14 @@ export default function Consolidado() {
 
   // 4. SUBCONTRATOS
   const costosSubcontratos = useMemo(() => {
-    let totalPagado = 0;
-    let totalSaldo = 0;
+    // Costo = monto bruto del EP (costosObra.js); el neto a pagar descuenta
+    // retenciones y anticipos, que no bajan el costo. El saldo por pagar se
+    // cuenta UNA vez por contrato (antes se sumaba en cada fila de EP).
+    const totalPagado = costoSubcontratos(subcontratos);
+    const totalSaldo = saldoSubcontratos(subcontratos);
     const contratistas = new Set();
 
     subcontratos.forEach(s => {
-      // Costo = monto bruto del EP (como Dashboard y Estado de pago); el neto
-      // a pagar descuenta retenciones y anticipos, que no bajan el costo
-      totalPagado += Number(s.montoEP) || 0;
-      totalSaldo += Number(s.saldoPorPagarSC) || 0;
       if (s.razonSocialSubcontratista) {
         contratistas.add(s.razonSocialSubcontratista);
       }
@@ -251,14 +265,20 @@ export default function Consolidado() {
     let montoRecibido = 0;
     let montoFacturado = 0;
 
+    let porFacturar = 0;
+
     purchaseOrders.forEach(order => {
-      totalMonto += Number(order.totalMonto) || 0;
+      // Costo = lo FACTURADO (costoOC); comprometido y por facturar, informativos
+      const c = comprometidoOC(order);
+      totalMonto += c.comprometido;
       montoRecibido += Number(order.totalMontoRecibido) || 0;
-      montoFacturado += Number(order.totalFacturado) || 0;
+      montoFacturado += costoOC(order);
+      porFacturar += c.porFacturar;
     });
 
     return {
       totalMonto: Math.round(totalMonto),
+      porFacturar: Math.round(porFacturar),
       montoRecibido: Math.round(montoRecibido),
       montoFacturado: Math.round(montoFacturado),
       ordenes: purchaseOrders.length
@@ -293,10 +313,11 @@ export default function Consolidado() {
   // ============================================
   const consolidadoTotal = useMemo(() => {
     // COSTOS OPERACIONALES DIRECTOS (sin flota)
-    const costosOperacionalesDirectos = 
+    const costosOperacionalesDirectos =
       costosCombustible.totalCosto +
       costosRemuneraciones.totalCostoEmpresa +
-      costosSubcontratos.totalPagado;
+      costosSubcontratos.totalPagado +
+      (mantencion.total || 0);
 
     // COSTOS INDIRECTOS
     const costosIndirectos = 
@@ -306,18 +327,21 @@ export default function Consolidado() {
     // TOTAL COSTOS
     const totalCostos = costosOperacionalesDirectos + costosIndirectos;
 
-    // INGRESOS (sin flota)
-    const totalIngresos = 0;
+    // INGRESOS: venta BRUTA del mandante (EP + reajustes + multas con signo),
+    // igual que Estado de pago. La retención no rebaja la venta: va aparte.
+    const totalIngresos = ingresos.reduce((s, i) => s + ventaOT(i) * i.factorRango, 0);
+    const retencion = ingresos.reduce((s, i) => s + retencionOT(i) * i.factorRango, 0);
 
     // MARGEN
     const margenBruto = totalIngresos - totalCostos;
-    const margenPorcentaje = 0;
+    const margenPorcentaje = totalIngresos > 0 ? (margenBruto / totalIngresos) * 100 : 0;
 
     return {
       costosOperacionalesDirectos: Math.round(costosOperacionalesDirectos),
       costosIndirectos: Math.round(costosIndirectos),
       totalCostos: Math.round(totalCostos),
       totalIngresos: Math.round(totalIngresos),
+      retencion: Math.round(retencion),
       margenBruto: Math.round(margenBruto),
       margenPorcentaje,
       
@@ -325,7 +349,8 @@ export default function Consolidado() {
       desgloseCostosOperacionales: {
         combustible: costosCombustible.totalCosto,
         remuneraciones: costosRemuneraciones.totalCostoEmpresa,
-        subcontratos: costosSubcontratos.totalPagado
+        subcontratos: costosSubcontratos.totalPagado,
+        mantencion: Math.round(mantencion.total || 0)
       },
       
       // Desglose de costos indirectos
@@ -334,7 +359,7 @@ export default function Consolidado() {
         rendiciones: costosRendiciones.totalAprobado
       }
     };
-  }, [costosCombustible, costosRemuneraciones, costosSubcontratos, costosOrdenes, costosRendiciones]);
+  }, [costosCombustible, costosRemuneraciones, costosSubcontratos, costosOrdenes, costosRendiciones, ingresos, mantencion]);
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('es-CL', {
@@ -535,6 +560,7 @@ export default function Consolidado() {
               icon="💰"
               color="from-emerald-500 to-teal-500"
               trend="up"
+              subtitle={consolidadoTotal.retencion > 0 ? `Retención por cobrar: ${formatCurrency(consolidadoTotal.retencion)}` : undefined}
             />
             <ExecutiveCard
               label="Margen Bruto"
@@ -603,11 +629,11 @@ export default function Consolidado() {
                     total={costosCombustible.totalCosto}
                     items={[
                       { label: 'Total Litros', value: `${costosCombustible.totalLitros} L`, isText: true },
-                      { label: 'Precio Diésel Actual', value: `$${costosCombustible.precioDieselActual}/L`, isText: true, highlight: true },
+                      { label: 'Precio promedio', value: `$${costosCombustible.totalLitros > 0 ? Math.round(costosCombustible.totalCosto / costosCombustible.totalLitros) : costosCombustible.precioDieselActual}/L`, isText: true, highlight: true },
                       { label: 'Recargas', value: `${costosCombustible.recargas}`, isText: true },
                       { label: 'Costo Total', value: costosCombustible.totalCosto, highlight: true }
                     ]}
-                    subtitle={`${costosCombustible.totalLitros} L × $${costosCombustible.precioDieselActual}/L`}
+                    subtitle={`${costosCombustible.totalLitros} L · precio de cada carga (respaldo $${costosCombustible.precioDieselActual}/L)`}
                   />
 
                   {/* Remuneraciones */}
@@ -631,9 +657,20 @@ export default function Consolidado() {
                     total={costosSubcontratos.totalPagado}
                     items={[
                       { label: 'Total EP (bruto)', value: costosSubcontratos.totalPagado, highlight: true },
-                      { label: 'Saldo por Pagar', value: costosSubcontratos.totalSaldo, warning: true },
+                      { label: 'Saldo por Pagar (por contrato)', value: costosSubcontratos.totalSaldo, warning: true },
                       { label: 'Estados de Pago', value: `${costosSubcontratos.cantidadEP}`, isText: true },
                       { label: 'Contratistas', value: `${costosSubcontratos.cantidadContratistas}`, isText: true }
+                    ]}
+                  />
+
+                  {/* Mantención y repuestos: OT cerradas de Maquinaria, por obra de la máquina ese día */}
+                  <CostDetailCard
+                    title={LINEA_MANTENCION}
+                    icon="🔧"
+                    total={Math.round(mantencion.total || 0)}
+                    items={[
+                      { label: 'Costo (mano de obra + repuestos)', value: Math.round(mantencion.total || 0), highlight: true },
+                      { label: 'OT cerradas', value: `${mantencion.filas?.length || 0}`, isText: true }
                     ]}
                   />
                 </div>
@@ -691,9 +728,10 @@ export default function Consolidado() {
                     icon="📋"
                     total={costosOrdenes.montoFacturado}
                     items={[
-                      { label: 'Monto Total', value: costosOrdenes.totalMonto },
+                      { label: 'Facturado (costo)', value: costosOrdenes.montoFacturado, highlight: true },
+                      { label: 'Comprometido', value: costosOrdenes.totalMonto },
+                      { label: 'Por facturar', value: costosOrdenes.porFacturar },
                       { label: 'Recibido', value: costosOrdenes.montoRecibido },
-                      { label: 'Facturado', value: costosOrdenes.montoFacturado, highlight: true },
                       { label: 'Órdenes', value: `${costosOrdenes.ordenes}`, isText: true }
                     ]}
                   />
@@ -739,11 +777,18 @@ export default function Consolidado() {
             <div className="p-6">
               <div className="space-y-4">
                 <FinancialRow
-                  label="Ingresos Totales"
+                  label="Ingresos Totales (venta bruta)"
                   value={consolidadoTotal.totalIngresos}
                   isHeader
                   positive
                 />
+                {consolidadoTotal.retencion > 0 && (
+                  <FinancialRow
+                    label="Retención (por cobrar, no rebaja la venta)"
+                    value={consolidadoTotal.retencion}
+                    indent
+                  />
+                )}
                 <div className="border-t border-slate-200 pt-4">
                   <FinancialRow
                     label="Costos Operacionales Directos"
@@ -782,7 +827,8 @@ export default function Consolidado() {
               data={[
                 { label: 'Combustible', value: costosCombustible.totalCosto, color: 'bg-cyan-500' },
                 { label: 'Remuneraciones', value: costosRemuneraciones.totalCostoEmpresa, color: 'bg-emerald-500' },
-                { label: 'Subcontratos', value: costosSubcontratos.totalPagado, color: 'bg-teal-500' }
+                { label: 'Subcontratos', value: costosSubcontratos.totalPagado, color: 'bg-teal-500' },
+                { label: 'Mantención', value: Math.round(mantencion.total || 0), color: 'bg-amber-500' }
               ]}
               total={consolidadoTotal.costosOperacionalesDirectos}
             />
