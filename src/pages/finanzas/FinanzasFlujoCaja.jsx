@@ -15,6 +15,7 @@ import {
 import { useTransicion, ControlTransicion, lerp } from "./transicion";
 import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
+import SelectorCliente from "./SelectorCliente";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
 import ReferenciaSubcontratos from "./ReferenciaSubcontratos";
 import ReferenciaCobrosYSueldos from "./ReferenciaCobrosYSueldos";
@@ -152,7 +153,7 @@ function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
   const { subcatsEgreso, subcatsIngreso, agregarSubcat, eliminarSubcat } = useSubcategorias(empresaId);
   const [form, setForm] = useState(editando || {
     categoria: "EGRESOS", nombre: "", subcategoria: "OPERACIONAL",
-    detalle: "", proyectoId: "", cliente: "", presupuestoMensual: "",
+    detalle: "", proyectoId: "", cliente: "", clienteId: "", clienteRut: "", presupuestoMensual: "",
     recurrente: false, frecuenciaRecurrente: "mensual", montoRecurrente: "",
     proveedorId: "",
   });
@@ -341,16 +342,29 @@ function ModalCuenta({ onSave, onClose, editando, proveedores = [] }) {
           {/* Se guarda el id del proyecto (antes texto libre, que el filtro
               por obra no lograba calzar). Un texto antiguo se sigue mostrando. */}
           <Campo as="select" etiqueta="Proyecto" value={form.proyectoId || ""}
-            onChange={e => setForm(f => ({...f, proyectoId: e.target.value}))}>
+            onChange={e => {
+              const p = proyectos.find(x => x.id === e.target.value);
+              // Si la cuenta aún no tiene cliente, se toma el mandante de la obra
+              setForm(f => ({ ...f, proyectoId: e.target.value,
+                ...(!f.clienteId && p?.clienteId ? { clienteId: p.clienteId, clienteRut: "", cliente: p.mandante || f.cliente } : {}) }));
+            }}>
             <option value="">Sin proyecto</option>
             {proyectos.map(p => <option key={p.id} value={p.id}>{p.name || p.nombre}</option>)}
             {form.proyectoId && !proyectos.some(p => p.id === form.proyectoId) && (
               <option value={form.proyectoId}>{form.proyectoId}</option>
             )}
           </Campo>
-          <Campo etiqueta="Cliente" value={form.cliente}
-            onChange={e => setForm(f => ({...f, cliente: e.target.value}))} />
         </div>
+      )}
+      {isIngreso && (
+        // Cliente del maestro por RUT: así los cobros de Rental y los estados
+        // de pago se asocian a la cuenta por su ficha, no adivinando el nombre.
+        <SelectorCliente
+          empresaId={empresaId}
+          valor={{ clienteId: form.clienteId, cliente: form.cliente }}
+          sugerencia={form.cliente || form.nombre}
+          onCambiar={c => setForm(f => ({ ...f, ...c }))}
+        />
       )}
 
       {/* Recurrencia */}
@@ -998,7 +1012,7 @@ export default function FinanzasFlujoCaja() {
       if (editandoCuenta) throw new Error("En una propuesta solo se agregan cuentas nuevas. Para editar una cuenta existente, sal de la propuesta.");
       await agregarCuentaNueva(empresaId, propuestaRef.current, {
         nombre: form.nombre, categoria: form.categoria, subcategoria: form.subcategoria, detalle: form.detalle,
-        obra: form.proyectoId, cliente: form.cliente,
+        obra: form.proyectoId, cliente: form.cliente, clienteId: form.clienteId || "", clienteRut: form.clienteRut || "",
         montoRecurrente: form.recurrente ? parseInput(form.montoRecurrente || "0") : 0, frecuencia: form.frecuenciaRecurrente,
       });
       await recargarPropuesta();

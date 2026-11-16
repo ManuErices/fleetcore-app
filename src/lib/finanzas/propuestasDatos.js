@@ -150,6 +150,8 @@ export async function agregarCuentaNueva(empresaId, propuesta, cuenta) {
     detalle: cuenta.detalle || "",
     proyectoId: cuenta.obra || "",
     cliente: cuenta.cliente || "",
+    clienteId: cuenta.clienteId || "",
+    clienteRut: cuenta.clienteRut || "",
     presupuestoMensual: "",
     recurrente: !!cuenta.montoRecurrente,
     frecuenciaRecurrente: cuenta.frecuencia || "mensual",
