@@ -5,7 +5,7 @@
 
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 
 setGlobalOptions({ region: 'southamerica-west1' });
 const { defineSecret } = require('firebase-functions/params');
@@ -2243,6 +2243,53 @@ async function getTrabajador(empresaId, trabajadorId) {
 }
 
 // Liquidación creada → avisar al trabajador que puede revisar y dar acuse.
+// ── Finiquito → corta el acceso (servidor) ─────────────────────
+// La pantalla de RRHH ya lo intenta, pero un administrativo de RRHH que no es
+// admin no puede escribir en `users` (las reglas no lo dejan). Aquí lo hace
+// el servidor, con el Admin SDK: toda cuenta vinculada a la ficha queda
+// 'finiquitado' (las reglas solo dejan escribir a usuarios activos) y se
+// borra la credencial del QR. Si el finiquito se anula, no se toca nada:
+// reactivar a alguien es una decisión de RRHH, a mano.
+exports.onFiniquitoGuardado = onDocumentWritten(
+  { document: 'empresas/{empresaId}/finiquitos/{id}' },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const fin = event.data?.after?.exists ? event.data.after.data() : null;
+      if (!fin || fin.estado === 'anulado' || !fin.trabajadorId) return;
+      const antes = event.data?.before?.exists ? event.data.before.data() : null;
+      if (antes && antes.estado === fin.estado && antes.trabajadorId === fin.trabajadorId) return; // nada relevante cambió
+
+      const tRef = db.doc(`empresas/${empresaId}/trabajadores/${fin.trabajadorId}`);
+      const tSnap = await tRef.get();
+      const t = tSnap.exists ? tSnap.data() : {};
+      if (tSnap.exists && t.estado !== 'finiquitado') await tRef.update({ estado: 'finiquitado', updatedAt: FieldValue.serverTimestamp() });
+
+      const uids = new Set();
+      if (t.portalUid) uids.add(t.portalUid);
+      const email = String(t.email || t.portalEmail || '').toLowerCase().trim();
+      const consultas = [db.collection('users').where('empresaId', '==', empresaId).where('trabajadorId', '==', fin.trabajadorId)];
+      if (email) consultas.push(db.collection('users').where('empresaId', '==', empresaId).where('email', '==', email));
+      for (const q of consultas) (await q.get()).forEach(d => uids.add(d.id));
+
+      for (const uid of uids) {
+        const uRef = db.doc(`users/${uid}`);
+        const uSnap = await uRef.get();
+        // Nunca se toca a un admin ni a un superadmin por esta vía
+        if (!uSnap.exists || ['superadmin', 'admin_contrato'].includes(uSnap.data().role)) continue;
+        await uRef.update({ estado: 'finiquitado', updatedAt: FieldValue.serverTimestamp() });
+        await db.doc(`empresas/${empresaId}/users/${uid}`).set({ estado: 'finiquitado' }, { merge: true }).catch(() => {});
+        // Cierra también las sesiones abiertas
+        await admin.auth().revokeRefreshTokens(uid).catch(() => {});
+      }
+      await db.doc(`empresas/${empresaId}/credenciales_qr/trab_${fin.trabajadorId}`).delete().catch(() => {});
+      console.log({ event: 'finiquito_corta_acceso', empresaId, trabajadorId: fin.trabajadorId, cuentas: uids.size });
+    } catch (e) {
+      console.error('onFiniquitoGuardado:', e.message);
+    }
+  }
+);
+
 exports.onRemuneracionCreated = onDocumentCreated(
   { document: 'empresas/{empresaId}/remuneraciones/{id}', secrets: SES_SECRETS },
   async (event) => {

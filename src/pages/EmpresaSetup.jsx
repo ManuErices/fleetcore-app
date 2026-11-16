@@ -15,12 +15,17 @@
 import React, { useState, useEffect } from "react";
 import { db, auth } from "../lib/firebase";
 import { collection, addDoc, doc, setDoc, getDoc, query, where, getDocs, serverTimestamp, collectionGroup } from "firebase/firestore";
-import { signOut } from "firebase/auth";
+import { signOut, sendEmailVerification } from "firebase/auth";
 import PhoneInput from "../components/ui/PhoneInput";
 
 export default function EmpresaSetup({ user, onComplete, onLogout }) {
   const [step, setStep]       = useState(1); // 1: form, 2: creando, 3: listo
   const [error, setError]     = useState("");
+  // Vincularse como operador o admin de una empresa ya registrada exige el
+  // email verificado (firestore.rules): si no, cualquiera se registraba con el
+  // correo de otra persona y tomaba su lugar.
+  const [verificando, setVerificando] = useState("");   // "" | "enviado" | "error"
+  const [reintento, setReintento] = useState(0);
   const [form, setForm]       = useState({
     nombre:    "",
     rut:       "",
@@ -33,6 +38,7 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
     let active = true;
     const checkExistingEmpresa = async () => {
       if (!user?.email) return;
+      if (!user.emailVerified) return;   // se muestra el aviso para verificar
       try {
         // Verificar si el usuario fue eliminado por un admin (tombstone)
         const userSnap = await getDoc(doc(db, 'users', user.uid));
@@ -152,7 +158,20 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
 
     checkExistingEmpresa();
     return () => { active = false; };
-  }, [user, onComplete]);
+  }, [user, onComplete, reintento]);
+
+  const enviarVerificacion = async () => {
+    try { await sendEmailVerification(auth.currentUser); setVerificando("enviado"); }
+    catch { setVerificando("error"); }
+  };
+  const yaVerifique = async () => {
+    try {
+      await auth.currentUser.reload();
+      await auth.currentUser.getIdToken(true);   // el token nuevo trae email_verified
+      if (auth.currentUser.emailVerified) { setVerificando(""); setReintento(n => n + 1); }
+      else setVerificando("pendiente");
+    } catch { setVerificando("error"); }
+  };
 
   // ── Helpers de formato ──────────────────────────────────────
   const formatRut = (value) => {
@@ -292,6 +311,20 @@ export default function EmpresaSetup({ user, onComplete, onLogout }) {
 
         {/* Card */}
         <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6 sm:p-8 space-y-5">
+
+          {user && !user.emailVerified && (
+            <div className="rounded-xl bg-amber-400/15 border border-amber-300/40 p-4 text-sm text-amber-50 space-y-2">
+              <p className="font-semibold">¿Tu empresa ya te registró (como operador o administrador)?</p>
+              <p className="text-amber-100/90">Para entrar a esa empresa primero verifica tu correo {user.email}. Si vas a crear una empresa nueva, puedes seguir con el formulario.</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={enviarVerificacion} className="px-3 py-1.5 rounded-lg bg-amber-400 text-slate-900 font-bold text-xs">Enviar correo de verificación</button>
+                <button type="button" onClick={yaVerifique} className="px-3 py-1.5 rounded-lg border border-amber-300/60 text-amber-50 font-bold text-xs">Ya lo verifiqué</button>
+              </div>
+              {verificando === "enviado" && <p className="text-xs">Te enviamos el correo. Abre el enlace y vuelve aquí.</p>}
+              {verificando === "pendiente" && <p className="text-xs">Aún no aparece verificado. Revisa tu correo (y spam).</p>}
+              {verificando === "error" && <p className="text-xs">No se pudo enviar. Intenta en unos minutos.</p>}
+            </div>
+          )}
 
           {/* Nombre empresa */}
           <div>

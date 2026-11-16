@@ -201,7 +201,8 @@ service cloud.firestore {
                    || (isAuth() && (
                          resource.data.get('parentEmpresaId', '__ninguna__') in misEmpresas()
                          || resource.data.get('adminUid', '') == request.auth.uid
-                         || resource.data.get('adminEmail', '__ninguno__') == request.auth.token.email));
+                         || (resource.data.get('adminEmail', '__ninguno__') == request.auth.token.email
+                             && request.auth.token.email_verified == true)));
       // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún);
       // O un administrador/usuario autorizado puede crear una sub-empresa
       allow create: if isSuperAdmin()
@@ -706,7 +707,8 @@ service cloud.firestore {
             && empresaNueva() != null
             && exists(/databases/$(database)/documents/empresas/$(empresaNueva()))
             && (get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminUid', '') == request.auth.uid
-                || get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminEmail', '_') == request.auth.token.email);
+                || (get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminEmail', '_') == request.auth.token.email
+                    && request.auth.token.email_verified == true));
       }
       // 2. Invitación vigente: mismo rol y empresa que la invitación, y si
       //    tenía destinatario, el email de quien la acepta.
@@ -726,7 +728,10 @@ service cloud.firestore {
         return request.resource.data.get('role', null) == 'operador'
             && tid != '' && empresaNueva() != null
             && exists(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid))
-            && get(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid)).data.get('email', '_').lower() == request.auth.token.email.lower();
+            && get(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid)).data.get('email', '_').lower() == request.auth.token.email.lower()
+            // El email tiene que estar verificado: si no, cualquiera podía
+            // registrarse con el correo de un operador y tomar su lugar.
+            && request.auth.token.email_verified == true;
       }
       // 4. Sin empresa todavía (cuenta recién creada, antes de elegir empresa).
       function sinEmpresaNiRol() {
@@ -923,7 +928,9 @@ service cloud.firestore {
 
     // Permisos para consulta de colección grupo trabajadores (auto-vinculación de operarios por email)
     match /{path=**}/trabajadores/{trabajadorId} {
-      allow read: if isAuth() && resource != null && (resource.data.email == request.auth.token.email || resource.data.get('portalEmail', '') == request.auth.token.email);
+      // Solo con el email verificado (ver esTrabajadorConEsteEmail)
+      allow read: if isAuth() && request.auth.token.email_verified == true && resource != null
+                  && (resource.data.email == request.auth.token.email || resource.data.get('portalEmail', '') == request.auth.token.email);
     }
 
     // ─────────────────────────────────────────────────────

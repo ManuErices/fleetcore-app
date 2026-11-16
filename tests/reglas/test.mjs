@@ -45,7 +45,7 @@ await env.withSecurityRulesDisabled(async c => {
   await uploadString(ref(st,"empresas/A/documentos/t2/f.pdf"),"x");
   await uploadString(ref(st,"empresas/A/activos/a1/f.pdf"),"x");
 });
-const as=(uid,email)=>env.authenticatedContext(uid,{email: email||`${uid}@x.cl`});
+const as=(uid,email,verificado=true)=>env.authenticatedContext(uid,{email: email||`${uid}@x.cl`, email_verified: verificado});
 const fsOf=(uid,email)=>as(uid,email).firestore();
 const stOf=(uid,email)=>as(uid,email).storage();
 // ── usuarios
@@ -156,6 +156,9 @@ await t("trabajador se adueña de ficha ajena → negado", assertFails(updateDoc
 await t("trabajador cambia su sueldo al vincularse → negado", assertFails(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",sueldoBase:9})));
 await t("trabajador se vincula a su ficha (mismo email) → permitido", assertSucceeds(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",portalEmail:"trabNuevo@x.cl"})));
 await t("…y crea su vínculo de portal → permitido", assertSucceeds(setDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores_portal/trabNuevo"),{trabajadorDocId:"t5"})));
+
+await t("operario con email SIN verificar → negado", assertFails(setDoc(doc(as("juanNV","juan@a.cl",false).firestore(),"users/juanNV"),{role:"operador",empresaId:"A",trabajadorId:"t1"})));
+await t("admin pendiente con email sin verificar no ve la empresa → negado", assertFails(getDocs(query(collection(as("nv2","admin@a.cl",false).firestore(),"empresas"),where("adminEmail","==","admin@a.cl")))));
 console.log(`\n${ok} ok, ${fail} fallos`);
 await env.cleanup();
 process.exit(fail?1:0);
