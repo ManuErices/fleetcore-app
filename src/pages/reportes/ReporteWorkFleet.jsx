@@ -13,6 +13,9 @@ import { useToast, ToastContainer } from "../../components/Toast";
 import { listMaintenancePlans, listMaintenanceEvents } from "../../lib/db";
 import { machineLabel } from "../../utils/searchHelpers";
 import { hoyISO } from '../../lib/fechas';
+import { buscarMaquina } from '../../lib/maquinas';
+import { obraDe, normalizarObra } from '../../lib/obras';
+import { buscarTrabajadorPorRut, buscarTrabajadorPorNombre } from '../../lib/trabajadores';
 
 // Estandariza nombres propios (operadores, obras) a Capitalización de Título:
 // la data llega en MAYÚSCULAS ("JOSE BRAVO BRAVO") y se ve mejor uniforme.
@@ -210,8 +213,10 @@ export default function ReporteWorkFleet() {
           getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
         ]);
         const porClave = new Map();
-        [...legacySnap.docs, ...trabSnap.docs].forEach(d => {
-          const data = { id: d.id, ...d.data() };
+        // _legacy marca las fichas que solo están en 'employees' (su id no es
+        // un trabajadorId del maestro).
+        [...legacySnap.docs.map(d => [d, true]), ...trabSnap.docs.map(d => [d, false])].forEach(([d, legacy]) => {
+          const data = { id: d.id, ...d.data(), _legacy: legacy };
           const clave = (data.rut || '').replace(/[.\-\s]/g, '').toUpperCase() || d.id;
           porClave.set(clave, { ...(porClave.get(clave) || {}), ...data });
         });
@@ -2141,6 +2146,15 @@ function ImportarExcelModal({ empresaId, onClose, machines, projects, empleados 
   const [importando, setImportando] = React.useState(false);
   const [resultado, setResultado] = React.useState(null);
   const [paso, setPaso] = React.useState('upload');
+  // Centros de costo: un "proyecto" del Excel puede venir como código o
+  // nombre de centro de costo vinculado a una obra (obraDe).
+  const [centros, setCentros] = React.useState([]);
+  React.useEffect(() => {
+    if (!empresaId) return;
+    getDocs(collection(db, 'empresas', empresaId, 'centros_costo'))
+      .then(snap => setCentros(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => setCentros([]));
+  }, [empresaId]);
 
   const parsearExcel = (file) => {
     const reader = new FileReader();
@@ -2165,16 +2179,18 @@ function ImportarExcelModal({ empresaId, onClose, machines, projects, empleados 
             if (parts[0].length <= 2) fecha = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
           }
           const patente = get(row, 'patente').toUpperCase();
-          const machine = machines.find(m => (m.patente||'').toUpperCase() === patente || (m.code||'').toUpperCase() === patente);
-          const proyNombre = get(row, 'proyecto').toUpperCase();
-          const project = projects.find(p => (p.name||'').toUpperCase() === proyNombre || (p.codigo||'').toUpperCase() === proyNombre);
+          // Máquina por patente o código normalizados ("TRRH-10" = "TRRH10")
+          const machine = buscarMaquina(machines, { patente, code: patente });
+          const proyTexto = get(row, 'proyecto');
+          // Obra por código de obra, código/nombre de centro de costo o nombre (normalizados)
+          const idObra = (proyTexto && projects.find(p => normalizarObra(p.codigo) && normalizarObra(p.codigo) === normalizarObra(proyTexto))?.id)
+            || obraDe({ obras: projects, centros }, { codigo: proyTexto, nombre: proyTexto });
+          const project = idObra ? projects.find(p => p.id === idObra) : null;
 
-          // Buscar empleado en Firebase por nombre (case-insensitive)
-          const nombreExcel = get(row, 'empleado').toLowerCase().trim();
-          const empleadoMatch = empleados.find(e => {
-            const nombreDB = (e.nombre || e.name || e.displayName || '').toLowerCase().trim();
-            return nombreDB === nombreExcel;
-          });
+          // Trabajador por RUT (si el Excel lo trae) o por nombre completo
+          // normalizado (sin tildes ni mayúsculas; con homónimos no se elige).
+          const empleadoMatch = buscarTrabajadorPorRut(empleados, get(row, 'rut'))
+            || buscarTrabajadorPorNombre(empleados, get(row, 'empleado'));
 
           return {
             _row: i + 2,
@@ -2191,8 +2207,9 @@ function ImportarExcelModal({ empresaId, onClose, machines, projects, empleados 
             machineType:        machine?.type      || get(row, 'tipo maquina'),
             machineMarca:       machine?.marca     || get(row, 'marca'),
             operador:           get(row, 'empleado'),
+            trabajadorId:       empleadoMatch && !empleadoMatch._legacy ? empleadoMatch.id : '',
             rut: (() => {
-              const r = empleadoMatch?.rut || '';
+              const r = empleadoMatch?.rut || get(row, 'rut') || '';
               if (!r) return '';
               // Formatear con puntos si no los tiene: 12345678-9 → 12.345.678-9
               const [num, dv] = r.replace(/\./g, '').split('-');
@@ -2263,7 +2280,7 @@ function ImportarExcelModal({ empresaId, onClose, machines, projects, empleados 
           projectId: fila.projectId, projectName: fila.projectName,
           machineId: fila.machineId, machinePatente: fila.machinePatente, machineCode: fila.machineCode,
           machineName: fila.machineName, machineType: fila.machineType, machineMarca: fila.machineMarca,
-          operador: fila.operador, rut: fila.rut || '',
+          operador: fila.operador, rut: fila.rut || '', trabajadorId: fila.trabajadorId || '',
           horometroInicial: fila.horometroInicial, horometroFinal: fila.horometroFinal,
           kilometrajeInicial: fila.kilometrajeInicial, kilometrajeFinal: fila.kilometrajeFinal,
           cargaCombustible: fila.cargaCombustible,

@@ -21,7 +21,15 @@ import { paramsDe } from './parametros';
 import { lineaDePago } from './nominaBanco';
 // Se usaba sin importar: pulsar "acuse de recibo" lanzaba ReferenceError.
 import { registrarAcuseRecibo } from './acuse';
-import { hoyISO } from '../../lib/fechas';
+import { hoyISO, desdeISO } from '../../lib/fechas';
+
+// Días de calendario (Chile) desde hoy hasta una fecha "AAAA-MM-DD": 0 = hoy,
+// negativo = ya pasó. `new Date("AAAA-MM-DD")` es medianoche UTC (21:00 del
+// día anterior en Chile), y los contratos aparecían vencidos un día antes.
+function diasHasta(iso) {
+  const d = desdeISO(iso), h = desdeISO(hoyISO());
+  return d && h ? Math.round((d - h) / 86400000) : NaN;
+}
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
   COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT,
@@ -150,7 +158,7 @@ function DashboardSection() {
   // Contratos por vencer
   const vigentes = contratos.filter(c => c.estado === 'vigente' && c.fechaFin);
   vigentes.forEach(c => {
-    const diasRestantes = Math.ceil((new Date(c.fechaFin) - hoy) / 86400000);
+    const diasRestantes = diasHasta(c.fechaFin);
     const t = trabajadores.find(t => t.id === c.trabajadorId);
     const nombre = t ? `${t.nombre} ${t.apellidoPaterno}` : 'Trabajador';
     if (diasRestantes < 0) {
@@ -183,7 +191,8 @@ function DashboardSection() {
   const finSemana = new Date(inicioSemana); finSemana.setDate(inicioSemana.getDate() + 6);
   activos.forEach(t => {
     if (!t.fechaNacimiento) return;
-    const fn = new Date(t.fechaNacimiento);
+    const fn = desdeISO(t.fechaNacimiento);
+    if (!fn) return;
     const esté = new Date(hoy.getFullYear(), fn.getMonth(), fn.getDate());
     if (esté >= inicioSemana && esté <= finSemana) {
       alertas.push({ tipo: 'verde', icono: '🎂', texto: `Cumpleaños: ${t.nombre} ${t.apellidoPaterno} — ${esté.toLocaleDateString('es-CL')}`, cat: 'Evento' });
@@ -194,7 +203,8 @@ function DashboardSection() {
   activos.forEach(t => {
     const c = contratos.find(c => c.trabajadorId === t.id && c.estado === 'vigente');
     if (!c?.fechaInicio) return;
-    const fi = new Date(c.fechaInicio);
+    const fi = desdeISO(c.fechaInicio);
+    if (!fi) return;
     if (fi.getMonth() === hoy.getMonth() && fi.getFullYear() < hoy.getFullYear()) {
       const anios = hoy.getFullYear() - fi.getFullYear();
       alertas.push({ tipo: 'verde', icono: '🏆', texto: `Aniversario: ${t.nombre} ${t.apellidoPaterno} — ${anios} año${anios !== 1 ? 's' : ''} este mes`, cat: 'Evento' });
@@ -237,7 +247,7 @@ function DashboardSection() {
   // ── Próximos vencimientos (30 días) ──
   const proximosVenc = vigentes
     .map(c => {
-      const dias = Math.ceil((new Date(c.fechaFin) - hoy) / 86400000);
+      const dias = diasHasta(c.fechaFin);
       const t = trabajadores.find(t => t.id === c.trabajadorId);
       return { ...c, diasRestantes: dias, _trabajador: t };
     })
@@ -485,7 +495,7 @@ function DashboardSection() {
           <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Contratos</p>
           {[
             ['Vigentes', contratos.filter(c => c.estado === 'vigente').length, 'text-emerald-600', 'bg-emerald-100'],
-            ['Por vencer', vigentes.filter(c => { const d = Math.ceil((new Date(c.fechaFin) - hoy) / 86400000); return d <= 30 && d > 0; }).length, 'text-amber-600', 'bg-amber-100'],
+            ['Por vencer', vigentes.filter(c => { const d = diasHasta(c.fechaFin); return d <= 30 && d >= 0; }).length, 'text-amber-600', 'bg-amber-100'],
             ['Terminados', contratos.filter(c => c.estado === 'terminado').length, 'text-slate-500', 'bg-slate-100'],
           ].map(([l, v, tc, bg]) => (
             <div key={l} className="flex items-center justify-between py-1.5">
@@ -599,7 +609,7 @@ function TrabajadoresSection() {
       const alguno = contratos.some(c => c.trabajadorId === row.id);
       alerts.push({ nivel: alguno ? 'amber' : 'red', texto: alguno ? 'Sin contrato vigente' : 'Sin contrato registrado' });
     } else if (contrato.fechaFin) {
-      const dias = Math.ceil((new Date(contrato.fechaFin) - hoy) / 86400000);
+      const dias = diasHasta(contrato.fechaFin);
       if (dias < 0) alerts.push({ nivel: 'red', texto: `Contrato vencido hace ${Math.abs(dias)} día${Math.abs(dias) !== 1 ? 's' : ''}` });
       else if (dias <= 15) alerts.push({ nivel: 'red', texto: `Contrato vence en ${dias} día${dias !== 1 ? 's' : ''}` });
       else if (dias <= 30) alerts.push({ nivel: 'amber', texto: `Contrato vence en ${dias} días` });

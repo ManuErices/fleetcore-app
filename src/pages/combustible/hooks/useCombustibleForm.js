@@ -9,6 +9,7 @@ import { useEmpresaData } from '../../../hooks/useEmpresaData';
 import { useEmpresa } from '../../../lib/useEmpresa';
 import { useSurtidorStock } from './useSurtidorStock';
 import { hoyISO } from '../../../lib/fechas';
+import { obraDuplicada, mensajeObraDuplicada } from '../../../lib/obras';
 
 // Fecha de hoy en Chile (toISOString daba la de UTC: desde las 21:00 ya era "mañana").
 const TODAY = hoyISO;
@@ -565,6 +566,24 @@ export function useCombustibleForm(empresaId, onClose, isReportesView) {
     }
     try {
       setLoading(true);
+      // Una obra por nombre y código: si ya existe (aunque esté desactivada,
+      // por eso se leen todas) se selecciona la existente en vez de duplicarla.
+      let todas = projects || [];
+      try { todas = (await getDocs(collection(db, 'empresas', empresaId, 'projects'))).docs.map(d => ({ id: d.id, ...d.data() })); } catch { /* sin conexión: se compara con las cargadas */ }
+      const existente = obraDuplicada(todas, { codigo: nuevoProyecto.codigo, nombre: nuevoProyecto.name });
+      if (existente) {
+        if (existente.active === false) {
+          toast({ type: 'warning', message: `${mensajeObraDuplicada(existente)} Pide a la oficina que la active.` });
+          return;
+        }
+        setProjects(prev => prev.some(p => p.id === existente.id) ? prev : [...prev, existente]);
+        setDatosControl(prev => ({ ...prev, projectId: existente.id }));
+        cargarEstaciones(existente.id);
+        setShowModalProyecto(false);
+        setNuevoProyecto({ name: '', codigo: '' });
+        toast({ type: 'info', message: `${mensajeObraDuplicada(existente)} Se seleccionó la existente.` });
+        return;
+      }
       const docRef = await addDoc(collection(db, 'empresas', empresaId, 'projects'), {
         name: nuevoProyecto.name.trim(),
         codigo: nuevoProyecto.codigo.trim(),

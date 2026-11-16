@@ -91,7 +91,8 @@ function useActivos() {
         const snap = await getDocs(collection(db, "empresas", empresaId, "machines"));
         if (!vivo) return;
         // Solo bienes de la empresa: se excluyen arrendadas, leasing (ver
-        // DEPRECIAR_LEASING) e inactivas. Antes entraba toda máquina activa.
+        // DEPRECIAR_LEASING) e inactivas sin fecha de baja. Las dadas de baja
+        // entran y se deprecian hasta el mes de la baja.
         const { depreciables, excluidas: exc } = clasificarActivos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setExcluidas(exc);
         setActivos(depreciables.map(m => ({
@@ -102,6 +103,8 @@ function useActivos() {
           valorResidual:  m.valorResidual  || "",
           fechaCompra:    m.fechaCompra    || "",
           vidaUtilAnios:  m.vidaUtilAnios  || "",
+          // Dada de baja: se deprecia hasta ese mes (depreciacionEntre)
+          fechaBaja:      m.fechaBaja      || "",
         })));
       } catch (e) { console.error("useActivos:", e); }
       if (vivo) setCargando(false);
@@ -275,7 +278,7 @@ export default function ContabilidadDepreciacion() {
                   </td>
                   <td className="px-2 py-2 text-[14px]">
                     {d.monto > 0
-                      ? <span className="text-cuaderno-grafito">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}</span>
+                      ? <span className="text-cuaderno-grafito">mes {d.mesN ?? "?"} de {d.totalMeses ?? "?"}{d.fechaBaja ? ` · baja ${d.fechaBaja}` : ""}</span>
                       : <Resaltado color="durazno">{d.motivo}</Resaltado>}
                   </td>
                 </tr>

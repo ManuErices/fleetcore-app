@@ -16,6 +16,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { guardarMaquina, estuvoEnObra, REFERENCIAS_MAQUINA, reemplazarIds } from "./maquinas";
+import { obraDuplicada, mensajeObraDuplicada } from "./obras";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "./firebase";
 
@@ -74,7 +75,17 @@ export async function listAllProjects(empresaId) {
 }
 
 // Crea o actualiza un proyecto
+// Rechaza (error code 'obra-duplicada', .obra = la existente) una obra con el
+// mismo código o nombre que otra de la empresa, activa o no.
 export async function upsertProject(empresaId, project) {
+  const todas = (await getDocs(EMPRESA_COL(empresaId, 'projects'))).docs.map(d => ({ id: d.id, ...d.data() }));
+  const choque = obraDuplicada(todas, { codigo: project.codigo, nombre: project.name, id: project.id });
+  if (choque) {
+    const e = new Error(mensajeObraDuplicada(choque));
+    e.code = 'obra-duplicada';
+    e.obra = choque;
+    throw e;
+  }
   const data = {
     name: String(project.name || '').trim(),
     codigo: String(project.codigo || '').trim(),
@@ -100,21 +111,30 @@ export async function toggleProjectActive(empresaId, projectId, active) {
 }
 
 // Colecciones con documentos de una obra (campo projectId), con su nombre para el aviso
-const REFERENCIAS_OBRA = [
+// [colección, nombre para el aviso, campos donde va el id (por defecto projectId)]
+export const REFERENCIAS_OBRA = [
   ['dailyLogs', 'registros diarios'], ['fuelLogs', 'recargas de combustible'],
   ['combustibleRegistros', 'registros del camión combustible'], ['purchaseOrders', 'órdenes de compra'],
   ['subcontratos', 'subcontratos'], ['rendiciones', 'rendiciones'],
   ['employeeMonthlyData', 'liquidaciones (Excel)'], ['estadoPagoIngresos', 'ingresos del estado de pago'],
+  // WorkFleet guarda la obra en la raíz o dentro de datosControl
+  ['reportes_combustible', 'reportes de combustible (WorkFleet)', ['projectId', 'datosControl.projectId']],
+  ['reportes_detallados', 'reportes diarios (WorkFleet)', ['projectId', 'datosControl.projectId']],
+  ['trabajadores', 'trabajadores'], ['centros_costo', 'centros de costo'],
 ];
 
 /** Cuántos documentos usan la obra: { "órdenes de compra": 12, ... }. */
 export async function contarReferenciasObra(empresaId, projectId) {
   const conteo = {};
-  await Promise.all(REFERENCIAS_OBRA.map(async ([col, nombre]) => {
-    try {
-      const snap = await getDocs(query(EMPRESA_COL(empresaId, col), where("projectId", "==", projectId)));
-      if (snap.size) conteo[nombre] = snap.size;
-    } catch { /* colección sin permiso o inexistente */ }
+  await Promise.all(REFERENCIAS_OBRA.map(async ([col, nombre, campos = ['projectId']]) => {
+    const ids = new Set();
+    await Promise.all(campos.map(async (campo) => {
+      try {
+        const snap = await getDocs(query(EMPRESA_COL(empresaId, col), where(campo, "==", projectId)));
+        snap.docs.forEach(d => ids.add(d.id));
+      } catch { /* colección sin permiso o inexistente */ }
+    }));
+    if (ids.size) conteo[nombre] = ids.size;
   }));
   // Máquinas: las que están hoy o estuvieron en la obra (historialObras)
   const maquinas = (await getDocs(EMPRESA_COL(empresaId, 'machines'))).docs.map(d => d.data());

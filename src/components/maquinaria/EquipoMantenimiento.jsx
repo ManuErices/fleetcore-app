@@ -38,6 +38,15 @@ const DISPONIBILIDAD = [
   { id: "no_disponible", label: "No disponible" },
 ];
 
+// Fecha para mostrar: un "AAAA-MM-DD" se toma como día de calendario (con
+// new Date(texto) se leía en UTC y se mostraba un día antes en Chile); un
+// instante completo (ISO con hora) se muestra en la hora local.
+function fmtFecha(v) {
+  if (!v) return "—";
+  const d = (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) ? desdeISO(v) : new Date(v);
+  return d && !isNaN(d) ? d.toLocaleDateString("es-CL") : String(v);
+}
+
 function estadoVencimiento(fechaVenc) {
   if (!fechaVenc) return { label: "Sin vencimiento", color: "text-slate-400" };
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
@@ -537,7 +546,7 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                           <p className="font-bold text-slate-900 text-sm">{tipoLabel}</p>
                           <p className="text-xs text-slate-500">
                             {d.numero ? `N° ${d.numero} · ` : ""}
-                            {d.fechaVencimiento ? `Vence: ${new Date(d.fechaVencimiento).toLocaleDateString("es-CL")}` : "Sin vencimiento"}
+                            {d.fechaVencimiento ? `Vence: ${fmtFecha(d.fechaVencimiento)}` : "Sin vencimiento"}
                           </p>
                           <p className={`text-xs mt-0.5 ${est.color}`}>{est.label}</p>
                         </div>
@@ -650,7 +659,7 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                         const delta = prev ? l.valor - prev.valor : null;
                         return (
                           <p key={i} className="text-[11px] text-slate-500">
-                            {new Date(l.fecha).toLocaleDateString("es-CL")} ·{" "}
+                            {fmtFecha(l.fecha)} ·{" "}
                             <strong className="text-slate-700">{Number(l.valor).toLocaleString("es-CL")} {medidorUnidad}</strong>
                             {delta != null && delta !== 0 && (
                               <span className="text-slate-400"> ({delta > 0 ? "+" : ""}{delta.toLocaleString("es-CL")})</span>
@@ -823,7 +832,7 @@ export default function EquipoMantenimiento({ machine, puedeEditar, onClose, onU
                       <div key={ev.id} className="border border-slate-200 rounded-xl p-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-black uppercase text-slate-500">{ev.tipo}</span>
-                          <span className="text-xs text-slate-400">{ev.fecha ? new Date(ev.fecha).toLocaleDateString("es-CL") : "—"}</span>
+                          <span className="text-xs text-slate-400">{fmtFecha(ev.fecha)}</span>
                         </div>
                         <p className="text-sm text-slate-800 mt-1">{ev.trabajoRealizado || "Sin descripción"}</p>
                         <p className="text-xs text-slate-500 mt-1">
@@ -1201,7 +1210,7 @@ function CorreccionMedidorModal({ actual, unidad, etiqueta, correcciones, saving
             <div className="space-y-1 max-h-28 overflow-y-auto">
               {correcciones.slice().reverse().map((c, i) => (
                 <p key={i} className="text-[11px] text-slate-500 leading-snug">
-                  {new Date(c.fecha).toLocaleDateString("es-CL")} ·{" "}
+                  {fmtFecha(c.fecha)} ·{" "}
                   {Number(c.anterior ?? 0).toLocaleString("es-CL")} → {Number(c.nuevo).toLocaleString("es-CL")} · {c.motivo}
                 </p>
               ))}

@@ -18,6 +18,11 @@
  *     desde el mes SIGUIENTE a la compra y hasta completar la vida útil. Un
  *     activo sin fecha de compra NO se deprecia (antes se depreciaba para
  *     siempre): se lista como "sin fecha de compra" para que alguien la ingrese.
+ *
+ *   · Bajas: una máquina dada de baja (`fechaBaja`, Admin → Máquinas) se
+ *     deprecia hasta el mes de la baja inclusive y nada después. Antes, al
+ *     quedar inactiva desaparecía del año completo (también de los meses en
+ *     que sí estuvo en uso). Una inactiva SIN fechaBaja sigue excluida.
  */
 import { propiedadNormal, estaActiva } from "../maquinas";
 import { partesISO } from "../fechas";
@@ -32,7 +37,7 @@ const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0;
  * Las fichas sin `ownership` se consideran propias (mismo criterio que esPropia).
  */
 export function motivoNoDepreciable(m) {
-  if (!estaActiva(m)) return "inactiva";
+  if (!estaActiva(m) && !m?.fechaBaja) return "inactiva";
   const p = propiedadNormal(m?.ownership) || "OWN";
   if (p === "OWN" || p === "CREDITO_AUTO") return null;
   if (p === "LEASING") return DEPRECIAR_LEASING ? null : "leasing";
@@ -82,14 +87,17 @@ export function depreciacionEntre(activo, vidaAnios, desde, hasta) {
 
   const totalMeses = Math.round(anios * 12);
   const primero = compra + 1;              // mes siguiente a la compra
-  const ultimo  = compra + totalMeses;     // último mes de vida útil
+  const finVida = compra + totalMeses;     // último mes de vida útil
+  const baja    = activo?.fechaBaja ? indiceMes(activo.fechaBaja) : null;
+  const ultimo  = baja !== null ? Math.min(finVida, baja) : finVida;   // hasta el mes de la baja inclusive
   const d = indiceMes(desde), h = indiceMes(hasta);
   if (d === null || h === null || h < d) return { monto: 0, meses: 0, motivo: "Período inválido" };
 
   const meses = Math.max(0, Math.min(h, ultimo) - Math.max(d, primero) + 1);
   if (meses === 0) {
     return { monto: 0, meses: 0, totalMeses,
-      motivo: h < primero ? "Aún no entra en servicio" : "Totalmente depreciado" };
+      motivo: h < primero ? "Aún no entra en servicio"
+        : (baja !== null && baja < finVida && d > baja) ? `Dada de baja (${activo.fechaBaja})` : "Totalmente depreciado" };
   }
   const cuotaMes = (valor - residual) / totalMeses;
   return {
