@@ -15,7 +15,7 @@ import OrganigramaVertical, { generarPDFOrganigrama } from './OrganigramaVertica
 import { hoyISO as hoyChile } from '../../lib/fechas';
 const { inp, AREAS, AFPS, ISAPRES, TIPOS_CONTRATO, JORNADAS, CENTROS_COSTO,
   CAUSALES_TERMINO, TIPOS_PERIODO, MESES, IMM_2026, TASAS, TASAS_AFP,
-  COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA, PLAN_CUENTAS_DEFAULT,
+  COLORES_AREA, UTM_DEFAULT, TRAMOS_IUT, TIPOS_ANEXO, ESTADOS_DIA,
   Modal, ConfirmDialog, Sparkline, DonutChart, BarraH, LineaMini, KPICard,
   SelectorTrabajadorModal,
   mesAnioKey, calcularTasaRotacion, ultimosMeses, exportarReporteCSV } = Shared;
@@ -4125,8 +4125,6 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
   const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [validRuts, setValidRuts] = useState(null); // null=no validado
   const [validando, setValidando] = useState(false);
-  const [planCuentas, setPlanCuentas] = useState(PLAN_CUENTAS_DEFAULT);
-  const [editPlan, setEditPlan] = useState(false);
   // Contexto único del período e indicadores (UTM/UF) cargados de verdad.
   const ctx = useContextoPeriodo(empresaId);
   const ind = useIndicadoresPeriodo(empresaId, filtroMes, filtroAnio);
@@ -4561,60 +4559,31 @@ function ContabilidadSection({ initialTab = 'asientos' }) {
           ════════════════════════════════════ */}
           {tabInner === 'plan' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Plan de cuentas contables</p>
-                  <p className="text-xs text-slate-400 mt-0.5">Edita los códigos para adaptarlos a tu sistema contable (Softland, Conta+, etc.)</p>
-                </div>
-                <button onClick={() => setEditPlan(e => !e)}
-                  className={`px-4 py-2 font-bold text-sm rounded-xl transition-colors ${editPlan ? 'bg-purple-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
-                  {editPlan ? 'Guardar cambios' : '✏ Editar códigos'}
-                </button>
+              <div>
+                <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Plan de cuentas contables</p>
+                <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                  Las cuentas contables de las remuneraciones ya no se editan aquí. Se configuran una sola vez en
+                  {' '}<strong>Contabilidad → Libro Diario → Importar → Centralizar remuneraciones (RRHH)</strong>, que
+                  arma cada mes el asiento de centralización con las mismas liquidaciones y el mismo motor del Libro de
+                  Remuneraciones Electrónico, y guarda a qué cuenta del plan contable va cada concepto (gasto de
+                  remuneraciones, leyes sociales, AFP, salud, AFC, mutual, impuesto único, líquido por pagar…).
+                </p>
+                <p className="text-xs text-slate-400 mt-2">
+                  El editor que había antes no guardaba los cambios y no lo usaba ningún informe. La pestaña
+                  {' '}"Asientos contables" sigue mostrando el resumen del período para revisión.
+                </p>
               </div>
-
-              <div className="overflow-x-auto rounded-xl border border-slate-100">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr style={{ background: "#1e1b4b" }}>
-                      {['Lado', 'Código', 'Nombre de cuenta', 'Tipo'].map(h => (
-                        <th key={h} className="px-4 py-3 text-[10px] font-black text-slate-300 uppercase tracking-widest text-left">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {planCuentas.map((c, i) => (
-                      <tr key={i} className={`hover:bg-slate-50 ${c.lado === 'haber' ? 'bg-blue-50/20' : ''}`}>
-                        <td className="px-4 py-2.5">
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${c.lado === 'debe' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {c.lado.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {editPlan
-                            ? <input className="font-mono text-xs border border-slate-200 rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-purple-400"
-                              value={c.codigo} onChange={e => setPlanCuentas(p => p.map((x, j) => j === i ? { ...x, codigo: e.target.value } : x))} />
-                            : <span className="font-mono font-bold text-slate-600">{c.codigo}</span>}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {editPlan
-                            ? <input className="text-xs border border-slate-200 rounded-lg px-2 py-1 w-full focus:outline-none focus:border-purple-400"
-                              value={c.nombre} onChange={e => setPlanCuentas(p => p.map((x, j) => j === i ? { ...x, nombre: e.target.value } : x))} />
-                            : <span className="text-slate-700">{c.nombre}</span>}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${c.tipo === 'gasto' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                            {c.tipo}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="bg-slate-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-slate-500"><strong>Compatibilidad:</strong> Los códigos del plan de cuentas son editables para adaptarse a Softland, Conta+, TuCuenta u otro sistema contable. Los cambios aplican solo a la sesión actual. Para persistirlos, copia los códigos actualizados a tu sistema.</p>
-              </div>
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.setItem('selectedApp', 'contabilidad');
+                    sessionStorage.setItem('contabilidad:vista', 'diario');
+                  } catch { /* almacenamiento bloqueado: se abre en la vista por defecto */ }
+                  window.location.assign('/contabilidad');
+                }}
+                className="px-4 py-2 font-bold text-sm rounded-xl bg-purple-600 hover:bg-purple-700 text-white transition-colors">
+                Ir a Contabilidad → Libro Diario
+              </button>
             </div>
           )}
 
