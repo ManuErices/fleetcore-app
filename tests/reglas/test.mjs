@@ -8,7 +8,7 @@
  *   npx firebase emulators:exec --only firestore,storage --project demo-test "node test.mjs"
  */
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, deleteDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { ref, uploadString, getBytes } from "firebase/storage";
 import fs from "node:fs";
 const env = await initializeTestEnvironment({
@@ -124,6 +124,38 @@ await t("operador lee nóminas de pago → negado", assertFails(getDoc(doc(fsOf(
 
 await t("operador lee credenciales QR → negado", assertFails(getDoc(doc(fsOf("opA"),"empresas/A/credenciales_qr/trab_t1"))));
 await t("admin guarda credencial QR → permitido", assertSucceeds(setDoc(doc(fsOf("adminA"),"empresas/A/credenciales_qr/trab_t1"),{email:"a",password:"b"})));
+// ── finiquito: un usuario con estado distinto de 'activo' ya no escribe
+await env.withSecurityRulesDisabled(async c=>{
+  const db=c.firestore();
+  await setDoc(doc(db,"users/opFiniq"),{role:"operador",empresaId:"A",modulos:["workfleet"],estado:"finiquitado"});
+  await setDoc(doc(db,"users/opActivo"),{role:"operador",empresaId:"A",modulos:["workfleet"],estado:"activo"});
+  await setDoc(doc(db,"users/admvoFinFiniq"),{role:"administrativo",empresaId:"A",modulos:["finanzas"],estado:"finiquitado"});
+  await setDoc(doc(db,"users/adminInactivo"),{role:"admin_contrato",empresaId:"A",estado:"inactivo"});
+});
+await t("operador finiquitado escribe máquinas → negado", assertFails(setDoc(doc(fsOf("opFiniq"),"empresas/A/machines/mf"),{x:1})));
+await t("operador finiquitado usa correlativo combustible → negado", assertFails(setDoc(doc(fsOf("opFiniq"),"empresas/A/counters/combustible"),{n:2})));
+await t("operador activo (estado explícito) escribe máquinas → permitido", assertSucceeds(setDoc(doc(fsOf("opActivo"),"empresas/A/machines/ma"),{x:1})));
+await t("operador sin campo estado escribe máquinas → permitido", assertSucceeds(setDoc(doc(fsOf("opA"),"empresas/A/machines/m3"),{x:1})));
+await t("Finanzas finiquitado escribe flujo → negado", assertFails(setDoc(doc(fsOf("admvoFinFiniq"),"empresas/A/flujo_pagos/pf"),{valor:1})));
+await t("admin inactivo guarda credencial QR → negado", assertFails(setDoc(doc(fsOf("adminInactivo"),"empresas/A/credenciales_qr/trab_t2"),{email:"a",password:"b"})));
+await t("finiquitado no puede reactivarse solo → negado", assertFails(updateDoc(doc(fsOf("opFiniq"),"users/opFiniq"),{estado:"activo"})));
+await t("admin marca usuario finiquitado → permitido", assertSucceeds(updateDoc(doc(fsOf("adminA"),"users/opActivo"),{estado:"finiquitado"})));
+await t("admin borra credencial QR del finiquitado → permitido", (async()=>{const db=fsOf("adminA");await setDoc(doc(db,"empresas/A/credenciales_qr/trab_t9"),{email:"a",password:"b"});await assertSucceeds(deleteDoc(doc(db,"empresas/A/credenciales_qr/trab_t9")));})());
+await t("admin busca usuarios vinculados a una ficha → permitido", assertSucceeds(getDocs(query(collection(fsOf("adminA"),"users"),where("empresaId","==","A"),where("trabajadorId","==","t1")))));
+// ── portal: el trabajador se vincula solo a su propia ficha
+await env.withSecurityRulesDisabled(async c=>{
+  const db=c.firestore();
+  await setDoc(doc(db,"users/trabNuevo"),{role:"trabajador",empresaId:"A",estado:"activo"});
+  await setDoc(doc(db,"empresas/A/trabajadores/t5"),{nombre:"Nuevo",email:"trabNuevo@x.cl",rut:"1-9"});
+  await setDoc(doc(db,"empresas/A/trabajadores/t6"),{nombre:"Otro",email:"otro@x.cl"});
+});
+await t("trabajador busca su ficha por email → permitido", assertSucceeds(getDocs(query(collection(fsOf("trabNuevo"),"empresas/A/trabajadores"),where("email","==","trabNuevo@x.cl")))));
+await t("trabajador lista toda la nómina → negado", assertFails(getDocs(collection(fsOf("trabNuevo"),"empresas/A/trabajadores"))));
+await t("trabajador se vincula a ficha ajena (portal) → negado", assertFails(setDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores_portal/trabNuevo"),{trabajadorDocId:"t6"})));
+await t("trabajador se adueña de ficha ajena → negado", assertFails(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t6"),{portalUid:"trabNuevo"})));
+await t("trabajador cambia su sueldo al vincularse → negado", assertFails(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",sueldoBase:9})));
+await t("trabajador se vincula a su ficha (mismo email) → permitido", assertSucceeds(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",portalEmail:"trabNuevo@x.cl"})));
+await t("…y crea su vínculo de portal → permitido", assertSucceeds(setDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores_portal/trabNuevo"),{trabajadorDocId:"t5"})));
 console.log(`\n${ok} ok, ${fail} fallos`);
 await env.cleanup();
 process.exit(fail?1:0);

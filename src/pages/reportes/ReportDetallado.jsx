@@ -14,7 +14,18 @@ import {
   validarCombustible,
 } from "../../lib/reportesConfig";
 import { hoyISO } from "../../lib/fechas";
-import { guardarMaquina } from "../../lib/maquinas";
+import { guardarMaquina, estaActiva } from "../../lib/maquinas";
+import { fetchTrabajadores, trabajadorActivo, buscarTrabajadorPorRut, nombreCompletoTrabajador } from "../../lib/trabajadores";
+
+// Ficha del maestro de trabajadores que corresponde a la cuenta: por el
+// trabajadorId del usuario, su RUT o su email. null si no se encuentra.
+function fichaDeUsuario(lista, { trabajadorId, rut, email } = {}) {
+  if (trabajadorId) { const t = lista.find(x => x.id === trabajadorId); if (t) return t; }
+  const porRut = buscarTrabajadorPorRut(lista, rut);
+  if (porRut) return porRut;
+  const e = String(email || '').toLowerCase().trim();
+  return e ? lista.find(x => String(x.email || x.portalEmail || '').toLowerCase().trim() === e) || null : null;
+}
 
 // Fecha de hoy en Chile (toISOString daba la de UTC: desde las 21:00 ya era "mañana").
 const isoToday = hoyISO;
@@ -57,6 +68,18 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
   const { toast, toasts, removeToast } = useToast();
   const [projects, setProjects] = useState([]);
   const [operadoresDisponibles, setOperadoresDisponibles] = useState([]);
+  // Cuenta que usa la pantalla, para ubicar su ficha de trabajador
+  const miCuentaRef = useRef({});
+  const miFichaId = () => {
+    const f = fichaDeUsuario(operadoresDisponibles.filter(o => !o._legacy), miCuentaRef.current);
+    return f?.id || '';
+  };
+  // Cuando ya cargaron los operadores, el parte del propio operador queda
+  // con su trabajadorId (si el admin no eligió otro).
+  useEffect(() => {
+    if (!operadoresDisponibles.length) return;
+    setFormData(prev => prev.trabajadorId ? prev : { ...prev, trabajadorId: miFichaId() });
+  }, [operadoresDisponibles]);
   const [userRole, setUserRole] = useState('operador');
   const [selectedProject, setSelectedProject] = useState("");
   const [machines, setMachines] = useState([]);
@@ -96,7 +119,8 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
     machineId: '',
     operador: '',
     rut: '',
-    userId: '',
+    userId: '',        // cuenta (auth uid) que registra el parte
+    trabajadorId: '',  // ficha del operador en el maestro de trabajadores
     cargaCombustible: '',
     horometroInicial: '',
     horometroFinal: '',
@@ -230,17 +254,15 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
         if (userDoc.exists()) {
           setUserRole(userDoc.data().role || 'operador');
         }
-        // Cargar operadores de la empresa. Según el módulo, la gente vive en
-        // 'employees' o en 'trabajadores'; se cargan ambas y se fusionan.
-        const [empSnap, trabSnap] = await Promise.all([
-          getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] })),
-          getDocs(collection(db, 'empresas', empresaId, 'trabajadores')).catch(() => ({ docs: [] })),
-        ]);
-        const porId = new Map();
-        [...empSnap.docs, ...trabSnap.docs].forEach(d => {
-          if (!porId.has(d.id)) porId.set(d.id, { id: d.id, ...d.data() });
-        });
-        setOperadoresDisponibles([...porId.values()]);
+        // Operadores: el maestro de trabajadores (solo fichas activas: un
+        // finiquitado no reporta). La colección antigua 'employees' se lee
+        // solo si la empresa todavía no tiene trabajadores.
+        let lista = await fetchTrabajadores(empresaId).catch(() => []);
+        if (!lista.length) {
+          const empSnap = await getDocs(collection(db, 'empresas', empresaId, 'employees')).catch(() => ({ docs: [] }));
+          lista = empSnap.docs.map(d => ({ id: d.id, ...d.data(), _legacy: true }));
+        }
+        setOperadoresDisponibles(lista.filter(trabajadorActivo));
       } catch (e) { console.error('Error cargando operadores:', e); }
     })();
   }, [empresaId]);
@@ -253,7 +275,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       const snap = await getDocs(
         query(collection(db, 'empresas', empresaId, 'projects'), orderBy('name'))
       );
-      const p = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const p = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.active !== false);
       console.log("\u{1F4CB} Proyectos cargados:", p.length, p);
       setProjects(p);
       if (p.length > 0) setSelectedProject(p[0].id);
@@ -295,11 +317,13 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
           userName = user.displayName || user.email?.split('@')[0] || '';
         }
 
+        miCuentaRef.current = { trabajadorId: userDoc.exists() ? userDoc.data().trabajadorId || '' : '', rut: userRut, email: user.email };
         setFormData(prev => ({
           ...prev,
           operador: userName,
           rut: userRut,
           userId: user.uid,
+          trabajadorId: miCuentaRef.current.trabajadorId,
           numeroReporte: ''
         }));
       } catch (error) {
@@ -324,7 +348,8 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       try {
         // ✅ Cargar máquinas sin orderBy para evitar error de índice faltante
         const snap = await getDocs(collection(db, 'empresas', empresaId, 'machines'));
-        const m = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Las inactivas o dadas de baja no reciben partes nuevos
+        const m = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(estaActiva);
         console.log("🚜 Máquinas cargadas:", m.length, "para empresa:", empresaId);
         setMachines(m);
       } catch (e) {
@@ -595,6 +620,7 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
       operador: userNombre,
       rut: userRut,
       userId: user?.uid || '',
+      trabajadorId: miFichaId(),
       actividadesEfectivas: [{ actividad: '', horaInicio: '', horaFin: '' }],
       tiemposNoEfectivos: [{ motivo: '', horaInicio: '', horaFin: '' }],
       tiemposProgramados: {
@@ -904,15 +930,18 @@ export default function ReportDetallado({ onClose, onSaved } = {}) {
                       </label>
                       <select
                         className="input-modern w-full text-sm sm:text-base"
-                        value={formData.userId || ''}
+                        value={formData.trabajadorId || formData.employeeId || ''}
                         onChange={(e) => {
                           const op = operadoresDisponibles.find(o => o.id === e.target.value);
                           if (op) {
+                            // trabajadorId = ficha del operador; userId sigue
+                            // siendo la cuenta que transcribe el parte.
                             setFormData(prev => ({
                               ...prev,
-                              operador: op.nombre || op.name || op.displayName || [op.nombres, op.apellidoPaterno, op.apellidoMaterno].filter(Boolean).join(' '),
+                              operador: op.displayName || nombreCompletoTrabajador(op) || op.name || '',
                               rut: op.rut || '',
-                              userId: op.id
+                              trabajadorId: op._legacy ? '' : op.id,
+                              ...(op._legacy ? { employeeId: op.id } : {}),
                             }));
                           }
                         }}

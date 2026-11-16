@@ -15,10 +15,11 @@ import {
   collection, getDocs, getDoc, doc, query, where, addDoc, updateDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { fetchTrabajadores, nombreCompletoTrabajador } from '../trabajadores';
+import { fetchTrabajadores, nombreCompletoTrabajador, trabajadorActivo } from '../trabajadores';
 import { EJECUTORES_FINANZAS, describirAccionFinanzas } from './herramientasFinanzas';
 import { EJECUTORES_EQUIPO } from './herramientasEquipo';
-import { guardarMaquina } from '../maquinas';
+import { guardarMaquina, estaActiva, normalizarPatente } from '../maquinas';
+import { obraDuplicada, mensajeObraDuplicada } from '../obras';
 import { EJECUTORES_MEJORAS, describirAccionMejoras } from './herramientasMejoras';
 
 // Herramientas que escriben en la base: el usuario las confirma antes.
@@ -124,10 +125,11 @@ const EJECUTORES = {
 
     const resultado = maquinas
       .filter(m => !m.deleted)
-      .filter(m => !solo_activas || m.active !== false)
+      .filter(m => !solo_activas || estaActiva(m))
       .filter(m => !obra_id || m.projectId === obra_id)
       .filter(m => !buscado || [m.patente, m.code, m.name, m.marca, m.modelo, m.type]
-        .some(campo => normalizar(campo).includes(buscado)))
+        .some(campo => normalizar(campo).includes(buscado))
+        || (normalizarPatente(texto) && normalizarPatente(m.patente) === normalizarPatente(texto)))
       .map(m => ({
         id: m.id,
         patente: m.patente || '',
@@ -137,7 +139,8 @@ const EJECUTORES = {
         marca: m.marca || '',
         modelo: m.modelo || '',
         obra: m.projectId ? (nombreObra.get(m.projectId) || m.projectId) : null,
-        activa: m.active !== false,
+        activa: estaActiva(m),
+        ...(m.fechaBaja ? { fecha_baja: m.fechaBaja, motivo_baja: m.motivoBaja || '' } : {}),
       }));
     return { total: resultado.length, ...recortar(resultado) };
   },
@@ -155,7 +158,11 @@ const EJECUTORES = {
         cargo: t.cargo || '',
         telefono: t.telefono || t.celular || '',
         email: t.email || t.correo || '',
-      }));
+        estado: t.estado || 'activo',
+        activo: trabajadorActivo(t),
+      }))
+      // Primero los vigentes: un finiquitado no debería elegirse para registrar nada nuevo
+      .sort((a, b) => Number(b.activo) - Number(a.activo));
     return { total: resultado.length, ...recortar(resultado) };
   },
 
@@ -282,6 +289,13 @@ const EJECUTORES = {
     if (!esAdmin(rol)) throw new Error('Tu rol no permite crear obras.');
     const limpio = String(nombre || '').trim();
     if (!limpio) throw new Error('Falta el nombre de la obra.');
+    // Una obra por nombre y por código (también contra las desactivadas).
+    const todas = (await getDocs(collection(db, 'empresas', empresaId, 'projects'))).docs.map(d => ({ id: d.id, ...d.data() }));
+    const existente = obraDuplicada(todas, { codigo, nombre: limpio });
+    if (existente) {
+      return { ok: false, ya_existia: true, obra_id: existente.id, nombre: existente.name || existente.nombre || '',
+        activa: existente.active !== false, error: mensajeObraDuplicada(existente) + ' No se creó otra.' };
+    }
     const ref = await addDoc(collection(db, 'empresas', empresaId, 'projects'), {
       name: limpio,
       codigo: String(codigo).trim(),

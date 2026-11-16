@@ -91,6 +91,31 @@ export function buscarTrabajadorPorRut(lista, rut) {
   return (lista || []).find(t => rutTrabajador(t.rut) === k) || null;
 }
 
+/**
+ * ¿La ficha está vigente? Sin campo `estado` cuenta como activa (fichas
+ * antiguas); 'inactivo' y 'finiquitado' quedan fuera de los selectores.
+ */
+export function trabajadorActivo(t) {
+  return !!t && (t.estado === undefined || t.estado === null || t.estado === '' || t.estado === 'activo');
+}
+
+/** Nombre en minúsculas, sin tildes ni espacios repetidos (para comparar). */
+export function normalizarNombrePersona(s) {
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Ficha cuyo nombre completo coincide con `nombre` (normalizado). Solo
+ * devuelve una si hay exactamente una coincidencia: con homónimos no adivina.
+ */
+export function buscarTrabajadorPorNombre(lista, nombre) {
+  const k = normalizarNombrePersona(nombre);
+  if (!k) return null;
+  const hits = (lista || []).filter(t => normalizarNombrePersona(nombreCompletoTrabajador(t)) === k);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 const vacio = (v) => v === undefined || v === null || v === '';
 
 /**

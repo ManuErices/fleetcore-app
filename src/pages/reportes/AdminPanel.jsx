@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import InviteUserPanel from "../InviteUserPanel";
 import MaquinaDetalleModal from "../../components/maquinaria/MaquinaDetalleModal";
-import { guardarMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion, cargarSurtidores, planSurtidores, migrarSurtidores, asegurarMaquina, listarMaquinas } from '../../lib/maquinas';
+import { guardarMaquina, darDeBajaMaquina, revertirBajaMaquina, MaquinaDuplicada, propiedadNormal, estaActiva, PROPIEDADES, gruposDuplicados, planNormalizacion, cargarSurtidores, planSurtidores, migrarSurtidores, asegurarMaquina, listarMaquinas } from '../../lib/maquinas';
 import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
 import { rutTrabajador, duplicadosTrabajadores } from '../../lib/trabajadores';
 import { guardarCredencialQR, leerCredencialQR, migrarContrasenas, claveOperador, claveUsuario } from '../../lib/credencialesQR';
@@ -16,6 +16,9 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, getAuth, setPersist
 import { initializeApp } from 'firebase/app';
 import { useEmpresa } from '../../lib/useEmpresa';
 import { fetchTrabajadores } from '../../lib/trabajadores';
+import { obraDuplicada, mensajeObraDuplicada } from '../../lib/obras';
+import { deleteProject, toggleProjectActive, deleteMachine } from '../../lib/db';
+import { hoyISO } from '../../lib/fechas';
 import { usePlan } from '../../hooks/usePlan';
 import {
   MODULES as CONFIG_MODULES,
@@ -1420,10 +1423,46 @@ function MaquinasSection() {
     setSaving(false);
   };
 
+  // Se borra solo una máquina sin registros (deleteMachine cuenta sus
+  // referencias). Con historia se ofrece darla de baja: queda inactiva con
+  // fecha y motivo, y sus registros siguen apuntando a ella.
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas', empresaId, 'machines', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    const maq = confirm;
     setConfirm(null);
+    try { await deleteMachine(empresaId, maq.id); load(); }
+    catch (e) {
+      if (e.code === 'maquina-con-referencias') {
+        if (!maq.fechaBaja && window.confirm(`${e.message}\n\nEliminarla dejaría esos registros sin máquina. ¿Darla de baja en su lugar?`)) abrirBaja(maq);
+        else if (maq.fechaBaja) alert(`${e.message}\n\nYa está dada de baja (${maq.fechaBaja}); se conserva por su historia.`);
+      } else alert('Error: ' + e.message);
+    }
   };
+
+  const [baja, setBaja] = useState(null); // { maquina, fecha, motivo }
+  const abrirBaja = (row) => setBaja({ maquina: row, fecha: hoyISO(), motivo: '' });
+  const confirmarBaja = async () => {
+    if (!baja?.fecha) { alert('Indica la fecha de baja.'); return; }
+    if (!baja.motivo.trim()) { alert('Indica el motivo de la baja.'); return; }
+    setSaving(true);
+    try {
+      await darDeBajaMaquina(empresaId, baja.maquina, { fecha: baja.fecha, motivo: baja.motivo });
+      setBaja(null); load();
+    } catch (e) { alert(e.message); }
+    setSaving(false);
+  };
+  const revertirBaja = async (row) => {
+    if (!window.confirm(`¿Revertir la baja de "${row.code || row.patente || row.name}"? Vuelve a quedar activa (sin obra asignada).`)) return;
+    try { await revertirBajaMaquina(empresaId, row); load(); } catch (e) { alert('Error: ' + e.message); }
+  };
+  const BajaBtn = (row) => row.fechaBaja ? (
+    <button onClick={() => revertirBaja(row)} className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg text-[10px] font-semibold transition-colors" title={`Dada de baja el ${row.fechaBaja}${row.motivoBaja ? ` · ${row.motivoBaja}` : ''}. Clic para revertir.`}>
+      Revertir baja
+    </button>
+  ) : (
+    <button onClick={() => abrirBaja(row)} className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-[10px] font-semibold transition-colors" title="Dar de baja (venta, siniestro, fin de vida útil)">
+      Dar de baja
+    </button>
+  );
 
   const DetalleBtn = (row) => (
     <button onClick={() => setDetalle(row)} className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-lg transition-colors" title="Ver detalle de la máquina">
@@ -1472,7 +1511,7 @@ function MaquinasSection() {
           const matchQ = !q || r.code?.toLowerCase().includes(q) || r.patente?.toLowerCase().includes(q) || r.type?.toLowerCase().includes(q) || r.marca?.toLowerCase().includes(q);
           const matchE = !filtroEmpresaMaq || (r.empresa || '').toUpperCase() === filtroEmpresaMaq.toUpperCase();
           return matchQ && matchE;
-        })} onEdit={openEdit} onDelete={setConfirm} extraAction={(row) => <>{DetalleBtn(row)}{QRBtn(row)}</>} emptyText="No hay máquinas registradas"
+        })} onEdit={openEdit} onDelete={setConfirm} extraAction={(row) => <>{DetalleBtn(row)}{QRBtn(row)}{BajaBtn(row)}</>} emptyText="No hay máquinas registradas"
           columns={[
             { key: 'code', label: 'Código', render: r => <button onClick={() => setDetalle(r)} className="font-mono font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded-lg text-xs transition-colors cursor-pointer" title="Ver detalle de la máquina">{r.code || r.patente || '—'}</button> },
             { key: 'patente', label: 'Patente', render: r => <span className="font-mono font-bold text-slate-700">{r.patente || '—'}</span> },
@@ -1481,9 +1520,38 @@ function MaquinasSection() {
             { key: 'modelo', label: 'Modelo' },
             { key: 'empresa', label: 'Empresa' },
             { key: 'propietario', label: 'Propietario' },
+            { key: 'active', label: 'Estado', render: r => r.fechaBaja
+              ? <span className="text-xs text-slate-500" title={r.motivoBaja || ''}>Baja {r.fechaBaja}</span>
+              : <span className={`text-xs font-semibold ${estaActiva(r) ? 'text-emerald-700' : 'text-slate-400'}`}>{estaActiva(r) ? 'Activa' : 'Inactiva'}</span> },
           ]}
         />
       </SectionCard>
+
+      <Modal isOpen={!!baja} onClose={() => setBaja(null)} title="Dar de baja máquina" color="purple">
+        {baja && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              <b>{baja.maquina.code || baja.maquina.patente || baja.maquina.name}</b> queda inactiva desde la fecha indicada y sale de su obra.
+              Su historia (partes diarios, combustible, mantenciones, contratos) se conserva, y Contabilidad la deprecia hasta el mes de la baja.
+            </p>
+            <Field label="Fecha de baja" required>
+              <input type="date" className={inputCls} value={baja.fecha} max={hoyISO()} onChange={e => setBaja({ ...baja, fecha: e.target.value })} />
+            </Field>
+            <Field label="Motivo" required>
+              <input className={inputCls} list="motivos-baja" value={baja.motivo} onChange={e => setBaja({ ...baja, motivo: e.target.value })} placeholder="Venta, siniestro, fin de vida útil, devolución…" />
+              <datalist id="motivos-baja">
+                {['Venta', 'Siniestro', 'Fin de vida útil', 'Devolución al arrendador', 'Robo'].map(m => <option key={m} value={m} />)}
+              </datalist>
+            </Field>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setBaja(null)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm">Cancelar</button>
+              <button onClick={confirmarBaja} disabled={saving} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-sm disabled:opacity-50">
+                {saving ? 'Guardando…' : 'Dar de baja'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editId ? 'Editar Máquina' : 'Nueva Máquina'} color="purple">
         <div className="space-y-4">
@@ -2179,6 +2247,10 @@ function ProyectosSection() {
   const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
 
   const save = async () => {
+    if (!form.name.trim()) { alert('El nombre del proyecto es obligatorio.'); return; }
+    // Una obra por nombre y por código: dos obras iguales dividían costos y reportes.
+    const choque = obraDuplicada(data, { codigo: form.codigo, nombre: form.name, id: editId });
+    if (choque) { alert(mensajeObraDuplicada(choque)); return; }
     setSaving(true);
     try {
       const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
@@ -2190,9 +2262,22 @@ function ProyectosSection() {
     setSaving(false);
   };
 
+  // Se borra solo una obra sin datos (deleteProject cuenta sus referencias);
+  // con datos se ofrece desactivarla para no dejar costos huérfanos.
   const del = async () => {
-    try { await deleteDoc(doc(db, 'empresas', empresaId, 'projects', confirm.id)); load(); } catch (e) { alert('Error: ' + e.message); }
+    const obra = confirm;
     setConfirm(null);
+    try { await deleteProject(empresaId, obra.id); load(); }
+    catch (e) {
+      if (e.code === 'obra-con-datos') {
+        if (obra.active !== false && window.confirm(`${e.message}\n\n¿Desactivar "${obra.name}"? Deja de aparecer en los selectores y conserva su historia.`)) {
+          try { await toggleProjectActive(empresaId, obra.id, false); load(); } catch (e2) { alert('Error: ' + e2.message); }
+        } else if (obra.active === false) alert(e.message);
+      } else alert('Error: ' + e.message);
+    }
+  };
+  const toggleActiva = async (row) => {
+    try { await toggleProjectActive(empresaId, row.id, row.active === false); load(); } catch (e) { alert('Error: ' + e.message); }
   };
 
   return (
@@ -2206,6 +2291,12 @@ function ProyectosSection() {
             { key: 'codigo', label: 'Código' },
             { key: 'mandante', label: 'Mandante' },
             { key: 'ubicacion', label: 'Ubicación', render: r => <span>{[r.comuna, r.region].filter(Boolean).join(', ') || r.ubicacion || '—'}</span> },
+            { key: 'active', label: 'Estado', render: r => (
+              <button type="button" onClick={() => toggleActiva(r)} title={r.active === false ? 'Activar' : 'Desactivar'}
+                className={`text-xs font-semibold underline-offset-2 hover:underline ${r.active === false ? 'text-slate-400' : 'text-emerald-700'}`}>
+                {r.active === false ? 'Inactiva' : 'Activa'}
+              </button>
+            ) },
           ]}
         />
       </SectionCard>

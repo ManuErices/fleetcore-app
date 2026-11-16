@@ -78,10 +78,18 @@ service cloud.firestore {
 
     // Usuario tiene acceso de lectura/escritura a la empresa
     // (cualquier rol excepto trabajador y mandante pueden operar)
+    // Un usuario finiquitado o desactivado (users.estado distinto de 'activo')
+    // conserva su cuenta pero ya no escribe: el finiquito corta el acceso.
+    // Una sola lectura de la ficha (ver la nota de PERMISOS POR ÁREA).
     function canWriteEmpresa(empresaId) {
-      return belongsToEmpresa(empresaId)
-          && userRole() != 'trabajador'
-          && userRole() != 'mandante';
+      let u = fichaUsuario();
+      let rol = u.get('role', '');
+      let eid = u.get('empresaId', null);
+      return isAuth()
+          && (eid == empresaId || empresaId in u.get('empresasIds', eid != null ? [eid] : []))
+          && rol != 'trabajador'
+          && rol != 'mandante'
+          && u.get('estado', 'activo') == 'activo';
     }
 
     // Trabajador autenticado con cuenta @mpf.cl (u otro dominio de empresa)
@@ -132,7 +140,7 @@ service cloud.firestore {
       let ms = u.get('modulos', []);
       let miembro = u.get('empresaId', '') == empresaId || empresaId in u.get('empresasIds', []);
       return rol == 'superadmin'
-          || (miembro && (rol == 'admin_contrato'
+          || (miembro && u.get('estado', 'activo') == 'activo' && (rol == 'admin_contrato'
               || ((rol == 'administrativo' || rol == 'operador')
                   && ((ms is list && ms.hasAny(modulos)) || (ms is string && ms.matches('.*(' + patron + ').*'))))));
     }
@@ -153,6 +161,7 @@ service cloud.firestore {
       let u = fichaUsuario();
       return u.get('role', '') == 'superadmin'
           || ((u.get('empresaId', '') == empresaId || empresaId in u.get('empresasIds', []))
+              && u.get('estado', 'activo') == 'activo'
               && u.get('role', '') in ['admin_contrato', 'administrativo']);
     }
 
@@ -236,16 +245,32 @@ service cloud.firestore {
         allow create: if isTrabajador()
                     && belongsToEmpresa(empresaId)
                     && request.resource.data.portalUid == request.auth.uid;
+        // …o, si RRHH ya tenía su ficha con el mismo email, la encuentra y se
+        // vincula a ella (una ficha por persona). Solo puede escribir el
+        // vínculo, y solo si la ficha no estaba vinculada a otra cuenta.
+        allow read: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.get('email', '') == request.auth.token.email;
+        allow update: if isTrabajador()
+                    && belongsToEmpresa(empresaId)
+                    && resource.data.get('email', '') == request.auth.token.email
+                    && resource.data.get('portalUid', '') in ['', null]
+                    && request.resource.data.portalUid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['portalUid', 'portalEmail', 'updatedAt']);
       }
 
       match /trabajadores_portal/{uid} {
         allow read:  if isAuth() && request.auth.uid == uid;
         allow write: if isSuperAdmin()
                      || (canWriteEmpresa(empresaId));
-        // Trabajador crea su propio vínculo al aceptar una invitación
+        // Trabajador crea su propio vínculo al aceptar una invitación, y solo
+        // hacia una ficha que ya está vinculada a su cuenta (antes podía
+        // apuntar a la ficha de cualquiera y leer sus liquidaciones).
         allow create: if isAuth() && request.auth.uid == uid
                     && belongsToEmpresa(empresaId)
-                    && isTrabajador();
+                    && isTrabajador()
+                    && exists(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores/$(request.resource.data.trabajadorDocId))
+                    && get(/databases/$(database)/documents/empresas/$(empresaId)/trabajadores/$(request.resource.data.trabajadorDocId)).data.get('portalUid', '') == request.auth.uid;
       }
 
       // ── CONTRATOS, ANEXOS, FINIQUITOS ───────────────────

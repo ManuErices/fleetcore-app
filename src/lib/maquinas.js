@@ -32,6 +32,7 @@ import {
   collection, doc, getDoc, getDocs, addDoc, setDoc, serverTimestamp, writeBatch, deleteDoc, deleteField,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import { hoyISO } from "./fechas";
 
 const col = (empresaId) => collection(db, "empresas", empresaId, "machines");
 
@@ -63,6 +64,18 @@ export function propiedadNormal(v) {
 export const esPropia = (m) => ["OWN", "LEASING", "CREDITO_AUTO"].includes(propiedadNormal(m?.ownership) || "OWN");
 export const esArrendada = (m) => propiedadNormal(m?.ownership) === "RENTED";
 export const estaActiva = (m) => m?.active !== false && m?.activo !== false;
+
+/**
+ * ¿Estaba operativa la máquina en `fecha` (AAAA-MM-DD)? Con `fechaBaja`, sí
+ * hasta ese día inclusive (aunque hoy esté inactiva): así los reportes y la
+ * depreciación de meses pasados la siguen contando. Sin fechaBaja, una
+ * máquina inactiva no cuenta en ninguna fecha (no se sabe desde cuándo).
+ */
+export function activaEn(m, fecha) {
+  if (!m) return false;
+  if (m.fechaBaja) return !fecha || fecha <= m.fechaBaja;
+  return estaActiva(m);
+}
 
 /** Llave de comparación: patente sin guiones/espacios; si no hay, el código. */
 export const normalizarPatente = (p) => String(p ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -143,10 +156,8 @@ export function camposCambiados(nuevos, original) {
 // historial). guardarMaquina lo mantiene solo cada vez que cambia la obra,
 // venga el cambio de Admin, Maquinaria, Oficina Técnica, Finanzas o el agente.
 
-export const hoyISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+// Fecha de hoy en Chile (la del dispositivo podía ser otra zona horaria).
+export { hoyISO };
 
 /** Historial tras mover la máquina de `anterior` a `nueva` en `fecha`. */
 export function moverDeObra(historial, anterior, nueva, fecha = hoyISO()) {
@@ -277,6 +288,54 @@ export async function asegurarMaquina(empresaId, datos, { origen = "", maquinas 
   const maquina = { id, ownership: "OWN", active: true, ...limpios };
   lista.push(maquina);
   return { id, creada: true, maquina };
+}
+
+// ─── Baja ───────────────────────────────────────────────────────────────────
+
+const ESTADOS_CONTRATO_CERRADO = ["finalizado", "terminado", "anulado", "cancelado", "cerrado"];
+
+/**
+ * Da de baja una máquina (venta, siniestro, fin de vida útil…) sin borrar su
+ * historia: queda `active: false`, `fechaBaja` ("AAAA-MM-DD") y `motivoBaja`,
+ * y se cierra su tramo de obra en esa fecha. Contabilidad la deprecia hasta
+ * el mes de la baja; los reportes de antes de la fecha la siguen mostrando.
+ * Se rechaza si la máquina está arrendada en un contrato de rental activo:
+ * primero hay que finalizar ese contrato.
+ */
+export async function darDeBajaMaquina(empresaId, machine, { fecha, motivo = "" } = {}) {
+  if (!empresaId || !machine?.id) throw new Error("Falta la máquina");
+  const f = fecha || hoyISO();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) throw new Error(`Fecha de baja inválida: "${f}" (usa AAAA-MM-DD)`);
+  let actual = machine;
+  try { const snap = await getDoc(doc(col(empresaId), machine.id)); if (snap.exists()) actual = { id: machine.id, ...snap.data() }; } catch { /* sin conexión: lo de la pantalla */ }
+  if (actual.contratoActivoId) {
+    let contrato = null;
+    try {
+      const c = await getDoc(doc(db, "empresas", empresaId, "rentalContracts", actual.contratoActivoId));
+      contrato = c.exists() ? c.data() : null;
+    } catch { contrato = { estado: "activo" }; }
+    if (contrato && !ESTADOS_CONTRATO_CERRADO.includes(String(contrato.estado || "").toLowerCase())) {
+      const e = new Error(`La máquina está arrendada en el contrato ${contrato.folio || contrato.numero || actual.contratoActivoId}${contrato.clienteNombre ? ` (${contrato.clienteNombre})` : ""}. Finaliza ese contrato en Rental antes de darla de baja.`);
+      e.code = "maquina-arrendada";
+      throw e;
+    }
+  }
+  const cambios = { active: false, fechaBaja: f, motivoBaja: String(motivo || "").trim() };
+  if (actual.projectId) {
+    // Cierra el tramo abierto en la fecha de la baja (no hoy)
+    cambios.projectId = null;
+    cambios.historialObras = moverDeObra(actual.historialObras, actual.projectId, null, f);
+  }
+  await guardarMaquina(empresaId, cambios, { id: machine.id, original: actual, origen: "baja", fechaObra: f });
+  return { id: machine.id, ...cambios };
+}
+
+/** Deshace una baja: vuelve a quedar activa (sin obra; se asigna aparte). */
+export async function revertirBajaMaquina(empresaId, machine) {
+  await setDoc(doc(col(empresaId), machine.id), {
+    active: true, fechaBaja: deleteField(), motivoBaja: deleteField(),
+    updatedAt: serverTimestamp(), actualizadoPor: auth.currentUser?.email || null, actualizadoDesde: "baja",
+  }, { merge: true });
 }
 
 // ─── Duplicados y fusión ───────────────────────────────────────────────────
