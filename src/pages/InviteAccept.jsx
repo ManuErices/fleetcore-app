@@ -141,9 +141,6 @@ export default function InviteAccept({ token, onAccepted }) {
         invitacionId: token,
         updatedAt: serverTimestamp(),
       };
-      if (form.pin) {
-        userUpdate.pinHash = await hashPin(form.pin);
-      }
 
       await setDoc(doc(db, "users", uid), userUpdate, { merge: true });
       await setDoc(doc(db, "empresas", invData.empresaId, "users", uid), userUpdate, { merge: true });
@@ -189,7 +186,6 @@ export default function InviteAccept({ token, onAccepted }) {
           cargo: "",
           empresa: empresaNombre,
           rol: docRole,
-          pinHash,
           estado: "activo",
           creadoEn: serverTimestamp(),
         });

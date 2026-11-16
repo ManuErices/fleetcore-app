@@ -20,9 +20,28 @@ export async function hashPin(pin) {
 }
 
 // ── PIN ───────────────────────────────────────────────────────
+// El PIN se verifica en el servidor (Cloud Function verificarPinFirma): el
+// hash ya no se puede leer desde la app.
+const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL || 'https://southamerica-west1-mpf-maquinaria.cloudfunctions.net'
+export async function llamarPin(accion, usuario, pin) {
+  const r = await fetch(`${FUNCTIONS_URL}/verificarPinFirma`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accion, usuario, pin }),
+  })
+  if (!r.ok) throw new Error('No se pudo verificar el PIN (' + r.status + ')')
+  return r.json()
+}
+
+export const MENSAJES_PIN = {
+  incorrecto: 'PIN incorrecto',
+  bloqueado:  'Demasiados intentos: el PIN quedó bloqueado 15 minutos',
+  inactivo:   'Tu cuenta está inactiva o finiquitada',
+  ajeno:      'Ese usuario de firma pertenece a otra cuenta',
+  sin_pin:    'Este usuario aún no tiene PIN',
+}
+
 export async function tienePin(usuario) {
-  const snap = await getDoc(doc(db, 'pins', usuario))
-  return snap.exists()
+  try { return !!(await llamarPin('existe', usuario)).existe } catch { return false }
 }
 
 export async function crearPin(usuario, pin) {
@@ -31,23 +50,18 @@ export async function crearPin(usuario, pin) {
   await setDoc(doc(db, 'pins', usuario), { hash, uid: auth.currentUser?.uid || null, createdAt: serverTimestamp() })
 }
 
+/** true si el PIN es correcto. El motivo de un rechazo queda en ultimoMotivoPin. */
+export let ultimoMotivoPin = ''
+export const motivoPin = () => ultimoMotivoPin || 'PIN incorrecto'
 export async function verificarPin(usuario, pin) {
   try {
-    const userSnap = await getDoc(doc(db, 'usuarios', usuario))
-    if (userSnap.exists()) {
-      const uData = userSnap.data()
-      if (uData.estado === 'finiquitado' || uData.estado === 'inactivo') {
-        return false
-      }
-    }
+    const r = await llamarPin('verificar', usuario, pin)
+    ultimoMotivoPin = r.ok ? '' : (MENSAJES_PIN[r.motivo] || 'PIN incorrecto')
+    return !!r.ok
   } catch (e) {
-    console.error('Error checking user status in verificarPin:', e.message)
+    ultimoMotivoPin = e.message
+    return false
   }
-
-  const snap = await getDoc(doc(db, 'pins', usuario))
-  if (!snap.exists()) return false
-  const hash = await hashPin(pin)
-  return hash === snap.data().hash
 }
 
 function docRef(empresaId, docId) {

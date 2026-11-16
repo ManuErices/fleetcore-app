@@ -100,7 +100,14 @@ function contarDescuadrados(asientos) {
 
 // ─── Inner app ────────────────────────────────────────────────────────────────
 function ContabilidadAppInner({ user, userRole, onBackToSelector, onLogout, onAdminPanel, onAdminEmpresaPanel }) {
-  const [activeView, setActiveView] = useState("plan");
+  // Otra app puede pedir abrir una vista (p. ej. RRHH → "Libro Diario"): se lee una vez y se borra
+  const [activeView, setActiveView] = useState(() => {
+    try { return sessionStorage.getItem("contabilidad:vista") || "plan"; }
+    catch { return "plan"; }
+  });
+  useEffect(() => {
+    try { sessionStorage.removeItem("contabilidad:vista"); } catch { /* sin sessionStorage */ }
+  }, []);
   const { asientos } = useContabilidad();
 
   const descuadrados = contarDescuadrados(asientos);

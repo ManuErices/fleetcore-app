@@ -15,6 +15,7 @@
  * (getWeekColumns en FinanzasFlujoCaja.jsx) para "<cuentaId>-<lunes>".
  */
 import { desdeISO, isoLocal, sumarDias, partesISO, limitesMes } from "../fechas.js";
+import { rutLlave } from "../rut.js";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -135,11 +136,34 @@ export function agruparPorSemana(items, semanas, hoy) {
   return r;
 }
 
-/** Cobros de Rental cuyo cliente calza con la cuenta del flujo (por nombre). */
+/** RUT (válidos) escritos en un texto: "Constructora X 76.123.456-0" → ["761234560"]. */
+export function rutsEnTexto(texto) {
+  return (String(texto || "").match(/\b\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]\b/g) || [])
+    .map(rutLlave).filter(Boolean);
+}
+
+/**
+ * Cobros de Rental del cliente de una cuenta del flujo. Primero por la ficha
+ * del maestro de clientes (`cuenta.clienteId` = id en rentalClients), luego
+ * por RUT (`cuenta.clienteRut`, o un RUT escrito en cliente/nombre/detalle,
+ * contra `clienteRut` del cobro) y solo si no, por nombre. Con RUT conocido,
+ * el nombre nunca junta a un cliente de otro RUT.
+ */
 export function cobrosDeCuenta(cobros, cuenta) {
   if (!cuenta) return [];
+  const lista = cobros || [];
+  if (cuenta.clienteId) {
+    const porId = lista.filter(c => c.clienteId === cuenta.clienteId);
+    if (porId.length) return porId;
+  }
   const textos = [cuenta.cliente, cuenta.nombre, cuenta.detalle].filter(Boolean);
-  return (cobros || []).filter(c => c.cliente && textos.some(t => nombresCalzan(c.cliente, t)));
+  const ruts = new Set([rutLlave(cuenta.clienteRut), ...textos.flatMap(rutsEnTexto)].filter(Boolean));
+  if (ruts.size) {
+    const porRut = lista.filter(c => c.clienteRut && ruts.has(c.clienteRut));
+    if (porRut.length) return porRut;
+  }
+  return lista.filter(c => c.cliente && (!ruts.size || !c.clienteRut || ruts.has(c.clienteRut))
+    && textos.some(t => nombresCalzan(c.cliente, t)));
 }
 
 // ─── Por cobrar: Oficina Técnica (estado de pago al mandante) ───────────────

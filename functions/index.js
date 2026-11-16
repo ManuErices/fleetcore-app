@@ -5,7 +5,7 @@
 
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { onRequest } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 
 setGlobalOptions({ region: 'southamerica-west1' });
 const { defineSecret } = require('firebase-functions/params');
@@ -2243,6 +2243,147 @@ async function getTrabajador(empresaId, trabajadorId) {
 }
 
 // Liquidación creada → avisar al trabajador que puede revisar y dar acuse.
+// ── PIN de firma: se verifica en el servidor ───────────────────
+// Antes el navegador leía el hash del PIN (pins/{usuario}) y lo comparaba:
+// con un PIN de 4 dígitos cualquiera que pudiera leer el hash lo rompía en
+// segundos y firmaba en nombre de otro. Ahora el hash no se puede leer desde
+// la app (firestore.rules) y la comparación se hace aquí, con bloqueo tras
+// 5 intentos fallidos (15 minutos).
+//   POST { accion: 'verificar' | 'existe' | 'login', usuario, pin }
+//   → verificar: { ok } · existe: { existe } · login: { ok, perfil }
+const MAX_INTENTOS_PIN = 5;
+const BLOQUEO_PIN_MS = 15 * 60 * 1000;
+const hashPinServidor = (pin) => crypto.createHash('sha256').update('mpf_salt_2026_' + pin).digest('hex');
+
+exports.verificarPinFirma = onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida: vuelve a iniciar sesión' });
+    try {
+      const accion = req.body?.accion || 'verificar';
+      const usuario = String(req.body?.usuario || '').toLowerCase().trim();
+      if (!usuario || usuario.includes('/')) return res.status(400).json({ error: 'Usuario inválido' });
+      const pinRef = db.doc(`pins/${usuario}`);
+      const usrRef = db.doc(`usuarios/${usuario}`);
+      const [pinSnap, usrSnap] = await Promise.all([pinRef.get(), usrRef.get()]);
+      const p = pinSnap.exists ? pinSnap.data() : {};
+      const u = usrSnap.exists ? usrSnap.data() : {};
+      const hashGuardado = p.hash || u.pinHash || '';
+
+      if (accion === 'existe') return res.json({ existe: !!hashGuardado, usuarioExiste: usrSnap.exists });
+
+      if (u.estado === 'finiquitado' || u.estado === 'inactivo') {
+        return res.json({ ok: false, motivo: 'inactivo' });
+      }
+      // No se exige que el PIN sea del mismo usuario de Firebase: el módulo de
+      // documentos permite que varias personas firmen desde un mismo equipo
+      // (cada una con su usuario y PIN). Lo que protege es que el hash ya no
+      // se lee y el bloqueo por intentos.
+      if (p.bloqueadoHasta && p.bloqueadoHasta > Date.now()) {
+        return res.json({ ok: false, motivo: 'bloqueado', hasta: p.bloqueadoHasta });
+      }
+      if (!hashGuardado) return res.json({ ok: false, motivo: 'sin_pin' });
+
+      const ok = hashPinServidor(String(req.body?.pin || '')) === hashGuardado;
+      if (!ok) {
+        const intentos = (p.intentosFallidos || 0) + 1;
+        await pinRef.set({
+          intentosFallidos: intentos >= MAX_INTENTOS_PIN ? 0 : intentos,
+          ...(intentos >= MAX_INTENTOS_PIN ? { bloqueadoHasta: Date.now() + BLOQUEO_PIN_MS } : {}),
+          ...(pinSnap.exists ? {} : { hash: hashGuardado }),
+        }, { merge: true });
+        return res.json({ ok: false, motivo: intentos >= MAX_INTENTOS_PIN ? 'bloqueado' : 'incorrecto' });
+      }
+      // Correcto: se limpia el contador, el hash pasa a pins (fuera de
+      // usuarios, que sí se lee desde la app) y el PIN queda con dueño.
+      await pinRef.set({ hash: hashGuardado, intentosFallidos: 0, bloqueadoHasta: null }, { merge: true });
+      if (u.pinHash) await usrRef.update({ pinHash: FieldValue.delete() }).catch(() => {});
+
+      if (accion === 'login') {
+        return res.json({ ok: true, perfil: {
+          usuario, nombre: u.nombre || '', rut: u.rut || '', cargo: u.cargo || '',
+          empresa: u.empresa || '', rol: u.rol || 'supervisor', estado: u.estado || 'activo',
+        } });
+      }
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error('verificarPinFirma:', e.message);
+      return res.status(500).json({ error: 'No se pudo verificar el PIN' });
+    }
+  });
+});
+
+// Superadmin: saca los pinHash que quedan en `usuarios` (legibles desde la
+// app) y los deja solo en `pins`. Se corre una vez después de desplegar.
+exports.migrarPinsUsuarios = onRequest((req, res) => {
+  cors(req, res, async () => {
+    const uidToken = await uidVerificado(req);
+    if (!uidToken) return res.status(401).json({ error: 'Sesión no válida' });
+    const yo = await db.collection('users').doc(uidToken).get();
+    if (!yo.exists || yo.data().role !== 'superadmin') return res.status(403).json({ error: 'Solo superadmin' });
+    const snap = await db.collection('usuarios').get();
+    let movidos = 0;
+    for (const d of snap.docs) {
+      const u = d.data();
+      if (!u.pinHash) continue;
+      const pinRef = db.doc(`pins/${d.id}`);
+      const pinSnap = await pinRef.get();
+      if (!pinSnap.exists || !pinSnap.data().hash) await pinRef.set({ hash: u.pinHash, uid: u.uid || null }, { merge: true });
+      await d.ref.update({ pinHash: FieldValue.delete() });
+      movidos++;
+    }
+    return res.json({ ok: true, movidos });
+  });
+});
+
+// ── Finiquito → corta el acceso (servidor) ─────────────────────
+// La pantalla de RRHH ya lo intenta, pero un administrativo de RRHH que no es
+// admin no puede escribir en `users` (las reglas no lo dejan). Aquí lo hace
+// el servidor, con el Admin SDK: toda cuenta vinculada a la ficha queda
+// 'finiquitado' (las reglas solo dejan escribir a usuarios activos) y se
+// borra la credencial del QR. Si el finiquito se anula, no se toca nada:
+// reactivar a alguien es una decisión de RRHH, a mano.
+exports.onFiniquitoGuardado = onDocumentWritten(
+  { document: 'empresas/{empresaId}/finiquitos/{id}' },
+  async (event) => {
+    try {
+      const { empresaId } = event.params;
+      const fin = event.data?.after?.exists ? event.data.after.data() : null;
+      if (!fin || fin.estado === 'anulado' || !fin.trabajadorId) return;
+      const antes = event.data?.before?.exists ? event.data.before.data() : null;
+      if (antes && antes.estado === fin.estado && antes.trabajadorId === fin.trabajadorId) return; // nada relevante cambió
+
+      const tRef = db.doc(`empresas/${empresaId}/trabajadores/${fin.trabajadorId}`);
+      const tSnap = await tRef.get();
+      const t = tSnap.exists ? tSnap.data() : {};
+      if (tSnap.exists && t.estado !== 'finiquitado') await tRef.update({ estado: 'finiquitado', updatedAt: FieldValue.serverTimestamp() });
+
+      const uids = new Set();
+      if (t.portalUid) uids.add(t.portalUid);
+      const email = String(t.email || t.portalEmail || '').toLowerCase().trim();
+      const consultas = [db.collection('users').where('empresaId', '==', empresaId).where('trabajadorId', '==', fin.trabajadorId)];
+      if (email) consultas.push(db.collection('users').where('empresaId', '==', empresaId).where('email', '==', email));
+      for (const q of consultas) (await q.get()).forEach(d => uids.add(d.id));
+
+      for (const uid of uids) {
+        const uRef = db.doc(`users/${uid}`);
+        const uSnap = await uRef.get();
+        // Nunca se toca a un admin ni a un superadmin por esta vía
+        if (!uSnap.exists || ['superadmin', 'admin_contrato'].includes(uSnap.data().role)) continue;
+        await uRef.update({ estado: 'finiquitado', updatedAt: FieldValue.serverTimestamp() });
+        await db.doc(`empresas/${empresaId}/users/${uid}`).set({ estado: 'finiquitado' }, { merge: true }).catch(() => {});
+        // Cierra también las sesiones abiertas
+        await admin.auth().revokeRefreshTokens(uid).catch(() => {});
+      }
+      await db.doc(`empresas/${empresaId}/credenciales_qr/trab_${fin.trabajadorId}`).delete().catch(() => {});
+      console.log({ event: 'finiquito_corta_acceso', empresaId, trabajadorId: fin.trabajadorId, cuentas: uids.size });
+    } catch (e) {
+      console.error('onFiniquitoGuardado:', e.message);
+    }
+  }
+);
+
 exports.onRemuneracionCreated = onDocumentCreated(
   { document: 'empresas/{empresaId}/remuneraciones/{id}', secrets: SES_SECRETS },
   async (event) => {

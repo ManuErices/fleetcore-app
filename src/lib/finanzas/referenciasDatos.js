@@ -15,6 +15,7 @@ import { db } from "../firebase";
 import { listRentalPayments, listRentalClients, saldoEEPP } from "../rental";
 import { fechaISO } from "../fechas";
 import { cobrosRental } from "./referencias";
+import { indiceClientes, clienteDe, rutDeCliente, nombreCliente } from "../clientesBase.js";
 
 const cache = new Map();
 function enCache(clave, cargar) {
@@ -41,7 +42,13 @@ export function cargarCobrosRental(empresaId) {
       listRentalClients(empresaId, { incluirInactivos: true }).catch(() => []),
     ]);
     const dias = new Map(clientes.map(c => [c.id, c.diasPago ?? 30]));
-    return cobrosRental(pagos, { saldoDe: saldoEEPP, diasPagoDe: id => dias.get(id) ?? 30 });
+    // Maestro de clientes: el cobro lleva el RUT y la razón social de la ficha,
+    // así la cuenta del flujo se cruza por RUT antes que por nombre escrito.
+    const ix = indiceClientes(clientes);
+    return cobrosRental(pagos, { saldoDe: saldoEEPP, diasPagoDe: id => dias.get(id) ?? 30 }).map(c => {
+      const ficha = clienteDe(ix, { clienteId: c.clienteId, nombre: c.cliente });
+      return ficha ? { ...c, clienteId: ficha.id, clienteRut: rutDeCliente(ficha), cliente: nombreCliente(ficha) || c.cliente } : { ...c, clienteRut: "" };
+    });
   });
 }
 

@@ -1,5 +1,12 @@
 import React, { useState, useRef, useCallback, useMemo } from "react";
 import * as XLSX from "xlsx";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { db } from "../../lib/firebase";
+import { useEmpresa } from "../../lib/useEmpresa";
+import { buscarCuentaPorCodigo } from "../../lib/planCuentas";
+import {
+  codigosOTPorRut, resolverCodigoOT, cuentaDeCodigoOT, aplicarCuentaAsiento,
+} from "../../lib/contabilidad/mapeoCuentas";
 import { fmt, normalizaRut, leerTextoDetectando, repararMojibake, claveDocImport, claveDocLegado } from "./ContabilidadContext";
 import {
   ModalCuaderno, Boton, Campo, Cifra, Titulo, Nota, Resaltado, VistoBueno, LineaGuia, Pestanas,
@@ -107,6 +114,45 @@ function aplicarReglaImport(asiento, reglasGasto) {
     _multiLinea: candidatas.length > 1,
     totalDebe: lineas.reduce((s, l) => s + (l.debe || 0), 0),
   };
+}
+
+// ─── Cuentas de costo de Oficina Técnica ─────────────────────────────────────
+// Si Oficina Técnica ya clasificó lo que se le compra a un proveedor (código
+// de costo "3.2" en el documento, en la OC que cita, o en casi todas sus OC y
+// subcontratos), la compra va a la cuenta contable mapeada a ese código en
+// Plan de cuentas → Cuentas de costo de Oficina Técnica (config/mapeoCuentas).
+// Prioridad: regla aprendida (reclasificación a mano) > código OT > regex por
+// razón social. Combustible y ventas no se tocan (tienen su propia lógica).
+function aplicarMapeoOT(asiento, contextoOT, cuentas) {
+  if (!contextoOT || asiento._esVenta || asiento._esCombustible) return asiento;
+  const r = resolverCodigoOT({ facturas: asiento._facturas, rut: asiento._rut }, contextoOT);
+  if (!r) return asiento;
+  const cuentaId = cuentaDeCodigoOT(contextoOT.mapeo, r.codigo);
+  const cuenta = cuentaId && cuentas.find(c => c.id === cuentaId && c.activa !== false);
+  if (!cuenta) return { ...asiento, _ot: { ...r, sinCuenta: true } };
+  const nombreOT = buscarCuentaPorCodigo(r.codigo)?.subcategoria || "";
+  const etiqueta = `Costo OT ${r.codigo}${nombreOT ? " " + casoTitulo(nombreOT) : ""}`;
+  const a = aplicarCuentaAsiento(asiento, cuenta, `${etiqueta} (${r.fuente})`);
+  return {
+    ...a,
+    ...(asiento._esNC ? {} : { _clasificacion: etiqueta }),
+    _ot: { ...r, cuentaNombre: cuenta.nombre },
+    totalDebe: a.lineas.reduce((t, l) => t + (l.debe || 0), 0),
+  };
+}
+
+/** Lee el mapeo OT → contable y lo que Oficina Técnica clasificó (OC y subcontratos). */
+async function cargarContextoOT(empresaId) {
+  const s = await getDoc(doc(db, "empresas", empresaId, "config", "mapeoCuentas"));
+  const mapeo = (s.exists() && s.data().mapeo) || {};
+  if (!Object.keys(mapeo).length) return null; // sin mapeo no hay nada que aplicar
+  const leer = (col) => getDocs(collection(db, "empresas", empresaId, col))
+    .then(q => q.docs.map(d => d.data()))
+    .catch(e => { console.warn(`Mapeo OT: no se pudo leer ${col}`, e); return []; });
+  const [ordenes, subcontratos] = await Promise.all([leer("purchaseOrders"), leer("subcontratos")]);
+  const ordenesPorNumero = {};
+  for (const oc of ordenes) if (oc.numeroOC) ordenesPorNumero[String(oc.numeroOC).trim()] = oc;
+  return { mapeo, ordenesPorNumero, porRut: codigosOTPorRut({ ordenes, subcontratos }) };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -273,7 +319,15 @@ function normalizarIConstruct(fila) {
     return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
   };
 
+  // Si el informe trae cuenta de costo u OC (según cómo se exporte desde
+  // iConstruye), se guardan para el mapeo de cuentas de costo OT.
+  const columna = (re) => { const k = Object.keys(fila).find(c => re.test(c)); return k ? String(fila[k] ?? "").trim() : ""; };
+  const codigoOT = columna(/^(c[oó]d(igo|\.)?\s*)?(c\.\s*c\.?|cuentas? (de )?costos?)$/i);
+  const numeroOC = columna(/^(n[°ºo]?\.?\s*)?(o\.?\s?c\.?|orden(es)? de compra)$/i);
+
   return {
+    "_codigoOT":    codigoOT,
+    "_numeroOC":    numeroOC,
     "_rut":         String(fila["Rut Emisor"] || "").trim(),
     "_razonSocial": fixEncoding((String(fila["Razón Social Emisor"] || "").trim())),
     "_folio":       String(fila["Folio"] || ""),
@@ -1104,6 +1158,16 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
             )}
             <span aria-hidden="true">·</span>
             <span>{asiento._nDocs} doc{asiento._nDocs>1?"s":""}</span>
+            {asiento._ot && !asiento._aprendido && !asiento._reclasificado && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span title="Plan de cuentas → Cuentas de costo de Oficina Técnica">
+                  {asiento._ot.sinCuenta
+                    ? `costo OT ${asiento._ot.codigo} sin cuenta mapeada`
+                    : `costo OT ${asiento._ot.codigo} (${asiento._ot.fuente})`}
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -1271,6 +1335,7 @@ function ProveedorCard({ asiento, idx, cuentas, onChange, isDuplicado = false })
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
 export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglasGasto = {}, guardarReglaGasto, guardarAsiento, periodoActivo, onImportDone, buscarHashesExistentes, dieselRecuperablePct = 0 }) {
+  const { empresaId } = useEmpresa();
   const inputRef   = useRef(null);
   const [step, setStep]              = useState(0);
   const [filas, setFilas]            = useState([]);
@@ -1327,7 +1392,14 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       const res = generarAsientos(validas, cuentas, periodo, { ...opciones, periodo: periodoReal, excluir: hashsExistentes });
       setDuplicados(hashsExistentes);
       setDocsOmitidos(res.docsOmitidos || 0);
-      setAsientos(res.asientos.map(a => aplicarReglaImport(a, reglasGasto)));
+      // Cuentas de costo de Oficina Técnica (si hay mapeo): antes de la regla
+      // aprendida, que sigue mandando porque es una decisión explícita.
+      let contextoOT = null;
+      if (fmt_ !== "rcv_venta" && empresaId) {
+        try { contextoOT = await cargarContextoOT(empresaId); }
+        catch (e) { console.warn("Mapeo OT no disponible:", e); }
+      }
+      setAsientos(res.asientos.map(a => aplicarReglaImport(aplicarMapeoOT(a, contextoOT, cuentas), reglasGasto)));
       setErrores([]);
       setStep(1);
     };
@@ -1365,7 +1437,7 @@ export default function ModalImportIConstruct({ isOpen, onClose, cuentas, reglas
       };
       reader.readAsArrayBuffer(file);
     }
-  }, [cuentas, periodo, reglasGasto, dieselRecuperablePct, buscarHashesExistentes]);
+  }, [cuentas, periodo, reglasGasto, dieselRecuperablePct, buscarHashesExistentes, empresaId]);
 
   const handleUpdateAsiento = (idx, updated) => {
     setAsientos(prev => prev.map((a, i) => i === idx ? updated : a));

@@ -7,6 +7,9 @@ import UnificarMaquinas from '../../components/maquinaria/UnificarMaquinas';
 import { rutTrabajador, duplicadosTrabajadores } from '../../lib/trabajadores';
 import { guardarCredencialQR, leerCredencialQR, migrarContrasenas, claveOperador, claveUsuario } from '../../lib/credencialesQR';
 import UnificarTrabajadores from '../../components/UnificarTrabajadores';
+import VincularMandantes from '../../components/VincularMandantes';
+import { listarClientes, asegurarCliente, nombreCliente, rutCliente } from '../../lib/clientes';
+import { formatearRut } from '../../lib/rut';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, getDoc,
   doc, serverTimestamp, query, orderBy, where, setDoc
@@ -2219,14 +2222,35 @@ function ProyectosSection() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(null);
-  const [form, setForm] = useState({ name: '', codigo: 'CC-', mandante: '', region: '', comuna: '', direccion: '' });
+  const [form, setForm] = useState({ name: '', codigo: 'CC-', mandante: '', clienteId: '', region: '', comuna: '', direccion: '' });
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [catMandanteModal, setCatMandanteModal] = useState(false);
 
-  // Catálogo dinámico de mandantes
-  const { items: mandantesDB, load: reloadMandantes } = useCatalogo('mandante');
-  const mandantesOpciones = mandantesDB.map(m => m.nombre).sort();
+  // Mandante = cliente del maestro único (rentalClients, src/lib/clientes.js).
+  // `mandante` (texto) se mantiene para mostrar; `clienteId` es el vínculo.
+  const [clientes, setClientes] = useState([]);
+  const [nuevoCliente, setNuevoCliente] = useState(null);   // { rut, razonSocial, error, creando }
+  const [vincular, setVincular] = useState(false);
+  const cargarClientes = useCallback(async () => {
+    if (!empresaId) return;
+    try { setClientes(await listarClientes(empresaId)); } catch (e) { console.error('Error cargando clientes:', e); }
+  }, [empresaId]);
+  useEffect(() => { cargarClientes(); }, [cargarClientes]);
+  const clientePorId = useMemo(() => new Map(clientes.map(c => [c.id, c])), [clientes]);
+  const sinVincular = data.filter(p => !p.clienteId && String(p.mandante || '').trim()).length;
+
+  const crearCliente = async () => {
+    const n = nuevoCliente;
+    if (!rutCliente(n.rut)) { setNuevoCliente({ ...n, error: 'RUT no válido: revisa el dígito verificador.' }); return; }
+    if (!String(n.razonSocial || '').trim()) { setNuevoCliente({ ...n, error: 'Escribe la razón social.' }); return; }
+    setNuevoCliente({ ...n, creando: true, error: '' });
+    try {
+      const r = await asegurarCliente(empresaId, { rut: n.rut, razonSocial: n.razonSocial }, 'obra');
+      await cargarClientes();
+      setForm(f => ({ ...f, clienteId: r.id, mandante: r.nombre }));
+      setNuevoCliente(r.creado ? null : { rut: '', razonSocial: '', error: `Ese RUT ya era el cliente "${r.nombre}": quedó seleccionado.` });
+    } catch (e) { setNuevoCliente({ ...n, creando: false, error: e.message }); }
+  };
 
   const load = useCallback(async () => {
     if (!empresaId) return;
@@ -2243,8 +2267,8 @@ function ProyectosSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', region: '', comuna: '', direccion: '' }); setEditId(null); setModal(true); };
-  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setModal(true); };
+  const openNew = () => { setForm({ name: '', codigo: '', mandante: '', clienteId: '', region: '', comuna: '', direccion: '' }); setEditId(null); setNuevoCliente(null); setModal(true); };
+  const openEdit = (row) => { setForm({ name: row.name || '', codigo: row.codigo || '', mandante: row.mandante || '', clienteId: row.clienteId || '', region: row.region || '', comuna: row.comuna || '', direccion: row.direccion || '' }); setEditId(row.id); setNuevoCliente(null); setModal(true); };
 
   const save = async () => {
     if (!form.name.trim()) { alert('El nombre del proyecto es obligatorio.'); return; }
@@ -2253,7 +2277,9 @@ function ProyectosSection() {
     if (choque) { alert(mensajeObraDuplicada(choque)); return; }
     setSaving(true);
     try {
-      const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante: form.mandante.trim(), region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
+      const cli = form.clienteId ? clientePorId.get(form.clienteId) : null;
+      const mandante = cli ? nombreCliente(cli) : form.mandante.trim();
+      const p = { name: form.name.trim(), codigo: form.codigo.trim(), mandante, clienteId: form.clienteId || null, region: form.region, comuna: form.comuna, direccion: form.direccion.trim(), updatedAt: serverTimestamp() };
       if (editId) await updateDoc(doc(db, 'empresas', empresaId, 'projects', editId), p);
       // active: true — sin este campo el proyecto no aparecía en Oficina Técnica
       else await addDoc(collection(db, 'empresas', empresaId, 'projects'), { ...p, active: true, createdAt: serverTimestamp() });
@@ -2282,6 +2308,12 @@ function ProyectosSection() {
 
   return (
     <>
+      {sinVincular > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <span>{sinVincular} obra(s) tienen el mandante solo escrito, sin ficha de cliente.</span>
+          <button type="button" onClick={() => setVincular(true)} className="font-bold underline underline-offset-2">Vincular mandantes</button>
+        </div>
+      )}
       <SectionCard title="Proyectos" subtitle="Proyectos y obras activas" count={data.length} color="indigo" onAdd={openNew} addLabel="Nuevo Proyecto"
         icon={<svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>}
       >
@@ -2289,7 +2321,11 @@ function ProyectosSection() {
           columns={[
             { key: 'name', label: 'Nombre' },
             { key: 'codigo', label: 'Código' },
-            { key: 'mandante', label: 'Mandante' },
+            { key: 'mandante', label: 'Mandante', render: r => {
+              const c = r.clienteId ? clientePorId.get(r.clienteId) : null;
+              if (c) return <span>{nombreCliente(c)}</span>;
+              return r.mandante ? <span>{r.mandante} <span className="text-[10px] font-bold text-amber-600">sin ficha</span></span> : <span className="text-slate-300">—</span>;
+            } },
             { key: 'ubicacion', label: 'Ubicación', render: r => <span>{[r.comuna, r.region].filter(Boolean).join(', ') || r.ubicacion || '—'}</span> },
             { key: 'active', label: 'Estado', render: r => (
               <button type="button" onClick={() => toggleActiva(r)} title={r.active === false ? 'Activar' : 'Desactivar'}
@@ -2364,40 +2400,59 @@ function ProyectosSection() {
             </Field>
           )}
 
-          <Field label="Mandante">
+          <Field label="Mandante (cliente)">
             <div className="flex gap-2">
               <select
                 className={inputCls}
                 style={{flex:1}}
-                value={form.mandante}
-                onChange={e => setForm({ ...form, mandante: e.target.value })}
+                value={form.clienteId}
+                onChange={e => {
+                  const c = clientePorId.get(e.target.value);
+                  setForm({ ...form, clienteId: e.target.value, mandante: c ? nombreCliente(c) : form.mandante });
+                }}
               >
-                <option value="">Seleccionar mandante...</option>
-                {mandantesOpciones.map(m => <option key={m} value={m}>{m}</option>)}
-                {form.mandante && !mandantesOpciones.includes(form.mandante) && (
-                  <option value={form.mandante}>{form.mandante}</option>
-                )}
+                <option value="">{form.mandante && !form.clienteId ? `${form.mandante} (sin ficha de cliente)` : 'Seleccionar cliente...'}</option>
+                {clientes.filter(c => c.activo !== false || c.id === form.clienteId).map(c => (
+                  <option key={c.id} value={c.id}>{nombreCliente(c)}{c.rut ? ` · ${c.rut}` : ''}</option>
+                ))}
               </select>
-              <button type="button" onClick={() => setCatMandanteModal(true)}
+              <button type="button" onClick={() => setNuevoCliente(n => (n ? null : { rut: '', razonSocial: form.clienteId ? '' : form.mandante, error: '' }))}
                 className="flex-shrink-0 px-3 py-2.5 text-xs font-black rounded-xl transition-all"
                 style={{background:'rgba(99,102,241,0.08)', color:'#4f46e5', border:'1px solid rgba(99,102,241,0.2)'}}>
                 + Crear
               </button>
             </div>
+            {form.mandante && !form.clienteId && !nuevoCliente && (
+              <p className="mt-1 text-xs text-amber-700">Mandante escrito a mano: "{form.mandante}". Elige su cliente o créalo con su RUT para que Contabilidad y Finanzas lo reconozcan.</p>
+            )}
+            {nuevoCliente && (
+              <div className="mt-2 p-3 rounded-xl border border-indigo-100 bg-indigo-50/40 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={inputCls} placeholder="RUT" value={nuevoCliente.rut}
+                    onChange={e => setNuevoCliente({ ...nuevoCliente, rut: e.target.value, error: '' })}
+                    onBlur={e => { const v = e.target.value; if (rutCliente(v)) setNuevoCliente(n => ({ ...n, rut: formatearRut(v) })); }} />
+                  <input className={inputCls} placeholder="Razón social" value={nuevoCliente.razonSocial}
+                    onChange={e => setNuevoCliente({ ...nuevoCliente, razonSocial: e.target.value, error: '' })} />
+                </div>
+                {nuevoCliente.error && <p className="text-xs text-red-600">{nuevoCliente.error}</p>}
+                <p className="text-[11px] text-slate-500">Se crea en el maestro de clientes (el mismo de Rental). Si el RUT ya existe se usa esa ficha.</p>
+                <button type="button" onClick={crearCliente} disabled={nuevoCliente.creando}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 rounded-lg disabled:opacity-50">
+                  {nuevoCliente.creando ? 'Creando…' : 'Crear cliente'}
+                </button>
+              </div>
+            )}
           </Field>
 
           <FormButtons onCancel={() => setModal(false)} onSave={save} saving={saving} isEdit={!!editId} color="indigo" />
         </div>
       </Modal>
 
-      <CatalogoModal
-        isOpen={catMandanteModal}
-        onClose={() => setCatMandanteModal(false)}
-        categoria="mandante"
-        titulo="Mandantes"
-        onCreated={async (nombre) => { await reloadMandantes(); setCatMandanteModal(false); setForm(f => ({ ...f, mandante: nombre })); }}
-        onDeleted={reloadMandantes}
-      />
+      {vincular && (
+        <VincularMandantes empresaId={empresaId} proyectos={data}
+          onClose={() => setVincular(false)}
+          onCambio={() => { load(); cargarClientes(); }} />
+      )}
 
       <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={del} title="Eliminar Proyecto" message={`¿Eliminar "${confirm?.name}"?`} />
     </>

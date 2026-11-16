@@ -45,7 +45,7 @@ await env.withSecurityRulesDisabled(async c => {
   await uploadString(ref(st,"empresas/A/documentos/t2/f.pdf"),"x");
   await uploadString(ref(st,"empresas/A/activos/a1/f.pdf"),"x");
 });
-const as=(uid,email)=>env.authenticatedContext(uid,{email: email||`${uid}@x.cl`});
+const as=(uid,email,verificado=true)=>env.authenticatedContext(uid,{email: email||`${uid}@x.cl`, email_verified: verificado});
 const fsOf=(uid,email)=>as(uid,email).firestore();
 const stOf=(uid,email)=>as(uid,email).storage();
 // ── usuarios
@@ -156,6 +156,38 @@ await t("trabajador se adueña de ficha ajena → negado", assertFails(updateDoc
 await t("trabajador cambia su sueldo al vincularse → negado", assertFails(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",sueldoBase:9})));
 await t("trabajador se vincula a su ficha (mismo email) → permitido", assertSucceeds(updateDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores/t5"),{portalUid:"trabNuevo",portalEmail:"trabNuevo@x.cl"})));
 await t("…y crea su vínculo de portal → permitido", assertSucceeds(setDoc(doc(fsOf("trabNuevo"),"empresas/A/trabajadores_portal/trabNuevo"),{trabajadorDocId:"t5"})));
+
+await t("operario con email SIN verificar → negado", assertFails(setDoc(doc(as("juanNV","juan@a.cl",false).firestore(),"users/juanNV"),{role:"operador",empresaId:"A",trabajadorId:"t1"})));
+await t("admin pendiente con email sin verificar no ve la empresa → negado", assertFails(getDocs(query(collection(as("nv2","admin@a.cl",false).firestore(),"empresas"),where("adminEmail","==","admin@a.cl")))));
+
+await t("leer hash de PIN (aunque sea propio) → negado", assertFails(getDoc(doc(fsOf("ana"),"pins/ana"))));
+await t("crear PIN con desbloqueo propio → negado", assertFails(setDoc(doc(fsOf("bea"),"pins/bea"),{hash:"h",uid:"bea",bloqueadoHasta:0})));
+await t("usuarios con pinHash → negado", assertFails(setDoc(doc(fsOf("caro"),"usuarios/caro"),{username:"caro",uid:"caro",pinHash:"h"})));
+await t("usuarios sin pinHash → permitido", assertSucceeds(setDoc(doc(fsOf("caro"),"usuarios/caro"),{username:"caro",uid:"caro"})));
+
+await t("agente: primer uso del día → permitido", assertSucceeds(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:1})));
+await t("agente: sumar de a 1 → permitido", assertSucceeds(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:2})));
+await t("agente: reiniciar el contador → negado", assertFails(setDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"),{n:1})));
+await t("agente: contador de otro → negado", assertFails(setDoc(doc(fsOf("opA"),"agente_uso/adminA_2026-11-16"),{n:1})));
+await t("agente: borrar contador → negado", assertFails(deleteDoc(doc(fsOf("opA"),"agente_uso/opA_2026-11-16"))));
+// ── maestro de clientes (rentalClients)
+await env.withSecurityRulesDisabled(async c => {
+  const db=c.firestore();
+  await setDoc(doc(db,"users/opCont"),{role:"operador",empresaId:"A",modulos:["contabilidad"]});
+  await setDoc(doc(db,"users/jefeT"),{role:"jefe_taller",empresaId:"A"});
+  await setDoc(doc(db,"empresas/A/rentalClients/cli1"),{nombre:"Cliente Uno",rut:"76.086.428-5"});
+});
+const fichaCli=(k)=>({nombre:"Nuevo",rut:k,rutNormalizado:k,activo:true});
+await t("admin crea cliente en Rental (id automático) → permitido", assertSucceeds(setDoc(doc(fsOf("adminA"),"empresas/A/rentalClients/auto1"),{nombre:"X",rut:""})));
+await t("jefe de taller edita cliente (Rental) → permitido", assertSucceeds(updateDoc(doc(fsOf("jefeT"),"empresas/A/rentalClients/cli1"),{telefono:"1"})));
+await t("Contabilidad (operador) crea cliente rut_<rut> → permitido", assertSucceeds(setDoc(doc(fsOf("opCont"),"empresas/A/rentalClients/rut_967902403"),fichaCli("967902403"))));
+await t("OT (operador fleetcore) crea cliente rut_<rut> → permitido", assertSucceeds(setDoc(doc(fsOf("opOT"),"empresas/A/rentalClients/rut_111111111"),fichaCli("111111111"))));
+await t("Contabilidad crea cliente con id que no es su RUT → negado", assertFails(setDoc(doc(fsOf("opCont"),"empresas/A/rentalClients/otro"),fichaCli("123456785"))));
+await t("Contabilidad modifica cliente existente → negado", assertFails(updateDoc(doc(fsOf("opCont"),"empresas/A/rentalClients/cli1"),{nombre:"Pisado"})));
+await t("Contabilidad borra cliente → negado", assertFails(deleteDoc(doc(fsOf("opCont"),"empresas/A/rentalClients/cli1"))));
+await t("operador WorkFleet crea cliente → negado", assertFails(setDoc(doc(fsOf("opA"),"empresas/A/rentalClients/rut_123456785"),fichaCli("123456785"))));
+await t("otra empresa crea cliente en A → negado", assertFails(setDoc(doc(fsOf("userB"),"empresas/A/rentalClients/rut_123456785"),fichaCli("123456785"))));
+await t("Contabilidad lee clientes → permitido", assertSucceeds(getDoc(doc(fsOf("opCont"),"empresas/A/rentalClients/cli1"))));
 console.log(`\n${ok} ok, ${fail} fallos`);
 await env.cleanup();
 process.exit(fail?1:0);

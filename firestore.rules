@@ -201,7 +201,8 @@ service cloud.firestore {
                    || (isAuth() && (
                          resource.data.get('parentEmpresaId', '__ninguna__') in misEmpresas()
                          || resource.data.get('adminUid', '') == request.auth.uid
-                         || resource.data.get('adminEmail', '__ninguno__') == request.auth.token.email));
+                         || (resource.data.get('adminEmail', '__ninguno__') == request.auth.token.email
+                             && request.auth.token.email_verified == true)));
       // Superadmin puede todo; usuario nuevo puede crear su primera empresa (sin empresaId aún);
       // O un administrador/usuario autorizado puede crear una sub-empresa
       allow create: if isSuperAdmin()
@@ -610,9 +611,18 @@ service cloud.firestore {
       }
 
       // ── MPF RENTAL: clientes y contratos de arriendo ──
+      // rentalClients = maestro único de clientes (src/lib/clientes.js).
+      // Rental lo administra (canManageMaquinaria). Contabilidad (RCV de
+      // ventas), Finanzas y Oficina Técnica (mandante de la obra) solo pueden
+      // CREAR fichas nuevas con id estable rut_<rutNormalizado> (asegurarClientes);
+      // no modifican ni borran las existentes. areaDe = una lectura de la ficha.
       match /rentalClients/{docId} {
         allow read:  if isAuth() && belongsToEmpresa(empresaId);
         allow write: if isSuperAdmin() || (belongsToEmpresa(empresaId) && canManageMaquinaria());
+        allow create: if request.resource.data.get('rutNormalizado', '') is string
+                      && request.resource.data.get('rutNormalizado', '') != ''
+                      && docId == 'rut_' + request.resource.data.rutNormalizado
+                      && areaDe(empresaId, ['contabilidad', 'finanzas', 'fleetcore'], 'contabilidad|finanzas|fleetcore');
       }
 
       match /rentalContracts/{docId} {
@@ -706,7 +716,8 @@ service cloud.firestore {
             && empresaNueva() != null
             && exists(/databases/$(database)/documents/empresas/$(empresaNueva()))
             && (get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminUid', '') == request.auth.uid
-                || get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminEmail', '_') == request.auth.token.email);
+                || (get(/databases/$(database)/documents/empresas/$(empresaNueva())).data.get('adminEmail', '_') == request.auth.token.email
+                    && request.auth.token.email_verified == true));
       }
       // 2. Invitación vigente: mismo rol y empresa que la invitación, y si
       //    tenía destinatario, el email de quien la acepta.
@@ -726,7 +737,10 @@ service cloud.firestore {
         return request.resource.data.get('role', null) == 'operador'
             && tid != '' && empresaNueva() != null
             && exists(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid))
-            && get(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid)).data.get('email', '_').lower() == request.auth.token.email.lower();
+            && get(/databases/$(database)/documents/empresas/$(empresaNueva())/trabajadores/$(tid)).data.get('email', '_').lower() == request.auth.token.email.lower()
+            // El email tiene que estar verificado: si no, cualquiera podía
+            // registrarse con el correo de un operador y tomar su lugar.
+            && request.auth.token.email_verified == true;
       }
       // 4. Sin empresa todavía (cuenta recién creada, antes de elegir empresa).
       function sinEmpresaNiRol() {
@@ -794,6 +808,23 @@ service cloud.firestore {
     // Va aparte de /users porque cada usuario puede editar su propio
     // documento: ahí podría darse el permiso a sí mismo.
     // ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
+    // /agente_uso — contador diario de turnos del asistente IA por usuario
+    // (api/agente/chat.js lo incrementa con el token del propio usuario).
+    // Solo se puede sumar de a 1 y hasta 300 por día: nadie puede reiniciar
+    // su contador ni borrarlo.
+    // ─────────────────────────────────────────────────────
+    match /agente_uso/{docId} {
+      allow read:   if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      allow create: if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}')
+                    && request.resource.data.keys().hasOnly(['n']) && request.resource.data.n == 1;
+      allow update: if isAuth() && docId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}')
+                    && request.resource.data.keys().hasOnly(['n'])
+                    && request.resource.data.n == resource.data.n + 1
+                    && request.resource.data.n <= 300;
+      allow delete: if false;
+    }
+
     match /plataforma/{docId} {
       allow read:  if isAuth();
       allow write: if isSuperAdmin();
@@ -880,15 +911,17 @@ service cloud.firestore {
     // pins y usuarios: sistema custom de auth del módulo documentos (no Firebase Auth)
     // Solo necesita ser accedido por cualquier usuario autenticado (no hay empresaId en estos docs)
     match /pins/{usuario} {
-      // El hash se lee para verificar la firma. Crear: solo si no existe (y
-      // queda con el uid de quien lo crea). Cambiar: solo su dueño. Antes
-      // cualquier usuario autenticado podía reemplazar el PIN de otro y
-      // firmar en su nombre.
-      allow read:   if isAuth();
-      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      // El hash ya no se lee desde la app: el PIN se verifica en el servidor
+      // (Cloud Function verificarPinFirma, con bloqueo por intentos). Antes
+      // cualquier usuario leía el hash de un PIN de 4 dígitos y lo rompía.
+      // Crear: solo si no existe, con el uid de quien lo crea. Cambiar: su dueño.
+      allow read:   if isSuperAdmin();
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid
+                    && !('intentosFallidos' in request.resource.data) && !('bloqueadoHasta' in request.resource.data);
       allow update: if isSuperAdmin()
                     || (isAuth() && resource.data.get('uid', null) == request.auth.uid
-                        && request.resource.data.get('uid', null) == request.auth.uid);
+                        && request.resource.data.get('uid', null) == request.auth.uid
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hash', 'createdAt', 'uid']));
       allow delete: if isSuperAdmin();
     }
     match /usuarios/{usuario} {
@@ -896,10 +929,13 @@ service cloud.firestore {
       // de su dueño y solo él lo cambia. Un admin puede cambiar únicamente el
       // estado (RRHH lo usa al desvincular o finiquitar).
       allow read:   if isAuth();
-      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid;
+      // Sin pinHash: el hash vive solo en /pins (que no se lee desde la app)
+      allow create: if isAuth() && request.resource.data.get('uid', null) == request.auth.uid
+                    && !('pinHash' in request.resource.data);
       allow update: if isSuperAdmin()
                     || (isAuth() && resource.data.get('uid', null) == request.auth.uid
-                        && request.resource.data.get('uid', null) == request.auth.uid)
+                        && request.resource.data.get('uid', null) == request.auth.uid
+                        && !('pinHash' in request.resource.data.diff(resource.data).affectedKeys()))
                     || (isAnyAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'updatedAt']));
       allow delete: if isSuperAdmin();
     }
@@ -923,7 +959,9 @@ service cloud.firestore {
 
     // Permisos para consulta de colección grupo trabajadores (auto-vinculación de operarios por email)
     match /{path=**}/trabajadores/{trabajadorId} {
-      allow read: if isAuth() && resource != null && (resource.data.email == request.auth.token.email || resource.data.get('portalEmail', '') == request.auth.token.email);
+      // Solo con el email verificado (ver esTrabajadorConEsteEmail)
+      allow read: if isAuth() && request.auth.token.email_verified == true && resource != null
+                  && (resource.data.email == request.auth.token.email || resource.data.get('portalEmail', '') == request.auth.token.email);
     }
 
     // ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 // src/components/FirmasPanel.jsx
 import { useState, useEffect } from 'react'
-import { ROLES_FIRMA, FLUJO, verificarPin, firmarDocumento, getFirmas, tienePin, crearPin } from '../lib/firmas.js'
+import { ROLES_FIRMA, FLUJO, verificarPin, motivoPin, firmarDocumento, getFirmas, tienePin, crearPin } from '../lib/firmas.js'
 import { getSession } from '../lib/auth.js'
 
 function PinModal({ session, rolLabel, onSuccess, onClose }) {
@@ -36,7 +36,7 @@ function PinModal({ session, rolLabel, onSuccess, onClose }) {
         await crearPin(session.usuario, pin)
       }
       const ok = await verificarPin(session.usuario, pin)
-      if (!ok) { setError('PIN incorrecto'); setLoading(false); return }
+      if (!ok) { setError(motivoPin()); setLoading(false); return }
       onSuccess()
     } catch(e) { setError(e.message) }
     setLoading(false)

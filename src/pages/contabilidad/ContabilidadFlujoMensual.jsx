@@ -22,7 +22,9 @@ import {
 import { detectarHonorarios, resumirHonorarios } from "../../lib/contabilidad/honorarios";
 import { detectarKardex, depreciacionDesdeKardex } from "../../lib/contabilidad/kardex";
 import { detectarRendiciones, resumirRendiciones, resumirRendicionesDocs, CLASES_RENDICION } from "../../lib/contabilidad/rendiciones";
-import { controlVentas } from "../../lib/contabilidad/ventasControl";
+import { controlVentas, ventasPorCliente } from "../../lib/contabilidad/ventasControl";
+import { listarClientes, asegurarClientes, clientesDeRCVVentas, clientePorRut } from "../../lib/clientes";
+import { formatearRut } from "../../lib/rut";
 
 /**
  * ContabilidadFlujoMensual.jsx
@@ -228,10 +230,12 @@ function calcularRCV(filasRaw, tipo, config) {
   return { resumen, reparto, destinos, proveedores, descuadre };
 }
 
-function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActual, onAplicar, onCambiarRegla, onCerrar }) {
+function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActual, clientesFaltantes = [], onAplicar, onCambiarRegla, onCerrar }) {
   const resumen = { ...calculo.resumen, reparto: calculo.reparto };
   const [mes, setMes] = useState(mesInicial);
   const [criterio, setCriterio] = useState("docto");
+  // Ventas: ofrecer (sin forzar) agregar al maestro de clientes los RUT que no están
+  const [agregarClientes, setAgregarClientes] = useState(false);
   const [aplicando, setAplicando] = useState(false);
   const esCompras = resumen.tipo === "compras";
   const fila = esCompras ? "Compras" : "Ingresos";
@@ -256,7 +260,7 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
         <div className="flex flex-wrap items-center justify-end gap-4">
           <Boton variante="texto" onClick={onCerrar} disabled={aplicando}>Cancelar</Boton>
           <Boton variante="primario" disabled={aplicando || calculo.descuadre > 1}
-            onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes }); } finally { setAplicando(false); } }}>
+            onClick={async () => { setAplicando(true); try { await onAplicar({ criterio, mes, agregarClientes: agregarClientes && clientesFaltantes.length > 0 }); } finally { setAplicando(false); } }}>
             {aplicando ? "Cargando…" : <>Cargar <Cifra valor={resumen.monto} escala="pesos" color="heredar" /></>}
           </Boton>
         </div>
@@ -324,6 +328,16 @@ function ModalRCV({ calculo, archivo, regimen, anioActivo, mesInicial, valorActu
               </p>
             </div>
           ))}
+        </section>
+      )}
+
+      {!esCompras && clientesFaltantes.length > 0 && (
+        <section>
+          <Titulo as="h3" tamano="sm">Clientes</Titulo>
+          <Casilla marcada={agregarClientes} onCambiar={setAgregarClientes}
+            descripcion={`${clientesFaltantes.slice(0, 4).map(c => casoTitulo(c.razonSocial) || formatearRut(c.rut)).join(", ")}${clientesFaltantes.length > 4 ? ` y ${clientesFaltantes.length - 4} más` : ""}. Se crea una ficha por RUT en el maestro de clientes (el mismo de Rental y de las obras); las fichas existentes no se tocan.`}>
+            Agregar {clientesFaltantes.length === 1 ? "1 cliente que no está" : `${clientesFaltantes.length} clientes que no están`} en el maestro
+          </Casilla>
         </section>
       )}
 
@@ -592,14 +606,20 @@ function HojaControlVentas({ empresaId, anio, ventas }) {
     setDocs(null); setError("");
     (async () => {
       try {
-        const [r, o] = await Promise.all([
+        const [r, o, cl, pr] = await Promise.all([
           getDocs(collection(db, "empresas", empresaId, "rentalPayments")).catch(() => null),
           getDocs(query(collection(db, "empresas", empresaId, "estadoPagoIngresos"), where("year", "==", anio))).catch(() => null),
+          // Maestro de clientes y obras (cliente de cada obra): para agrupar por cliente
+          getDocs(collection(db, "empresas", empresaId, "rentalClients")).catch(() => null),
+          getDocs(collection(db, "empresas", empresaId, "projects")).catch(() => null),
         ]);
         if (!vivo) return;
+        const conId = (snap) => (snap ? snap.docs.map(d => ({ id: d.id, ...d.data() })) : []);
         setDocs({
-          rental: r ? r.docs.map(d => ({ id: d.id, ...d.data() })) : [],
+          rental: conId(r),
           ot: o ? o.docs.map(d => d.data()) : [],
+          clientes: conId(cl),
+          proyectos: conId(pr),
           sinPermiso: !r || !o,
         });
       } catch (e) {
@@ -610,7 +630,8 @@ function HojaControlVentas({ empresaId, anio, ventas }) {
     return () => { vivo = false; };
   }, [abierta, empresaId, anio]);
 
-  const meses = useMemo(() => (docs ? controlVentas(docs.rental, docs.ot, anio, ventas) : null), [docs, anio, ventas]);
+  const meses = useMemo(() => (docs ? controlVentas(docs.rental, docs.ot, anio, ventas, { clientes: docs.clientes }) : null), [docs, anio, ventas]);
+  const porCliente = useMemo(() => (docs ? ventasPorCliente(docs.rental, docs.ot, anio, { clientes: docs.clientes, proyectos: docs.proyectos }) : []), [docs, anio]);
   const total = (k) => (meses || []).reduce((s, m) => s + m[k], 0);
 
   return (
@@ -682,6 +703,22 @@ function HojaControlVentas({ empresaId, anio, ventas }) {
               </tfoot>
             </table>
           </div>
+          {porCliente.length > 0 && (
+            <div>
+              <Titulo as="h3" tamano="sm">FleetCore por cliente, {anio}</Titulo>
+              {porCliente.map(c => (
+                <LineaGuia key={c.clave} className="min-h-[30px] text-[17px]"
+                  etiqueta={<span>{casoTitulo(c.nombre) || "Sin cliente"}
+                    <span className="text-[14px] text-cuaderno-grafito">{c.rut ? ` · ${formatearRut(c.rut)}` : ""}{c.rental && c.ot ? " · Rental y OT" : c.ot ? " · OT" : " · Rental"}</span>
+                    {c.sinFicha && <Resaltado color="durazno" className="ml-1 text-[13px]">sin ficha</Resaltado>}</span>}>
+                  <Cifra valor={c.total} escala="pesos" />
+                </LineaGuia>
+              ))}
+              <p className="m-0 mt-1 text-[13px] text-cuaderno-grafito">
+                El cliente sale del maestro de clientes: en Rental la ficha del estado de pago; en Oficina Técnica, la de la obra (Admin → Proyectos). "Sin ficha" se agrupó por RUT o por nombre escrito: vincula la obra a su cliente para que cuadre.
+              </p>
+            </div>
+          )}
           <p className="m-0 text-[14px] text-cuaderno-grafito">
             Rental: neto de cada estado de pago por su fecha de emisión, sin los anulados. Oficina Técnica: estados de pago + reajustes + multas del mes de cada obra (las retenciones no, la factura va por el total). Una diferencia positiva son ventas facturadas sin estado de pago en FleetCore (otros clientes o servicios); una negativa, estados de pago aún sin factura o facturados en otro mes.
           </p>
@@ -1378,6 +1415,19 @@ export default function ContabilidadFlujoMensual() {
   const calculoRcv = useMemo(
     () => (rcv ? calcularRCV(rcv.filas, rcv.tipo, configTributaria) : null),
     [rcv, configTributaria]);
+  // RCV de ventas: RUT de clientes que aún no están en el maestro (rentalClients)
+  const [clientesRcvFaltantes, setClientesRcvFaltantes] = useState([]);
+  useEffect(() => {
+    setClientesRcvFaltantes([]);
+    if (!rcv || rcv.tipo === "compras" || !empresaId) return;
+    let vivo = true;
+    const delArchivo = clientesDeRCVVentas(rcv.filas);
+    if (!delArchivo.length) return;
+    listarClientes(empresaId)
+      .then(lista => { if (vivo) setClientesRcvFaltantes(delArchivo.filter(c => !clientePorRut(lista, c.rut))); })
+      .catch(() => {});   // sin permiso de lectura: no se ofrece
+    return () => { vivo = false; };
+  }, [rcv, empresaId]);
 
   function cambiarReglaProveedor(pv, fila) {
     const reglas = { ...(configTributaria.reglasFilaRCV || {}), [pv.rut]: { fila, nombre: pv.nombre } };
@@ -1387,7 +1437,7 @@ export default function ContabilidadFlujoMensual() {
     });
   }
 
-  async function aplicarRCV({ criterio, mes }) {
+  async function aplicarRCV({ criterio, mes, agregarClientes = false }) {
     const c = calculoRcv;
     const r = c.resumen;
     const p = r.mesSugerido || { anio, mes };
@@ -1446,6 +1496,15 @@ export default function ContabilidadFlujoMensual() {
 
     setData(d => aplicarTodo(d, anio, { otrosAnios }));
     setRcv(null);
+
+    // Maestro de clientes: solo si el usuario lo marcó. No afecta la carga del RCV.
+    if (agregarClientes && clientesRcvFaltantes.length) {
+      try { await asegurarClientes(empresaId, clientesRcvFaltantes, "rcv_ventas"); }
+      catch (e) {
+        console.error("Error agregando clientes del RCV:", e);
+        alert("El RCV se cargó, pero no se pudieron agregar los clientes al maestro (¿permisos?).");
+      }
+    }
   }
   // Libro de remuneraciones → filas Remuneraciones y Finiquitos del mes del libro
   async function aplicarRemuneraciones({ reemplazar = false } = {}) {
@@ -1733,6 +1792,7 @@ export default function ContabilidadFlujoMensual() {
           anioActivo={anio}
           mesInicial={calculoRcv.resumen.mesSugerido?.anio === anio ? calculoRcv.resumen.mesSugerido.mes : partesISO(hoyISO()).mes - 1}
           valorActual={m => valorFila(rcv.tipo === "compras" ? "compras" : "ingresos", m)}
+          clientesFaltantes={clientesRcvFaltantes}
           onAplicar={aplicarRCV}
           onCambiarRegla={cambiarReglaProveedor}
           onCerrar={() => setRcv(null)}

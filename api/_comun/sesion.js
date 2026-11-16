@@ -64,3 +64,43 @@ export async function leerDocumento(idToken, ruta) {
   const data = await r.json();
   return Object.fromEntries(Object.entries(data.fields || {}).map(([k, v]) => [k, desempacar(v)]));
 }
+
+/**
+ * Cuenta un turno del asistente para el usuario, en
+ * agente_uso/{uid}_{AAAA-MM-DD} (día en Chile). Se escribe con el idToken del
+ * usuario: las reglas solo aceptan sumar de a 1 y hasta el tope diario
+ * (firestore.rules → match /agente_uso), así que nadie puede reiniciar su
+ * contador ni pasarse del tope. Devuelve { ok, n } o { ok:false, limite:true }.
+ * Si Firestore falla por otra razón, deja pasar (no se corta el asistente por
+ * un problema de red) y lo registra.
+ */
+export async function contarUsoAgente(idToken, uid) {
+  const dia = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago' }).format(new Date());
+  const base = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
+  const ruta = `agente_uso/${uid}_${dia}`;
+  const headers = { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' };
+  try {
+    const g = await fetch(`${base}/${ruta}`, { headers });
+    let n = 0, precondicion = 'currentDocument.exists=false';
+    if (g.ok) {
+      const d = await g.json();
+      n = Number(d.fields?.n?.integerValue || 0);
+      precondicion = `currentDocument.updateTime=${encodeURIComponent(d.updateTime)}`;
+    } else if (g.status !== 404) {
+      console.error('agente_uso lectura:', g.status);
+      return { ok: true, n: null };
+    }
+    const p = await fetch(`${base}/${ruta}?updateMask.fieldPaths=n&${precondicion}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ fields: { n: { integerValue: String(n + 1) } } }),
+    });
+    if (p.ok) return { ok: true, n: n + 1 };
+    if (p.status === 403) return { ok: false, limite: true, n };
+    // 400/409: otra pestaña contó al mismo tiempo; no se bloquea por eso
+    console.warn('agente_uso escritura:', p.status);
+    return { ok: true, n: null };
+  } catch (e) {
+    console.error('agente_uso:', e.message);
+    return { ok: true, n: null };
+  }
+}
