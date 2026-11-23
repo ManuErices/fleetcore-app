@@ -17,8 +17,8 @@ import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import SelectorCliente from "./SelectorCliente";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
-import ReferenciaSubcontratos from "./ReferenciaSubcontratos";
-import ReferenciaCobrosYSueldos from "./ReferenciaCobrosYSueldos";
+import ReferenciaSubcontratos, { DESCRIPCION_SUBCONTRATOS } from "./ReferenciaSubcontratos";
+import ReferenciaCobrosYSueldos, { DESCRIPCION_COBROS } from "./ReferenciaCobrosYSueldos";
 import { cargarReales, cargarSaldosBancos } from "../../lib/banco/importacion.js";
 import {
   Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
@@ -730,6 +730,7 @@ export default function FinanzasFlujoCaja() {
   const [showExportMenu,  setShowExportMenu]  = useState(false);
   const [exportando,      setExportando]      = useState(null); // null | "excel" | "pdf"
   const [expandido,       setExpandido]       = useState(false); // modo pantalla ampliada (oculta sidebar + KPIs)
+  const [referencia,      setReferencia]      = useState(null);  // "subcontratos" | "cobros" | null — panel de referencia abierto bajo el libro
   const [proveedores,     setProveedores]     = useState([]);    // maestro de proveedores, en vivo
   const [cuentaDetalleId, setCuentaDetalleId] = useState(null);  // cuenta abierta en el panel lateral
 
@@ -1897,13 +1898,37 @@ export default function FinanzasFlujoCaja() {
         </div>
       )}
 
-      {/* Referencia: estados de pago de subcontratistas (no escribe en el flujo) */}
-      <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
-        payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle} />
-
-      {/* Referencia: por cobrar (Rental, OT) y sueldos de RRHH (no escribe en el flujo) */}
-      <ReferenciaCobrosYSueldos empresaId={empresaId} ingresos={ingresos} payments={payments}
-        weekColumns={weekColumns} proyectoId={proyectoId} proyectos={proyectos} onAbrirCuenta={abrirDetalle} />
+      {/* Referencias de otros módulos (no escriben en el flujo). El libro es lo
+          principal: cerradas son una sola línea, y abiertas ocupan como máximo
+          un tercio de la pantalla con su propio scroll. Solo una a la vez. */}
+      <div className={`flex-shrink-0 ${expandido ? "px-4 pb-3" : "px-8 pb-5"}`}>
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[16px]">
+          <span className="text-[14px] text-cuaderno-grafito">Referencias, no modifican el flujo:</span>
+          {[
+            { id: "subcontratos", label: "Estados de pago de subcontratistas", descripcion: DESCRIPCION_SUBCONTRATOS },
+            { id: "cobros", label: "Por cobrar y sueldos", descripcion: DESCRIPCION_COBROS },
+          ].map(r => (
+            <button key={r.id} type="button" title={r.descripcion} aria-expanded={referencia === r.id}
+              onClick={() => setReferencia(v => v === r.id ? null : r.id)}
+              className={`underline underline-offset-[3px] ${referencia === r.id ? "decoration-cuaderno-tinta decoration-2" : "decoration-cuaderno-columna"}`}>
+              {r.label} {referencia === r.id ? "▴" : "▾"}
+            </button>
+          ))}
+        </div>
+        {referencia && (
+          <div className="mt-2 max-h-[34vh] overflow-y-auto">
+            {referencia === "subcontratos" ? (
+              <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
+                payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle}
+                onCerrar={() => setReferencia(null)} />
+            ) : (
+              <ReferenciaCobrosYSueldos empresaId={empresaId} ingresos={ingresos} payments={payments}
+                weekColumns={weekColumns} proyectoId={proyectoId} proyectos={proyectos} onAbrirCuenta={abrirDetalle}
+                onCerrar={() => setReferencia(null)} />
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Panel lateral de detalle de cuenta (egresos) */}
       {cuentaDetalle && (

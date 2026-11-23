@@ -15,16 +15,18 @@ import { Hoja, Cifra, Boton, Resaltado, casoTitulo } from "./cuaderno";
  */
 const DIAS = 60;
 
-export default function ReferenciaSubcontratos({ empresaId, egresos, proveedores, payments, weekColumns, onAbrirCuenta }) {
-  const [abierto, setAbierto] = useState(false);
+export const DESCRIPCION_SUBCONTRATOS = `Lo que cobran los subcontratistas en sus estados de pago de los últimos ${DIAS} días (Oficina Técnica), al lado de lo anotado en el flujo. No modifica el flujo.`;
+
+/** Se monta abierta: la barra de referencias del flujo decide cuándo mostrarla. */
+export default function ReferenciaSubcontratos({ empresaId, egresos, proveedores, payments, weekColumns, onAbrirCuenta, onCerrar }) {
   const [filas, setFilas] = useState(null);
 
   useEffect(() => {
-    if (!abierto || !empresaId || filas) return;
+    if (!empresaId || filas) return;
     let vivo = true;
     cargarSubcontratos(empresaId).then(f => { if (vivo) setFilas(f); }).catch(() => { if (vivo) setFilas([]); });
     return () => { vivo = false; };
-  }, [abierto, empresaId, filas]);
+  }, [empresaId, filas]);
 
   const grupos = useMemo(() => {
     if (!filas) return [];
@@ -44,12 +46,9 @@ export default function ReferenciaSubcontratos({ empresaId, egresos, proveedores
 
   return (
     <Hoja titulo="Estados de pago de subcontratistas"
-      extra={<Boton variante="texto" onClick={() => setAbierto(a => !a)}>{abierto ? "Ocultar" : "Ver"}</Boton>}>
-      {!abierto ? (
-        <p className="m-0 text-[16px] text-cuaderno-grafito">
-          Referencia desde Oficina Técnica: lo que cobran los subcontratistas en sus estados de pago de los últimos {DIAS} días, al lado de lo anotado en el flujo. No modifica el flujo.
-        </p>
-      ) : filas === null ? (
+      extra={onCerrar && <Boton variante="texto" onClick={onCerrar}>Ocultar</Boton>}>
+      <p className="m-0 mb-3 text-[14px] text-cuaderno-grafito">{DESCRIPCION_SUBCONTRATOS}</p>
+      {filas === null ? (
         <p className="m-0 text-[16px] text-cuaderno-grafito">Buscando estados de pago…</p>
       ) : !grupos.length ? (
         <p className="m-0 text-[16px] text-cuaderno-grafito">No hay estados de pago de subcontratistas en los últimos {DIAS} días.</p>
