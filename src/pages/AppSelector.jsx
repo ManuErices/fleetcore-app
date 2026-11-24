@@ -9,6 +9,10 @@ import InviteUserPanel from "./InviteUserPanel.jsx";
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, query, where, getCountFromServer } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { listWorkOrders } from "../lib/db";
+import { listarMaquinas } from "../lib/maquinas";
+import { otAbiertas } from "../lib/ordenesTrabajo";
+import { combinarUso, registrarUsoModulo, ordenarPorUso } from "../lib/usoModulos";
 import { usePlan } from "../hooks/usePlan";
 import { normalizeModulos, isRevisorRole as checkRevisorRole } from "../lib/plans";
 import UserMenuDropdown from "../components/UserMenuDropdown";
@@ -39,6 +43,7 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
   const [userModulos, setUserModulos] = useState([]);
   const [userName, setUserName] = useState('');
   const [liveData, setLiveData] = useState({});
+  const [uso, setUso] = useState({});
 
   useEffect(() => {
     const loadUser = async () => {
@@ -50,6 +55,7 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
         setUserRole(role);
         setUserModulos(normalizeModulos(data.modulos));
         setUserName(data.nombre || user.displayName || user.email.split('@')[0]);
+        setUso(combinarUso(data.usoModulos, user.uid));
         if (data.empresaId) setEmpresaId(data.empresaId);
         if (role === 'trabajador') { window.location.href = '/trabajador'; return; }
       } catch { setUserRole('operador'); }
@@ -64,13 +70,17 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
     (async () => {
       try {
         const base = ['empresas', empresaId];
-        const [otSnap, fallaSnap, repSnap] = await Promise.all([
-          getCountFromServer(query(collection(db, ...base, 'workOrders'), where('estado', 'not-in', ['cerrada', 'cancelada']))),
+        // Las OT se leen completas (no con un conteo del servidor) para usar
+        // el mismo criterio que el dashboard de Maquinaria: sin las terminadas
+        // y sin las de máquinas eliminadas o dadas de baja.
+        const [ots, maquinas, fallaSnap, repSnap] = await Promise.all([
+          listWorkOrders(empresaId),
+          listarMaquinas(empresaId),
           getCountFromServer(query(collection(db, ...base, 'failures'), where('estado', '==', 'abierta'))),
           getCountFromServer(collection(db, ...base, 'spareParts')),
         ]);
         setLiveData({
-          otAbiertas: otSnap.data().count,
+          otAbiertas: otAbiertas(ots, maquinas).length,
           fallasAbiertas: fallaSnap.data().count,
           repuestos: repSnap.data().count,
         });
@@ -109,6 +119,7 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
 
   const handleSelect = (appId, hasAccess) => {
     if (!hasAccess) return;
+    registrarUsoModulo(user?.uid, appId);
     localStorage.setItem('selectedApp', appId);
     onSelectApp(appId);
   };
@@ -139,6 +150,79 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
       </div>
     );
   }
+
+  // ── Módulos, del más al menos usado por esta persona ─────────
+  const rolOficina = (m) => isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo(m));
+  const gestion = ordenarPorUso([
+    {
+      usoId: 'maquinaria', label: "Maquinaria", logo: "/logo-maquinaria.svg", colorKey: "maquinaria",
+      tagline: "Rental, mantenimiento y control de flota",
+      live: [
+        { label: "OT abiertas", value: liveData.otAbiertas ?? "—" },
+        { label: "Fallas activas", value: liveData.fallasAbiertas ?? "—" },
+        { label: "Repuestos", value: liveData.repuestos ?? "—" },
+      ],
+      chips: ["Rental SpA", "Taller", "Checklist", "Alertas"],
+      canAccess: canAccessMaquinaria,
+      blockReason: blockReason('maquinaria', isSuperAdmin || isAdminContrato || (['administrativo','jefe_taller','mecanico'].includes(userRole) && hasModulo('maquinaria'))),
+      onSelect: () => handleSelect('maquinaria', canAccessMaquinaria),
+    },
+    {
+      usoId: 'fleetcore', label: "Oficina Técnica", logo: "/logo-fleetcore-o.svg", colorKey: "fleetcore",
+      tagline: "Equipos, faenas y control de costos", chips: ["Equipos", "Costos", "OC"],
+      canAccess: canAccessFleetCore, blockReason: blockReason('fleetcore', rolOficina('fleetcore')),
+      onSelect: () => handleSelect('fleetcore', canAccessFleetCore),
+    },
+    {
+      usoId: 'rrhh', label: "Recursos Humanos", logo: "/logo-fleetcore-r.png", colorKey: "rrhh",
+      tagline: "Contratos, liquidaciones y asistencia", chips: ["Contratos", "Remuneraciones", "Previred"],
+      canAccess: canAccessRRHH, blockReason: blockReason('rrhh', rolOficina('rrhh')),
+      onSelect: () => handleSelect('rrhh', canAccessRRHH),
+    },
+    {
+      usoId: 'reportes', label: "Reportes", logo: "/wf-logo-movil.svg", colorKey: "reportes",
+      tagline: "Análisis de maquinaria y combustible", chips: ["Maquinaria", "Combustible", "KPIs"],
+      canAccess: canAccessReportes, blockReason: blockReason('reportes', rolOficina('reportes')),
+      onSelect: () => handleSelect('reportes', canAccessReportes),
+    },
+    {
+      usoId: 'finanzas', label: "Finanzas", logo: "/logo-fleetcore-f.png", colorKey: "finanzas",
+      tagline: "Flujo de caja y control financiero", chips: ["Flujo de caja", "Proveedores", "Leasing"],
+      canAccess: canAccessFinanzas, blockReason: blockReason('finanzas', rolOficina('finanzas')),
+      onSelect: () => handleSelect('finanzas', canAccessFinanzas),
+    },
+    {
+      usoId: 'contabilidad', label: "Contabilidad", logo: "/logo-fleetcore-f.png", colorKey: "contabilidad",
+      tagline: "Libro diario, balance y tributario", chips: ["IFRS/SII", "F29", "Balance"],
+      canAccess: canAccessContabilidad, blockReason: blockReason('contabilidad', rolOficina('contabilidad')),
+      onSelect: () => handleSelect('contabilidad', canAccessContabilidad),
+    },
+    {
+      usoId: 'documentos', label: "FleetCore-I", logo: "/logo-fleetcore-i.svg", colorKey: "documentos",
+      tagline: "Libro de obras e informes con IA", chips: ["Firma digital", "IA", "Libro de obras"],
+      canAccess: canAccessDocumentos, blockReason: blockReason('fleetcore', rolOficina('fleetcore') || isRevisorRole),
+      onSelect: () => handleSelect('documentos', canAccessDocumentos),
+    },
+  ], uso);
+  const [principal, ...demas] = gestion;
+  const segundos = demas.slice(0, 2);
+  const resto = demas.slice(2);
+
+  const terreno = ordenarPorUso([
+    {
+      usoId: 'workfleet-m', label: "WorkFleet Mobile", logo: "/wf-logo.svg", colorKey: "workfleet",
+      tagline: "Horómetros y combustible sin señal", chips: ["Offline", "Horómetros", "Combustible"],
+      canAccess: canAccessWorkFleetM,
+      blockReason: blockReason('workfleet', isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo'),
+      onSelect: () => handleSelect('workfleet-m', canAccessWorkFleetM),
+    },
+    {
+      usoId: 'portal', label: "Portal Trabajadores", logo: "/logo-fleetcore-r.png", colorKey: "portal",
+      tagline: "Liquidaciones, contratos y certificados", chips: ["Liquidaciones", "Certificados", "Vacaciones"],
+      canAccess: true, blockReason: null,
+      onSelect: () => { registrarUsoModulo(user?.uid, 'portal'); window.location.href = '/trabajador'; },
+    },
+  ], uso);
 
   return (
     <>
@@ -182,128 +266,31 @@ export default function AppSelector({ user, userRole: initialUserRole, onLogout,
           <section className="space-y-4">
             <SectionLabel icon="🏢" label="Gestión y control" />
 
-            {/* Bento: Maquinaria destacada (ancha) + dos columnas */}
+            {/* Bento: el más usado destacado (ancho), los dos siguientes a su
+                derecha y el resto en una fila. Ver ordenarPorUso. */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-              {/* Maquinaria — card grande con datos en vivo */}
-              <div className="lg:col-span-2">
-                <FeaturedCard
-                  label="Maquinaria" logo="/logo-maquinaria.svg" colorKey="maquinaria"
-                  tagline="Rental, mantenimiento y control de flota"
-                  live={[
-                    { label: "OT abiertas", value: liveData.otAbiertas ?? "—" },
-                    { label: "Fallas activas", value: liveData.fallasAbiertas ?? "—" },
-                    { label: "Repuestos", value: liveData.repuestos ?? "—" },
-                  ]}
-                  chips={["Rental SpA", "Taller", "Checklist", "Alertas"]}
-                  canAccess={canAccessMaquinaria}
-                  blockReason={blockReason('maquinaria', isSuperAdmin || isAdminContrato || (['administrativo','jefe_taller','mecanico'].includes(userRole) && hasModulo('maquinaria')))}
-                  isAdmin={isAdmin}
-                  onSelect={() => handleSelect('maquinaria', canAccessMaquinaria)}
-                  onUpgrade={onUpgrade}
-                />
-              </div>
-
-              {/* Columna derecha: Oficina Técnica + RRHH */}
+              {principal && (
+                <div className="lg:col-span-2">
+                  <FeaturedCard {...principal} live={principal.live || []} onUpgrade={onUpgrade} isAdmin={isAdmin} />
+                </div>
+              )}
               <div className="flex flex-col gap-4">
-                <ModuleCard
-                  label="Oficina Técnica" logo="/logo-fleetcore-o.svg" colorKey="fleetcore"
-                  tagline="Equipos, faenas y control de costos"
-                  chips={["Equipos", "Costos", "OC"]}
-                  canAccess={canAccessFleetCore}
-                  blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo('fleetcore')))}
-                  isAdmin={isAdmin}
-                  onSelect={() => handleSelect('fleetcore', canAccessFleetCore)}
-                  onUpgrade={onUpgrade}
-                  compact
-                />
-                <ModuleCard
-                  label="Recursos Humanos" logo="/logo-fleetcore-r.png" colorKey="rrhh"
-                  tagline="Contratos, liquidaciones y asistencia"
-                  chips={["Contratos", "Remuneraciones", "Previred"]}
-                  canAccess={canAccessRRHH}
-                  blockReason={blockReason('rrhh', isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo('rrhh')))}
-                  isAdmin={isAdmin}
-                  onSelect={() => handleSelect('rrhh', canAccessRRHH)}
-                  onUpgrade={onUpgrade}
-                  compact
-                />
+                {segundos.map((m) => <ModuleCard key={m.usoId} {...m} isAdmin={isAdmin} onUpgrade={onUpgrade} compact />)}
               </div>
             </div>
 
-            {/* Fila de módulos de finanzas */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <ModuleCard
-                label="Reportes" logo="/wf-logo-movil.svg" colorKey="reportes"
-                tagline="Análisis de maquinaria y combustible"
-                chips={["Maquinaria", "Combustible", "KPIs"]}
-                canAccess={canAccessReportes}
-                blockReason={blockReason('reportes', isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo('reportes')))}
-                isAdmin={isAdmin}
-                onSelect={() => handleSelect('reportes', canAccessReportes)}
-                onUpgrade={onUpgrade}
-                compact
-              />
-              <ModuleCard
-                label="Finanzas" logo="/logo-fleetcore-f.png" colorKey="finanzas"
-                tagline="Flujo de caja y control financiero"
-                chips={["Flujo de caja", "Proveedores", "Leasing"]}
-                canAccess={canAccessFinanzas}
-                blockReason={blockReason('finanzas', isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo('finanzas')))}
-                isAdmin={isAdmin}
-                onSelect={() => handleSelect('finanzas', canAccessFinanzas)}
-                onUpgrade={onUpgrade}
-                compact
-              />
-              <ModuleCard
-                label="Contabilidad" logo="/logo-fleetcore-f.png" colorKey="contabilidad"
-                tagline="Libro diario, balance y tributario"
-                chips={["IFRS/SII", "F29", "Balance"]}
-                canAccess={canAccessContabilidad}
-                blockReason={blockReason('contabilidad', isSuperAdmin || isAdminContrato || (['administrativo','operador'].includes(userRole) && hasModulo('contabilidad')))}
-                isAdmin={isAdmin}
-                onSelect={() => handleSelect('contabilidad', canAccessContabilidad)}
-                onUpgrade={onUpgrade}
-                compact
-              />
-              <ModuleCard
-                label="FleetCore-I" logo="/logo-fleetcore-i.svg" colorKey="documentos"
-                tagline="Libro de obras e informes con IA"
-                chips={["Firma digital", "IA", "Libro de obras"]}
-                canAccess={canAccessDocumentos}
-                blockReason={blockReason('fleetcore', isSuperAdmin || isAdminContrato || isRevisorRole || (['administrativo','operador'].includes(userRole) && hasModulo('fleetcore')))}
-                isAdmin={isAdmin}
-                onSelect={() => handleSelect('documentos', canAccessDocumentos)}
-                onUpgrade={onUpgrade}
-                compact
-              />
-            </div>
+            {resto.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {resto.map((m) => <ModuleCard key={m.usoId} {...m} isAdmin={isAdmin} onUpgrade={onUpgrade} compact />)}
+              </div>
+            )}
           </section>
 
           {/* ── SECCIÓN 2: Operación en terreno ── */}
           <section className="space-y-4">
             <SectionLabel icon="🚜" label="Operación en terreno" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
-              <ModuleCard
-                label="WorkFleet Mobile" logo="/wf-logo.svg" colorKey="workfleet"
-                tagline="Horómetros y combustible sin señal"
-                chips={["Offline", "Horómetros", "Combustible"]}
-                canAccess={canAccessWorkFleetM}
-                blockReason={blockReason('workfleet', isSuperAdmin || isAdminContrato || userRole === 'operador' || userRole === 'administrativo')}
-                isAdmin={isAdmin}
-                onSelect={() => handleSelect('workfleet-m', canAccessWorkFleetM)}
-                onUpgrade={onUpgrade}
-                compact
-              />
-              <ModuleCard
-                label="Portal Trabajadores" logo="/logo-fleetcore-r.png" colorKey="portal"
-                tagline="Liquidaciones, contratos y certificados"
-                chips={["Liquidaciones", "Certificados", "Vacaciones"]}
-                canAccess={true} blockReason={null} isAdmin={isAdmin}
-                onSelect={() => { window.location.href = '/trabajador'; }}
-                onUpgrade={onUpgrade}
-                compact
-              />
+              {terreno.map((m) => <ModuleCard key={m.usoId} {...m} isAdmin={isAdmin} onUpgrade={onUpgrade} compact />)}
             </div>
           </section>
 
@@ -361,7 +348,7 @@ function FeaturedCard({ label, logo, colorKey, tagline, live, chips, canAccess, 
         </div>
 
         {/* Stats en vivo */}
-        {canAccess && (
+        {canAccess && live?.length > 0 && (
           <div className="grid grid-cols-3 gap-3">
             {live.map((s) => (
               <div key={s.label} className={`rounded-xl ${col.bg} border ${col.border} px-3 py-2.5 text-center`}>
