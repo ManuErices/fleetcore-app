@@ -17,8 +17,8 @@ import { escucharProveedores } from "../../lib/proveedores";
 import SelectorProveedor from "./SelectorProveedor";
 import SelectorCliente from "./SelectorCliente";
 import PanelDetalleCuenta from "./PanelDetalleCuenta";
-import ReferenciaSubcontratos from "./ReferenciaSubcontratos";
-import ReferenciaCobrosYSueldos from "./ReferenciaCobrosYSueldos";
+import ReferenciaSubcontratos, { DESCRIPCION_SUBCONTRATOS } from "./ReferenciaSubcontratos";
+import ReferenciaCobrosYSueldos, { DESCRIPCION_COBROS } from "./ReferenciaCobrosYSueldos";
 import { cargarReales, cargarSaldosBancos } from "../../lib/banco/importacion.js";
 import {
   Cifra, Titulo, Resaltado, Nota, LineaGuia, Boton, Campo, VistoBueno,
@@ -730,6 +730,14 @@ export default function FinanzasFlujoCaja() {
   const [showExportMenu,  setShowExportMenu]  = useState(false);
   const [exportando,      setExportando]      = useState(null); // null | "excel" | "pdf"
   const [expandido,       setExpandido]       = useState(false); // modo pantalla ampliada (oculta sidebar + KPIs)
+  const [referencia,      setReferencia]      = useState(null);  // "subcontratos" | "cobros" | null — panel de referencia abierto bajo el libro
+  // En la vista ampliada el libro manda: el panel de la propuesta (arriba) y
+  // las referencias (abajo) quedan plegados en una línea con su flechita.
+  const [verPanelProp,    setVerPanelProp]    = useState(false);
+  const [verReferencias,  setVerReferencias]  = useState(false);
+  useEffect(() => { setVerPanelProp(false); setVerReferencias(false); }, [expandido]);
+  const panelPropVisible = !expandido || verPanelProp;
+  const referenciasVisibles = !expandido || verReferencias;
   const [proveedores,     setProveedores]     = useState([]);    // maestro de proveedores, en vivo
   const [cuentaDetalleId, setCuentaDetalleId] = useState(null);  // cuenta abierta en el panel lateral
 
@@ -1493,7 +1501,31 @@ export default function FinanzasFlujoCaja() {
       )}
 
       {/* ── Propuesta activa ────────────────────────────────────────────────── */}
-      {propuesta && (
+      {propuesta && !panelPropVisible && (
+        <div className="flex-shrink-0 mx-4 mt-3 mb-1 rounded-md border-[1.5px] border-dashed border-cuaderno-tinta/50 bg-cuaderno-lavanda/30 px-3 py-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[15px]">
+          <button type="button" onClick={() => setVerPanelProp(true)} aria-expanded="false"
+            title="Mostrar el panel de la propuesta" className="inline-flex items-center gap-2 min-h-[32px]">
+            <span aria-hidden="true">▸</span>
+            <span className="text-cuaderno-grafito">Propuesta</span>
+            <span>{propuesta.nombre}</span>
+            <Resaltado color={propuesta.estado === "en_revision" ? "durazno" : esEditable(propuesta) ? "lavanda" : "rosa"} className="text-[13px]">
+              {ESTADOS_PROPUESTA[propuesta.estado]?.label || propuesta.estado}
+            </Resaltado>
+          </button>
+          <span className="text-[13px] text-cuaderno-grafito">
+            {cambiadas.size} {cambiadas.size === 1 ? "celda cambiada" : "celdas cambiadas"}
+            {t < 1 ? " · mostrando el flujo actual" : ""}
+          </span>
+          <span className="ml-auto inline-flex items-baseline gap-1.5">
+            <span className="text-cuaderno-grafito">Caja al final</span>
+            <Cifra valor={acumuladoFinalActual} color="grafito" vacio="0" />
+            <span className="text-cuaderno-grafito">→</span>
+            <Cifra valor={acumuladoFinalPropuesta} vacio="0" />
+          </span>
+          {errorProp && <span className="w-full text-[13px] text-cuaderno-roja">{errorProp}</span>}
+        </div>
+      )}
+      {propuesta && panelPropVisible && (
         <div className={`flex-shrink-0 mb-1 rounded-md border-[1.5px] border-dashed border-cuaderno-tinta/50 bg-cuaderno-lavanda/30 px-4 py-3 space-y-2 ${expandido ? "mx-4 mt-3" : "mx-8"}`}>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <div className="min-w-[15rem] flex-[0_1_22rem]">
@@ -1550,6 +1582,10 @@ export default function FinanzasFlujoCaja() {
               irASeccionFinanzas("propuestas");
             }}>Ver comparación semana a semana</Boton>
             <Boton variante="texto" className="text-[16px] ml-auto" onClick={salirPropuesta}>Volver al flujo actual</Boton>
+            {expandido && (
+              <Boton variante="texto" className="text-[16px]" onClick={() => setVerPanelProp(false)} aria-expanded="true"
+                title="Plegar el panel para ver más filas">▴ Ocultar</Boton>
+            )}
           </div>
           {errorProp && <Nota etiqueta="Ojo:">{errorProp}</Nota>}
         </div>
@@ -1897,13 +1933,53 @@ export default function FinanzasFlujoCaja() {
         </div>
       )}
 
-      {/* Referencia: estados de pago de subcontratistas (no escribe en el flujo) */}
-      <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
-        payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle} />
-
-      {/* Referencia: por cobrar (Rental, OT) y sueldos de RRHH (no escribe en el flujo) */}
-      <ReferenciaCobrosYSueldos empresaId={empresaId} ingresos={ingresos} payments={payments}
-        weekColumns={weekColumns} proyectoId={proyectoId} proyectos={proyectos} onAbrirCuenta={abrirDetalle} />
+      {/* Referencias de otros módulos (no escriben en el flujo). El libro es lo
+          principal: cerradas son una sola línea, y abiertas ocupan como máximo
+          un tercio de la pantalla con su propio scroll. Solo una a la vez. */}
+      {!referenciasVisibles ? (
+        <div className="flex-shrink-0 px-4 pb-2 -mt-3 flex justify-end">
+          <button type="button" onClick={() => setVerReferencias(true)} aria-expanded="false"
+            title="Estados de pago de subcontratistas, por cobrar y sueldos"
+            className="inline-flex items-center gap-1.5 min-h-[28px] text-[14px] text-cuaderno-grafito hover:text-cuaderno-tinta">
+            <span aria-hidden="true">▴</span> Referencias
+          </button>
+        </div>
+      ) : (
+      <div className={`flex-shrink-0 ${expandido ? "px-4 pb-3" : "px-8 pb-5"}`}>
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[16px]">
+          {expandido && (
+            <button type="button" onClick={() => { setVerReferencias(false); setReferencia(null); }} aria-expanded="true"
+              title="Plegar las referencias" className="text-[14px] text-cuaderno-grafito hover:text-cuaderno-tinta">
+              <span aria-hidden="true">▾</span> Ocultar
+            </button>
+          )}
+          <span className="text-[14px] text-cuaderno-grafito">Referencias, no modifican el flujo:</span>
+          {[
+            { id: "subcontratos", label: "Estados de pago de subcontratistas", descripcion: DESCRIPCION_SUBCONTRATOS },
+            { id: "cobros", label: "Por cobrar y sueldos", descripcion: DESCRIPCION_COBROS },
+          ].map(r => (
+            <button key={r.id} type="button" title={r.descripcion} aria-expanded={referencia === r.id}
+              onClick={() => setReferencia(v => v === r.id ? null : r.id)}
+              className={`underline underline-offset-[3px] ${referencia === r.id ? "decoration-cuaderno-tinta decoration-2" : "decoration-cuaderno-columna"}`}>
+              {r.label} {referencia === r.id ? "▴" : "▾"}
+            </button>
+          ))}
+        </div>
+        {referencia && (
+          <div className="mt-2 max-h-[34vh] overflow-y-auto">
+            {referencia === "subcontratos" ? (
+              <ReferenciaSubcontratos empresaId={empresaId} egresos={egresos} proveedores={proveedores}
+                payments={payments} weekColumns={weekColumns} onAbrirCuenta={abrirDetalle}
+                onCerrar={() => setReferencia(null)} />
+            ) : (
+              <ReferenciaCobrosYSueldos empresaId={empresaId} ingresos={ingresos} payments={payments}
+                weekColumns={weekColumns} proyectoId={proyectoId} proyectos={proyectos} onAbrirCuenta={abrirDetalle}
+                onCerrar={() => setReferencia(null)} />
+            )}
+          </div>
+        )}
+      </div>
+      )}
 
       {/* Panel lateral de detalle de cuenta (egresos) */}
       {cuentaDetalle && (

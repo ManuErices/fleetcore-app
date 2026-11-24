@@ -23,15 +23,17 @@ function Encabezado({ children, derecha }) {
   return <th className={`px-2 py-1.5 font-normal text-[14px] text-cuaderno-grafito ${derecha ? "text-right" : "text-left"}`}>{children}</th>;
 }
 
-export default function ReferenciaCobrosYSueldos({ empresaId, ingresos, payments, weekColumns, proyectoId, proyectos = [], onAbrirCuenta }) {
-  const [abierto, setAbierto] = useState(false);
+export const DESCRIPCION_COBROS = "Estados de pago por cobrar (Rental), lo facturable a mandantes (Oficina Técnica) y los sueldos, Previred e impuesto único por pagar (RRHH). No modifica el flujo.";
+
+/** Se monta abierta: la barra de referencias del flujo decide cuándo mostrarla. */
+export default function ReferenciaCobrosYSueldos({ empresaId, ingresos, payments, weekColumns, proyectoId, proyectos = [], onAbrirCuenta, onCerrar }) {
   const [datos, setDatos] = useState(null);
 
   const mesActual = mesActualISO();
   const mesesRRHH = useMemo(() => [sumarMeses(mesActual, -1), mesActual, sumarMeses(mesActual, 1)], [mesActual]);
 
   useEffect(() => {
-    if (!abierto || !empresaId || datos) return;
+    if (!empresaId || datos) return;
     let vivo = true;
     Promise.all([
       cargarCobrosRental(empresaId).catch(() => []),
@@ -39,7 +41,7 @@ export default function ReferenciaCobrosYSueldos({ empresaId, ingresos, payments
       cargarPagosRRHH(empresaId, mesesRRHH).catch(() => ({ filas: [], nominas: [] })),
     ]).then(([cobros, epi, rrhh]) => { if (vivo) setDatos({ cobros, epi, rrhh }); });
     return () => { vivo = false; };
-  }, [abierto, empresaId, datos, mesesRRHH]);
+  }, [empresaId, datos, mesesRRHH]);
 
   const obra = proyectoId && proyectoId !== "todos" ? proyectoId : null;
   const nombreObra = (id) => { const p = proyectos.find(x => x.id === id); return p ? (p.name || p.nombre) : "Sin obra"; };
@@ -81,12 +83,9 @@ export default function ReferenciaCobrosYSueldos({ empresaId, ingresos, payments
 
   return (
     <Hoja titulo="Por cobrar y sueldos (referencia)"
-      extra={<Boton variante="texto" onClick={() => setAbierto(a => !a)}>{abierto ? "Ocultar" : "Ver"}</Boton>}>
-      {!abierto ? (
-        <p className="m-0 text-[16px] text-cuaderno-grafito">
-          Referencia desde Rental, Oficina Técnica y RRHH: estados de pago por cobrar, lo facturable a mandantes y los sueldos, Previred e impuesto único por pagar. No modifica el flujo.
-        </p>
-      ) : !vista ? (
+      extra={onCerrar && <Boton variante="texto" onClick={onCerrar}>Ocultar</Boton>}>
+      <p className="m-0 mb-3 text-[14px] text-cuaderno-grafito">{DESCRIPCION_COBROS}</p>
+      {!vista ? (
         <p className="m-0 text-[16px] text-cuaderno-grafito">Buscando cobros y sueldos…</p>
       ) : (
         <div className="space-y-5">
