@@ -8,6 +8,7 @@ import {
   listRentalContracts, buildIngresoPorMaquina,
 } from "../../lib/db";
 import { cargarLeasingPorMaquina } from "../../lib/finanzas/leasingMaquinas";
+import { otAbiertas as filtrarOTAbiertas } from "../../lib/ordenesTrabajo";
 import { leasingDeMaquina } from "../../lib/finanzas/costosFijos.js";
 
 const CLP = (n) => "$" + Number(n || 0).toLocaleString("es-CL");
@@ -73,7 +74,8 @@ export default function MaquinariaDashboard() {
   const fueraServicio = porEstado("fuera_de_servicio");
 
   // ── OT ──
-  const otAbiertas = workOrders.filter((o) => !["cerrada", "cancelada"].includes(o.estado));
+  // Mismo criterio que el selector de módulos (src/lib/ordenesTrabajo.js).
+  const otAbiertas = filtrarOTAbiertas(workOrders, raw.machines);
   const otPendientes = workOrders.filter((o) => o.estado === "pendiente").length;
   const otEnEjecucion = workOrders.filter((o) => ["en_diagnostico", "en_ejecucion", "asignada"].includes(o.estado)).length;
   const otEsperandoRepuesto = workOrders.filter((o) => o.estado === "esperando_repuesto").length;
